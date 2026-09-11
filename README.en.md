@@ -1,5 +1,7 @@
 # video-recap-skills
 
+> Project page: <https://zenstory.ai/video-recap> · All ZenStory AI projects: <https://zenstory.ai/projects>
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-purple)
 ![Powered by Xiaomi MiMo](https://img.shields.io/badge/AI-Xiaomi%20MiMo-green)
