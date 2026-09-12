@@ -9,7 +9,7 @@
 
 [中文](README.md) · English
 
-**In Claude Code, Codex CLI, OpenCode, or OpenClaw, one natural-language request turns a video into a Chinese-narration recap.** It needs only Python, `ffmpeg`, and one Xiaomi MiMo API key locally; TTS can optionally use Fish Audio. No GPU or model downloads are required, and it runs on macOS / Linux / Windows.
+**Use natural-language instructions in Claude Code, Codex CLI, OpenCode, or OpenClaw to create Chinese-narration recaps from supported video files.** Core stages use Python and `ffmpeg` locally, with remote Xiaomi MiMo services for ASR, VLM, and default TTS; optional Fish Audio TTS requires a separate API key. These core stages do not require a local GPU or model downloads. Final delivery still requires a full playback review.
 
 ## Demo
 
@@ -266,7 +266,7 @@ This project is maintained by [ZenStory AI](https://zenstory.ai) — open-source
 | --- | --- |
 | [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | Web-fiction writing skill pack: chart scanning, deconstruction, drafting, de-AI-flavor, covers |
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI short-drama / motion-comic suite: scripts, assets, storyboards, image & video prompts, review |
-| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | Agent skills that turn novels into playable games |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | Clip any video into a narrated Chinese recap, with CapCut draft export (this repo) |
-| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness plugin wrapping the Oh Story and Drama Skills workflows |
+| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | Agent skills for source-grounded novel adaptation, target-runtime builds, and evidence-based QA |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | Create Chinese-narration recaps from supported video files, with optional editable JianYing/CapCut draft export (this repo) |
+| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | Community DeepSeek Harness plugin with novel, short-drama, game and video-recap workbenches |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | Chat-to-create AI novel-writing workbench ([app.zenstory.ai](https://app.zenstory.ai)) |

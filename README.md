@@ -9,7 +9,7 @@
 
 中文 · [English](README.en.md)
 
-**在 Claude Code、Codex CLI、OpenCode 或 OpenClaw 里，用一句自然语言把视频变成中文解说成片。** 本地只需要 Python、`ffmpeg` 和一个小米 MiMo API Key，其中 TTS 也可切换到 Fish Audio。不用 GPU，不用下载模型，macOS / Linux / Windows 均可运行。
+**在 Claude Code、Codex CLI、OpenCode 或 OpenClaw 里，用自然语言组织工作流，为支持的视频文件制作中文解说。** 核心阶段在本地使用 Python 和 `ffmpeg`，远程小米 MiMo 服务负责 ASR、VLM 和默认 TTS；可选的 Fish Audio TTS 需要单独的 API Key。这些核心阶段不需要本地 GPU 或下载模型。最终交付仍需完整播放复核。
 
 ## 演示
 
@@ -264,7 +264,7 @@ MIT，见 [LICENSE](LICENSE)。
 | --- | --- |
 | [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | 网文写作 skill 包：扫榜、拆文、写作、去AI味、封面图 |
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI 短剧 / 漫剧创作 skill 合集：剧本、资产、分镜、图片/视频提示词、独立审查 |
-| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 把小说改编成可玩游戏的 agent skills |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 把任意视频剪成中文解说视频，支持剪映草稿导出（本仓库） |
-| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 插件，封装 Oh Story 与 Drama Skills 工作流 |
+| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 面向原著改编、指定运行环境构建与运行证据 QA 的 agent skills |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 将支持的视频文件制作成中文解说，可选导出可编辑的剪映/CapCut 草稿（本仓库） |
+| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 社区插件，提供小说、短剧、游戏和视频解说工作台 |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | 对话即创作的 AI 小说写作工作台（[app.zenstory.ai](https://app.zenstory.ai)） |
