@@ -3,12 +3,12 @@
   "owner": {
     "name": "PiteChen"
   },
-  "description": "Turn any video into a Chinese-narration recap on ffmpeg + one Xiaomi MiMo API key.",
+  "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg, remote Xiaomi MiMo ASR/VLM/default TTS, optional Fish Audio TTS, and required final playback review.",
   "plugins": [
     {
       "name": "video-recap-skills",
       "source": "./",
-      "description": "Turn any video into a Chinese-narration recap (understanding -> narration -> cut -> voiceover -> assemble) on ffmpeg + one Xiaomi MiMo API key. A bundle of independent skills + a thin orchestrator. macOS / Linux / Windows.",
+      "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg; remote Xiaomi MiMo ASR, VLM, and default TTS; optional Fish Audio TTS with a separate API key; final playback review required.",
       "homepage": "https://github.com/zenstory-ai/video-recap-skills",
       "license": "MIT"
     }
