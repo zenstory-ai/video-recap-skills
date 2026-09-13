@@ -23,6 +23,19 @@ Beyond the rendered MP4, you can export a **剪映/JianYing draft** to keep edit
 
 <img alt="Exported 剪映 draft: original clips, narration, BGM, and subtitles" src="docs/jianying-export.png" width="100%">
 
+## Find a Guide for Your Creative Task
+
+Start with the material and question you have now; every request need not rerun the full pipeline:
+
+| What you need to solve | Practical guide | Next deliverable and boundary |
+|---|---|---|
+| How do I write evidence-grounded Chinese narration from a video? | [Video-to-narration workflow](https://zenstory.ai/video-recap/video-to-narration) | Establish picture, dialogue and supplied background before treating a claim as a source-video fact |
+| When should original sound or a pause lead? | [Original sound and narration](https://zenstory.ai/video-recap/original-audio-and-narration) | Assign each beat's sound task first; ownership labels are not a completed mix |
+| I have a recap timeline; how do I keep editing in JianYing? | [JianYing / CapCut draft export](https://zenstory.ai/video-recap/capcut-draft) | Export independently from a real `timeline.json`; do not rerun understanding, TTS or MP4 rendering merely to export |
+
+**A text-only handoff request** (complete the setup below first and replace 〈placeholders〉):
+> I have permission to use 〈local video〉 and am supplying checked picture and dialogue records for it. Propose only the sound handoff for this material: which full dialogue line, action sound or pause to preserve, where narration is needed, and which record supports each choice. List missing evidence rather than inventing motives or unseen events. Return beat notes and necessary narration drafts without calling TTS or rendering; this plan is not an existing finished video.
+
 ## What it is
 
 ```mermaid
@@ -42,7 +55,7 @@ flowchart LR
 ## Why use it
 
 - **One key, runs anywhere.** ASR, VLM, and TTS all go through [Xiaomi MiMo](https://platform.xiaomimimo.com); the local runtime uses only Python's standard library and `ffmpeg`, with no `pip install`.
-- **Optional Fish Audio TTS.** Select `--tts-provider fish-audio` to use Fish Audio. Its current `s2.1-pro-free` model is useful for development, evaluation, and non-SLA workloads while the existing MiMo path remains the default.
+- **Optional Fish Audio TTS.** Select `--tts-provider fish-audio` to change the voiceover service only; ASR and VLM still use MiMo, and the MiMo TTS path remains the default.
 - **Research when it matters.** When the title/story context is known or the brief notes the material is thin, put character relationships and plot background in `background_research.json` so the VLM knows who's who.
 - **Make the editorial decision before allocating sound.** The agent first compares edit hypotheses and locks the POV, story spine, exact picture moments, and original-audio anchors. Narration is voiced as a block only when it has a defined job; strong dialogue, action sound, or silence may own an entire beat. A 7:3 split is only a rough fallback, never a quota.
 - **Cut first, frames aligned.** Cut mode renders the shortened video first, then writes narration against that output timeline, so picture and voice stay in sync.
@@ -69,7 +82,7 @@ export MIMO_TOKEN_PLAN_CLUSTER=cn          # optional for tp-* keys: cn | sgp | 
 
 In Windows PowerShell, use `$env:MIMO_API_KEY="your-mimo-key"`. MiMo does not require a subscription: `sk-*` keys can use pay-as-you-go billing. In one complete-video run measured for this project, usage cost about CNY 1.3; actual cost varies with video length and request volume. Pay-as-you-go keys default to `https://api.xiaomimimo.com/v1`.
 
-To use the currently free Fish Audio TTS path:
+To use the optional Fish Audio TTS path:
 
 ```bash
 export TTS_PROVIDER=fish-audio
@@ -77,7 +90,7 @@ export FISH_API_KEY=your-fish-key
 export FISH_TTS_REFERENCE_ID=your-voice-model-id  # optional; overrides the built-in “娱乐扒妹” voice
 ```
 
-The default Fish model is `s2.1-pro-free`, with the built-in “娱乐扒妹” narration voice (reference ID `5653cea4ac83480aaf2bf45406556185`). Set `FISH_TTS_REFERENCE_ID` to override it. [Fish Audio currently states](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en) that free access runs through **2026-08-31**, subject to its Fair Use Policy and without an SLA; check its current policy after that date. See the [config playbook](skills/video-recap/references/config-playbook.md) for model, voice, loudness, subtitle, and per-capability settings.
+The configured default Fish model is `s2.1-pro-free`, with the built-in “娱乐扒妹” narration voice (reference ID `5653cea4ac83480aaf2bf45406556185`). Set `FISH_TTS_REFERENCE_ID` to override it. The model name is not a promise of permanently free service; the [original free-access announcement](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en) described a limited period. Before use, check [Fish Audio’s current pricing and rate limits](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits), service availability and the commercial terms for your account. See the [config playbook](skills/video-recap/references/config-playbook.md) for model, voice, loudness, subtitle, and per-capability settings.
 
 ### 2. Choose an agent host
 

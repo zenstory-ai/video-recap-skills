@@ -23,6 +23,19 @@
 
 <img alt="导出的剪映草稿：原片、解说、BGM、字幕" src="docs/jianying-export.png" width="100%">
 
+## 按创作任务找指南
+
+从手头已有的材料和眼前的问题出发，不必每次重跑全部阶段：
+
+| 你要解决什么 | 实用指南 | 下一项交付与边界 |
+|---|---|---|
+| 有视频，怎样写出有依据的中文解说？ | [视频到解说完整流程](https://zenstory.ai/video-recap/video-to-narration) | 先确认画面、对白与已提供背景，不把猜测写成片中事实 |
+| 什么时候应该让原声或停顿主导？ | [原声与旁白分工](https://zenstory.ai/video-recap/original-audio-and-narration) | 先定每拍声音任务；职责标签不等于已经完成混音 |
+| 已有解说时间线，想接着在剪映里改？ | [剪映 / CapCut 草稿导出](https://zenstory.ai/video-recap/capcut-draft) | 使用真实 `timeline.json` 独立导出；不为导出重跑理解、配音或 MP4 渲染 |
+
+**先做一次文本交接的请求示例**（先按下文完成安装与配置，替换〈占位内容〉）：
+> 我有权使用〈本地视频〉，并提供了对应的已核对画面与对白记录。先只给这段素材的声音分工建议：哪句对白、哪个动作声或停顿应完整保留，哪里确需旁白，依据是哪条记录。缺证据就列待核对项，不补人物动机或没出现的事件。交付分拍说明和必要的旁白草案，不调用配音或渲染；这份规划不代表已有成片。
+
 ## 这是什么
 
 ```mermaid
@@ -42,7 +55,7 @@ flowchart LR
 ## 为什么用它
 
 - **一个 key 跑全程。** ASR、VLM、TTS 均走[小米 MiMo](https://platform.xiaomimimo.com)；本地运行时只有 Python 标准库和 `ffmpeg`。
-- **TTS 可切 Fish Audio。** `--tts-provider fish-audio` 即可使用 Fish Audio；当前 `s2.1-pro-free` 免费模型适合开发、试用和非 SLA 场景，也保留 MiMo 默认路径。
+- **TTS 可切 Fish Audio。** `--tts-provider fish-audio` 只替换配音服务，ASR 与 VLM 仍走 MiMo；MiMo 默认 TTS 路径也保留。
 - **该查资料时先查。** 片名/剧情明确或 brief 提示素材偏薄时，把人物关系、剧情背景存进 `background_research.json`，VLM 才更容易认出谁是谁。
 - **先做创作决定，再分配声音。** Agent 先比较剪辑假设，锁定 POV、主线、具体画面与原声锚点；旁白有明确任务时才整块配音，强对白、动作声或沉默可以完整主导一个 beat。
 - **先剪后配，画面对齐。** 剪辑模式先把长视频剪成成片，再对着成片写解说，时间轴天然对齐。
@@ -69,7 +82,7 @@ export MIMO_TOKEN_PLAN_CLUSTER=cn          # tp-* key 可选：cn | sgp | ams
 
 Windows PowerShell 使用 `$env:MIMO_API_KEY="your-mimo-key"`。MiMo 不一定要开通订阅：`sk-*` key 可直接按量付费，按本项目一次完整视频实测，一条视频仅消耗约 1.3 元（实际费用会随视频时长和调用量变化），默认连接 `https://api.xiaomimimo.com/v1`。
 
-如需使用 Fish Audio 免费 TTS：
+如需改用可选的 Fish Audio TTS：
 
 ```bash
 export TTS_PROVIDER=fish-audio
@@ -77,7 +90,7 @@ export FISH_API_KEY=your-fish-key
 export FISH_TTS_REFERENCE_ID=your-voice-model-id  # 可选；内置了“娱乐扒妹”解说音色
 ```
 
-当前默认使用 `s2.1-pro-free` 和“娱乐扒妹”音色（reference ID：`5653cea4ac83480aaf2bf45406556185`）；设置 `FISH_TTS_REFERENCE_ID` 可覆盖默认音色。[Fish Audio 官方现行说明](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en)为免费开放至 **2026-08-31**。
+当前代码默认使用 `s2.1-pro-free` 和“娱乐扒妹”音色（reference ID：`5653cea4ac83480aaf2bf45406556185`）；设置 `FISH_TTS_REFERENCE_ID` 可覆盖默认音色。模型名中的 `free` 不是长期免费承诺；[原免费开放公告](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en)是阶段性安排。运行前请核对 [Fish Audio 当前价格与限额](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)、服务可用性及账户商用条款。
 
 ### 2. 选择 Agent 宿主
 
