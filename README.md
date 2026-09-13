@@ -55,7 +55,7 @@ flowchart LR
 ## 为什么用它
 
 - **一个 key 跑全程。** ASR、VLM、TTS 均走[小米 MiMo](https://platform.xiaomimimo.com)；本地运行时只有 Python 标准库和 `ffmpeg`。
-- **TTS 可切 Fish Audio。** `--tts-provider fish-audio` 即可使用 Fish Audio；当前 `s2.1-pro-free` 免费模型适合开发、试用和非 SLA 场景，也保留 MiMo 默认路径。
+- **TTS 可切 Fish Audio。** `--tts-provider fish-audio` 只替换配音服务，ASR 与 VLM 仍走 MiMo；MiMo 默认 TTS 路径也保留。
 - **该查资料时先查。** 片名/剧情明确或 brief 提示素材偏薄时，把人物关系、剧情背景存进 `background_research.json`，VLM 才更容易认出谁是谁。
 - **先做创作决定，再分配声音。** Agent 先比较剪辑假设，锁定 POV、主线、具体画面与原声锚点；旁白有明确任务时才整块配音，强对白、动作声或沉默可以完整主导一个 beat。
 - **先剪后配，画面对齐。** 剪辑模式先把长视频剪成成片，再对着成片写解说，时间轴天然对齐。
@@ -82,7 +82,7 @@ export MIMO_TOKEN_PLAN_CLUSTER=cn          # tp-* key 可选：cn | sgp | ams
 
 Windows PowerShell 使用 `$env:MIMO_API_KEY="your-mimo-key"`。MiMo 不一定要开通订阅：`sk-*` key 可直接按量付费，按本项目一次完整视频实测，一条视频仅消耗约 1.3 元（实际费用会随视频时长和调用量变化），默认连接 `https://api.xiaomimimo.com/v1`。
 
-如需使用 Fish Audio 免费 TTS：
+如需改用可选的 Fish Audio TTS：
 
 ```bash
 export TTS_PROVIDER=fish-audio
@@ -90,7 +90,7 @@ export FISH_API_KEY=your-fish-key
 export FISH_TTS_REFERENCE_ID=your-voice-model-id  # 可选；内置了“娱乐扒妹”解说音色
 ```
 
-当前默认使用 `s2.1-pro-free` 和“娱乐扒妹”音色（reference ID：`5653cea4ac83480aaf2bf45406556185`）；设置 `FISH_TTS_REFERENCE_ID` 可覆盖默认音色。[Fish Audio 官方现行说明](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en)为免费开放至 **2026-08-31**。
+当前代码默认使用 `s2.1-pro-free` 和“娱乐扒妹”音色（reference ID：`5653cea4ac83480aaf2bf45406556185`）；设置 `FISH_TTS_REFERENCE_ID` 可覆盖默认音色。模型名中的 `free` 不是长期免费承诺；[原免费开放公告](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en)是阶段性安排。运行前请核对 [Fish Audio 当前价格与限额](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)、服务可用性及账户商用条款。
 
 ### 2. 选择 Agent 宿主
 
