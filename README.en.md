@@ -23,6 +23,19 @@ Beyond the rendered MP4, you can export a **剪映/JianYing draft** to keep edit
 
 <img alt="Exported 剪映 draft: original clips, narration, BGM, and subtitles" src="docs/jianying-export.png" width="100%">
 
+## Find a Guide for Your Creative Task
+
+Start with the material and question you have now; every request need not rerun the full pipeline:
+
+| What you need to solve | Practical guide | Next deliverable and boundary |
+|---|---|---|
+| How do I write evidence-grounded Chinese narration from a video? | [Video-to-narration workflow](https://zenstory.ai/video-recap/video-to-narration) | Establish picture, dialogue and supplied background before treating a claim as a source-video fact |
+| When should original sound or a pause lead? | [Original sound and narration](https://zenstory.ai/video-recap/original-audio-and-narration) | Assign each beat's sound task first; ownership labels are not a completed mix |
+| I have a recap timeline; how do I keep editing in JianYing? | [JianYing / CapCut draft export](https://zenstory.ai/video-recap/capcut-draft) | Export independently from a real `timeline.json`; do not rerun understanding, TTS or MP4 rendering merely to export |
+
+**A text-only handoff request** (complete the setup below first and replace 〈placeholders〉):
+> I have permission to use 〈local video〉 and am supplying checked picture and dialogue records for it. Propose only the sound handoff for this material: which full dialogue line, action sound or pause to preserve, where narration is needed, and which record supports each choice. List missing evidence rather than inventing motives or unseen events. Return beat notes and necessary narration drafts without calling TTS or rendering; this plan is not an existing finished video.
+
 ## What it is
 
 ```mermaid
