@@ -15,6 +15,7 @@ from recap_runtime import (
     _multi_run_manifest_payload,
     _run_manifest_payload,
 )
+from recap_source import audio_binding, uses_narration
 
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 
@@ -23,6 +24,7 @@ PHASE_LEDGER = "recap_phase.json"
 CUT_TIMELINE_CRAFT_BULLETS = [
     "- 片段顺序必须服务同一条故事主线，而不是无序高光；可使用 0–1 个 cold open，随后回到 setup → turn → escalation → payoff。",
     "- 每个片段必须对应 `recap_story_plan.json` 中的一个 change-based beat；删除后不损失因果、人物或情绪的片段通常不保留。",
+    "- 已从源证据确认的必保问答、反应或兑现段，写入同一 `clip_plan.json.required_evidence`（nodes登记id/source绝对路径/start/end原片秒/track/content，before登记必要先后）；只锁具体区间，不锁整个beat。剪点吸附后工具会核验，reason或花字不能代替缺失的源段。",
     "- `reason` 统一写成 `beat_id | function | change | POV | preferred moment | 入点 | 出点`，不能只写 hook、重要剧情或事件摘要。",
     "- 优先保留因果、揭示、决定、关系移动、情绪转向与不可替代的表演/反应；跳过片尾、广告、重复静态画面和水印废片段。",
     "- 片段追求最短但完整：建立镜头可以短，关键表演/反应允许多停一点；在完整台词、完整动作或自然声音边界结束，避免原声从半句中切入或切出。",
@@ -157,6 +159,12 @@ def _manifest_mismatches(work_dir, video, args):
     ]
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
+    actual_audio = actual.get("audio", {"mode": "narration", "selected_stream_index": 0})
+    expected_audio = audio_binding(args)
+    if actual_audio != expected_audio:
+        mismatches.append(
+            f"audio: expected {expected_audio!r}, got {actual_audio!r}"
+        )
     return mismatches
 
 
@@ -177,6 +185,12 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         )
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
+    actual_audio = actual.get("audio", {"mode": "narration", "selected_stream_index": 0})
+    expected_audio = audio_binding(args)
+    if actual_audio != expected_audio:
+        mismatches.append(
+            f"audio: expected {expected_audio!r}, got {actual_audio!r}"
+        )
     return mismatches
 
 
@@ -232,6 +246,10 @@ def _continuation_command(video, work_dir, args):
         parts += ["--style", args.style]
     if args.edit_mode != "full":
         parts += ["--edit-mode", args.edit_mode]
+    if getattr(args, "audio_mode", "narration") != "narration":
+        parts += ["--audio-mode", args.audio_mode]
+    if getattr(args, "audio_stream_index", 0) != 0:
+        parts += ["--audio-stream-index", str(args.audio_stream_index)]
     if args.target_duration:
         parts += ["--target-duration", args.target_duration]
     if args.allow_duration_drift:
@@ -250,14 +268,17 @@ def _continuation_command(video, work_dir, args):
         parts.append("--no-consolidate")
     if args.consolidate_asr:
         parts.append("--consolidate-asr")
-    if args.mimo_tts_voice:
-        parts += ["--mimo-tts-voice", args.mimo_tts_voice]
-    if args.tts_provider != "auto":
-        parts += ["--tts-provider", args.tts_provider]
-    if args.voice_ref:
-        parts += ["--voice-ref", args.voice_ref]
-    if args.allow_partial_tts:
-        parts.append("--allow-partial-tts")
+    if uses_narration(args):
+        if args.mimo_tts_voice:
+            parts += ["--mimo-tts-voice", args.mimo_tts_voice]
+        if args.tts_provider != "auto":
+            parts += ["--tts-provider", args.tts_provider]
+        if args.voice_ref:
+            parts += ["--voice-ref", args.voice_ref]
+        if args.allow_partial_tts:
+            parts.append("--allow-partial-tts")
+        if getattr(args, "preserve_approved_text", False):
+            parts.append("--preserve-approved-text")
     if args.burn_subtitles is not None:
         parts.append("--burn-subtitles" if args.burn_subtitles else "--no-burn-subtitles")
     if args.subtitle_y_top is not None:
@@ -272,16 +293,21 @@ def _continuation_command(video, work_dir, args):
         parts.append("--jianying-bundle-media")
     if args.jianying_no_bundle_media:
         parts.append("--jianying-no-bundle-media")
-    if args.review_narration is not None:
-        parts.append("--review-narration" if args.review_narration else "--no-review-narration")
-    if args.require_narration_review:
-        parts.append("--require-narration-review")
+    if uses_narration(args):
+        if args.review_narration is not None:
+            parts.append(
+                "--review-narration" if args.review_narration else "--no-review-narration"
+            )
+        if args.require_narration_review:
+            parts.append("--require-narration-review")
     if args.material_library_dir:
         parts += ["--material-library-dir", args.material_library_dir]
     if args.use_materials:
         parts.append("--use-materials")
     if args.save_materials:
         parts.append("--save-materials")
+    if getattr(args, "require_final_qc", False):
+        parts.append("--require-final-qc")
     return " ".join(shlex.quote(part) for part in parts)
 
 

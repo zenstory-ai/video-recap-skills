@@ -10,6 +10,41 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+以一次真实商业交付中沉淀的经验为来源，把「交付规则只写给 Agent 看」变成执行器会遵守、返修后能复核的约束；同时把该项目的画幅/帧率/任务编号/交付批次等特例全部剥离，通用库不携带任何单项目数据。边界划分见 `docs/production-boundaries.md`。
+
+### Added
+
+- **声音路径显式化。** `recap.py --audio-mode {narration,source-mix,adopted-packet-copy}` 把声音策略与 `--edit-mode` 解耦：`source-mix` 不跑 TTS 也能出片，`adopted-packet-copy` 复用已采用的完整混音并按 AAC 包逐包比对，不再重编码；运行清单记录音频策略，错配的 work-dir 被拒绝。
+- **已采用配音的本地复用。** `--tts-meta` + `--narration-adoption` + `--audio-mix-adoption` 三件套在重剪后复用未变的 WAV 与配音记录，只重做底轨与落点；全有或全无、fail-closed。
+- **批准稿保护。** `--preserve-approved-text` 贯穿 full / 单源 cut / 多源 cut 的校验器再到 TTS：文本装不下窗口时列出具体段落与时长，不自动缩稿、不静默变速；失败不沿用旧的 `tts_meta.json`。
+- **最终 QC 可选阻断。** `--require-final-qc` 开启后，阻断项存在时不打印完成、非零退出；续跑保留该选项。
+- **自托管 TTS 端点。** `--tts-provider index-tts` 通过 `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 接入 index-tts 协议的 JSON→WAV 服务；端点只以 sha256 落盘，拒绝带凭证的 URL 与重定向，`doctor` 离线校验配置而不探测连通性。
+- **独立字幕轨。** `subtitle_track.json` 以整数 tick 绑定当前音画，标注估计 / 校准 / 强对齐精度，渲染前核对陈旧轨与不可显示短 cue。
+- **主题前景与成片衔接。** `theme_foreground.py` 用真实浏览器 DOM 测量字体与版式生成前景序列，`compose_foreground.py` 在冻结音频包不变的前提下叠加到成片；片尾卡为可选输入，不再强制替换。
+- **video-cut 三项。** `--review-shots` 扫描实际渲染文件内部的短镜与密集切点（只召回、不修复）；锁帧画面计划 / 渲染按已采用的逐帧源表重建画面并逐帧校验；`clip_plan.required_evidence` 让 Agent 声明必保源片刻，工具在吸附之后、渲染之前核对。
+- **ASR 时序证据 sidecar。** `asr_timing_evidence.json` 记录来源指纹、可用性状态与词级对齐是否执行，词表修正与原始转写分列，粗窗不再被当作精字幕。
+- **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
+- **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
+
+### Changed
+
+- **同一句源字幕跨同源连续剪点时先合并再筛短片段**，不再把一句话切碎；不同源、真实删段、输出空隙不合并。`SUBTITLE_RENDER_VERSION` 提升到 9。
+- **SRT 毫秒改为向下量化**，避免帧边界时间被四舍五入后延迟一帧。
+- **理解缓存不再把全空转写当作有效命中**（`EMPTY_UNKNOWN` 与 `UNAVAILABLE_NO_DURATION` 同样视为 MISS）。
+- **批准稿结构校验拒绝 `end <= start`**，结构错误以清晰的 `SystemExit` 报出，不再抛原始 traceback。
+- **`recap.py` 关闭 argparse 前缀缩写**（`allow_abbrev=False`），显式选项由 parser 记录，不再靠扫描 `sys.argv`。
+- 剪辑手法与审稿提示补充：保住动机与接受条件、反打是否新增信息、跨场镜头不得拼成虚假因果、REVISION 只提可定位的局部修法。
+
+### Fixed
+
+- 剪映时间线导出时，跳过的旁白段会让其后所有段的增益与采样落点错位。
+- 主题前景的浏览器路径不再硬编码为 macOS 的 Chrome：按显式参数 → `THEME_FOREGROUND_BROWSER` → `PATH` → 常见安装位置解析。
+- 29.97 / 59.94 fps 的画面不再因「每帧采样数不是整数」被拒绝；帧钟以精确分数投影到采样钟。
+- 配音采用记录不再只接受全 1.0 的变速策略；声明的策略按形状与范围校验后生效。
+- `pair_media` 与 `source_score` 对 HEVC 的接受口径统一。
+- 本地复用路径失败时的清理以 `assembly_manifest.json` 的实际输出为准，不再猜测文件名而静默跳过。
+- 短镜阈值按实测帧率推导，不再固定 24 帧。
+
 ## [0.5.0] - 2026-09-05
 
 两条主线：新增 Fish Audio TTS 通道与《锅火》60 秒案例；以及一次以「在边界校验一次，之后信任契约」为原则的全量瘦身——删除约 2,600 行防御式代码，把校验集中到真正的输入边界，并修复审查过程中发现的三处真实缺陷。行为收紧之处见 `Changed`。

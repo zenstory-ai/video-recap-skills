@@ -1,4 +1,5 @@
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 sys.path.insert(
@@ -789,6 +790,27 @@ def test_seconds_to_srt_time():
     assert result.startswith("01:01:01")
     # 0s
     assert _seconds_to_srt_time(0) == "00:00:00,000"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (1.65, "00:00:01,650"),
+        (0.29, "00:00:00,290"),
+        (1.001, "00:00:01,001"),
+        (1.2496, "00:00:01,249"),
+        (1.2494, "00:00:01,249"),
+        (53 / 30, "00:00:01,766"),
+        (Fraction(53, 30), "00:00:01,766"),
+        (-0.5, "00:00:00,000"),
+        (59.9996, "00:00:59,999"),
+        (60, "00:01:00,000"),
+        (3599.9996, "00:59:59,999"),
+        (3600, "01:00:00,000"),
+    ],
+)
+def test_seconds_to_srt_time_preserves_millisecond_floor(seconds, expected):
+    assert _seconds_to_srt_time(seconds) == expected
 
 
 def test_seconds_to_ass_time():
@@ -1992,6 +2014,51 @@ def test_emit_timeline_uses_exact_placed_audio_not_longer_prefit_source(
         track for track in timeline["tracks"] if track.get("name") == "narration"
     )
     assert narration_track["segments"][0]["source_path"] == str(placed)
+
+
+def test_emit_timeline_maps_adopted_mix_by_index_across_a_skipped_segment(
+    monkeypatch, tmp_path
+):
+    """Adopted mix segments are 1:1 with the unfiltered narration list, not the placed one."""
+    placed = tmp_path / "placed.wav"
+    placed.write_bytes(b"fit")
+    prepared = tmp_path / "prepared_bed.wav"
+    prepared.write_bytes(b"bed")
+    monkeypatch.setattr(timeline_emit, "_timeline_subtitle_segments", lambda *args: [])
+    monkeypatch.setitem(CONFIG, "ducking_mode", "none")
+    segments = [
+        {"index": 0, "placed_audio_path": str(placed), "actual_place_start": 0.5,
+         "actual_place_end": 1.5, "narration": "第一句。"},
+        # unplaced: zero-width window, dropped from the timeline but still mixed 1:1
+        {"index": 1, "placed_audio_path": str(placed), "actual_place_start": 2.0,
+         "actual_place_end": 2.0, "narration": "被跳过。"},
+        {"index": 2, "placed_audio_path": str(placed), "actual_place_start": 2.5,
+         "actual_place_end": 3.5, "narration": "第三句。"},
+    ]
+    explicit_audio_mix = {
+        "segments": [
+            {"index": 0, "gain": 0.1, "output_start_sample": 0, "output_end_sample": 10},
+            {"index": 1, "gain": 0.2, "output_start_sample": 10, "output_end_sample": 20},
+            {"index": 2, "gain": 0.3, "output_start_sample": 20, "output_end_sample": 30},
+        ],
+        "prepared": {"prepared_bed.wav": {"path": str(prepared)}},
+        "format": {"total_samples": 30},
+        "conversion_policy": "exact_adopted_pcm",
+        "master_gain_db": 0.0,
+    }
+
+    timeline = _emit_timeline(
+        tmp_path / "input.mp4", segments, tmp_path, 4.0, _canvas(), False,
+        explicit_audio_mix=explicit_audio_mix,
+    )
+
+    narration_track = next(
+        track for track in timeline["tracks"] if track.get("name") == "narration"
+    )
+    placed_segments = narration_track["segments"]
+    assert [item["gain"] for item in placed_segments] == [0.1, 0.3]
+    assert [item["output_start_sample"] for item in placed_segments] == [0, 20]
+    assert [item["output_end_sample"] for item in placed_segments] == [10, 30]
 
 
 def test_build_timed_narration_never_trims_even_subframe_speech_overrun(

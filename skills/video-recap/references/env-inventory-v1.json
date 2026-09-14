@@ -1,0 +1,407 @@
+{
+  "schema_version": 1,
+  "variables": {
+    "ALLOW_PARTIAL_TTS": {
+      "classification": "value"
+    },
+    "ASR_CHUNK_MAX_CHARS": {
+      "classification": "value"
+    },
+    "ASR_CHUNK_MIN_CHARS": {
+      "classification": "value"
+    },
+    "ASR_SEGMENT_SECONDS": {
+      "classification": "value"
+    },
+    "ASR_THROTTLE_SECONDS": {
+      "classification": "value"
+    },
+    "BGM_DUCKING_VOLUME": {
+      "classification": "value"
+    },
+    "BGM_PATH": {
+      "classification": "file_path"
+    },
+    "BGM_VOLUME": {
+      "classification": "value"
+    },
+    "BURN_SUBTITLES": {
+      "classification": "value"
+    },
+    "CLIP_JOIN_AUDIO_FADE_MS": {
+      "classification": "value"
+    },
+    "CLIP_PADDING": {
+      "classification": "value"
+    },
+    "CLIP_SNAP_MAX_EXTEND": {
+      "classification": "value"
+    },
+    "CLIP_START_SNAP_MAX_PREPEND": {
+      "classification": "value"
+    },
+    "CLIP_START_SNAP_MAX_TRIM": {
+      "classification": "value"
+    },
+    "DUCKING_ORIG_VOLUME": {
+      "classification": "value"
+    },
+    "DUCK_BRIDGE_SECONDS": {
+      "classification": "value"
+    },
+    "DUCK_FADE_SECONDS": {
+      "classification": "value"
+    },
+    "EDIT_MODE": {
+      "classification": "value"
+    },
+    "EXPORT_JIANYING": {
+      "classification": "value"
+    },
+    "FADE_MS": {
+      "classification": "value"
+    },
+    "FINAL_LIMITER_PEAK": {
+      "classification": "value"
+    },
+    "FINAL_LOUDNORM": {
+      "classification": "value"
+    },
+    "FISH_TTS_API_URL": {
+      "classification": "url"
+    },
+    "FISH_TTS_MODEL": {
+      "classification": "value"
+    },
+    "FISH_TTS_REFERENCE_ID": {
+      "classification": "value"
+    },
+    "FORCE_VIDEO_REENCODE": {
+      "classification": "value"
+    },
+    "FOREIGN_SOURCE_AUDIO": {
+      "classification": "value"
+    },
+    "IDLE_ORIG_VOLUME": {
+      "classification": "value"
+    },
+    "INDEX_TTS_CACHE_REVISION": {
+      "classification": "value"
+    },
+    "INDEX_TTS_ENDPOINT": {
+      "classification": "url"
+    },
+    "INDEX_TTS_VOICE": {
+      "classification": "value"
+    },
+    "JIANYING_BUNDLE_MEDIA": {
+      "classification": "value"
+    },
+    "JIANYING_DRAFT_DIR": {
+      "classification": "file_path"
+    },
+    "MASK_SOURCE_SUBTITLES": {
+      "classification": "value"
+    },
+    "MIMO_API_URL": {
+      "classification": "url"
+    },
+    "MIMO_ASR_API_URL": {
+      "classification": "url"
+    },
+    "MIMO_ASR_BASE64_MAX_MB": {
+      "classification": "value"
+    },
+    "MIMO_ASR_LANGUAGE": {
+      "classification": "value"
+    },
+    "MIMO_ASR_MODEL": {
+      "classification": "value"
+    },
+    "MIMO_DISABLE_THINKING": {
+      "classification": "value"
+    },
+    "MIMO_MEDIA_RESOLUTION": {
+      "classification": "value"
+    },
+    "MIMO_MODEL": {
+      "classification": "value"
+    },
+    "MIMO_QC": {
+      "classification": "value"
+    },
+    "MIMO_QC_MODEL": {
+      "classification": "value"
+    },
+    "MIMO_QC_REFRESH": {
+      "classification": "value"
+    },
+    "MIMO_TOKEN_PLAN_CLUSTER": {
+      "classification": "value"
+    },
+    "MIMO_TTS_API_URL": {
+      "classification": "url"
+    },
+    "MIMO_TTS_MODEL": {
+      "classification": "value"
+    },
+    "MIMO_TTS_STYLE": {
+      "classification": "value"
+    },
+    "MIMO_TTS_VOICE": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_API_URL": {
+      "classification": "url"
+    },
+    "MIMO_VIDEO_BASE64_MAX_MB": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_CHUNK_MAX_SECONDS": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_CHUNK_MIN_SECONDS": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_CHUNK_TIMEOUT": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_FPS": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_MODEL": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_OVERVIEW": {
+      "classification": "value"
+    },
+    "MIMO_VIDEO_PROMPT": {
+      "classification": "value"
+    },
+    "NARRATION_CUMULATIVE_TEMPO_HARD_MAX": {
+      "classification": "value"
+    },
+    "NARRATION_CUMULATIVE_TEMPO_MAX": {
+      "classification": "value"
+    },
+    "NARRATION_DELAY_SECONDS": {
+      "classification": "value"
+    },
+    "NARRATION_MAX_PULL_SECONDS": {
+      "classification": "value"
+    },
+    "NARRATION_RUN_GAP_SECONDS": {
+      "classification": "value"
+    },
+    "NARRATION_SPEED": {
+      "classification": "value"
+    },
+    "NARRATION_TIGHTEN": {
+      "classification": "value"
+    },
+    "NARRATION_TIGHT_PAUSE_SECONDS": {
+      "classification": "value"
+    },
+    "OUTPUT_CRF": {
+      "classification": "value"
+    },
+    "OUTPUT_MAX_HEIGHT": {
+      "classification": "value"
+    },
+    "OUTPUT_PRESET": {
+      "classification": "value"
+    },
+    "REQUIRE_NARRATION_REVIEW": {
+      "classification": "value"
+    },
+    "REVIEW_NARRATION": {
+      "classification": "value"
+    },
+    "SCENE_CUT_DETECT_THRESHOLD": {
+      "classification": "value"
+    },
+    "SCENE_CUT_SNAP": {
+      "classification": "value"
+    },
+    "SCENE_CUT_SNAP_MARGIN": {
+      "classification": "value"
+    },
+    "SCENE_JUNK_BRIGHT_LUMA": {
+      "classification": "value"
+    },
+    "SCENE_JUNK_DARK_LUMA": {
+      "classification": "value"
+    },
+    "SCENE_JUNK_FILTER": {
+      "classification": "value"
+    },
+    "SCENE_JUNK_PIXEL_RATIO": {
+      "classification": "value"
+    },
+    "SCENE_JUNK_WORKERS": {
+      "classification": "value"
+    },
+    "SNAP_CLIP_LINE_END": {
+      "classification": "value"
+    },
+    "SOURCE_BOUNDARY_MAX_ALIGNMENT_ERROR": {
+      "classification": "value"
+    },
+    "SOURCE_BOUNDARY_MIN_PAUSE": {
+      "classification": "value"
+    },
+    "SOURCE_BOUNDARY_NOISE_THRESHOLD": {
+      "classification": "value"
+    },
+    "SOURCE_SUBTITLE_MASK_POLICY": {
+      "classification": "value"
+    },
+    "SOURCE_SUBTITLE_MASK_RATIO": {
+      "classification": "value"
+    },
+    "SOURCE_SUBTITLE_MASK_TIMING": {
+      "classification": "value"
+    },
+    "SOURCE_VIDEO": {
+      "classification": "value"
+    },
+    "SPEECH_DUCKING_VOLUME": {
+      "classification": "value"
+    },
+    "SPEECH_RATE": {
+      "classification": "value"
+    },
+    "SPEECH_SAFETY_MARGIN": {
+      "classification": "value"
+    },
+    "STORYBOARD": {
+      "classification": "value"
+    },
+    "STORYBOARD_COLUMNS": {
+      "classification": "value"
+    },
+    "STORYBOARD_LONG_SCENE_SECONDS": {
+      "classification": "value"
+    },
+    "STORYBOARD_MAX_TILES": {
+      "classification": "value"
+    },
+    "STORYBOARD_ROWS_PER_PAGE": {
+      "classification": "value"
+    },
+    "SUBTITLE_ALIGNMENT": {
+      "classification": "value"
+    },
+    "SUBTITLE_FONT_NAME": {
+      "classification": "value"
+    },
+    "SUBTITLE_FONT_SIZE": {
+      "classification": "value"
+    },
+    "SUBTITLE_MARGIN_L": {
+      "classification": "value"
+    },
+    "SUBTITLE_MARGIN_R": {
+      "classification": "value"
+    },
+    "SUBTITLE_MARGIN_V": {
+      "classification": "value"
+    },
+    "SUBTITLE_MASK_OPACITY": {
+      "classification": "value"
+    },
+    "SUBTITLE_MASK_PADDING": {
+      "classification": "value"
+    },
+    "SUBTITLE_MAX_CHARS": {
+      "classification": "value"
+    },
+    "SUBTITLE_MAX_LINES": {
+      "classification": "value"
+    },
+    "SUBTITLE_ORIGINAL_IN_GAPS": {
+      "classification": "value"
+    },
+    "SUBTITLE_OUTLINE": {
+      "classification": "value"
+    },
+    "SUBTITLE_OUTLINE_COLOR": {
+      "classification": "value"
+    },
+    "SUBTITLE_PLAY_RES_X": {
+      "classification": "value"
+    },
+    "SUBTITLE_PLAY_RES_Y": {
+      "classification": "value"
+    },
+    "SUBTITLE_PRIMARY_COLOR": {
+      "classification": "value"
+    },
+    "SUBTITLE_SHADOW": {
+      "classification": "value"
+    },
+    "SUBTITLE_Y_BOT": {
+      "classification": "value"
+    },
+    "SUBTITLE_Y_TOP": {
+      "classification": "value"
+    },
+    "TARGET_DURATION": {
+      "classification": "value"
+    },
+    "TARGET_LRA": {
+      "classification": "value"
+    },
+    "TARGET_LUFS": {
+      "classification": "value"
+    },
+    "TARGET_TRUE_PEAK": {
+      "classification": "value"
+    },
+    "TTS_PROVIDER": {
+      "classification": "value"
+    },
+    "TTS_RETRIES": {
+      "classification": "value"
+    },
+    "TTS_SEGMENT_NORMALIZE": {
+      "classification": "value"
+    },
+    "TTS_SEGMENT_PEAK_LIMIT": {
+      "classification": "value"
+    },
+    "TTS_SEGMENT_TARGET_RMS_DBFS": {
+      "classification": "value"
+    },
+    "TTS_SEGMENT_TEMPO_MAX": {
+      "classification": "value"
+    },
+    "TTS_TIMEOUT": {
+      "classification": "value"
+    },
+    "TTS_WORKERS": {
+      "classification": "value"
+    },
+    "VIDEO_RECAP_MATERIAL_LIBRARY_DIR": {
+      "classification": "file_path"
+    },
+    "VLM_MAX_FRAMES": {
+      "classification": "value"
+    },
+    "VLM_MAX_TOKENS": {
+      "classification": "value"
+    },
+    "VLM_SECONDS_PER_FRAME": {
+      "classification": "value"
+    },
+    "VLM_WORKERS": {
+      "classification": "value"
+    },
+    "VOICE_REF": {
+      "classification": "file_path"
+    },
+    "ZONE_DUCKING_VOLUME": {
+      "classification": "value"
+    }
+  }
+}

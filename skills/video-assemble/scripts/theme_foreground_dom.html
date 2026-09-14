@@ -1,0 +1,180 @@
+<!doctype html>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; }
+  html, body, #canvas { margin: 0; overflow: hidden; background: transparent; }
+  #canvas { position: relative; }
+  #underlay { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .text { position: absolute; padding: 0; margin: 0; font-synthesis: none; }
+</style>
+<div id="canvas"><img id="underlay"></div>
+<script>
+"use strict";
+const canvas = document.getElementById("canvas");
+
+function leftFor(anchor) {
+  if (anchor.horizontal === "center") return anchor.x - anchor.width / 2;
+  if (anchor.horizontal === "right") return anchor.x - anchor.width;
+  return anchor.x;
+}
+
+function lineHeight(style, size) {
+  return style.line_height.kind === "px" ? style.line_height.value : style.line_height.value * size;
+}
+
+function applyText(element, role, size, position) {
+  const style = role.style;
+  const anchor = role.anchor;
+  const font = window.__themeFonts.get(style.font_id);
+  element.className = "text";
+  element.style.left = `${position?.left ?? leftFor(anchor)}px`;
+  element.style.width = `${anchor.width}px`;
+  if (position?.top !== undefined) element.style.top = `${position.top}px`;
+  else if (anchor.vertical === "top") element.style.top = `${anchor.y}px`;
+  else element.style.bottom = `${window.__canvasHeight - anchor.y}px`;
+  element.style.fontFamily = JSON.stringify(font.family);
+  element.style.fontWeight = String(style.font_weight);
+  element.style.fontSize = `${size}px`;
+  element.style.lineHeight = `${lineHeight(style, size)}px`;
+  element.style.letterSpacing = `${style.letter_spacing}px`;
+  element.style.color = style.color;
+  element.style.textAlign = style.text_align;
+  element.style.whiteSpace = style.wrap === "nowrap" ? "nowrap" : "pre-wrap";
+  element.style.overflowWrap = style.wrap === "pre_wrap_anywhere" ? "anywhere" : "normal";
+  element.style.transform = `skewX(${style.skew_x}deg)`;
+  element.style.transformOrigin = `${style.text_align} center`;
+  if (style.shadow) {
+    element.style.textShadow = `${style.shadow.offset_x}px ${style.shadow.offset_y}px ${style.shadow.blur}px ${style.shadow.color}`;
+  }
+  if (style.stroke) element.style.webkitTextStroke = `${style.stroke.width}px ${style.stroke.color}`;
+  if (style.stroke) element.style.paintOrder = "stroke fill";
+}
+
+function addText(roleName, text, size, id, position) {
+  const role = window.__request.roles[roleName];
+  const element = document.createElement("div");
+  element.dataset.role = roleName;
+  element.dataset.id = id;
+  element.dataset.fontId = role.style.font_id;
+  applyText(element, role, size, position);
+  element.textContent = text;
+  canvas.appendChild(element);
+  return element;
+}
+
+async function renderTheme(request) {
+  window.__request = request;
+  window.__canvasHeight = request.canvas.height;
+  canvas.style.width = `${request.canvas.width}px`;
+  canvas.style.height = `${request.canvas.height}px`;
+  document.documentElement.style.width = `${request.canvas.width}px`;
+  document.documentElement.style.height = `${request.canvas.height}px`;
+  document.body.style.width = `${request.canvas.width}px`;
+  document.body.style.height = `${request.canvas.height}px`;
+  const underlay = document.getElementById("underlay");
+  underlay.src = request.underlay;
+  await underlay.decode();
+  window.__themeFonts = new Map();
+  for (const item of request.fonts) {
+    const face = new FontFace(item.family, `url(${item.source})`, {weight: String(item.weight)});
+    await face.load();
+    document.fonts.add(face);
+    window.__themeFonts.set(item.id, item);
+  }
+  await document.fonts.ready;
+  for (const item of request.fonts) {
+    if (!document.fonts.check(`${item.weight} 16px ${JSON.stringify(item.family)}`)) {
+      throw new Error(`Font check failed: ${item.id}`);
+    }
+  }
+
+  const title = request.roles.title;
+  const titleBox = document.createElement("div");
+  titleBox.className = "text";
+  titleBox.dataset.role = "title";
+  titleBox.dataset.id = "title-pair";
+  applyText(titleBox, title, title.size);
+  titleBox.style.display = "flex";
+  titleBox.style.flexDirection = "column";
+  titleBox.style.gap = `${Math.max(title.gap.minimum, title.gap.visible - title.size * title.gap.size_subtract)}px`;
+  titleBox.style.transform = "none";
+  for (const [index, text] of [request.state.title.primary, request.state.title.secondary].entries()) {
+    const line = document.createElement("div");
+    line.dataset.role = "title-line";
+    line.dataset.id = `title-${index}`;
+    line.dataset.fontId = title.style.font_id;
+    line.style.color = title.colors[index];
+    line.style.transform = `skewX(${title.style.skew_x}deg)`;
+    line.style.transformOrigin = "center center";
+    line.textContent = text;
+    titleBox.appendChild(line);
+  }
+  canvas.appendChild(titleBox);
+
+  for (const caption of request.state.captions) addText("caption", caption.text, request.roles.caption.size, caption.id);
+  for (const note of request.state.notes) {
+    const role = request.roles.note;
+    const group = document.createElement("div");
+    group.className = "text";
+    group.dataset.role = "note";
+    group.dataset.id = note.id;
+    applyText(group, role, role.size, note.position);
+    group.style.transform = "none";
+    for (const [index, text] of note.lines.entries()) {
+      const line = document.createElement("div");
+      line.dataset.role = "note-line";
+      line.dataset.id = `${note.id}-${index}`;
+      line.dataset.fontId = role.style.font_id;
+      line.style.transform = `skewX(${role.style.skew_x}deg)`;
+      line.style.transformOrigin = "left center";
+      line.textContent = text;
+      group.appendChild(line);
+    }
+    canvas.appendChild(group);
+  }
+  for (const marker of request.state.markers) {
+    if (marker.visible) addText("marker", marker.text, request.roles.marker.size, marker.id);
+  }
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  const observations = [];
+  for (const element of canvas.querySelectorAll("[data-role]")) {
+    const rect = element.getBoundingClientRect();
+    if (rect.left < -0.01 || rect.top < -0.01 || rect.right > request.canvas.width + 0.01 || rect.bottom > request.canvas.height + 0.01) {
+      throw new Error(`Layout overflow: ${element.dataset.role}/${element.dataset.id}`);
+    }
+    const computed = getComputedStyle(element);
+    observations.push({role: element.dataset.role, id: element.dataset.id,
+      rect: {left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+             width: rect.width, height: rect.height},
+      computed_font: {family: computed.fontFamily, weight: computed.fontWeight,
+                      size: computed.fontSize, line_height: computed.lineHeight,
+                      text_stroke: computed.webkitTextStroke, paint_order: computed.paintOrder}});
+  }
+  const textBoxes = [];
+  const lineGroups = new Map();
+  for (const element of canvas.querySelectorAll("[data-font-id]")) {
+    const range = document.createRange();
+    range.selectNodeContents(element);
+    const boxes = Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0)
+      .map(rect => ({left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom,
+                     width: rect.width, height: rect.height}));
+    const lineTops = [...new Set(boxes.map(rect => rect.top.toFixed(3)))];
+    const roleName = element.dataset.role.startsWith("title") ? "title"
+      : element.dataset.role.startsWith("note") ? "note" : element.dataset.role;
+    const groupId = roleName === "title" ? "title-pair"
+      : roleName === "note" ? element.parentElement.dataset.id : element.dataset.id;
+    const groupKey = `${roleName}:${groupId}`;
+    lineGroups.set(groupKey, (lineGroups.get(groupKey) || 0) + lineTops.length);
+    textBoxes.push({role: element.dataset.role, id: element.dataset.id,
+                    classification: "DOM_TEXT_FRAGMENT_BOX_NOT_INK_BOUNDS", boxes, line_count: lineTops.length});
+  }
+  for (const [groupKey, count] of lineGroups) {
+    const roleName = groupKey.split(":", 1)[0];
+    if (count > request.roles[roleName].style.max_lines) {
+      throw new Error(`Text exceeds max_lines: ${groupKey} lines=${count} max=${request.roles[roleName].style.max_lines}`);
+    }
+  }
+  return {fonts_ready: true, font_checks: request.fonts.map(item => ({id: item.id, weight: item.weight, loaded: true})),
+          elements: observations, text_fragment_boxes: textBoxes};
+}
+</script>

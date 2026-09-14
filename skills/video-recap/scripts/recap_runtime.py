@@ -12,6 +12,7 @@ from pathlib import Path
 import materials as material_lib
 from doctor import ffmpeg_has_subtitles_filter
 from lib import env_bool, load_json
+from recap_source import audio_binding
 
 BUNDLE = Path(__file__).resolve().parents[2]  # the skills/ directory
 
@@ -140,6 +141,7 @@ def _run_manifest_payload(video, args):
         "source_video": str(Path(video).resolve()),
         "source_video_fingerprint": material_lib.file_fingerprint(video),
         "settings": _analysis_settings(args),
+        "audio": audio_binding(args),
     }
 
 
@@ -148,6 +150,7 @@ def _write_run_manifest(work_dir, video, args):
     (work_dir / RUN_MANIFEST).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
+    return payload
 
 
 def _build_multi_source_records(videos, args):
@@ -185,6 +188,7 @@ def _multi_run_manifest_payload(videos, args, source_records):
         ],
         "source_videos": [str(v) for v in _coerce_videos(videos)],
         "settings": _analysis_settings(args),
+        "audio": audio_binding(args),
     }
 
 

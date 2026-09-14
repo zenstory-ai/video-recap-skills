@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from lib import CONFIG, log
+from asr_timing_evidence import asr_evidence_summary_for_brief
 
 
 from detect import detect_speech_boundary_anchors
@@ -195,6 +196,7 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
         args.style,
         mimo_overview_enabled=CONFIG.get("mimo_video_overview", False),
         mimo_overview_video_path=video,
+        asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )
     _prepend_storyboard_brief_header(
         brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode

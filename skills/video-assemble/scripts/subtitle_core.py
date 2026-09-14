@@ -2,6 +2,7 @@
 
 import os
 import re
+from decimal import Decimal
 
 from lib import CONFIG
 from assemble_constants import (
@@ -13,11 +14,16 @@ from assemble_constants import (
 from media import _ratio_to_float
 
 def _seconds_to_srt_time(seconds):
-    """将秒数转为 SRT 时间格式 HH:MM:SS,mmm"""
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    ms = int((seconds % 1) * 1000)
+    """Floor times to SRT milliseconds without float remainder artifacts.
+
+    Coercing first keeps Fraction/Decimal/str inputs working and clamps a negative
+    time to zero instead of emitting a negative-component SRT stamp.
+    """
+    seconds = max(0.0, float(seconds))
+    total_ms = int(Decimal(str(seconds)) * 1000)
+    h, remainder = divmod(total_ms, 3_600_000)
+    m, remainder = divmod(remainder, 60_000)
+    s, ms = divmod(remainder, 1000)
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 

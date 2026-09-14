@@ -1,7 +1,7 @@
 ---
 name: video-recap
 description: >
- 从输入视频端到端生成中文解说成片。用户提供 .mp4 / .mov / .mkv / .webm，并要求添加旁白、
+ 从输入视频生成中文解说成片或原声剧情短片。用户提供 .mp4 / .mov / .mkv / .webm，并要求剪辑、添加旁白、
  配音、总结、短剧/电视剧/电影/纪录片/科普解说时使用。负责编排 video-* 技能链：视频理解 →
  Agent 制定故事与视听方案 → 剪辑 → 配音 → 合成。触发词：视频解说、视频旁白、生成解说、
  视频 recap、video recap、voiceover、narration、auto-dub、recap。
@@ -17,6 +17,28 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 
 流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会校验
 `recap_run_manifest.json`，拒绝复用来自其他源视频或其他运行参数的旧工作目录；视频理解产物也只在来源一致时复用。
+
+画面流程 `--edit-mode full|cut|dub` 与声音策略分开：`--audio-mode narration` 保留上述解说流程；
+`source-mix` 不做配音；`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。使用原声模式时读
+`references/audio-routing.md`，不要为了运行工具而编造空解说。
+
+已有预制画面和本地采用的完整声音三件套时，可走严格 assembly-only 路径：
+
+```bash
+python3 scripts/recap.py picture.mp4 --edit-mode full --work-dir NEW_WORK \
+  --output-dir DELIVERY \
+  --tts-meta tts_meta.json \
+  --narration-adoption narration_adoption.json \
+  --audio-mix-adoption audio_mix_adoption.json
+```
+
+三个 JSON 参数必须同时出现。该入口只接受单视频、full、narration、音轨 0、新工作目录和未存在的
+交付文件；不运行理解、写稿、解说评审、TTS、cut、MiMo QC 或剪映导出。语义和媒体身份仍由
+video-assemble 严格验证，recap 不把调用方采用的声音或混音声明成自动创作或发布批准。详见
+`references/audio-routing.md`。
+
+这里的单视频是**已经剪好的母版**。重剪后可以复用未改动的 WAV 与 `tts_meta.json`，但必须按新母版
+重新绑定画面哈希与落点；衔接步骤见 `references/audio-routing.md` 的 “Keep adopted voice after a cut”。
 
 ## 2. 创作职责
 
@@ -59,6 +81,10 @@ export MIMO_API_KEY=***
 
 TTS 可通过 `--tts-provider fish-audio` / `TTS_PROVIDER=fish-audio` 改用 Fish Audio；此时另需 `FISH_API_KEY`，默认模型为 `s2.1-pro-free`，默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），可用 `FISH_TTS_REFERENCE_ID` 覆盖。ASR/VLM 仍使用 MiMo。
 
+自托管 TTS 端点（index-tts 协议）可显式选择 `--tts-provider index-tts`，端点与音色由
+`INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 配置；协议、能力限制见配音技能。`auto` 不会选它，
+`--doctor` 仅离线核配置，不证明服务可用或声线正确。原声模式不运行 TTS，也不需要其凭证。
+
 `tp-*` Token Plan 密钥默认使用中国区集群，可用 `MIMO_TOKEN_PLAN_CLUSTER` 覆盖。
 
 可选能力：
@@ -70,7 +96,7 @@ MiMo QC 默认关闭；每个选定阶段最多请求一次，写入 `mimo_qc.js
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本启动后会自行定位兄弟技能和资源。
 
-## 4. 标准解说流程
+## 4. 标准解说流程（audio-mode narration）
 
 ### 4.1 背景调研
 
@@ -132,6 +158,9 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --mimo-qc both
 
 合成前复核会读取脚本、计划和 TTS 元数据；成片后还会读取最多六张临时 JPEG。相同输入命中内容缓存，`--mimo-qc-refresh` 可强制刷新。帧的 base64 与凭证不会写入磁盘。
 
+已有批准解说稿时使用 `--preserve-approved-text`：编排器会在 full、单视频 cut 和多视频 cut 的 TTS 前把保护参数交给真实校验器，保留段落顺序、数量、时间、文本、停顿和扩展元数据；形状、来源边界和时长错误仍会失败，字符预算只形成预警，不能静默缩稿或降级为部分成功。
+这项策略只保护批准的时间线与文本；`overlaps_speech` 仍可依据已有声音证据更新，声音身份、后续 tempo、实际合成 WAV 是否装入时间窗及混音仍须单独核验。
+
 ### 4.5 字幕与克隆旁白
 
 若要把旁白字幕固定在原片字幕区域，先在仓库根目录运行：
@@ -155,6 +184,27 @@ python3 tools/measure_subtitle.py <video>
 5. REVISION 分别验证本轮修改项已经改变、冻结项没有意外变化；然后再做解码、时长、音画规格等机械检查。
 
 scene score、亮度统计、contact sheet 与自动 QC 只负责定位候选问题；最终判断以真实播放为准。短时间内出现密集候选时，必须判断每个切点来自原片还是本次拼接：原片无关短镜头整段删，相关短镜头扩展到完整动作/反应；人工拼接点优先移动边界、恢复同源连续运动或合并片段，能消除就不保留。修复失败时回到剪点、声音或文案层，不用更多包装掩盖。
+
+full/cut 交付如需让确定性的最终检查影响命令退出状态，显式传
+`--require-final-qc`。只有 `final_qc.json` 与 `golden_eval.json` 的摘要均为
+`ok: true` 且整数 `blocker_count: 0` 才打印完成并返回成功；缺失、畸形或 blocker
+会保留报告和已渲染诊断媒体，但命令非零退出且不打印完成。默认仍是仅报告、不阻断。
+该参数不支持 `--edit-mode dub`；dub 未传该参数时的准备和渲染行为不变。
+
+### 4.7 不需要解说的片子
+
+```bash
+# 对当前整段输入直接合成；不隐式跑理解/ASR/TTS
+python3 scripts/recap.py locked_picture.mp4 --work-dir source_work --audio-mode source-mix
+# 剪辑计划仍按 cut 流程产生，剪完不再暂停等待 narration.json
+python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --work-dir cut_work --audio-mode source-mix
+# 只换包装时冻结当前整片 AAC；不允许同时加 BGM/TTS
+python3 scripts/recap.py adopted.mp4 --work-dir packaging_work --audio-mode adopted-packet-copy
+```
+
+`source-mix` 仍会混音和重编码；`cut + adopted-packet-copy` 冻结的是剪后中间片的声音，不是原片的 AAC 包。
+当前严格字幕轨只支持 adopted 模式；其他字幕来源没有因此变成精确对齐。切换声音模式须新工作目录，
+不得把旧 TTS、QC 或自动生成的解说花字混入本轮原声生产。细节见 `references/audio-routing.md`。
 
 ## 5. 英译中原声复刻模式
 
@@ -197,9 +247,12 @@ python3 scripts/recap.py --doctor
 可透传参数：
 
 `--context`、`--scene-threshold`、`--style`、`--edit-mode {full,cut,dub}`、`--target-duration`、
+`--require-final-qc`（仅 full/cut）、
+`--audio-mode {narration,source-mix,adopted-packet-copy}`、`--audio-stream-index`、
+`--tts-meta`、`--narration-adoption`、`--audio-mix-adoption`、
 `--skip-asr`、`--mimo-video-overview`、`--mimo-qc {off,pre-assemble,post-render,both}`、
 `--mimo-qc-refresh`、`--consolidate`、`--consolidate-asr`、`--tts-provider`、`--mimo-tts-voice`、`--voice-ref`、
-`--allow-partial-tts`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、
+`--allow-partial-tts`、`--preserve-approved-text`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、
 `--subtitle-y-top`、`--subtitle-y-bot`、`--no-burn-subtitles`、`--output-dir`、
 `--export-jianying`、`--jianying-bundle-media`、`--jianying-no-bundle-media`、
 `--material-library-dir`、`--use-materials`、`--save-materials`。
@@ -212,5 +265,6 @@ python3 scripts/recap.py --doctor
 - 语义评审默认建议型、失败开放；只有调用方显式启用严格解说评审时，事实矛盾、残句或评审不可用才会在 TTS 前阻断。确定性校验阶段始终负责硬校验。
 - MiMo QC 不能阻断、自动修复或改变退出状态，只提供定位建议。
 - 建立内容质量基线不依赖平台分析、留存遥测或发布接入。
+- 本技能不改字幕/品牌包装与宣发文案；入口见 `video-assemble` 的 references/theme-foreground.md 与 `video-script` 的 references/promotional-copy.md。
 - 本技能不是无人值守调度器，不会向任何平台发布内容。
 - 各阶段技能不共享代码，只通过 `work_dir` 产物通信。

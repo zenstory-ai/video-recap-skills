@@ -12,8 +12,10 @@ from audio_mix import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitle_core import _subtitle_style_config
+from narration_binding import binding_fingerprint
+from audio_mix_binding import binding_fingerprint as audio_mix_binding_fingerprint
 
-def assembly_settings_fingerprint(work_dir=None):
+def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
     """Settings that affect the rendered video, used by pipeline resume cache. When work_dir is
     given, a user_subtitles presence flag is included so dropping in a user-subtitle file rebuilds
     the cached subtitles."""
@@ -23,6 +25,12 @@ def assembly_settings_fingerprint(work_dir=None):
     overlay_fingerprint = (
         _artifact_fingerprint(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
     )
+    subtitle_track_fingerprint = (
+        _artifact_fingerprint(Path(work_dir) / "subtitle_track.json")
+        if work_dir is not None else None
+    )
+    if audio_mode not in {"narration", "source-mix", "adopted-packet-copy"}:
+        raise ValueError(f"unsupported audio mode: {audio_mode}")
     fingerprint = {
         "version": SUBTITLE_RENDER_VERSION,
         "subtitle_text_normalize": SUBTITLE_TEXT_NORMALIZE_VERSION,
@@ -59,15 +67,49 @@ def assembly_settings_fingerprint(work_dir=None):
                 "fingerprint": overlay_fingerprint,
             },
         },
-        "narration_timing": {
-            "delay_seconds": CONFIG["narration_delay_seconds"],
-            "tail_pad_seconds": CONFIG["narration_tail_pad_seconds"],
-            "fade_ms": CONFIG["fade_ms"],
-            "narration_speed": CONFIG["narration_speed"],
-            "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
-            "tts_segment_tempo_max": CONFIG["tts_segment_tempo_max"],
+        "audio": {
+            "mode": audio_mode,
+            "selected_stream_index": audio_stream_index,
         },
-        "audio_mix": {
+    }
+    explicit_mix = (
+        audio_mix_binding_fingerprint(work_dir)
+        if work_dir is not None and audio_mode == "narration" else None
+    )
+    if explicit_mix:
+        fingerprint["audio"]["path"] = "explicit_adopted_full_sound"
+        fingerprint["audio_mix_binding"] = explicit_mix
+    if audio_mode == "narration":
+        narration_binding = binding_fingerprint(work_dir) if work_dir else None
+        fingerprint["narration_input_binding"] = narration_binding
+        adopted_tempo = (
+            narration_binding.get("tempo_policy") if narration_binding else None
+        )
+        fingerprint["narration_timing"] = {
+            "delay_seconds": 0.0 if explicit_mix else CONFIG["narration_delay_seconds"],
+            "tail_pad_seconds": 0.0 if explicit_mix else CONFIG["narration_tail_pad_seconds"],
+            "fade_ms": 0 if explicit_mix else CONFIG["fade_ms"],
+            "narration_speed": (
+                1.0 if explicit_mix else
+                adopted_tempo["global_atempo"] if adopted_tempo else CONFIG["narration_speed"]
+            ),
+            "tempo_source": (
+                "explicit_audio_mix" if explicit_mix else
+                "adoption" if adopted_tempo else "configuration"
+            ),
+            "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
+            "tts_segment_tempo_max": (
+                adopted_tempo["segment_tempo_max"]
+                if explicit_mix and adopted_tempo else CONFIG["tts_segment_tempo_max"]
+            ),
+        }
+        if explicit_mix and adopted_tempo:
+            fingerprint["narration_timing"]["narration_cumulative_tempo_max"] = \
+                adopted_tempo["cumulative_tempo_max"]
+            fingerprint["narration_timing"]["narration_cumulative_tempo_hard_max"] = \
+                adopted_tempo["cumulative_tempo_hard_max"]
+    if audio_mode in {"narration", "source-mix"} and not explicit_mix:
+        fingerprint["audio_mix"] = {
             "ducking_mode": CONFIG["ducking_mode"],
             "duck_fade_seconds": CONFIG["duck_fade_seconds"],
             "duck_bridge_seconds": CONFIG["duck_bridge_seconds"],
@@ -87,9 +129,13 @@ def assembly_settings_fingerprint(work_dir=None):
             "bgm_path": CONFIG["bgm_path"],
             "bgm_volume": CONFIG["bgm_volume"],
             "bgm_ducking_volume": CONFIG["bgm_ducking_volume"],
-        },
-    }
+        }
     if burn_subtitles:
         fingerprint["subtitle_renderer"] = "ass"
         fingerprint["subtitle_style"] = _subtitle_style_config()
+    if subtitle_track_fingerprint is not None:
+        fingerprint["subtitle_track"] = {
+            "artifact": "subtitle_track.json",
+            "fingerprint": subtitle_track_fingerprint,
+        }
     return fingerprint
