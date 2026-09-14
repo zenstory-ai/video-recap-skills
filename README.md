@@ -1,6 +1,6 @@
 # video-recap-skills
 
-> 项目页：<https://zenstory.ai/video-recap> · ZenStory AI 全部项目：<https://zenstory.ai/projects>
+> 项目页：<https://zenstory.ai/zh/video-recap> · ZenStory AI 全部项目：<https://zenstory.ai/zh/projects>
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-purple)
@@ -29,9 +29,9 @@
 
 | 你要解决什么 | 实用指南 | 下一项交付与边界 |
 |---|---|---|
-| 有视频，怎样写出有依据的中文解说？ | [视频到解说完整流程](https://zenstory.ai/video-recap/video-to-narration) | 先确认画面、对白与已提供背景，不把猜测写成片中事实 |
-| 什么时候应该让原声或停顿主导？ | [原声与旁白分工](https://zenstory.ai/video-recap/original-audio-and-narration) | 先定每拍声音任务；职责标签不等于已经完成混音 |
-| 已有解说时间线，想接着在剪映里改？ | [剪映 / CapCut 草稿导出](https://zenstory.ai/video-recap/capcut-draft) | 使用真实 `timeline.json` 独立导出；不为导出重跑理解、配音或 MP4 渲染 |
+| 有视频，怎样写出有依据的中文解说？ | [视频到解说完整流程](https://zenstory.ai/zh/video-recap/video-to-narration) | 先确认画面、对白与已提供背景，不把猜测写成片中事实 |
+| 什么时候应该让原声或停顿主导？ | [原声与旁白分工](https://zenstory.ai/zh/video-recap/original-audio-and-narration) | 先定每拍声音任务；职责标签不等于已经完成混音 |
+| 已有解说时间线，想接着在剪映里改？ | [剪映 / CapCut 草稿导出](https://zenstory.ai/zh/video-recap/capcut-draft) | 使用真实 `timeline.json` 独立导出；不为导出重跑理解、配音或 MP4 渲染 |
 | 导出的剪映草稿里有哪些轨道、能改什么、自建和 SaaS 成本有何不同？ | [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md) | 仓库内文档，描述当前版本的导出内容与边界 |
 
 **先做一次文本交接的请求示例**（先按下文完成安装与配置，替换〈占位内容〉）：
@@ -272,7 +272,7 @@ MIT，见 [LICENSE](LICENSE)。
 
 ## ZenStory AI 项目
 
-本项目由 [ZenStory AI](https://zenstory.ai) 维护——一组开源、面向 agent 的故事创作、改编与生产工具（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）。同组织项目：
+本项目由 [ZenStory AI](https://zenstory.ai/zh) 维护——一组开源、面向 agent 的故事创作、改编与生产工具（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）。同组织项目：
 
 | 项目 | 用途 |
 | --- | --- |
