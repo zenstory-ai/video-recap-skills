@@ -1,15 +1,15 @@
+中文 · [English](README.en.md)
+
 # video-recap-skills
 
-> 项目页：<https://zenstory.ai/zh/video-recap> · ZenStory AI 全部项目：<https://zenstory.ai/zh/projects>
+**在 Claude Code、Codex CLI、OpenCode 或 OpenClaw 里，用一句自然语言把视频变成中文解说成片。**
+
+项目主页：https://zenstory.ai/zh/video-recap
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-purple)
 ![Powered by Xiaomi MiMo](https://img.shields.io/badge/AI-Xiaomi%20MiMo-green)
 ![Fish Audio TTS](https://img.shields.io/badge/TTS-Fish%20Audio-blue)
-
-中文 · [English](README.en.md)
-
-**在 Claude Code、Codex CLI、OpenCode 或 OpenClaw 里，用自然语言组织工作流，为支持的视频文件制作中文解说。** 核心阶段在本地使用 Python 和 `ffmpeg`，远程小米 MiMo 服务负责 ASR、VLM 和默认 TTS；可选的 Fish Audio TTS 需要单独的 API Key。这些核心阶段不需要本地 GPU 或下载模型。最终交付仍需完整播放复核。
 
 ## 演示
 
@@ -23,21 +23,11 @@
 
 <img alt="导出的剪映草稿：原片、解说、BGM、字幕" src="docs/jianying-export.png" width="100%">
 
-## 按创作任务找指南
-
-从手头已有的材料和眼前的问题出发，不必每次重跑全部阶段：
-
-| 你要解决什么 | 实用指南 | 下一项交付与边界 |
-|---|---|---|
-| 有视频，怎样写出有依据的中文解说？ | [视频到解说完整流程](https://zenstory.ai/zh/video-recap/video-to-narration) | 先确认画面、对白与已提供背景，不把猜测写成片中事实 |
-| 什么时候应该让原声或停顿主导？ | [原声与旁白分工](https://zenstory.ai/zh/video-recap/original-audio-and-narration) | 先定每拍声音任务；职责标签不等于已经完成混音 |
-| 已有解说时间线，想接着在剪映里改？ | [剪映 / CapCut 草稿导出](https://zenstory.ai/zh/video-recap/capcut-draft) | 使用真实 `timeline.json` 独立导出；不为导出重跑理解、配音或 MP4 渲染 |
-| 导出的剪映草稿里有哪些轨道、能改什么、自建和 SaaS 成本有何不同？ | [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md) | 仓库内文档，描述当前版本的导出内容与边界 |
-
-**先做一次文本交接的请求示例**（先按下文完成安装与配置，替换〈占位内容〉）：
-> 我有权使用〈本地视频〉，并提供了对应的已核对画面与对白记录。先只给这段素材的声音分工建议：哪句对白、哪个动作声或停顿应完整保留，哪里确需旁白，依据是哪条记录。缺证据就列待核对项，不补人物动机或没出现的事件。交付分拍说明和必要的旁白草案，不调用配音或渲染；这份规划不代表已有成片。
-
 ## 这是什么
+
+给 Agent 一个视频路径和一句话需求，它会自动完成理解（场景、ASR、VLM）、故事与剪辑规划、写稿、配音、混音和字幕，输出一条 `recap_<名>.mp4`。
+
+长视频可以先剪成短片再配解说；多个视频可以剪成同一条主线；分析结果沉淀成素材库供下次复用。成片之外，还可以导出剪映草稿继续手动精修。
 
 ```mermaid
 flowchart LR
@@ -56,7 +46,7 @@ flowchart LR
 ## 为什么用它
 
 - **一个 key 跑全程。** ASR、VLM、TTS 均走[小米 MiMo](https://platform.xiaomimimo.com)；本地运行时只有 Python 标准库和 `ffmpeg`。
-- **TTS 可切 Fish Audio。** `--tts-provider fish-audio` 只替换配音服务，ASR 与 VLM 仍走 MiMo；MiMo 默认 TTS 路径也保留。
+- **TTS 可切 Fish Audio。** `--tts-provider fish-audio` 只替换配音服务，ASR 与 VLM 仍走 MiMo。
 - **该查资料时先查。** 片名/剧情明确或 brief 提示素材偏薄时，把人物关系、剧情背景存进 `background_research.json`，VLM 才更容易认出谁是谁。
 - **先做创作决定，再分配声音。** Agent 先比较剪辑假设，锁定 POV、主线、具体画面与原声锚点；旁白有明确任务时才整块配音，强对白、动作声或沉默可以完整主导一个 beat。
 - **先剪后配，画面对齐。** 剪辑模式先把长视频剪成成片，再对着成片写解说，时间轴天然对齐。
@@ -66,7 +56,22 @@ flowchart LR
 
 ## 安装
 
-### 1. 通用前置
+在 Claude Code 内执行：
+
+```text
+/plugin marketplace add zenstory-ai/video-recap-skills
+/plugin install video-recap-skills@video-recap
+```
+
+也可以直接说：
+
+```text
+安装这个插件：https://github.com/zenstory-ai/video-recap-skills
+```
+
+### 前置条件
+
+不需要 GPU，不需要下载模型，macOS / Linux / Windows 均可运行。本地需要：
 
 - Python 3.10+
 - `PATH` 上可用的 `ffmpeg`；默认烧录字幕，因此需要带 libass / `subtitles` 滤镜
@@ -83,41 +88,24 @@ export MIMO_TOKEN_PLAN_CLUSTER=cn          # tp-* key 可选：cn | sgp | ams
 
 Windows PowerShell 使用 `$env:MIMO_API_KEY="your-mimo-key"`。MiMo 不一定要开通订阅：`sk-*` key 可直接按量付费，按本项目一次完整视频实测，一条视频仅消耗约 1.3 元（实际费用会随视频时长和调用量变化），默认连接 `https://api.xiaomimimo.com/v1`。
 
-如需改用可选的 Fish Audio TTS：
-
-```bash
-export TTS_PROVIDER=fish-audio
-export FISH_API_KEY=your-fish-key
-export FISH_TTS_REFERENCE_ID=your-voice-model-id  # 可选；内置了“娱乐扒妹”解说音色
-```
-
-当前代码默认使用 `s2.1-pro-free` 和“娱乐扒妹”音色（reference ID：`5653cea4ac83480aaf2bf45406556185`）；设置 `FISH_TTS_REFERENCE_ID` 可覆盖默认音色。模型名中的 `free` 不是长期免费承诺；[原免费开放公告](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en)是阶段性安排。运行前请核对 [Fish Audio 当前价格与限额](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)、服务可用性及账户商用条款。
-
-### 2. 选择 Agent 宿主
-
-#### Claude Code
-
-在 Claude Code 内执行：
+安装完成后，可以让 Agent 自检环境：
 
 ```text
-/plugin marketplace add zenstory-ai/video-recap-skills
-/plugin install video-recap-skills@video-recap
+检查 video-recap 的运行环境，告诉我 Python、ffmpeg/libass 和 MiMo 配置是否就绪。
 ```
 
-也可以直接说：
-
-```text
-安装这个插件：https://github.com/zenstory-ai/video-recap-skills
-```
-
-#### Codex CLI
+<details>
+<summary><b>Codex CLI</b></summary>
 
 ```bash
 codex plugin marketplace add zenstory-ai/video-recap-skills
 codex plugin add video-recap-skills@video-recap
 ```
 
-#### OpenCode
+</details>
+
+<details>
+<summary><b>OpenCode</b></summary>
 
 [OpenCode 官方 Agent Skills 文档](https://opencode.ai/docs/skills/)规定项目级技能放在 `.opencode/skills/<name>/SKILL.md`。克隆仓库后，从仓库目录启动 OpenCode：
 
@@ -129,9 +117,12 @@ ln -s ../skills .opencode/skills             # macOS / Linux
 opencode debug skill
 ```
 
-Windows 可把 `skills\*` 复制到 `.opencode\skills\`。本 PR 已在 OpenCode `1.14.32` 上实际验证：`opencode debug skill` 能发现全部 6 个技能。日常端到端制作使用 `video-recap`；只做策划或写稿时可调用 `video-script`；其余四个技能负责工具阶段。
+Windows 可把 `skills\*` 复制到 `.opencode\skills\`。已在 OpenCode `1.14.32` 上实际验证：`opencode debug skill` 能发现全部 6 个技能。日常端到端制作使用 `video-recap`；只做策划或写稿时可调用 `video-script`；其余四个技能负责工具阶段。
 
-#### OpenClaw
+</details>
+
+<details>
+<summary><b>OpenClaw</b></summary>
 
 克隆仓库后导入 Claude 插件包，并检查技能列表：
 
@@ -142,15 +133,26 @@ openclaw skills list
 
 不要把同一份技能同时注册到多个发现目录，否则可能出现重名或重复触发。
 
-安装完成后，可以让 Agent 自检环境：
+</details>
 
-```text
-检查 video-recap 的运行环境，告诉我 Python、ffmpeg/libass 和 MiMo 配置是否就绪。
+<details>
+<summary><b>可选：改用 Fish Audio TTS</b></summary>
+
+Fish Audio 需要单独的 API Key，只替换配音服务：
+
+```bash
+export TTS_PROVIDER=fish-audio
+export FISH_API_KEY=your-fish-key
+export FISH_TTS_REFERENCE_ID=your-voice-model-id  # 可选；内置了“娱乐扒妹”解说音色
 ```
+
+当前代码默认使用 `s2.1-pro-free` 和“娱乐扒妹”音色（reference ID：`5653cea4ac83480aaf2bf45406556185`）；设置 `FISH_TTS_REFERENCE_ID` 可覆盖默认音色。该模型曾[阶段性免费开放](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en)，运行前请查看 [Fish Audio 当前价格与限额](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits)和账户商用条款。
+
+</details>
 
 ## 怎么用
 
-直接给出视频路径、期望成片和必要背景。用户不需要手动运行仓库里的 Python 脚本。
+直接给出视频路径、期望成片和必要背景，其余步骤由 Agent 完成。下面的请求复制改一改就能用：
 
 **完整视频解说：**
 
@@ -182,13 +184,19 @@ Agent 会自动完成理解、故事与视听规划、剪辑、写稿、配音�
 
 素材库只保存 JSON / Markdown 和索引，不复制原始媒体、不建数据库、不做 embedding。需要检索时，Agent 直接在文件系统中查找。
 
+**只要声音分工和旁白草案，先不配音：**
+
+```text
+我有 /path/to/video.mp4 和对应的画面与对白记录。先只给这段素材的声音分工建议：哪句对白、哪个动作声或停顿应完整保留，哪里确需旁白，依据是哪条记录。缺证据就列待核对项，不补人物动机或没出现的事件。交付分拍说明和必要的旁白草案，先不配音、不渲染。
+```
+
 **增加建议型质量复核并导出剪映草稿：**
 
 ```text
 给 /path/to/video.mp4 做解说，合成前和成片后都做 MiMo 质量复核，并导出可继续编辑的剪映草稿。
 ```
 
-MiMo 复核始终是 advisory：每个阶段最多一次请求，失败开放，不会自动修改或阻断成片。
+MiMo 复核只给建议：每个阶段最多一次请求，失败开放，不会自动修改或阻断成片。剪映草稿导出是独立的一步，用已有的 `timeline.json` 即可，见[多轨时间线 / 剪映导出](skills/video-recap/references/timeline-and-jianying.md)。
 
 **让新字幕贴合原片硬字幕位置：**
 
@@ -206,7 +214,7 @@ MiMo 复核始终是 advisory：每个阶段最多一次请求，失败开放，
 
 参考音频会发送给 MiMo 用于合成，其内容指纹参与缓存校验。仅在获得音色所有者授权时使用。
 
-**改用当前免费的 Fish Audio 配音：**
+**改用 Fish Audio 配音：**
 
 ```text
 用 Fish Audio 给 /path/to/video.mp4 做中文解说；使用默认的“娱乐扒妹”音色。
@@ -260,6 +268,13 @@ Agent 会向编排器传入 `--tts-provider fish-audio`；需要 `FISH_API_KEY`�
 - 各 skill 的契约：每个 `skills/<skill>/SKILL.md`（写作规则在 video-script 的 SKILL.md 里）
 - [数据结构](skills/video-recap/references/data-schema.md) · [配置手册](skills/video-recap/references/config-playbook.md) · [多轨时间线 / 剪映导出](skills/video-recap/references/timeline-and-jianying.md)
 - [背景调研指南](skills/video-recap/references/research-guide.md) · [VLM prompt 模板](skills/video-understanding/references/prompt-templates.md)
+
+## 延伸阅读
+
+- [视频到解说完整流程](https://zenstory.ai/zh/video-recap/video-to-narration)：有视频，怎样写出有依据的中文解说
+- [原声与旁白分工](https://zenstory.ai/zh/video-recap/original-audio-and-narration)：什么时候该让原声或停顿主导
+- [剪映 / CapCut 草稿导出](https://zenstory.ai/zh/video-recap/capcut-draft)：已有解说时间线，接着在剪映里改
+- [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md)：导出草稿里有哪些轨道、能改什么、自建和 SaaS 成本对比
 
 ## 致谢
 

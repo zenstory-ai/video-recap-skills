@@ -1,15 +1,15 @@
+[中文](README.md) · English
+
 # video-recap-skills
 
-> Project page: <https://zenstory.ai/video-recap> · All ZenStory AI projects: <https://zenstory.ai/projects>
+**In Claude Code, Codex CLI, OpenCode, or OpenClaw, one natural-language request turns a video into a Chinese-narration recap.**
+
+Project page: https://zenstory.ai/video-recap
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 ![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-purple)
 ![Powered by Xiaomi MiMo](https://img.shields.io/badge/AI-Xiaomi%20MiMo-green)
 ![Fish Audio TTS](https://img.shields.io/badge/TTS-Fish%20Audio-blue)
-
-[中文](README.md) · English
-
-**Use natural-language instructions in Claude Code, Codex CLI, OpenCode, or OpenClaw to create Chinese-narration recaps from supported video files.** Core stages use Python and `ffmpeg` locally, with remote Xiaomi MiMo services for ASR, VLM, and default TTS; optional Fish Audio TTS requires a separate API key. These core stages do not require a local GPU or model downloads. Final delivery still requires a full playback review.
 
 ## Demo
 
@@ -23,21 +23,11 @@ Beyond the rendered MP4, you can export a **剪映/JianYing draft** to keep edit
 
 <img alt="Exported 剪映 draft: original clips, narration, BGM, and subtitles" src="docs/jianying-export.png" width="100%">
 
-## Find a Guide for Your Creative Task
-
-Start with the material and question you have now; every request need not rerun the full pipeline:
-
-| What you need to solve | Practical guide | Next deliverable and boundary |
-|---|---|---|
-| How do I write evidence-grounded Chinese narration from a video? | [Video-to-narration workflow](https://zenstory.ai/video-recap/video-to-narration) | Establish picture, dialogue and supplied background before treating a claim as a source-video fact |
-| When should original sound or a pause lead? | [Original sound and narration](https://zenstory.ai/video-recap/original-audio-and-narration) | Assign each beat's sound task first; ownership labels are not a completed mix |
-| I have a recap timeline; how do I keep editing in JianYing? | [JianYing / CapCut draft export](https://zenstory.ai/video-recap/capcut-draft) | Export independently from a real `timeline.json`; do not rerun understanding, TTS or MP4 rendering merely to export |
-| What is inside the exported JianYing draft, and how does self-hosting compare with SaaS on cost? | [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md) (Chinese) | In-repo document describing the current export contents and limits |
-
-**A text-only handoff request** (complete the setup below first and replace 〈placeholders〉):
-> I have permission to use 〈local video〉 and am supplying checked picture and dialogue records for it. Propose only the sound handoff for this material: which full dialogue line, action sound or pause to preserve, where narration is needed, and which record supports each choice. List missing evidence rather than inventing motives or unseen events. Return beat notes and necessary narration drafts without calling TTS or rendering; this plan is not an existing finished video.
-
 ## What it is
+
+Give the agent a video path and a one-line brief. It understands the footage (scenes, ASR, VLM), plans the story and the edit, writes the narration, voices it, mixes and subtitles it, and writes `recap_<name>.mp4`.
+
+A long video can be cut down first and narrated on the shortened timeline; several videos can be cut into one story spine; each analysis is saved to a material library you can reuse next time. Beyond the rendered MP4, you can export a JianYing draft and keep editing by hand.
 
 ```mermaid
 flowchart LR
@@ -56,7 +46,7 @@ flowchart LR
 ## Why use it
 
 - **One key, runs anywhere.** ASR, VLM, and TTS all go through [Xiaomi MiMo](https://platform.xiaomimimo.com); the local runtime uses only Python's standard library and `ffmpeg`, with no `pip install`.
-- **Optional Fish Audio TTS.** Select `--tts-provider fish-audio` to change the voiceover service only; ASR and VLM still use MiMo, and the MiMo TTS path remains the default.
+- **Optional Fish Audio TTS.** Select `--tts-provider fish-audio` to change the voiceover service only; ASR and VLM still use MiMo.
 - **Research when it matters.** When the title/story context is known or the brief notes the material is thin, put character relationships and plot background in `background_research.json` so the VLM knows who's who.
 - **Make the editorial decision before allocating sound.** The agent first compares edit hypotheses and locks the POV, story spine, exact picture moments, and original-audio anchors. Narration is voiced as a block only when it has a defined job; strong dialogue, action sound, or silence may own an entire beat. A 7:3 split is only a rough fallback, never a quota.
 - **Cut first, frames aligned.** Cut mode renders the shortened video first, then writes narration against that output timeline, so picture and voice stay in sync.
@@ -66,7 +56,22 @@ flowchart LR
 
 ## Installation
 
-### 1. Shared prerequisites
+Run inside Claude Code:
+
+```text
+/plugin marketplace add zenstory-ai/video-recap-skills
+/plugin install video-recap-skills@video-recap
+```
+
+Or simply ask:
+
+```text
+Install this plugin: https://github.com/zenstory-ai/video-recap-skills
+```
+
+### Prerequisites
+
+No GPU or model downloads; runs on macOS / Linux / Windows. You need:
 
 - Python 3.10+
 - `ffmpeg` on `PATH`; subtitle burn-in is enabled by default and requires libass / the `subtitles` filter
@@ -83,34 +88,14 @@ export MIMO_TOKEN_PLAN_CLUSTER=cn          # optional for tp-* keys: cn | sgp | 
 
 In Windows PowerShell, use `$env:MIMO_API_KEY="your-mimo-key"`. MiMo does not require a subscription: `sk-*` keys can use pay-as-you-go billing. In one complete-video run measured for this project, usage cost about CNY 1.3; actual cost varies with video length and request volume. Pay-as-you-go keys default to `https://api.xiaomimimo.com/v1`.
 
-To use the optional Fish Audio TTS path:
-
-```bash
-export TTS_PROVIDER=fish-audio
-export FISH_API_KEY=your-fish-key
-export FISH_TTS_REFERENCE_ID=your-voice-model-id  # optional; overrides the built-in “娱乐扒妹” voice
-```
-
-The configured default Fish model is `s2.1-pro-free`, with the built-in “娱乐扒妹” narration voice (reference ID `5653cea4ac83480aaf2bf45406556185`). Set `FISH_TTS_REFERENCE_ID` to override it. The model name is not a promise of permanently free service; the [original free-access announcement](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en) described a limited period. Before use, check [Fish Audio’s current pricing and rate limits](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits), service availability and the commercial terms for your account. See the [config playbook](skills/video-recap/references/config-playbook.md) for model, voice, loudness, subtitle, and per-capability settings.
-
-### 2. Choose an agent host
-
-#### Claude Code
-
-Run inside Claude Code:
+After installation, ask the agent to check the environment:
 
 ```text
-/plugin marketplace add zenstory-ai/video-recap-skills
-/plugin install video-recap-skills@video-recap
+Check the video-recap environment and tell me whether Python, ffmpeg/libass, and MiMo are ready.
 ```
 
-Or simply ask:
-
-```text
-Install this plugin: https://github.com/zenstory-ai/video-recap-skills
-```
-
-#### Codex CLI
+<details>
+<summary><b>Codex CLI</b></summary>
 
 ```bash
 codex plugin marketplace add zenstory-ai/video-recap-skills
@@ -119,7 +104,10 @@ codex plugin add video-recap-skills@video-recap
 
 For a local checkout, replace the marketplace source in the first command with its directory. This flow was smoke-tested with an isolated `CODEX_HOME` on Codex CLI `0.144.1`.
 
-#### OpenCode
+</details>
+
+<details>
+<summary><b>OpenCode</b></summary>
 
 The official [OpenCode Agent Skills documentation](https://opencode.ai/docs/skills/) defines project skills under `.opencode/skills/<name>/SKILL.md`. Clone the repository and start OpenCode from that directory:
 
@@ -131,9 +119,12 @@ ln -s ../skills .opencode/skills             # macOS / Linux
 opencode debug skill
 ```
 
-On Windows, copy `skills\*` into `.opencode\skills\`. This PR was run-verified on OpenCode `1.14.32`: `opencode debug skill` discovered all 6 skills. Use `video-recap` for normal end-to-end production, `video-script` for planning or writing only, and the other four skills as tool stages.
+On Windows, copy `skills\*` into `.opencode\skills\`. Run-verified on OpenCode `1.14.32`: `opencode debug skill` discovered all 6 skills. Use `video-recap` for normal end-to-end production, `video-script` for planning or writing only, and the other four skills as tool stages.
 
-#### OpenClaw
+</details>
+
+<details>
+<summary><b>OpenClaw</b></summary>
 
 After cloning, import the Claude plugin bundle and check the discovered skills:
 
@@ -144,15 +135,26 @@ openclaw skills list
 
 Do not register the same checkout through multiple discovery paths; duplicate registration can cause name collisions or repeated triggers.
 
-After installation, ask the agent to check the environment:
+</details>
 
-```text
-Check the video-recap environment and tell me whether Python, ffmpeg/libass, and MiMo are ready.
+<details>
+<summary><b>Optional: switch TTS to Fish Audio</b></summary>
+
+Fish Audio needs its own API key and replaces the voiceover service only:
+
+```bash
+export TTS_PROVIDER=fish-audio
+export FISH_API_KEY=your-fish-key
+export FISH_TTS_REFERENCE_ID=your-voice-model-id  # optional; overrides the built-in “娱乐扒妹” voice
 ```
+
+The configured default Fish model is `s2.1-pro-free`, with the built-in “娱乐扒妹” narration voice (reference ID `5653cea4ac83480aaf2bf45406556185`). Set `FISH_TTS_REFERENCE_ID` to override it. The model had a [limited free-access period](https://fish.audio/blog/s2-1-pro-free-api/?articleLocale=en); check [Fish Audio’s current pricing and rate limits](https://docs.fish.audio/developer-guide/models-pricing/pricing-and-rate-limits) and the commercial terms for your account before use. See the [config playbook](skills/video-recap/references/config-playbook.md) for model, voice, loudness, subtitle, and per-capability settings.
+
+</details>
 
 ## Usage
 
-Give the agent the video paths, desired result, and any useful story context. Users do not need to run the repository's Python scripts directly.
+Give the agent the video paths, desired result, and any useful story context; it handles the rest. Copy one of these requests and adjust it:
 
 **Full-video recap:**
 
@@ -184,13 +186,19 @@ Analyze /path/to/ep1.mp4 and save reusable understanding artifacts under /path/t
 
 The library contains JSON, Markdown, and an index only. It does not copy raw media, create a database, or use embeddings; the agent searches it directly on the filesystem.
 
+**Sound handoff and narration drafts only, no voiceover yet:**
+
+```text
+I have /path/to/video.mp4 and checked picture and dialogue records for it. Propose only the sound handoff for this material: which full dialogue line, action sound or pause to preserve, where narration is needed, and which record supports each choice. List missing evidence rather than inventing motives or unseen events. Return beat notes and necessary narration drafts; skip TTS and rendering for now.
+```
+
 **Add advisory quality review and export a JianYing draft:**
 
 ```text
 Make a recap of /path/to/video.mp4, run MiMo quality review before assembly and after rendering, and export an editable JianYing draft.
 ```
 
-MiMo review is always advisory: at most one request per selected stage, fail-open, and never an automatic edit or render blocker.
+MiMo review is always advisory: at most one request per selected stage, fail-open, and never an automatic edit or render blocker. The JianYing draft export is a separate step that works from an existing `timeline.json`; see [Multi-track timeline / 剪映 export](skills/video-recap/references/timeline-and-jianying.md).
 
 **Align new subtitles with the source's burned-in subtitle band:**
 
@@ -208,7 +216,7 @@ Use the voice from /path/to/voice-ref.wav for the recap of /path/to/video.mp4. I
 
 The reference audio is sent to MiMo for synthesis and its content fingerprint participates in cache validation. Use voice cloning only with the voice owner's authorization.
 
-**Use the currently free Fish Audio voiceover path:**
+**Use the Fish Audio voiceover path:**
 
 ```text
 Use Fish Audio for the Chinese narration of /path/to/video.mp4 with the built-in “娱乐扒妹” voice.
@@ -262,6 +270,13 @@ Priority: **your file › the agent-proofread `original_subtitles.json` › ASR 
 - Per-skill contracts: each `skills/<skill>/SKILL.md` (the writing rules are in video-script's SKILL.md)
 - [Data schema](skills/video-recap/references/data-schema.md) · [Config playbook](skills/video-recap/references/config-playbook.md) · [Multi-track timeline / 剪映 export](skills/video-recap/references/timeline-and-jianying.md)
 - [Background research guide](skills/video-recap/references/research-guide.md) · [VLM prompt templates](skills/video-understanding/references/prompt-templates.md)
+
+## Further reading
+
+- [Video-to-narration workflow](https://zenstory.ai/video-recap/video-to-narration): writing evidence-grounded Chinese narration from a video
+- [Original sound and narration](https://zenstory.ai/video-recap/original-audio-and-narration): when original sound or a pause should lead
+- [JianYing / CapCut draft export](https://zenstory.ai/video-recap/capcut-draft): keep editing an existing recap timeline in JianYing
+- [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md) (Chinese): what is inside the exported draft and how self-hosting compares with SaaS on cost
 
 ## Acknowledgements
 
