@@ -1,15 +1,34 @@
-中文 · [English](README.en.md)
+<p align="center">
+  <img src="https://zenstory.ai/brand/zenstory-ai-mark.svg" alt="" width="76" height="76">
+</p>
 
-# video-recap-skills
+<h1 align="center">Video Recap Skills</h1>
 
-**在 Claude Code、Codex CLI、OpenCode 或 OpenClaw 里，用一句自然语言把视频变成中文解说成片。**
+<p align="center">
+  <b>在 Claude Code、Codex CLI、OpenCode 或 OpenClaw 里，用一句自然语言把视频变成中文解说成片。</b>
+</p>
 
-项目主页：https://zenstory.ai/zh/video-recap
+<p align="center">
+  <a href="https://zenstory.ai/zh/video-recap"><b>项目主页</b></a>
+  &nbsp;·&nbsp;
+  <a href="#安装"><b>安装</b></a>
+  &nbsp;·&nbsp;
+  <a href="#怎么用"><b>怎么用</b></a>
+  &nbsp;·&nbsp;
+  <a href="README.en.md"><b>English</b></a>
+</p>
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-![Claude Code Plugin](https://img.shields.io/badge/Claude%20Code-Plugin-purple)
-![Powered by Xiaomi MiMo](https://img.shields.io/badge/AI-Xiaomi%20MiMo-green)
-![Fish Audio TTS](https://img.shields.io/badge/TTS-Fish%20Audio-blue)
+<p align="center">
+  <a href="https://github.com/zenstory-ai/video-recap-skills/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/video-recap-skills?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
+  <a href="https://github.com/zenstory-ai/video-recap-skills/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/video-recap-skills?style=flat-square&color=081431&label=Release"></a>
+  <img alt="Skills 6" src="https://img.shields.io/badge/Skills-6-081431?style=flat-square">
+  <a href="https://platform.xiaomimimo.com"><img alt="AI Xiaomi%20MiMo" src="https://img.shields.io/badge/AI-Xiaomi%20MiMo-34A853?style=flat-square"></a>
+  <a href="./LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-1F6FEB?style=flat-square"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/zenstory-ai/video-recap-skills/issues"><img alt="GitHub Issues" src="https://img.shields.io/badge/GitHub%20Issues-181717?style=for-the-badge&logo=github&logoColor=white"></a>
+</p>
 
 ## 演示
 
