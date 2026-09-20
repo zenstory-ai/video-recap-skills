@@ -91,16 +91,6 @@ def test_index_transport_posts_exact_contract_and_records_request_receipt(monkey
         "http://private.invalid/tts?token=secret",
         "http://private.invalid/tts#secret",
         "http:///missing-host",
-    ],
-)
-def test_index_endpoint_rejects_unsafe_or_credential_bearing_urls(endpoint):
-    with pytest.raises(ValueError, match="INDEX_TTS_ENDPOINT"):
-        index_tts.validate_index_tts_config(endpoint, "voice")
-
-
-@pytest.mark.parametrize(
-    "endpoint",
-    [
         "http://@private.invalid/tts",
         "http://private.invalid:bad/tts",
         "http://private.invalid:99999/tts",
@@ -108,29 +98,48 @@ def test_index_endpoint_rejects_unsafe_or_credential_bearing_urls(endpoint):
         "http://[broken/tts",
     ],
 )
-def test_index_endpoint_rejects_malformed_values_without_echo(endpoint):
+def test_index_endpoint_rejects_unsafe_or_malformed_urls_without_echo(endpoint):
     with pytest.raises(ValueError) as raised:
         index_tts.validate_index_tts_config(endpoint, "voice")
 
     assert "INDEX_TTS_ENDPOINT" in str(raised.value)
     assert "private.invalid" not in str(raised.value)
+    assert "secret" not in str(raised.value)
     assert "Injected" not in str(raised.value)
 
 
-def test_index_transport_refuses_redirect_without_forwarding_body(monkeypatch, tmp_path):
-    error = urllib.error.HTTPError(
-        "http://private.invalid/tts", 307, "redirect", {"Location": "http://other/tts"}, None
-    )
+_PRIVATE_URL = "http://user:secret@private.invalid/tts?token=secret"
+
+
+@pytest.mark.parametrize(
+    ("error", "match"),
+    [
+        (
+            urllib.error.HTTPError(
+                _PRIVATE_URL, 307, "redirect", {"Location": "http://other/tts"}, None
+            ),
+            "重定向",
+        ),
+        (socket.timeout("timed out"), "超时"),
+        (urllib.error.URLError(_PRIVATE_URL), "网络错误"),
+    ],
+    ids=["redirect", "timeout", "url-error"],
+)
+def test_index_transport_failures_raise_generic_error_without_output(
+    monkeypatch, tmp_path, error, match
+):
     monkeypatch.setattr(
         index_tts, "_open_without_redirects", lambda *_args, **_kwargs: (_ for _ in ()).throw(error)
     )
 
-    with pytest.raises(RuntimeError, match="重定向"):
+    with pytest.raises(RuntimeError, match=match) as raised:
         index_tts.synthesize_index_tts(
             "不得转发。", tmp_path / "out.wav", endpoint="http://private.invalid/tts",
-            voice="voice", timeout=3,
+            voice="voice", timeout=1,
         )
 
+    assert "secret" not in str(raised.value)
+    assert raised.value.__cause__ is None
     assert not (tmp_path / "out.wav").exists()
 
 
@@ -225,76 +234,40 @@ def test_index_success_response_io_failures_hide_private_reason(
     assert not (tmp_path / "out.wav").exists()
 
 
-def test_index_json_and_url_errors_do_not_echo_private_service_values(monkeypatch, tmp_path):
-    private = "http://user:secret@private.invalid/tts?token=secret"
-    monkeypatch.setattr(
-        index_tts,
-        "_open_without_redirects",
-        lambda *_args, **_kwargs: _Response(
-            json.dumps({"error": private}).encode(), "application/json"
-        ),
-    )
-    with pytest.raises(RuntimeError) as json_error:
-        index_tts.synthesize_index_tts(
-            "测试。", tmp_path / "json.wav", endpoint="http://host/tts",
-            voice="voice", timeout=3,
-        )
-    assert private not in str(json_error.value)
-
-    monkeypatch.setattr(
-        index_tts,
-        "_open_without_redirects",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(urllib.error.URLError(private)),
-    )
-    with pytest.raises(RuntimeError) as url_error:
-        index_tts.synthesize_index_tts(
-            "测试。", tmp_path / "url.wav", endpoint="http://host/tts",
-            voice="voice", timeout=3,
-        )
-    assert private not in str(url_error.value)
-
-
 def test_index_redirect_handler_never_creates_forwarded_request():
     handler = index_tts._NoRedirectHandler()
     assert handler.redirect_request(None, None, 307, "redirect", {}, "http://other/tts") is None
 
 
+def _riff_overdeclared_wav():
+    audio = bytearray(_wav_bytes())
+    audio[4:8] = (len(audio) + 1024).to_bytes(4, "little")
+    return bytes(audio)
+
+
 @pytest.mark.parametrize(
-    ("body", "content_type"),
+    ("body", "content_type", "match"),
     [
-        (b'{"error":"not wav"}', "application/json"),
-        (b"RIFFbad-WAVE", "audio/wav"),
-        (_wav_bytes(frames=0), "audio/wav"),
+        (json.dumps({"error": _PRIVATE_URL}).encode(), "application/json", "JSON"),
+        (b"RIFFbad-WAVE", "audio/wav", "WAV"),
+        (_wav_bytes(frames=0), "audio/wav", "WAV"),  # 44-byte header only: no data chunk at all
+        (_riff_overdeclared_wav(), "audio/wav", "截断|长度"),
     ],
+    ids=["json-error", "not-riff", "zero-frames", "riff-overdeclared"],
 )
-def test_index_transport_rejects_non_authentic_wav(monkeypatch, tmp_path, body, content_type):
+def test_index_transport_rejects_non_authentic_wav(monkeypatch, tmp_path, body, content_type, match):
     monkeypatch.setattr(
         index_tts, "_open_without_redirects", lambda *_args, **_kwargs: _Response(body, content_type)
     )
 
-    with pytest.raises(RuntimeError, match="WAV|音频"):
+    with pytest.raises(RuntimeError, match=match) as raised:
         index_tts.synthesize_index_tts(
             "测试。", tmp_path / "out.wav", endpoint="https://private.invalid/tts",
             voice="voice", timeout=3,
         )
 
+    assert "secret" not in str(raised.value)
     assert not (tmp_path / "out.wav").exists()
-
-
-def test_index_transport_rejects_riff_declared_longer_than_response(monkeypatch, tmp_path):
-    audio = bytearray(_wav_bytes())
-    audio[4:8] = (len(audio) + 1024).to_bytes(4, "little")
-    monkeypatch.setattr(
-        index_tts,
-        "_open_without_redirects",
-        lambda *_args, **_kwargs: _Response(bytes(audio)),
-    )
-
-    with pytest.raises(RuntimeError, match="截断|长度"):
-        index_tts.synthesize_index_tts(
-            "测试。", tmp_path / "out.wav", endpoint="http://host/tts",
-            voice="voice", timeout=3,
-        )
 
 
 def test_index_transport_enforces_response_size_limit(monkeypatch, tmp_path):
@@ -310,22 +283,6 @@ def test_index_transport_enforces_response_size_limit(monkeypatch, tmp_path):
             "测试。", tmp_path / "out.wav", endpoint="https://private.invalid/tts",
             voice="voice", timeout=3,
         )
-
-
-def test_index_transport_surfaces_timeout_without_output(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        index_tts,
-        "_open_without_redirects",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(socket.timeout("timed out")),
-    )
-
-    with pytest.raises(RuntimeError, match="超时"):
-        index_tts.synthesize_index_tts(
-            "测试。", tmp_path / "out.wav", endpoint="https://private.invalid/tts",
-            voice="voice", timeout=1,
-        )
-
-    assert not (tmp_path / "out.wav").exists()
 
 
 @pytest.mark.parametrize("timeout", [True, 0, float("inf"), float("nan")])
@@ -433,7 +390,7 @@ def test_explicit_index_provider_requires_endpoint_and_voice_before_cache(monkey
         voiceover._configured_tts_engine_for_cache()
 
 
-def test_index_preparation_uses_provider_default_speed_and_rejects_emotion(monkeypatch, tmp_path):
+def test_index_preparation_uses_provider_default_speed_despite_dynamic_params(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "tts_dynamic_params", True)
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
@@ -442,20 +399,17 @@ def test_index_preparation_uses_provider_default_speed_and_rejects_emotion(monke
     prepared = voiceover._prepare_tts_segment(0, segment, [segment], tmp_path, "index-tts")
 
     assert prepared[2:4] == ("+0%", "+0Hz")
-    with pytest.raises(RuntimeError, match="emotion|情绪"):
-        voiceover._prepare_tts_segment(
-            0, {**segment, "emotion": "紧张"}, [segment], tmp_path, "index-tts"
-        )
 
 
 @pytest.mark.parametrize(
     "control",
-    [{"style": "dramatic"}, {"rate": "+5%"}, {"pitch": "+3Hz"}],
+    [{"emotion": "紧张"}, {"style": "dramatic"}, {"rate": "+5%"}, {"pitch": "+3Hz"}],
+    ids=lambda control: next(iter(control)),
 )
 def test_index_preparation_rejects_unsupported_segment_controls(monkeypatch, tmp_path, control):
     segment = {"start": 0.0, "end": 2.0, "narration": "测试。", **control}
 
-    with pytest.raises(RuntimeError, match="端点不接受段级控制字段"):
+    with pytest.raises(RuntimeError, match=f"端点不接受段级控制字段.*{next(iter(control))}"):
         voiceover._prepare_tts_segment(0, segment, [segment], tmp_path, "index-tts")
 
 

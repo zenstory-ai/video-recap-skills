@@ -229,21 +229,6 @@ def test_bad_cut_roi_option_fails_before_loading_source(tmp_path, monkeypatch, o
     assert not (tmp_path / 'work').exists()
 
 
-def test_scan_failure_never_leaves_old_success_report(tmp_path, monkeypatch):
-    video = tmp_path / "fake.mp4"
-    video.write_bytes(b"fake")
-    output = tmp_path / "review.json"
-    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}')
-    def fail(*args, **kwargs):
-        raise RuntimeError("decoder failed")
-    monkeypatch.setattr(shot_review, "scan_video", fail)
-    with pytest.raises(RuntimeError, match="decoder"):
-        shot_review.write_scan(video, output)
-    report = json.loads(output.read_text())
-    assert report["status"] == "SCAN_FAILED"
-    assert report["normal_speed_review"] == "NOT_CHECKED"
-
-
 def test_corrupt_meta_invalidates_verified_old_report_not_unknown_file(tmp_path):
     video, _, plan, _ = bound_fixture(tmp_path)
     Path(str(video) + ".meta.json").write_text("broken")

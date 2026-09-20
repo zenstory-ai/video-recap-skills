@@ -6,19 +6,17 @@ import voiceover as tts
 from voiceover import _run_tts_engine, _tts_mimo
 
 
-def test_mimo_tts_missing_audio_data_raises(monkeypatch, tmp_path):
-    """A MiMo TTS response without audio.data must raise, not write a silent wav."""
-    monkeypatch.setattr("voiceover.mimo_tts_api_call", lambda payload: {"choices": [{"message": {}}]})
-    with pytest.raises(RuntimeError, match="缺少 audio.data"):
-        _tts_mimo("测试文本", tmp_path / "out.wav")
-
-
-def test_mimo_tts_invalid_base64_raises(monkeypatch, tmp_path):
-    monkeypatch.setattr(
-        "voiceover.mimo_tts_api_call",
-        lambda payload: {"choices": [{"message": {"audio": {"data": "!!!not-base64!!!"}}}]},
-    )
-    with pytest.raises(RuntimeError, match="base64"):
+@pytest.mark.parametrize(
+    ("response", "match"),
+    [
+        ({"choices": [{"message": {}}]}, "缺少 audio.data"),
+        ({"choices": [{"message": {"audio": {"data": "!!!not-base64!!!"}}}]}, "base64"),
+    ],
+)
+def test_mimo_tts_unusable_response_raises_instead_of_writing_wav(monkeypatch, tmp_path, response, match):
+    """A MiMo reply without decodable audio.data must raise, not write a silent wav."""
+    monkeypatch.setattr("voiceover.mimo_tts_api_call", lambda payload: response)
+    with pytest.raises(RuntimeError, match=match):
         _tts_mimo("测试文本", tmp_path / "out.wav")
 
 

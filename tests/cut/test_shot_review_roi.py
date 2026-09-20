@@ -89,8 +89,9 @@ def test_crop_must_not_silently_clamp_out_of_bounds(make_video, tmp_path, roi):
 
 
 @pytest.mark.parametrize('roi', [None, (1, 3, 5, 7)])
-def test_failed_decode_keeps_requested_scan_scope(tmp_path, monkeypatch, roi):
+def test_failed_decode_keeps_requested_scan_scope_and_never_leaves_old_success(tmp_path, monkeypatch, roi):
     output = tmp_path / 'failed.json'
+    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}')
     region = list(roi) if roi is not None else None
 
     def fail_decode(*args, **kwargs):
@@ -105,6 +106,7 @@ def test_failed_decode_keeps_requested_scan_scope(tmp_path, monkeypatch, roi):
         shot_review.write_scan(tmp_path / 'video.mp4', output, threshold=0.12, roi=roi)
     failed = json.loads(output.read_text())
     assert failed['status'] == 'SCAN_FAILED'
+    assert failed['normal_speed_review'] == 'NOT_CHECKED'
     assert failed['scene_roi'] == region
     assert failed['scene_threshold'] == 0.12
 
