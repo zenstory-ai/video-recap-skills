@@ -5,7 +5,7 @@ import os
 
 from lib import env_bool
 
-TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio")
+TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
 class _RecordExplicit:
@@ -90,7 +90,7 @@ def parse_args(argv=None):
         "--tts-provider",
         default=os.environ.get("TTS_PROVIDER", "auto"),
         choices=TTS_PROVIDERS,
-        help="voiceover provider; auto prefers configured MiMo, then Fish Audio",
+        help="voiceover provider; auto prefers configured MiMo, then Fish Audio; Index is explicit",
     )
     parser.add_argument(
         "--voice-ref",

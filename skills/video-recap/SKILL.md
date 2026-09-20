@@ -59,6 +59,10 @@ export MIMO_API_KEY=***
 
 TTS 可通过 `--tts-provider fish-audio` / `TTS_PROVIDER=fish-audio` 改用 Fish Audio；此时另需 `FISH_API_KEY`，默认模型为 `s2.1-pro-free`，默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），可用 `FISH_TTS_REFERENCE_ID` 覆盖。ASR/VLM 仍使用 MiMo。
 
+自托管 TTS 端点（index-tts 协议）可显式选择 `--tts-provider index-tts`，端点与音色由
+`INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 配置；协议、能力限制见配音技能。`auto` 不会选它，
+`--doctor` 仅离线核配置，不证明服务可用或声线正确。
+
 `tp-*` Token Plan 密钥默认使用中国区集群，可用 `MIMO_TOKEN_PLAN_CLUSTER` 覆盖。
 
 可选能力：
