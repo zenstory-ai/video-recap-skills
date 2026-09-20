@@ -1,14 +1,13 @@
-import sys
-from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
 """Regression tests for detect.py bug fixes (BUG 2 junk filter, BUG 11 silence)."""
+import json
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
 
-import detect
-from detect import (
+import detect  # noqa: E402
+from detect import (  # noqa: E402
     _filter_junk_scenes,
     detect_scenes,
     detect_silence_periods,
@@ -24,32 +23,31 @@ def _fail(stderr="boom"):
     return CompletedProcess(args=["ffmpeg"], returncode=1, stdout="", stderr=stderr)
 
 
+def _extract_then(monkeypatch, tmp_path, silencedetect_stderr=""):
+    """run_cmd stub: the audio extraction writes audio.wav.tmp; silencedetect returns stderr."""
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append([str(c) for c in cmd])
+        if any(str(c).endswith("audio.wav.tmp") for c in cmd):
+            (tmp_path / "audio.wav.tmp").write_bytes(b"RIFF")
+            return _ok()
+        return _ok(stderr=silencedetect_stderr)
+
+    monkeypatch.setattr("detect.run_cmd", fake_run)
+    monkeypatch.setattr("detect.log", lambda msg: None)
+    return calls
+
+
 # ── BUG 2: junk filter must not delete a scene that has any non-junk frame ──
 
-def test_filter_keeps_scene_with_nonjunk_midpoint_even_if_first_frame_is_junk(monkeypatch):
-    # [{0-2 黑场}, {2-30 真实场景}] — 模拟黑场被并入长场景后：长场景起始帧是黑的
-    scenes = [
-        {"start": 0.0, "end": 2.0},     # all junk (black lead-in)
-        {"start": 2.0, "end": 30.0},    # real scene: junk only at very start
-    ]
-
-    # junk only for timestamps strictly before 2.1s (i.e. the black lead-in and
-    # the merged scene's first probe), but NOT at the midpoint/end of the long scene.
-    monkeypatch.setattr("detect._is_junk_scene", lambda video, ts: ts < 2.1)
-
-    out = _filter_junk_scenes(scenes, Path("video.mp4"))
-    # The long real scene survives because its midpoint (16s) and end (29.9s) are non-junk.
-    assert {"start": 2.0, "end": 30.0} in out
-    # The pure black lead-in is removed.
-    assert {"start": 0.0, "end": 2.0} not in out
-
-
 def test_filter_drops_scene_only_when_all_probes_are_junk(monkeypatch):
+    # Models a black lead-in merged into a long scene: the long scene's first probe is black
+    # but its midpoint/end are not, so it survives; the all-black scene is removed.
     scenes = [
         {"start": 0.0, "end": 4.0},
         {"start": 4.0, "end": 8.0},
     ]
-    # second scene is junk everywhere; first scene junk only at its start probe.
     monkeypatch.setattr(
         "detect._is_junk_scene",
         lambda video, ts: ts >= 4.0 or ts < 0.2,
@@ -81,7 +79,6 @@ def test_detect_scenes_filters_junk_before_merging(monkeypatch, tmp_path):
         order.append("filter")
         # the 0-2 black lead-in is still an ISOLATED short scene here (not yet merged)
         assert {"start": 0.0, "end": 2.0} in scenes
-        # drop the black lead-in, keep the real scene
         return [s for s in scenes if s["start"] != 0.0]
 
     def fake_merge(scenes, min_duration=4.0):
@@ -92,7 +89,6 @@ def test_detect_scenes_filters_junk_before_merging(monkeypatch, tmp_path):
     monkeypatch.setattr("detect._merge_short_scenes", fake_merge)
 
     scenes = detect_scenes(tmp_path / "v.mp4", tmp_path)
-    # filter ran before merge
     assert order == ["filter", "merge"]
     # the long real scene reached the output (was NOT deleted wholesale)
     assert {"start": 2.0, "end": 30.0} in scenes
@@ -100,48 +96,32 @@ def test_detect_scenes_filters_junk_before_merging(monkeypatch, tmp_path):
 
 # ── BUG 11: silence detection respects ffmpeg return codes ──
 
-def test_detect_silence_returns_empty_and_logs_on_extraction_failure(monkeypatch, tmp_path):
-    logs = []
-    monkeypatch.setattr("detect.log", lambda msg: logs.append(msg))
-    monkeypatch.setattr("detect.run_cmd", lambda cmd, **kw: _fail("no audio stream"))
-
-    out = detect_silence_periods(tmp_path / "v.mp4", tmp_path)
-    assert out == []
-    # no silence_periods.json cached on failure (so it can be retried later)
-    assert not (tmp_path / "silence_periods.json").exists()
-    # a clear Chinese warning was logged
-    assert any("提取失败" in m for m in logs)
-
-
-def test_detect_silence_compacts_verbose_ffmpeg_failure(monkeypatch, tmp_path):
+def test_detect_silence_extraction_failure_is_uncached_compact_and_leaves_no_partial(
+    monkeypatch, tmp_path
+):
     logs = []
     verbose = "ffmpeg build configuration " + ("x" * 2000) + " Output file does not contain any stream"
-    monkeypatch.setattr("detect.log", lambda msg: logs.append(msg))
-    monkeypatch.setattr("detect.run_cmd", lambda cmd, **kw: _fail(verbose))
-
-    assert detect_silence_periods(tmp_path / "silent.mp4", tmp_path) == []
-
-    message = next(msg for msg in logs if "提取失败" in msg)
-    assert len(message) < 500
-    assert "Output file does not contain any stream" in message
-
-
-def test_detect_silence_does_not_leave_partial_audio_on_failure(monkeypatch, tmp_path):
-    monkeypatch.setattr("detect.log", lambda msg: None)
 
     def fake_run(cmd, **kw):
-        # simulate ffmpeg writing a partial temp file then failing
+        # simulate ffmpeg writing a partial temp file then failing verbosely
         for part in cmd:
-            sp = str(part)
-            if sp.endswith("audio.wav.tmp"):
-                Path(sp).write_bytes(b"partial")
-        return _fail("interrupted")
+            if str(part).endswith("audio.wav.tmp"):
+                Path(str(part)).write_bytes(b"partial")
+        return _fail(verbose)
 
+    monkeypatch.setattr("detect.log", lambda msg: logs.append(msg))
     monkeypatch.setattr("detect.run_cmd", fake_run)
-    detect_silence_periods(tmp_path / "v.mp4", tmp_path)
+
+    assert detect_silence_periods(tmp_path / "v.mp4", tmp_path) == []
+    # no silence_periods.json cached on failure (so it can be retried later)
+    assert not (tmp_path / "silence_periods.json").exists()
     # partial temp must be cleaned up and never promoted to audio.wav
     assert not (tmp_path / "audio.wav.tmp").exists()
     assert not (tmp_path / "audio.wav").exists()
+    # a clear, compact Chinese warning keeping the informative tail of ffmpeg's stderr
+    message = next(msg for msg in logs if "提取失败" in msg)
+    assert len(message) < 500
+    assert "Output file does not contain any stream" in message
 
 
 def test_detect_silence_returns_empty_on_silencedetect_nonzero(monkeypatch, tmp_path):
@@ -159,28 +139,19 @@ def test_detect_silence_returns_empty_on_silencedetect_nonzero(monkeypatch, tmp_
     assert any("静音检测失败" in m for m in logs)
 
 
-def test_detect_silence_extracts_to_temp_then_atomic_moves(monkeypatch, tmp_path):
+def test_detect_silence_extracts_wav_to_temp_then_atomic_moves(monkeypatch, tmp_path):
     # happy path: extraction writes temp, silencedetect succeeds with no silence
     video = tmp_path / "v.mp4"
     video.write_bytes(b"video")
-    calls = []
-
-    def fake_run(cmd, **kw):
-        calls.append([str(p) for p in cmd])
-        for part in cmd:
-            sp = str(part)
-            if sp.endswith("audio.wav.tmp"):
-                Path(sp).write_bytes(b"audio")
-        return _ok(stderr="")  # no silence_start lines
-
-    monkeypatch.setattr("detect.log", lambda msg: None)
-    monkeypatch.setattr("detect.run_cmd", fake_run)
+    calls = _extract_then(monkeypatch, tmp_path)
     monkeypatch.setattr("detect.get_video_duration", lambda path: 10.0)
 
     out = detect_silence_periods(video, tmp_path)
     assert out == []
-    # extraction targeted a .tmp path (atomic move pattern), not audio.wav directly
-    assert any(any(p.endswith("audio.wav.tmp") for p in c) for c in calls)
+    # extraction targeted a .tmp path (atomic move pattern), not audio.wav directly, and
+    # states the muxer explicitly (the .tmp suffix hides the format: 'Invalid argument')
+    extract = next(c for c in calls if any(p.endswith("audio.wav.tmp") for p in c))
+    assert "-f" in extract and "wav" in extract, f"extract cmd missing -f wav: {extract}"
     # promoted into place on success
     assert (tmp_path / "audio.wav").exists()
     assert not (tmp_path / "audio.wav.tmp").exists()
@@ -211,26 +182,6 @@ def test_detect_speech_boundary_anchors_aligns_sentence_punctuation_to_short_pau
     assert (tmp_path / "speech_boundary_anchors.json").exists()
 
 
-def test_silence_audio_extract_states_wav_format(monkeypatch, tmp_path):
-    """BUG: extracting to audio.wav.tmp hides the format from ffmpeg (muxer 'Invalid argument').
-    The extraction command must pass -f wav explicitly."""
-    video = tmp_path / "v.mp4"
-    video.write_bytes(b"video")
-    cmds = []
-
-    def fake(cmd, **kw):
-        cmds.append([str(c) for c in cmd])
-        if any("audio.wav.tmp" in str(c) for c in cmd):
-            (tmp_path / "audio.wav.tmp").write_bytes(b"RIFF")  # simulate a successful extract
-        return _ok()
-
-    monkeypatch.setattr("detect.run_cmd", fake)
-    detect_silence_periods(video, tmp_path, asr_result=[])
-    extract = next((c for c in cmds if any("audio.wav.tmp" in x for x in c)), None)
-    assert extract is not None, "no audio extraction command issued"
-    assert "-f" in extract and "wav" in extract, f"extract cmd missing -f wav: {extract}"
-
-
 def test_detect_silence_reextracts_audio_when_source_video_changes(monkeypatch, tmp_path):
     """audio.wav reuse must be tied to the source video, not merely file existence."""
     old_video = tmp_path / "old.mp4"
@@ -239,61 +190,31 @@ def test_detect_silence_reextracts_audio_when_source_video_changes(monkeypatch, 
     new_video.write_bytes(b"new")
     (tmp_path / "audio.wav").write_bytes(b"old-audio")
     detect._write_audio_meta(tmp_path, old_video)
-    calls = []
-
-    def fake_run(cmd, **kw):
-        calls.append([str(part) for part in cmd])
-        if any(str(part).endswith("audio.wav.tmp") for part in cmd):
-            (tmp_path / "audio.wav.tmp").write_bytes(b"new-audio")
-        return _ok(stderr="")
-
-    monkeypatch.setattr("detect.log", lambda msg: None)
-    monkeypatch.setattr("detect.run_cmd", fake_run)
+    calls = _extract_then(monkeypatch, tmp_path)
     monkeypatch.setattr("detect.get_video_duration", lambda path: 10.0)
 
     detect_silence_periods(new_video, tmp_path, asr_result=[])
 
-    assert (tmp_path / "audio.wav").read_bytes() == b"new-audio"
+    assert (tmp_path / "audio.wav").read_bytes() == b"RIFF"
     assert any(any(part.endswith("audio.wav.tmp") for part in cmd) for cmd in calls)
 
 
 def test_detect_silence_records_overlap_and_ignores_coarse_grid_asr(monkeypatch, tmp_path):
     video = tmp_path / "v.mp4"
     video.write_bytes(b"video")
-    calls = []
-    def fake_run(cmd, **kw):
-        calls.append([str(c) for c in cmd])
-        if any(str(c).endswith("audio.wav.tmp") for c in cmd):
-            (tmp_path / "audio.wav.tmp").write_bytes(b"RIFF")
-            return _ok()
-        return _ok(stderr="silence_start: 5\nsilence_end: 8\nsilence_start: 20\nsilence_end: 24\n")
-    monkeypatch.setattr("detect.run_cmd", fake_run)
+    _extract_then(
+        monkeypatch,
+        tmp_path,
+        "silence_start: 5\nsilence_end: 8\nsilence_start: 20\nsilence_end: 24\n",
+    )
     monkeypatch.setattr("detect.get_video_duration", lambda path: 60.0)
-    monkeypatch.setattr("detect.log", lambda msg: None)
     asr = [{"start": 0, "end": 30, "text": "a"}, {"start": 30, "end": 60, "text": "b"}]
     out = detect_silence_periods(video, tmp_path, asr_result=asr)
     assert out and all(p["has_speech"] is False for p in out)
     assert all(p["asr_granularity"] == "coarse_grid" for p in out)
     assert all("speech_overlap_ratio" in p and "has_speech_reason" in p for p in out)
-    qc = __import__('json').loads((tmp_path / "silence_periods.qc.json").read_text(encoding="utf-8"))
+    qc = json.loads((tmp_path / "silence_periods.qc.json").read_text(encoding="utf-8"))
     assert qc["coarse_asr_windows"] == len(out)
-
-
-def test_detect_silence_marks_true_short_asr_overlap(monkeypatch, tmp_path):
-    video = tmp_path / "v.mp4"
-    video.write_bytes(b"video")
-    def fake_run(cmd, **kw):
-        if any(str(c).endswith("audio.wav.tmp") for c in cmd):
-            (tmp_path / "audio.wav.tmp").write_bytes(b"RIFF")
-            return _ok()
-        return _ok(stderr="silence_start: 5\nsilence_end: 9\n")
-    monkeypatch.setattr("detect.run_cmd", fake_run)
-    monkeypatch.setattr("detect.get_video_duration", lambda path: 30.0)
-    monkeypatch.setattr("detect.log", lambda msg: None)
-    out = detect_silence_periods(video, tmp_path, asr_result=[{"start": 5.2, "end": 8.8, "text": "real"}])
-    assert out[0]["has_speech"] is True
-    assert out[0]["has_speech_reason"] == "asr_overlap_high_confidence"
-    assert out[0]["speech_overlap_ratio"] >= 0.8
 
 
 def test_annotate_quiet_windows_with_asr_is_pure_helper():
@@ -307,4 +228,5 @@ def test_annotate_quiet_windows_with_asr_is_pure_helper():
     assert periods[0]["has_speech"] is False
     assert annotated[0]["has_speech"] is True
     assert annotated[0]["has_speech_reason"] == "asr_overlap_high_confidence"
+    assert annotated[0]["speech_overlap_ratio"] >= 0.7
     assert qc["asr_granularity"] == "segment"
