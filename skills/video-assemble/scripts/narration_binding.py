@@ -380,7 +380,7 @@ def stage_final_binding(context, tts_segments, narration_wav, rendered_output, f
     del tts_segments, narration_wav  # already sealed; reject post-render substitutions
     report = _active_report(context, rendered_output, final_output)
     destination = Path(final_output).resolve().parent / ".narration_input_binding.rendering.json"
-    destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    destination.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return report, destination
 
 
@@ -430,13 +430,13 @@ def finalize_binding(context, tts_segments, narration_wav, final_output, *, stag
         }
         destination = Path(narration_wav).resolve().parent / FILENAME
         temporary = destination.with_suffix(".writing.json")
-        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         temporary.replace(destination)
         return report
     report = _active_report(context, final_output, final_output)
     destination = Path(narration_wav).resolve().parent / FILENAME
     temporary = destination.with_suffix(".writing.json")
-    temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+    temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(destination)
     return report
 
