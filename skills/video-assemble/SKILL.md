@@ -98,5 +98,8 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 不重新转写视频，不擅自改变 Agent 的时间决定。
 - 字幕烧录默认开启；关闭时不会重编码绘制字幕区域。
 
+显式输出轴字幕轨的独立合同、完整替换语义和当前边界见 `references/subtitle-track.md`。
+
 画面回原片重建后，若需保留另一文件中的已采用完整混音，先按
-`references/pair-media.md` 显式配对独立画面与音轨。配对只复制流，不补字幕或片名卡。
+`references/pair-media.md` 显式配对独立画面与音轨。配对只复制流，不补字幕或片名卡；
+后续字幕轨必须重新绑定配对后的容器与 `a:0`，不能继续沿用旧版本身份。

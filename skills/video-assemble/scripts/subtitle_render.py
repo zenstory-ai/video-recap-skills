@@ -16,7 +16,7 @@ def _generate_srt(narration, work_dir, video_duration):
     for idx, entry in enumerate(_combined_subtitle_entries(narration, work_dir, video_duration), start=1):
         srt_lines.append(str(idx))
         srt_lines.append(f"{_seconds_to_srt_time(entry['start'])} --> {_seconds_to_srt_time(entry['end'])}")
-        srt_lines.append(_normalize_subtitle_text(entry["text"]))
+        srt_lines.append(entry["text"] if entry.get("_bound_track") else _normalize_subtitle_text(entry["text"]))
         srt_lines.append("")
     srt_path = work_dir / "subtitles.srt"
     srt_path.write_text("\n".join(srt_lines), encoding="utf-8")
@@ -69,10 +69,11 @@ def _generate_ass(narration, work_dir, video_duration, canvas):
     ]
     # entries are already split into short one-line chunks, so no wrapping here.
     for entry in _combined_subtitle_entries(narration, work_dir, video_duration):
-        text = _escape_ass_text(_normalize_subtitle_text(entry["text"]))
+        text = _escape_ass_text(entry["text"] if entry.get("_bound_track") else _normalize_subtitle_text(entry["text"]))
         ass_lines.append(
             "Dialogue: 0,"
-            f"{_seconds_to_ass_time(entry['start'])},{_seconds_to_ass_time(entry['end'])},"
+            f"{entry.get('ass_start', _seconds_to_ass_time(entry['start']))},"
+            f"{entry.get('ass_end', _seconds_to_ass_time(entry['end']))},"
             f"Default,,0,0,0,,{text}"
         )
 
