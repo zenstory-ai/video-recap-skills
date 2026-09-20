@@ -65,6 +65,7 @@ def build_agent_brief(
     *,
     mimo_overview_enabled=None,
     mimo_overview_video_path=None,
+    asr_evidence=None,
 ):
     """Write a compact brief that tells the agent exactly how to author recap artifacts."""
     # account for the global narration atempo (CONFIG['narration_speed']) so a beat's text
@@ -129,6 +130,28 @@ def build_agent_brief(
         f"- Target duration (cut mode): {target_duration}",
         f"- Effective speech budget: {effective_rate:.2f} Chinese chars/sec after {breath_sec:.2f}s pause allowance",
     ]
+    # Understanding validates evidence before calling; the standalone script skill
+    # has no producer dependency and must not invent an available ASR status.
+    if asr_evidence is None:
+        asr_evidence = {"status": "MISSING_OR_STALE", "evidence_fingerprint": None,
+                        "glossary_modifications": None}
+
+    lines.extend(
+        [
+            "",
+            "## ASR timing evidence",
+            "",
+            f"- Status: {asr_evidence['status']}",
+            f"- Evidence fingerprint: {asr_evidence['evidence_fingerprint'] or '(missing)'}",
+            f"- Glossary modifications: {asr_evidence.get('glossary_modifications') or '(unverified)'}; details: asr_timing_evidence.json",
+            "- Empty text: UNKNOWN_NOT_PROVEN_SILENCE; these windows locate a search region, not subtitle onsets.",
+            "- Timing: coarse provider windows; word alignment: NOT_PERFORMED; dialogue boundaries: NOT_VERIFIED.",
+            "- ASR window ends and timeline-fusion/quiet-window recommendations are advisory only. "
+            "They must not be treated as verified dialogue boundaries or safe cut points; use direct listening "
+            "and picture review before preserving or cutting original dialogue.",
+            "",
+        ]
+    )
     if thin_substrate:
         lines.append(
             f"- Narration density: substrate is {substrate['level']} — do NOT chase a beat count. "

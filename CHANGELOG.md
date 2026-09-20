@@ -12,10 +12,12 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **ASR 时序证据 sidecar。** `asr_timing_evidence.json` 记录来源指纹、可用性状态与词级对齐是否执行，词表修正与原始转写分列，粗窗不再被当作精字幕；brief 显示经验证的状态与指纹，缺失或陈旧时显示 `MISSING_OR_STALE`。
 - **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
 
 ### Changed
 
+- **理解缓存不再把全空转写当作有效命中**（`EMPTY_UNKNOWN` 与 `UNAVAILABLE_NO_DURATION` 同样视为 MISS）；没有 sidecar 的旧缓存以 `LEGACY_UNVERIFIED` 复用。ASR 音频提取或 provider 失败时清理陈旧的 `audio.wav` 与 `asr_result.json`，时长改从提取后的 `audio.wav` 读取。
 - 剪辑手法与审稿提示补充：保住动机与接受条件、反打是否新增信息、跨场镜头不得拼成虚假因果、只写证据已呈现的结果、REVISION 只提可定位的局部修法；brief 不再把 ASR 行尾当作安全剪点，改为听审后再定。
 
 ## [0.5.0] - 2026-09-05
