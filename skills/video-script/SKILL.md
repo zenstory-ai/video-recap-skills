@@ -1,14 +1,19 @@
 ---
 name: video-script
 description: >
- 对已完成分析的视频进行导演与剪辑策划，再写带时间戳的中文解说并校验。work_dir 已包含
- agent_narration_brief.md 与 vlm_analysis.json 时使用。适用于故事方向、片段选择、画面/原声/旁白分工、
- 解说写作与复核。输入 work_dir 中的理解索引；输出 recap_story_plan.json、visual_audio_board.json、
- 可选 style_card.json、cut 模式需要的 clip_plan.json，以及通过校验的 narration.json。触发词：解说词、写解说、视频旁白、
+ 对已完成分析的视频进行导演与剪辑策划，再写带时间戳的中文解说并校验；也处理已有短片的
+ 宣发标题、花字修订和外部文案回填。普通策划输入 work_dir 的 agent_narration_brief.md 与
+ vlm_analysis.json；文案返修输入当前成片的工程与内容证据。策划输出 recap_story_plan.json、visual_audio_board.json、
+ 可选 style_card.json、cut 模式需要的 clip_plan.json，以及通过校验的 narration.json；仅宣发文案任务交付提案或回填既有包装计划。
+ 触发词：解说词、写解说、视频旁白、宣发标题、花字修订、文案回填、
  narration script、写稿、解说文案、剪辑思路、导演思路。
 ---
 
 ## 1. 定位
+
+只改宣发标题、封面、花字或回填外部文案时，直接读 `references/promotional-copy.md`，
+按当前短片的观看理由和兑现位置处理指定文字层，不重做下述策划/旁白链。
+普通解说写作不因此增加平台调研或包装任务。
 
 本技能负责：创作方向、画面/声音计划、旁白写作与校验。Agent 不是 JSON 填写器，而要依次扮演：
 
@@ -243,6 +248,6 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full
 
 - 不运行 ASR / VLM；只消费视频理解索引。
 - 不合成 TTS，也不渲染视频。
-- 不根据平台分析做优化；先建立内容意图与剪辑一致性。
+- 平台研究仅用于明确的宣发任务；不替代当前片内事实，也不默认改变解说和剪辑。
 - `review.py` 不改写 `narration.json`；是否采用严格门禁由调用方决定。
 - `validate.py` 不改写文本含义，只检查或对齐时间与安静窗口。
