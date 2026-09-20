@@ -10,6 +10,7 @@ from lib import CONFIG
 from media import _plan_clip_spans
 from assemble_constants import (
     _AUTO_ORIGINAL_READ_CPS,
+    _CLIP_CONTIGUITY_TOLERANCE,
     _MAX_ORIGINAL_READ_CPS,
     _MIN_ASR_CLIP_OVERLAP,
     _MIN_GAP_TO_SUBTITLE,
@@ -214,21 +215,32 @@ def _load_user_original_subtitles(work_dir):
 
 def _map_asr_to_output(asr_segs, clip_spans):
     """Map SOURCE-time ASR segments onto the OUTPUT timeline. Full mode (clip_spans None) is
-    identity; cut mode intersects each ASR span with each kept clip (a straddling line yields one
-    fragment per clip; lines in cut-away footage are dropped)."""
+    identity. Keep one utterance across source/output-continuous picture cuts;
+    real source deletions, output gaps and repeated playback remain separate."""
     if clip_spans is None:
         return [dict(s) for s in asr_segs]
     out = []
     for seg in asr_segs:
+        fragments = []
         for c in clip_spans:
             ov_s, ov_e = max(seg["start"], c["source_start"]), min(seg["end"], c["source_end"])
-            if ov_e - ov_s <= _MIN_ASR_CLIP_OVERLAP:
+            if ov_e <= ov_s:
                 continue
-            out.append({
-                "start": c["output_start"] + (ov_s - c["source_start"]),
-                "end": c["output_start"] + (ov_e - c["source_start"]),
-                "text": seg["text"],
-            })
+            start = c["output_start"] + (ov_s - c["source_start"])
+            end = c["output_start"] + (ov_e - c["source_start"])
+            entry = c.get("entry", {})
+            source_key = (c.get("source_id") or entry.get("source_id"),
+                          c.get("source_path") or entry.get("source_path"))
+            if (fragments and abs(fragments[-1]["source_end"] - ov_s) < _CLIP_CONTIGUITY_TOLERANCE
+                    and abs(fragments[-1]["end"] - start) < _CLIP_CONTIGUITY_TOLERANCE
+                    and fragments[-1]["source_key"] == source_key):
+                fragments[-1].update(end=end, source_end=ov_e)
+            else:
+                fragments.append({"start": start, "end": end, "source_end": ov_e,
+                                  "source_key": source_key})
+        # Filter after joining: individually tiny pieces may be one readable phrase.
+        out.extend({"start": f["start"], "end": f["end"], "text": seg["text"]}
+                   for f in fragments if f["end"] - f["start"] > _MIN_ASR_CLIP_OVERLAP)
     return out
 
 
