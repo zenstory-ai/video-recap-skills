@@ -1,4 +1,5 @@
 import sys
+from fractions import Fraction
 from pathlib import Path
 
 sys.path.insert(
@@ -789,6 +790,27 @@ def test_seconds_to_srt_time():
     assert result.startswith("01:01:01")
     # 0s
     assert _seconds_to_srt_time(0) == "00:00:00,000"
+
+
+@pytest.mark.parametrize(
+    ("seconds", "expected"),
+    [
+        (1.65, "00:00:01,650"),
+        (0.29, "00:00:00,290"),
+        (1.001, "00:00:01,001"),
+        (1.2496, "00:00:01,249"),
+        (1.2494, "00:00:01,249"),
+        (53 / 30, "00:00:01,766"),
+        (Fraction(53, 30), "00:00:01,766"),
+        (-0.5, "00:00:00,000"),
+        (59.9996, "00:00:59,999"),
+        (60, "00:01:00,000"),
+        (3599.9996, "00:59:59,999"),
+        (3600, "01:00:00,000"),
+    ],
+)
+def test_seconds_to_srt_time_preserves_millisecond_floor(seconds, expected):
+    assert _seconds_to_srt_time(seconds) == expected
 
 
 def test_seconds_to_ass_time():

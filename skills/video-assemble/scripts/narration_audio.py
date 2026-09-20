@@ -210,10 +210,15 @@ def _build_timed_narration(
             continue
 
         original_wav_path = wav_path
-        with wave.open(wav_path, "rb") as wf_check:
-            needs_resample = (
-                wf_check.getnchannels(), wf_check.getsampwidth(), wf_check.getframerate()
-            ) != (1, 2, sample_rate)
+        try:
+            with wave.open(wav_path, "rb") as wf_check:
+                needs_resample = (
+                    wf_check.getnchannels(), wf_check.getsampwidth(), wf_check.getframerate()
+                ) != (1, 2, sample_rate)
+        except (wave.Error, EOFError):
+            # Valid post-processed WAV may use IEEE float, which Python's wave
+            # reader does not support. FFmpeg performs the explicit PCM conversion.
+            needs_resample = True
 
         tts_rate_offset = seg.get("tts_rate_offset", 0.0)
         tts_dur = seg["audio_duration"]
