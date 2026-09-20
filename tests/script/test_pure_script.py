@@ -10,14 +10,72 @@ import brief_context
 import brief_inputs
 import brief_timeline
 import validate as narration_validate
-import pytest  # noqa: F401
-from subprocess import CompletedProcess  # noqa: F401
+import pytest
 from lib import CONFIG, env_float, stable_hash
 from agent_brief import build_agent_brief
 from agent_text import _post_dedup_narration, _text_char_count
 from brief_context import assess_understanding_substrate
 from narration_lint import lint_narration
 from timeline_fusion import _align_narration_to_quiet, _build_timeline_fusion
+
+
+def _write_json(path, payload):
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_source_anchors(work_dir, anchors):
+    _write_json(
+        work_dir / "speech_boundary_anchors.json",
+        {"schema_version": 1, "sentence_anchors": anchors},
+    )
+
+
+def _write_output_evidence(
+    work_dir, plan, *, sentence_anchors, speech_spans, quiet_windows
+):
+    _write_json(work_dir / "clip_plan_validated.json", plan)
+    _write_json(
+        work_dir / "speech_boundary_anchors_output.json",
+        {
+            "schema_version": 2,
+            "timeline": "cut_output",
+            "clip_plan_fingerprint": stable_hash(plan),
+            "sentence_anchors": sentence_anchors,
+            "speech_spans": speech_spans,
+            "quiet_windows": quiet_windows,
+        },
+    )
+
+
+def _run_validate(monkeypatch, work_dir, mode, *extra):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["validate.py", "--work-dir", str(work_dir), "--mode", mode, *extra],
+    )
+    narration_validate.main()
+
+
+def _run_validate_cut_output(monkeypatch, work_dir):
+    _run_validate(monkeypatch, work_dir, "cut_output", "--output-duration", "10")
+
+
+def _set_brief_mode(monkeypatch, edit_mode, target_duration="", context_info=""):
+    monkeypatch.setitem(CONFIG, "edit_mode", edit_mode)
+    monkeypatch.setitem(CONFIG, "target_duration", target_duration)
+    monkeypatch.setitem(CONFIG, "context_info", context_info)
+
+
+def _brief_text(scenes, asr, silence, duration, work_dir, **kwargs):
+    return build_agent_brief(scenes, asr, silence, duration, work_dir, **kwargs).read_text(
+        encoding="utf-8"
+    )
+
+
+def _json_examples(text):
+    return [
+        json.loads(raw) for raw in re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
+    ]
 
 
 def test_text_char_count():
@@ -71,8 +129,7 @@ def test_lint_narration_rejects_empty_file(tmp_path):
 
 
 def test_lint_narration_rejects_malformed_visual_overlays(tmp_path):
-    """recap's `_canonical_visual_overlay` reads type/text/start/end off these entries after
-    TTS has already run, so lint is the only place a malformed overlay can still be cheap."""
+    """Lint is the last cheap place to catch an overlay recap will read after TTS."""
     segment = {"start": 0.0, "end": 5.0, "narration": "开场的一段解说文字内容。"}
     scenes = [{"scene_id": 0, "start": 0.0, "end": 5.0}]
 
@@ -100,39 +157,52 @@ def test_lint_narration_rejects_malformed_visual_overlays(tmp_path):
     )
 
 
-def test_lint_blocks_narration_entry_that_interrupts_source_sentence(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "sentence_anchors": [
-                    {
-                        "time": 5.81,
-                        "text_tail": "带你重走詹姆斯的二十一年。",
-                        "confidence": "high",
-                    },
-                    {
-                        "time": 14.34,
-                        "text_tail": "把自己的名字写进历史。",
-                        "confidence": "high",
-                    },
-                    {
-                        "time": 22.86,
-                        "text_tail": "开启了自己的全明星之路。",
-                        "confidence": "high",
-                    },
-                ],
-            },
-            ensure_ascii=False,
+@pytest.mark.parametrize(
+    "anchors, start, end, suggested_start, text_tail",
+    [
+        pytest.param(
+            [
+                {"time": 5.81, "text_tail": "带你重走詹姆斯的二十一年。", "confidence": "high"},
+                {"time": 14.34, "text_tail": "把自己的名字写进历史。", "confidence": "high"},
+                {"time": 22.86, "text_tail": "开启了自己的全明星之路。", "confidence": "high"},
+            ],
+            20.41,
+            29.3,
+            22.86,
+            "全明星之路",
+            id="mid_sentence_suggests_next_anchor",
         ),
-        encoding="utf-8",
-    )
+        pytest.param(
+            [
+                {"time": 5.81, "pause_start": 5.22, "text_tail": "第一句说完。", "confidence": "high"},
+                {"time": 14.34, "pause_start": 13.74, "text_tail": "第二句说完。", "confidence": "high"},
+            ],
+            6.10,
+            12.0,
+            14.34,
+            "第二句说完",
+            id="shortly_after_pause_ended_suggests_next_anchor",
+        ),
+        pytest.param(
+            [{"time": 5.81, "pause_start": 5.22, "text_tail": "已完成句子。", "confidence": "high"}],
+            8.0,
+            12.0,
+            None,
+            "",
+            id="after_last_known_anchor_has_no_fake_suggestion",
+        ),
+    ],
+)
+def test_lint_blocks_narration_entry_that_interrupts_source_sentence(
+    tmp_path, anchors, start, end, suggested_start, text_tail
+):
+    _write_source_anchors(tmp_path, anchors)
 
     report = lint_narration(
         [
             {
-                "start": 20.41,
-                "end": 29.3,
+                "start": start,
+                "end": end,
                 "narration": "这里切入会打断原句。",
                 "overlaps_speech": True,
             },
@@ -145,23 +215,14 @@ def test_lint_blocks_narration_entry_that_interrupts_source_sentence(tmp_path):
         for item in report["errors"]
         if item["code"] == "interrupts_source_sentence"
     )
-    assert issue["entry_time"] == 20.41
-    assert issue["suggested_start"] == 22.86
-    assert "全明星之路" in issue["source_text_tail"]
+    assert issue["entry_time"] == start
+    assert issue["suggested_start"] == suggested_start
+    assert text_tail in issue["source_text_tail"]
 
 
 def test_lint_never_allows_intentional_source_interrupt_override(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "sentence_anchors": [
-                    {"time": 5.81, "text_tail": "一句说完。", "confidence": "high"}
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_source_anchors(
+        tmp_path, [{"time": 5.81, "text_tail": "一句说完。", "confidence": "high"}]
     )
 
     report = lint_narration(
@@ -194,33 +255,16 @@ def _write_cut_output_speech_evidence(work_dir):
             }
         ]
     }
-    (work_dir / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
+    _write_json(
+        work_dir / "speech_boundary_anchors.json",
+        {"sentence_anchors": [{"time": 104.0, "pause_start": 103.8, "confidence": "high"}]},
     )
-    (work_dir / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [
-                    {"time": 104.0, "pause_start": 103.8, "confidence": "high"}
-                ]
-            }
-        ),
-        encoding="utf-8",
-    )
-    (work_dir / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": stable_hash(plan),
-                "sentence_anchors": [
-                    {"time": 4.0, "pause_start": 3.8, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 0.0, "end": 10.0}],
-                "quiet_windows": [{"start": 3.8, "end": 4.1}],
-            }
-        ),
-        encoding="utf-8",
+    _write_output_evidence(
+        work_dir,
+        plan,
+        sentence_anchors=[{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
+        speech_spans=[{"start": 0.0, "end": 10.0}],
+        quiet_windows=[{"start": 3.8, "end": 4.1}],
     )
 
 
@@ -228,34 +272,19 @@ def test_validate_cut_output_uses_output_clock_sentence_anchors(
     monkeypatch, tmp_path
 ):
     _write_cut_output_speech_evidence(tmp_path)
-    (tmp_path / "narration.json").write_text(
-        json.dumps(
-            [
-                {
-                    "start": 4.0,
-                    "end": 6.0,
-                    "narration": "从剪后句末安全进入。",
-                    "overlaps_speech": True,
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    _write_json(
+        tmp_path / "narration.json",
         [
-            "validate.py",
-            "--work-dir",
-            str(tmp_path),
-            "--mode",
-            "cut_output",
-            "--output-duration",
-            "10",
+            {
+                "start": 4.0,
+                "end": 6.0,
+                "narration": "从剪后句末安全进入。",
+                "overlaps_speech": True,
+            }
         ],
     )
 
-    narration_validate.main()
+    _run_validate_cut_output(monkeypatch, tmp_path)
 
     report = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
     assert not any(
@@ -265,273 +294,101 @@ def test_validate_cut_output_uses_output_clock_sentence_anchors(
 
 def test_validate_cut_output_rejects_false_speech_override(monkeypatch, tmp_path):
     _write_cut_output_speech_evidence(tmp_path)
-    (tmp_path / "narration.json").write_text(
-        json.dumps(
-            [
-                {
-                    "start": 2.0,
-                    "end": 3.0,
-                    "narration": "伪造静音标记不能绕过门禁。",
-                    "overlaps_speech": False,
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    _write_json(
+        tmp_path / "narration.json",
         [
-            "validate.py",
-            "--work-dir",
-            str(tmp_path),
-            "--mode",
-            "cut_output",
-            "--output-duration",
-            "10",
+            {
+                "start": 2.0,
+                "end": 3.0,
+                "narration": "伪造静音标记不能绕过门禁。",
+                "overlaps_speech": False,
+            }
         ],
     )
 
     with pytest.raises(ValueError, match="interrupts_source_sentence"):
-        narration_validate.main()
+        _run_validate_cut_output(monkeypatch, tmp_path)
 
 
 def test_validate_cut_output_fails_closed_without_mapped_speech_evidence(
     monkeypatch, tmp_path
 ):
-    (tmp_path / "narration.json").write_text(
-        json.dumps(
-            [
-                {
-                    "start": 2.0,
-                    "end": 3.0,
-                    "narration": "缺少输出证据时不能信任静音标记。",
-                    "overlaps_speech": False,
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    _write_json(
+        tmp_path / "narration.json",
         [
-            "validate.py",
-            "--work-dir",
-            str(tmp_path),
-            "--mode",
-            "cut_output",
-            "--output-duration",
-            "10",
+            {
+                "start": 2.0,
+                "end": 3.0,
+                "narration": "缺少输出证据时不能信任静音标记。",
+                "overlaps_speech": False,
+            }
         ],
     )
 
     with pytest.raises(ValueError, match="source_sentence_anchors_unavailable"):
-        narration_validate.main()
+        _run_validate_cut_output(monkeypatch, tmp_path)
 
 
 def test_validate_cut_output_checks_entry_before_later_quiet(monkeypatch, tmp_path):
-    plan = {"clips": []}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
+    _write_output_evidence(
+        tmp_path,
+        {"clips": []},
+        sentence_anchors=[{"time": 1.0, "pause_start": 0.95, "confidence": "high"}],
+        speech_spans=[{"start": 0.0, "end": 1.0}],
+        quiet_windows=[{"start": 1.0, "end": 10.0}],
     )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": stable_hash(plan),
-                "sentence_anchors": [
-                    {"time": 1.0, "pause_start": 0.95, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 0.0, "end": 1.0}],
-                "quiet_windows": [{"start": 1.0, "end": 10.0}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "narration.json").write_text(
-        json.dumps(
-            [
-                {
-                    "start": 0.8,
-                    "end": 10.0,
-                    "narration": "后面大段静音不能掩盖入口仍在原声句内。",
-                    "overlaps_speech": False,
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    _write_json(
+        tmp_path / "narration.json",
         [
-            "validate.py",
-            "--work-dir",
-            str(tmp_path),
-            "--mode",
-            "cut_output",
-            "--output-duration",
-            "10",
+            {
+                "start": 0.8,
+                "end": 10.0,
+                "narration": "后面大段静音不能掩盖入口仍在原声句内。",
+                "overlaps_speech": False,
+            }
         ],
     )
 
     with pytest.raises(ValueError, match="interrupts_source_sentence"):
-        narration_validate.main()
+        _run_validate_cut_output(monkeypatch, tmp_path)
 
 
 def test_validate_cut_output_marks_later_speech_after_mostly_quiet_entry(
     monkeypatch, tmp_path
 ):
-    plan = {"clips": []}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": stable_hash(plan),
-                "sentence_anchors": [
-                    {"time": 10.0, "pause_start": 9.8, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 8.5, "end": 10.0}],
-                "quiet_windows": [{"start": 0.0, "end": 8.5}],
-            }
-        ),
-        encoding="utf-8",
+    _write_output_evidence(
+        tmp_path,
+        {"clips": []},
+        sentence_anchors=[{"time": 10.0, "pause_start": 9.8, "confidence": "high"}],
+        speech_spans=[{"start": 8.5, "end": 10.0}],
+        quiet_windows=[{"start": 0.0, "end": 8.5}],
     )
     narration_path = tmp_path / "narration.json"
-    narration_path.write_text(
-        json.dumps(
-            [
-                {
-                    "start": 1.0,
-                    "end": 10.0,
-                    "narration": "入口安静，但后段原声仍需混音避让。",
-                    "overlaps_speech": False,
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
+    _write_json(
+        narration_path,
         [
-            "validate.py",
-            "--work-dir",
-            str(tmp_path),
-            "--mode",
-            "cut_output",
-            "--output-duration",
-            "10",
+            {
+                "start": 1.0,
+                "end": 10.0,
+                "narration": "入口安静，但后段原声仍需混音避让。",
+                "overlaps_speech": False,
+            }
         ],
     )
 
-    narration_validate.main()
+    _run_validate_cut_output(monkeypatch, tmp_path)
 
     persisted = json.loads(narration_path.read_text(encoding="utf-8"))
     assert persisted[0]["overlaps_speech"] is True
 
 
-def test_lint_blocks_entry_shortly_after_pause_has_ended(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [
-                    {
-                        "time": 5.81,
-                        "pause_start": 5.22,
-                        "text_tail": "第一句说完。",
-                        "confidence": "high",
-                    },
-                    {
-                        "time": 14.34,
-                        "pause_start": 13.74,
-                        "text_tail": "第二句说完。",
-                        "confidence": "high",
-                    },
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    report = lint_narration(
-        [
-            {
-                "start": 6.10,
-                "end": 12.0,
-                "narration": "已经错过停顿并进入下一句。",
-                "overlaps_speech": True,
-            },
-        ],
-        work_dir=tmp_path,
-    )
-
-    issue = next(
-        item
-        for item in report["errors"]
-        if item["code"] == "interrupts_source_sentence"
-    )
-    assert issue["suggested_start"] == 14.34
-
-
-def test_lint_blocks_fragment_after_last_known_anchor_without_fake_suggestion(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [
-                    {
-                        "time": 5.81,
-                        "pause_start": 5.22,
-                        "text_tail": "已完成句子。",
-                        "confidence": "high",
-                    },
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-
-    report = lint_narration(
-        [
-            {
-                "start": 8.0,
-                "end": 12.0,
-                "narration": "不能在未知尾句中间进入。",
-                "overlaps_speech": True,
-            },
-        ],
-        work_dir=tmp_path,
-    )
-
-    issue = next(
-        item
-        for item in report["errors"]
-        if item["code"] == "interrupts_source_sentence"
-    )
-    assert issue["suggested_start"] is None
-
-
 def test_lint_does_not_treat_back_to_back_narration_as_new_source_entry(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "sentence_anchors": [
-                    {"time": 5.81, "text_tail": "第一句原声。", "confidence": "high"},
-                    {"time": 22.86, "text_tail": "下一句原声。", "confidence": "high"},
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_source_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "text_tail": "第一句原声。", "confidence": "high"},
+            {"time": 22.86, "text_tail": "下一句原声。", "confidence": "high"},
+        ],
     )
 
     report = lint_narration(
@@ -577,20 +434,32 @@ def test_lint_counts_leading_original_audio_block_and_interval_union(tmp_path):
     assert report["metrics"]["original_block_count"] >= 1
 
 
-def test_lint_narration_cut_mode_requires_clip_membership():
+def test_lint_narration_cut_mode_checks_clip_membership_and_boundaries():
+    """A beat outside the plan is an error; one spilling past its clip is silently trimmed
+    by the mapper, so it must at least warn."""
     plan = {"clips": [{"clip_id": 0, "source_start": 10.0, "source_end": 20.0}]}
-    report = lint_narration(
+    scenes = [{"scene_id": 0, "start": 0.0, "end": 30.0}]
+
+    membership = lint_narration(
         [
             {"start": 11.0, "end": 15.0, "narration": "片段内解说。"},
             {"start": 22.0, "end": 24.0, "narration": "片段外解说。"},
         ],
-        [{"scene_id": 0, "start": 0.0, "end": 30.0}],
+        scenes,
         clip_plan=plan,
         mode="cut",
     )
+    assert membership["ok"] is False
+    assert any(issue["code"] == "outside_clip_plan" for issue in membership["errors"])
+    assert "crosses_clip_boundary" not in {i["code"] for i in membership["warnings"]}
 
-    assert report["ok"] is False
-    assert any(issue["code"] == "outside_clip_plan" for issue in report["errors"])
+    crossing = lint_narration(
+        [{"start": 12.0, "end": 25.0, "narration": "跨过片段边界的解说。"}],
+        scenes,
+        clip_plan=plan,
+        mode="cut",
+    )  # mid 18.5 in clip, end 25 > 20
+    assert "crosses_clip_boundary" in {i["code"] for i in crossing["warnings"]}
 
 
 def test_lint_narration_warns_when_segment_spans_too_many_visual_beats(monkeypatch):
@@ -730,14 +599,8 @@ def test_lint_flags_wall_to_wall_narration_with_no_original_blocks(monkeypatch):
 
 
 def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
-    """Cut mode must size the beat target to the OUTPUT length, not the source.
-
-    Regression for the 2h->30min complaint: the brief used to ask for ~source/60*spm
-    beats across the whole source timeline, ~75% of which the cut then dropped.
-    """
-    monkeypatch.setitem(CONFIG, "edit_mode", "cut")
-    monkeypatch.setitem(CONFIG, "target_duration", "1m")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    """Cut mode sizes the beat target to the OUTPUT length, not the source (2h->30min regression)."""
+    _set_brief_mode(monkeypatch, "cut", target_duration="1m")
     scenes = [
         {
             "scene_id": i,
@@ -747,9 +610,7 @@ def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
         }
         for i in range(10)
     ]
-    text = build_agent_brief(scenes, [], [], 600.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
+    text = _brief_text(scenes, [], [], 600.0, tmp_path)
     assert "CUT OUTPUT" in text
     assert (
         "narration BLOCKS across the ~1min CUT OUTPUT" in text
@@ -758,12 +619,8 @@ def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
     assert (
         "step 1 of 2" in text
     )  # A1: cut-first, write clip_plan only (no edited_source yet)
-    examples = [
-        json.loads(raw)
-        for raw in re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
-    ]
     clip_plan = next(
-        item for item in examples if isinstance(item, dict) and "clips" in item
+        item for item in _json_examples(text) if isinstance(item, dict) and "clips" in item
     )
     reason_parts = [part.strip() for part in clip_plan["clips"][0]["reason"].split("|")]
     assert clip_plan["target_duration"] == "1m"
@@ -773,61 +630,63 @@ def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
     assert reason_parts[-2].startswith("入点=") and reason_parts[-1].startswith("出点=")
 
 
-def test_build_agent_brief_cut_pass2_is_output_timeline(monkeypatch, tmp_path):
-    """Step 6: once the cut is rendered (edited_source.mp4 exists), the cut brief switches to
-    the PASS-2 output-timeline variant: narrate in OUTPUT time, with the kept clips listed."""
-    monkeypatch.setitem(CONFIG, "edit_mode", "cut")
-    monkeypatch.setitem(CONFIG, "target_duration", "1m")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+def test_build_agent_brief_cut_pass2_narrates_output_timeline_sized_to_validated_cut(
+    monkeypatch, tmp_path
+):
+    """Once edited_source.mp4 exists the cut brief becomes the PASS-2 variant: narrate in
+    OUTPUT time, list the kept clips, and size to the validated cut, not --target-duration."""
+    _set_brief_mode(monkeypatch, "cut", target_duration="1m")
     (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(
-            {
-                "clips": [
-                    {
-                        "clip_id": 0,
-                        "source_start": 10.0,
-                        "source_end": 20.0,
-                        "output_start": 0.0,
-                        "output_end": 10.0,
-                        "reason": "开端",
-                    },
-                ]
-            }
-        ),
-        encoding="utf-8",
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {
+            "clips": [
+                {
+                    "clip_id": 0,
+                    "source_start": 10.0,
+                    "source_end": 20.0,
+                    "output_start": 0.0,
+                    "output_end": 10.0,
+                    "reason": "开端",
+                },
+                {
+                    "clip_id": 1,
+                    "source_start": 40.0,
+                    "source_end": 50.0,
+                    "output_start": 10.0,
+                    "output_end": 20.0,
+                    "reason": "转折",
+                },
+            ],
+            "total_duration": 20.0,
+        },
     )
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 60.0, "description": "画面"}]
-    text = build_agent_brief(scenes, [], [], 600.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
+    scenes = [{"scene_id": 0, "start": 10.0, "end": 50.0, "description": "保留片段"}]
+    text = _brief_text(scenes, [], [], 120.0, tmp_path)
     assert "step 2 of 2: write `narration.json` in OUTPUT time" in text
     assert "Kept clips on the OUTPUT timeline" in text
     assert "OUTPUT 0.0–10.0s ← SOURCE[0] 10.0–20.0s" in text
     assert "step 1 of 2" not in text
+    assert "across the ~20s CUT OUTPUT" in text
+    assert "edited_source.mp4` (~20s)" in text
+    assert "~1min" not in text
 
 
 def test_build_agent_brief_keeps_plan_linkage_in_the_board_not_narration_schema(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    _set_brief_mode(monkeypatch, "full")
 
-    text = build_agent_brief(
+    text = _brief_text(
         [{"scene_id": 0, "start": 0.0, "end": 8.0, "description": "人物作出选择"}],
         [{"start": 1.0, "end": 3.0, "text": "我决定留下。"}],
         [],
         8.0,
         tmp_path,
-    ).read_text(encoding="utf-8")
-    examples = [
-        json.loads(raw)
-        for raw in re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
-    ]
+    )
     narration = next(
         item
-        for item in examples
+        for item in _json_examples(text)
         if isinstance(item, list) and item and "narration" in item[0]
     )
 
@@ -845,35 +704,21 @@ def test_build_agent_brief_keeps_plan_linkage_in_the_board_not_narration_schema(
 
 
 def test_build_agent_brief_surfaces_sentence_end_entry_anchors(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "sentence_anchors": [
-                    {
-                        "time": 5.81,
-                        "text_tail": "带你重走詹姆斯的二十一年。",
-                        "confidence": "high",
-                    },
-                    {
-                        "time": 22.86,
-                        "text_tail": "开启了自己的全明星之路。",
-                        "confidence": "high",
-                    },
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_source_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "text_tail": "带你重走詹姆斯的二十一年。", "confidence": "high"},
+            {"time": 22.86, "text_tail": "开启了自己的全明星之路。", "confidence": "high"},
+        ],
     )
 
-    text = build_agent_brief(
+    text = _brief_text(
         [{"scene_id": 0, "start": 0.0, "end": 30.0, "description": "生涯回顾"}],
         [{"start": 0.0, "end": 30.0, "text": "原声持续讲述。"}],
         [],
         30.0,
         tmp_path,
-    ).read_text(encoding="utf-8")
+    )
 
     assert "原声句末安全切入点" in text
     assert "5.81s" in text and "22.86s" in text
@@ -884,14 +729,14 @@ def test_build_agent_brief_surfaces_sentence_end_entry_anchors(tmp_path):
 def test_build_agent_brief_preserves_freeform_style_and_artifact_contract(tmp_path):
     style = "悬疑冷幽默，但每句都像朋友复盘：别端着，保留东北味儿"
 
-    text = build_agent_brief(
+    text = _brief_text(
         [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}],
         [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}],
         [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}],
         6.0,
         tmp_path,
         style=style,
-    ).read_text(encoding="utf-8")
+    )
 
     assert f"- Style (--style, freeform verbatim guidance): {style}" in text
     assert (
@@ -905,60 +750,19 @@ def test_build_agent_brief_preserves_freeform_style_and_artifact_contract(tmp_pa
     assert "not a preset enum, fixed taxonomy" in text
 
 
-def test_build_agent_brief_cut_pass2_sizes_to_actual_validated_duration(
+def test_build_agent_brief_empty_substrate_warns_and_relaxes_density(
     monkeypatch, tmp_path
 ):
-    monkeypatch.setitem(CONFIG, "edit_mode", "cut")
-    monkeypatch.setitem(CONFIG, "target_duration", "1m")
-    monkeypatch.setitem(CONFIG, "context_info", "")
-    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(
-            {
-                "clips": [
-                    {
-                        "source_start": 10.0,
-                        "source_end": 20.0,
-                        "output_start": 0.0,
-                        "output_end": 10.0,
-                    },
-                    {
-                        "source_start": 40.0,
-                        "source_end": 50.0,
-                        "output_start": 10.0,
-                        "output_end": 20.0,
-                    },
-                ],
-                "total_duration": 20.0,
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    text = build_agent_brief(
-        [{"scene_id": 0, "start": 10.0, "end": 50.0, "description": "保留片段"}],
-        [],
-        [],
-        120.0,
-        tmp_path,
-    ).read_text(encoding="utf-8")
-
-    assert "across the ~20s CUT OUTPUT" in text
-    assert "edited_source.mp4` (~20s)" in text
-    assert "~1min" not in text
-
-
-def test_build_agent_brief_thin_substrate_relaxes_density(monkeypatch, tmp_path):
-    """Thin/empty substrate must turn the density target into a ceiling, not a quota,
-    so the agent is not forced to fill beats with 看图说话."""
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    """Empty substrate turns the density target into a ceiling, not a quota, so the agent
+    is not forced to fill beats with 看图说话."""
+    _set_brief_mode(monkeypatch, "full")
     scenes = [
         {"scene_id": i, "start": i * 6.0, "end": i * 6.0 + 6.0, "description": "画面"}
         for i in range(4)
     ]
-    text = build_agent_brief(scenes, [], [], 24.0, tmp_path).read_text(encoding="utf-8")
+    assert assess_understanding_substrate(scenes, [])["level"] == "empty"
+    text = _brief_text(scenes, [], [], 24.0, tmp_path)
+    assert "SUBSTRATE IS EMPTY" in text
     assert "do NOT chase a beat count" in text
     assert "grounded blocks" in text  # thin -> fewer, grounded blocks (no quota)
     assert (
@@ -969,11 +773,8 @@ def test_build_agent_brief_thin_substrate_relaxes_density(monkeypatch, tmp_path)
 def test_build_agent_brief_research_directive_when_context_without_research(
     monkeypatch, tmp_path
 ):
-    """A title/context with no background_research.json must trigger a loud research-first
-    directive (the root of 'cold' narration: no story context -> only pixels to narrate)."""
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "这是《庆余年》第一集")
+    """A title/context with no background_research.json triggers a research-first directive."""
+    _set_brief_mode(monkeypatch, "full", context_info="这是《庆余年》第一集")
     scenes = [
         {
             "scene_id": 0,
@@ -983,76 +784,17 @@ def test_build_agent_brief_research_directive_when_context_without_research(
         }
     ]
     asr = [{"start": 1.0, "end": 5.0, "text": "一句对白。"}]
-    text = build_agent_brief(scenes, asr, [], 6.0, tmp_path).read_text(encoding="utf-8")
+    text = _brief_text(scenes, asr, [], 6.0, tmp_path)
     assert "Research the story FIRST" in text
     assert "庆余年" in text  # the context is echoed into the directive
 
     (tmp_path / "background_research.json").write_text(
         '{"synopsis": "范闲查案"}', encoding="utf-8"
     )
-    text2 = build_agent_brief(scenes, asr, [], 6.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
+    text2 = _brief_text(scenes, asr, [], 6.0, tmp_path)
     assert (
         "Research the story FIRST" not in text2
     )  # already researched -> directive gone
-
-
-def test_research_directive_does_not_fire_for_dialogue_rich_titled_run(
-    monkeypatch, tmp_path
-):
-    """Step 3: a dialogue-rich (substrate=rich) titled run with no research file must NOT be
-    nagged — the directive fires only for thin/empty substrate, not merely because a title exists."""
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(
-        CONFIG, "context_info", "这是《庆余年》第一集"
-    )  # a title, but no research file
-    scenes = [
-        {
-            "scene_id": i,
-            "start": float(i * 6),
-            "end": float(i * 6 + 6),
-            "description": "范闲与人对峙",
-            "frame_facts": {str(i * 6): ["对峙"]},
-        }
-        for i in range(4)
-    ]
-    asr = [{"start": 1.0, "end": 5.0, "text": "对" * 250}]  # rich dialogue spine
-    assert assess_understanding_substrate(scenes, asr)["level"] == "rich"
-    text = build_agent_brief(scenes, asr, [], 24.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
-    assert "Research the story FIRST" not in text  # rich + titled -> no nag
-
-
-def test_lint_narration_cut_mode_warns_on_clip_boundary_crossing():
-    """A beat that spills past its clip is silently trimmed by the mapper and ends up
-    over cut-away footage -> warn so the agent tightens it inside the clip."""
-    plan = {"clips": [{"clip_id": 0, "source_start": 10.0, "source_end": 20.0}]}
-    crossing = lint_narration(
-        [
-            {
-                "start": 12.0,
-                "end": 25.0,
-                "narration": "跨过片段边界的解说。",
-            },  # mid 18.5 in clip, end 25 > 20
-        ],
-        [{"scene_id": 0, "start": 0.0, "end": 30.0}],
-        clip_plan=plan,
-        mode="cut",
-    )
-    assert "crosses_clip_boundary" in {i["code"] for i in crossing["warnings"]}
-
-    inside = lint_narration(
-        [
-            {"start": 12.0, "end": 18.0, "narration": "完全在片段内。"},
-        ],
-        [{"scene_id": 0, "start": 0.0, "end": 30.0}],
-        clip_plan=plan,
-        mode="cut",
-    )
-    assert "crosses_clip_boundary" not in {i["code"] for i in inside["warnings"]}
 
 
 def test_align_narration_to_quiet_sets_overlap_flag_without_moving_beats(monkeypatch):
@@ -1146,23 +888,16 @@ def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
     overview["overview_fingerprint"] = brief_inputs._mimo_overview_payload_fingerprint(
         overview
     )
-    (tmp_path / "mimo_video_overview.json").write_text(
-        json.dumps(overview, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    _write_json(tmp_path / "mimo_video_overview.json", overview)
+    _set_brief_mode(monkeypatch, "full")
 
-    brief = build_agent_brief(
+    text = _brief_text(
         [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "场景"}],
         [],
         [],
         3.0,
         tmp_path,
     )
-
-    text = brief.read_text(encoding="utf-8")
     assert "MiMo scene-chunk video overview" in text
     assert "这是 MiMo 对分片汇总的故事线概览。" in text
     assert "内部推理" not in text
@@ -1170,11 +905,9 @@ def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
 
 def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    _set_brief_mode(monkeypatch, "full")
     asr = [{"start": 0.0, "end": 1.0, "text": "原始对白"}]
-    (tmp_path / "asr_result.json").write_text(json.dumps(asr), encoding="utf-8")
+    _write_json(tmp_path / "asr_result.json", asr)
     for name in (
         "asr_clean.json",
         "mimo_video_overview.json",
@@ -1185,7 +918,7 @@ def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path)
     ):
         (tmp_path / name).write_text("not json", encoding="utf-8")
 
-    brief = build_agent_brief(
+    text = _brief_text(
         [{"scene_id": 0, "start": 0.0, "end": 1.0, "description": "画面"}],
         asr,
         [],
@@ -1193,24 +926,19 @@ def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path)
         tmp_path,
     )
 
-    assert "原始对白" in brief.read_text(encoding="utf-8")
+    assert "原始对白" in text
 
 
 def test_build_agent_brief_injects_background_research(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
-    (tmp_path / "background_research.json").write_text(
-        json.dumps(
-            {
-                "synopsis": "少年范闲深夜查案。",
-                "characters": {"范闲": "主角", "五竹": "范闲的护卫"},
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _set_brief_mode(monkeypatch, "full")
+    _write_json(
+        tmp_path / "background_research.json",
+        {
+            "synopsis": "少年范闲深夜查案。",
+            "characters": {"范闲": "主角", "五竹": "范闲的护卫"},
+        },
     )
-    brief = build_agent_brief(
+    text = _brief_text(
         [
             {
                 "scene_id": 0,
@@ -1225,25 +953,9 @@ def test_build_agent_brief_injects_background_research(monkeypatch, tmp_path):
         3.0,
         tmp_path,
     )
-    text = brief.read_text(encoding="utf-8")
     assert "Story context" in text
     assert "五竹" in text
     assert "范闲的护卫" in text
-
-
-def test_build_agent_brief_warns_on_empty_substrate(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
-    brief = build_agent_brief(
-        [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "场景"}],
-        [],
-        [],
-        3.0,
-        tmp_path,
-    )
-    text = brief.read_text(encoding="utf-8")
-    assert "SUBSTRATE IS EMPTY" in text
 
 
 def test_timeline_fusion_aligns_scenes_dialogue_and_quiet_slots():
@@ -1341,12 +1053,9 @@ def test_parse_target_seconds_table():
 def test_build_agent_brief_storyless_rich_video_relaxes_and_prompts_research(
     monkeypatch, tmp_path
 ):
-    """End-to-end for the anime complaint: a frame-fact-rich but storyless video (no
-    dialogue, no research) must now be treated as thin so the density relaxes and the
-    research directive fires — instead of being graded 'rich' and shipping cold."""
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    """Anime case: frame-fact-rich but storyless (no dialogue, no research) is treated as
+    thin, so the density relaxes and the research directive fires instead of shipping cold."""
+    _set_brief_mode(monkeypatch, "full")
     scenes = [
         {
             "scene_id": i,
@@ -1357,18 +1066,18 @@ def test_build_agent_brief_storyless_rich_video_relaxes_and_prompts_research(
         }
         for i in range(6)
     ]
-    text = build_agent_brief(scenes, [], [], 36.0, tmp_path).read_text(encoding="utf-8")
+    text = _brief_text(scenes, [], [], 36.0, tmp_path)
     assert "do NOT chase a beat count" in text  # density relaxed (FIX D)
     assert "Research the story FIRST" in text  # research directive (FIX E)
     assert "segments/min (minimum" not in text  # strict quota line suppressed
 
 
-def test_build_agent_brief_rich_density_is_a_guide_not_quota(monkeypatch, tmp_path):
-    """Step 1: even with RICH substrate, density is framed as a GUIDE, not a hard quota,
-    so the writer never pads with pixel-filler just to hit a beat count."""
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+def test_build_agent_brief_rich_substrate_frames_density_as_guide_without_research_nag(
+    monkeypatch, tmp_path
+):
+    """RICH substrate: density stays a GUIDE, never a quota, and a title alone (dialogue-rich,
+    no research file) must not trigger the research-first nag."""
+    _set_brief_mode(monkeypatch, "full", context_info="这是《庆余年》第一集")
     scenes = [
         {
             "scene_id": i,
@@ -1383,9 +1092,7 @@ def test_build_agent_brief_rich_density_is_a_guide_not_quota(monkeypatch, tmp_pa
         {"start": 1.0, "end": 5.0, "text": "对" * 250}
     ]  # >= 200 chars -> a real story spine -> rich
     assert assess_understanding_substrate(scenes, asr)["level"] == "rich"
-    text = build_agent_brief(scenes, asr, [], 36.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
+    text = _brief_text(scenes, asr, [], 36.0, tmp_path)
     assert (
         "Content-led audio allocation" in text
     )  # story/sound decisions, not ratio, are the headline
@@ -1394,167 +1101,64 @@ def test_build_agent_brief_rich_density_is_a_guide_not_quota(monkeypatch, tmp_pa
     assert (
         "Narration density target:" not in text
     )  # the old hard-quota phrasing is gone
+    assert "Research the story FIRST" not in text  # rich + titled -> no nag
 
 
-def test_cut_validate_prefers_raw_plan_when_validated_is_stale(tmp_path):
-    import sys
-    import importlib.util
-
-    validate_path = (
-        Path(__file__).resolve().parents[2]
-        / "skills"
-        / "video-script"
-        / "scripts"
-        / "validate.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "video_script_validate_under_test", validate_path
-    )
-    validate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = validate
-    spec.loader.exec_module(validate)
-
-    raw = tmp_path / "clip_plan.json"
+def test_cut_validate_uses_validated_plan_only_when_raw_fingerprint_is_fresh(tmp_path):
+    raw_payload = {"clips": [{"start": 40.0, "end": 50.0}]}
     validated = tmp_path / "clip_plan_validated.json"
-    raw.write_text(
-        json.dumps({"clips": [{"start": 40.0, "end": 50.0}]}), encoding="utf-8"
-    )
-    validated.write_text(
-        json.dumps(
-            {"clips": [{"clip_id": 0, "source_start": 0.0, "source_end": 10.0}]}
-        ),
-        encoding="utf-8",
-    )
+    _write_json(tmp_path / "clip_plan.json", raw_payload)
 
-    plan = validate._load_cut_clip_plan(tmp_path)
+    _write_json(
+        validated, {"clips": [{"clip_id": 0, "source_start": 0.0, "source_end": 10.0}]}
+    )
+    stale = narration_validate._load_cut_clip_plan(tmp_path)
+    assert stale["clips"][0]["start"] == 40.0  # stale validated plan -> raw wins
 
-    assert plan["clips"][0]["start"] == 40.0
+    _write_json(
+        validated,
+        {
+            "raw_plan_fingerprint": stable_hash(raw_payload),
+            "clips": [{"clip_id": 0, "source_start": 40.0, "source_end": 50.0}],
+        },
+    )
+    fresh = narration_validate._load_cut_clip_plan(tmp_path)
+    assert fresh["clips"][0]["source_start"] == 40.0
 
 
 def test_full_validation_rewrite_preserves_visual_overlays(tmp_path, monkeypatch):
     """Full mode normalizes and rewrites narration.json without losing render metadata."""
-    import sys
-    import importlib.util
-
-    validate_path = (
-        Path(__file__).resolve().parents[2]
-        / "skills"
-        / "video-script"
-        / "scripts"
-        / "validate.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "video_script_validate_overlays_under_test", validate_path
-    )
-    validate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = validate
-    spec.loader.exec_module(validate)
-
     overlays = [
         {"type": "top_title", "text": "二十一年", "start": 0.0, "end": 2.0},
         {"type": "inline_label_or_callout", "text": "2003", "start": 2.0, "end": 3.0},
     ]
-    (tmp_path / "narration.json").write_text(
-        json.dumps(
-            [
-                {
-                    "start": 0.0,
-                    "end": 10.0,
-                    "narration": "这是一段能够通过完整模式校验的解说。",
-                    "visual_overlays": overlays,
-                }
-            ],
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_json(
+        tmp_path / "narration.json",
+        [
+            {
+                "start": 0.0,
+                "end": 10.0,
+                "narration": "这是一段能够通过完整模式校验的解说。",
+                "visual_overlays": overlays,
+            }
+        ],
     )
-    (tmp_path / "vlm_analysis.json").write_text(
-        json.dumps(
-            [
-                {
-                    "scene_id": 0,
-                    "start": 0.0,
-                    "end": 10.0,
-                    "description": "人物站在球场中央",
-                }
-            ],
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_json(
+        tmp_path / "vlm_analysis.json",
+        [{"scene_id": 0, "start": 0.0, "end": 10.0, "description": "人物站在球场中央"}],
     )
+    monkeypatch.setitem(CONFIG, "speech_rate", 6.0)
 
-    old_argv = sys.argv
-    try:
-        monkeypatch.setitem(validate.CONFIG, "speech_rate", 6.0)
-        sys.argv = ["validate.py", "--work-dir", str(tmp_path), "--mode", "full"]
-        validate.main()
-    finally:
-        sys.argv = old_argv
+    _run_validate(monkeypatch, tmp_path, "full")
 
     rewritten = json.loads((tmp_path / "narration.json").read_text(encoding="utf-8"))
     assert rewritten[0]["visual_overlays"] == overlays
 
 
-def test_cut_validate_uses_validated_plan_when_raw_fingerprint_matches(tmp_path):
-    import sys
-    import importlib.util
-
-    validate_path = (
-        Path(__file__).resolve().parents[2]
-        / "skills"
-        / "video-script"
-        / "scripts"
-        / "validate.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "video_script_validate_fresh_under_test", validate_path
-    )
-    validate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = validate
-    spec.loader.exec_module(validate)
-
-    raw_payload = {"clips": [{"start": 40.0, "end": 50.0}]}
-    raw = tmp_path / "clip_plan.json"
-    validated = tmp_path / "clip_plan_validated.json"
-    raw.write_text(json.dumps(raw_payload), encoding="utf-8")
-    validated.write_text(
-        json.dumps(
-            {
-                "raw_plan_fingerprint": validate.stable_hash(raw_payload),
-                "clips": [{"clip_id": 0, "source_start": 40.0, "source_end": 50.0}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    plan = validate._load_cut_clip_plan(tmp_path)
-
-    assert plan["clips"][0]["source_start"] == 40.0
-
-
-def test_cut_output_duration_bounds_rejects_segments_outside_output_timeline():
-    import sys
-    import importlib.util
-
-    validate_path = (
-        Path(__file__).resolve().parents[2]
-        / "skills"
-        / "video-script"
-        / "scripts"
-        / "validate.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "video_script_validate_bounds_under_test", validate_path
-    )
-    validate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = validate
-    spec.loader.exec_module(validate)
-
-    validate._validate_output_timeline_bounds(
-        [
-            {"start": 0.0, "end": 9.95, "narration": "有效。"},
-        ],
-        output_duration=10.0,
+def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
+    validate_bounds = narration_validate._validate_output_timeline_bounds
+    validate_bounds(
+        [{"start": 0.0, "end": 9.95, "narration": "有效。"}], output_duration=10.0
     )
 
     bad = [
@@ -1563,136 +1167,64 @@ def test_cut_output_duration_bounds_rejects_segments_outside_output_timeline():
         {"start": 10.1, "end": 11.0, "narration": "完全在外。"},
     ]
     with pytest.raises(SystemExit) as exc:
-        validate._validate_output_timeline_bounds(bad, output_duration=10.0)
-
+        validate_bounds(bad, output_duration=10.0)
     msg = str(exc.value)
     assert "output_duration=10.000" in msg
     assert "segment 0" in msg and "segment 1" in msg and "segment 2" in msg
 
-
-def test_cut_output_mode_requires_output_duration(tmp_path):
-    import sys
-    import importlib.util
-
-    validate_path = (
-        Path(__file__).resolve().parents[2]
-        / "skills"
-        / "video-script"
-        / "scripts"
-        / "validate.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "video_script_validate_required_duration_under_test", validate_path
-    )
-    validate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = validate
-    spec.loader.exec_module(validate)
-
-    (tmp_path / "narration.json").write_text(
-        json.dumps([{"start": 0.0, "end": 1.0, "narration": "有效。"}]),
-        encoding="utf-8",
-    )
-    old_argv = sys.argv
-    try:
-        sys.argv = ["validate.py", "--work-dir", str(tmp_path), "--mode", "cut_output"]
-        with pytest.raises(SystemExit, match="--output-duration is required"):
-            validate.main()
-    finally:
-        sys.argv = old_argv
-
-
-def test_cut_output_duration_bounds_rejects_non_finite_duration():
-    import sys
-    import importlib.util
-
-    validate_path = (
-        Path(__file__).resolve().parents[2]
-        / "skills"
-        / "video-script"
-        / "scripts"
-        / "validate.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "video_script_validate_finite_duration_under_test", validate_path
-    )
-    validate = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = validate
-    spec.loader.exec_module(validate)
-
     with pytest.raises(SystemExit, match="finite and positive"):
-        validate._validate_output_timeline_bounds(
-            [{"start": 0.0, "end": 1.0}], output_duration=float("nan")
-        )
+        validate_bounds([{"start": 0.0, "end": 1.0}], output_duration=float("nan"))
     with pytest.raises(SystemExit, match="non-finite time"):
-        validate._validate_output_timeline_bounds(
-            [{"start": float("nan"), "end": 1.0}], output_duration=10.0
-        )
+        validate_bounds([{"start": float("nan"), "end": 1.0}], output_duration=10.0)
+
+
+def test_cut_output_mode_requires_output_duration(monkeypatch, tmp_path):
+    _write_json(
+        tmp_path / "narration.json", [{"start": 0.0, "end": 1.0, "narration": "有效。"}]
+    )
+
+    with pytest.raises(SystemExit, match="--output-duration is required"):
+        _run_validate(monkeypatch, tmp_path, "cut_output")
 
 
 def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "edit_mode", "cut")
-    monkeypatch.setitem(CONFIG, "target_duration", "10s")
-    monkeypatch.setitem(CONFIG, "context_info", "")
+    _set_brief_mode(monkeypatch, "cut", target_duration="10s")
     raw_plan = {"clips": [{"start": 100.0, "end": 110.0}]}
-    (tmp_path / "clip_plan.json").write_text(
-        json.dumps(raw_plan, ensure_ascii=False), encoding="utf-8"
-    )
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(
-            {
-                "raw_plan_fingerprint": stable_hash(raw_plan),
-                "clips": [
-                    {
-                        "source_start": 100.0,
-                        "source_end": 110.0,
-                        "output_start": 0.0,
-                        "output_end": 10.0,
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_json(tmp_path / "clip_plan.json", raw_plan)
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {
+            "raw_plan_fingerprint": stable_hash(raw_plan),
+            "clips": [
+                {
+                    "source_start": 100.0,
+                    "source_end": 110.0,
+                    "output_start": 0.0,
+                    "output_end": 10.0,
+                }
+            ],
+        },
     )
     (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "sentence_anchors": [
-                    {
-                        "time": 104.0,
-                        "text_tail": "输出第四秒句末。",
-                        "confidence": "high",
-                    }
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_source_anchors(
+        tmp_path,
+        [{"time": 104.0, "text_tail": "输出第四秒句末。", "confidence": "high"}],
     )
     asr_payload = [{"start": 101.0, "end": 105.0, "text": "输出一到五秒对白。"}]
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps(asr_payload, ensure_ascii=False), encoding="utf-8"
-    )
-    (tmp_path / "asr_clean.json").write_text(
-        json.dumps(
-            {
-                "segments": [
-                    {"start": 101.0, "end": 105.0, "text": "清洗后一到五秒对白。"}
-                ],
-                "source_md5": __import__("hashlib")
-                .md5((tmp_path / "asr_result.json").read_bytes())
-                .hexdigest(),
-                "model": brief_context._consolidation_model(),
-                "prompt_md5": brief_context._clean_asr_prompt_fingerprint(),
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
+    _write_json(tmp_path / "asr_result.json", asr_payload)
+    _write_json(
+        tmp_path / "asr_clean.json",
+        {
+            "segments": [{"start": 101.0, "end": 105.0, "text": "清洗后一到五秒对白。"}],
+            "source_md5": __import__("hashlib")
+            .md5((tmp_path / "asr_result.json").read_bytes())
+            .hexdigest(),
+            "model": brief_context._consolidation_model(),
+            "prompt_md5": brief_context._clean_asr_prompt_fingerprint(),
+        },
     )
 
-    brief = build_agent_brief(
+    text = _brief_text(
         [
             {
                 "scene_id": 7,
@@ -1712,7 +1244,6 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
         (tmp_path / "asr_writing_chunks.json").read_text(encoding="utf-8")
     )
     fusion = json.loads((tmp_path / "timeline_fusion.json").read_text(encoding="utf-8"))
-    text = brief.read_text(encoding="utf-8")
 
     assert chunks[0]["start"] == pytest.approx(1.0)
     assert chunks[0]["end"] == pytest.approx(5.0)
@@ -1766,19 +1297,11 @@ def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):
             },
         ]
     }
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
+    _write_json(tmp_path / "clip_plan_validated.json", plan)
     (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [
-                    {"time": 4.0, "pause_start": 3.8, "confidence": "high"}
-                ]
-            }
-        ),
-        encoding="utf-8",
+    _write_json(
+        tmp_path / "speech_boundary_anchors.json",
+        {"sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}]},
     )
 
     anchors = brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
@@ -1786,31 +1309,15 @@ def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):
     assert [row["time"] for row in anchors] == [4.0, 14.0]
 
 
-def test_cut_pass2_agent_brief_requires_fresh_output_spans(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "edit_mode", "cut")
-    monkeypatch.setitem(CONFIG, "target_duration", "10s")
-    monkeypatch.setitem(CONFIG, "context_info", "")
-    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-
-    with pytest.raises(
-        SystemExit, match="cut pass2 brief requires fresh clip_plan_validated.json"
-    ):
-        build_agent_brief(
-            [{"scene_id": 7, "start": 100.0, "end": 110.0, "description": "保留片段"}],
-            [{"start": 101.0, "end": 105.0, "text": "源时间对白。"}],
-            [],
-            120.0,
-            tmp_path,
-        )
-
-
-def test_cut_pass2_agent_brief_rejects_non_finite_output_spans(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "edit_mode", "cut")
-    monkeypatch.setitem(CONFIG, "target_duration", "10s")
-    monkeypatch.setitem(CONFIG, "context_info", "")
-    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(
+@pytest.mark.parametrize(
+    "validated_plan, match",
+    [
+        pytest.param(
+            None,
+            "cut pass2 brief requires fresh clip_plan_validated.json",
+            id="missing_validated_plan",
+        ),
+        pytest.param(
             {
                 "clips": [
                     {
@@ -1820,12 +1327,21 @@ def test_cut_pass2_agent_brief_rejects_non_finite_output_spans(monkeypatch, tmp_
                         "output_end": 10.0,
                     }
                 ],
-            }
+            },
+            "non-finite clip span",
+            id="non_finite_clip_span",
         ),
-        encoding="utf-8",
-    )
+    ],
+)
+def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
+    monkeypatch, tmp_path, validated_plan, match
+):
+    _set_brief_mode(monkeypatch, "cut", target_duration="10s")
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    if validated_plan is not None:
+        _write_json(tmp_path / "clip_plan_validated.json", validated_plan)
 
-    with pytest.raises(SystemExit, match="non-finite clip span"):
+    with pytest.raises(SystemExit, match=match):
         build_agent_brief(
             [{"scene_id": 7, "start": 100.0, "end": 110.0, "description": "保留片段"}],
             [{"start": 101.0, "end": 105.0, "text": "源时间对白。"}],
