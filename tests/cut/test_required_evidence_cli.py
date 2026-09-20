@@ -53,7 +53,7 @@ def test_missing_premise_blocks_before_cached_reuse_and_clears_stale_delivery(ru
                      'reason': '拒绝请求→作出决定；标题/说明不能补被删前提'}],
            'required_evidence': contract(video)}
     with pytest.raises(SystemExit, match='QC blocking'):
-        run(raw, '--allow-sparse-cut', '--allow-duration-drift', '--no-narration-map')
+        run(raw, '--allow-duration-drift')
     current = json.loads((tmp_path / 'clip_plan_validated.json').read_text(encoding='utf-8'))
     assert current['qc']['required_evidence']['selection_status'] == 'BLOCK'
     assert current['qc']['blocking']
@@ -137,7 +137,7 @@ def run_real_cut(source, work, raw, *options):
     (work / 'clip_plan.json').write_text(json.dumps(raw), encoding='utf-8')
     result = subprocess.run([
         sys.executable, str(Path(cut_cli.__file__).with_name('cut.py')),
-        str(source), '--work-dir', str(work), '--no-narration-map', *options,
+        str(source), '--work-dir', str(work), *options,
     ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0',
             'CLIP_PADDING': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
     return result, json.loads((work / 'clip_plan_validated.json').read_text(encoding='utf-8'))
@@ -170,7 +170,7 @@ def test_real_render_and_cache_recheck_declared_premise(real_source, tmp_path):
 
     # Identical media plan, but the revised editorial requirement is not in it.
     raw['required_evidence']['nodes'][0].update(start=0.25, end=1.75)
-    blocked, validated = run_real_cut(real_source, work, raw, '--allow-sparse-cut')
+    blocked, validated = run_real_cut(real_source, work, raw, '--allow-duration-drift')
     assert blocked.returncode != 0
     assert 'QC blocking' in blocked.stdout + blocked.stderr
     assert validated['qc']['required_evidence']['selection_status'] == 'BLOCK'

@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Removed
+
+- **video-cut 旧版单阶段旁白映射路径。** `cut.py` 不再读取 `narration.json`、不再把原片时间的旁白映射为 `narration_mapped.json`，`--narration` / `--no-narration-map` / `--allow-sparse-cut` 参数随之删除；`recap.py --allow-sparse-cut` 同步移除。唯一支持的 cut 流程是先剪后配：Agent 对着 `edited_source.mp4` 按输出时间线写 `narration.json`。
+
 ### Added
 
 - **video-cut `clip_plan.required_evidence`。** Agent 声明必保源片刻（节点、来源、原片秒、轨道、先后关系），工具在句界/画面吸附之后、渲染之前核对；缺段、错序或无效声明写入 `clip_plan_validated.json.qc.required_evidence` 并阻断，缓存复用同样重检。

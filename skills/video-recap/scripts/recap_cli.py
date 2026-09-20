@@ -72,11 +72,6 @@ def parse_args(argv=None):
         action="store_true",
         help="cut mode: accept clip duration drift from --target-duration (primary override)",
     )
-    parser.add_argument(
-        "--allow-sparse-cut",
-        action="store_true",
-        help="compatibility: accept sparse cut mapping and legacy duration drift override",
-    )
     parser.add_argument("--skip-asr", action="store_true")
     parser.add_argument("--mimo-video-overview", action="store_true")
     parser.add_argument(

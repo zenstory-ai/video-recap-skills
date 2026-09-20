@@ -5,7 +5,7 @@ description: >
  把带时间戳的 narration.json 合成为中文解说音频。使用 MiMo TTS（mimo-v2.5-tts）或
  Fish Audio（s2.1-pro-free）或显式配置的通用 IndexTTS HTTP 服务逐段生成语音，
  按时间窗动态适配语速并处理响度；输入输出时间线上的旁白，产出 tts_segments 与 tts_meta.json。
- 旧版直接剪辑路径也可显式传入 narration_mapped.json。触发词：配音、语音合成、TTS、解说配音、
+ 触发词：配音、语音合成、TTS、解说配音、
  voiceover、text to speech、旁白配音。
 ---
 
@@ -39,8 +39,7 @@ export INDEX_TTS_CACHE_REVISION=<operator-deployment-revision>  # 可选
 默认输入为 `work_dir/narration.json`。每段必须包含 `start`、`end` 与 `narration`，可选字段包括
 `pause_after_ms` 和 `overlaps_speech`。时间统一表示音频最终放置的**输出时间线秒数**。
 
-编排式 cut 流程直接使用输出时间的 `narration.json`。只有旧版直接剪辑路径需要显式传入
-`narration_mapped.json`。
+cut 流程先剪后配：`narration.json` 本身就是按剪后成片的输出时间写的，不存在另一份映射稿。
 
 ## 4. 运行命令
 
@@ -51,12 +50,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
   [--preserve-approved-text]
 ```
 
-单独运行且省略 `--narration` 时，默认读取 `work_dir/narration.json`。旧版路径如需映射后的稿件，必须显式传入：
-
-```bash
-python3 scripts/voiceover.py --work-dir <work_dir> \
-  --narration <work_dir/narration_mapped.json>
-```
+单独运行且省略 `--narration` 时，默认读取 `work_dir/narration.json`；`--narration` 只用于指定其他路径的同格式稿件。
 
 ## 5. 输出契约
 

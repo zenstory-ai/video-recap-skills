@@ -704,18 +704,13 @@ def test_tts_cache_key_changes_with_emotion():
 
 
 
-def test_voiceover_cli_defaults_to_narration_json_even_when_stale_mapped_exists(monkeypatch, tmp_path):
-    """Direct voiceover runs must not let a stale legacy narration_mapped.json override
-    the canonical output-time narration.json. Legacy mapped narration remains available
-    only when passed explicitly via --narration."""
+def test_voiceover_cli_defaults_to_work_dir_narration_json(monkeypatch, tmp_path):
+    """Without --narration, voiceover reads <work-dir>/narration.json as-is (it is already
+    on the output timeline in cut mode; no remapped variant exists)."""
     import json
 
     (tmp_path / "narration.json").write_text(
         json.dumps([{"start": 0.0, "end": 1.0, "narration": "current output。"}]),
-        encoding="utf-8",
-    )
-    (tmp_path / "narration_mapped.json").write_text(
-        json.dumps([{"start": 0.0, "end": 1.0, "narration": "stale mapped。"}]),
         encoding="utf-8",
     )
     seen = {}
@@ -739,43 +734,6 @@ def test_voiceover_cli_defaults_to_narration_json_even_when_stale_mapped_exists(
     meta = json.loads((tmp_path / "tts_meta.json").read_text(encoding="utf-8"))
     assert seen["narration"][0]["narration"] == "current output。"
     assert meta["narration"] == "narration.json"
-
-
-def test_voiceover_cli_still_allows_explicit_legacy_mapped_narration(monkeypatch, tmp_path):
-    import json
-
-    mapped = tmp_path / "narration_mapped.json"
-    (tmp_path / "narration.json").write_text(
-        json.dumps([{"start": 0.0, "end": 1.0, "narration": "current output。"}]),
-        encoding="utf-8",
-    )
-    mapped.write_text(
-        json.dumps([{"start": 0.0, "end": 1.0, "narration": "explicit mapped。"}]),
-        encoding="utf-8",
-    )
-    seen = {}
-
-    def fake_synthesize(narration, work_dir):
-        seen["narration"] = narration
-        return ([{
-            "index": 0,
-            "start": narration[0]["start"],
-            "end": narration[0]["end"],
-            "narration": narration[0]["narration"],
-            "audio_path": str(Path(work_dir) / "tts_segments" / "narr_000.wav"),
-            "audio_duration": 0.5,
-        }], "mimo-tts", [])
-
-    monkeypatch.setattr("voiceover.synthesize_tts", fake_synthesize)
-    monkeypatch.setattr(sys, "argv", [
-        "voiceover.py", "--work-dir", str(tmp_path), "--narration", str(mapped),
-    ])
-
-    voiceover.main()
-
-    meta = json.loads((tmp_path / "tts_meta.json").read_text(encoding="utf-8"))
-    assert seen["narration"][0]["narration"] == "explicit mapped。"
-    assert meta["narration"] == "narration_mapped.json"
 
 
 def test_voiceover_cli_accepts_allow_partial_tts(monkeypatch, tmp_path):

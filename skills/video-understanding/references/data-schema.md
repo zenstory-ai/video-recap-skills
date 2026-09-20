@@ -145,7 +145,7 @@ brief 会校验 sidecar 并打印当前状态和 sidecar 指纹，缺失或绑�
 
 ## narration.json
 
-Agent 撰写的解说词。full 模式下使用原视频时间；**两阶段 cut 编排流程**在第二次暂停前已经剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长），不会再生成或消费 `narration_mapped.json`。只有旧版直接单阶段剪辑路径才会把原视频时间的 narration remap 成 `narration_mapped.json`：
+Agent 撰写的解说词。full 模式下使用原视频时间；**两阶段 cut 编排流程**在第二次暂停前已经剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）；不存在原视频时间→输出时间的旁白映射产物：
 
 ```json
 [
@@ -297,23 +297,6 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
   "total_duration": 26.0,
   "target_duration": 600.0
 }
-```
-
-## narration_mapped.json
-
-仅旧版直接单阶段剪辑路径会生成。两阶段 cut 编排流程不使用它：Agent 在第二阶段直接按剪后成片 OUTPUT 时间轴写 `narration.json`。启用旧版路径时，`start/end` 已变成短视频输出时间，`source_start/source_end` 保留原视频时间：
-
-```json
-[
-  {
-    "start": 2.0,
-    "end": 7.0,
-    "source_start": 14.0,
-    "source_end": 19.0,
-    "source_clip_id": 0,
-    "narration": "解说文本"
-  }
-]
 ```
 
 ## background_research.json
