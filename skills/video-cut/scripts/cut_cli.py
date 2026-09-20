@@ -1,11 +1,13 @@
 """Command-line orchestration for the video-cut skill."""
 
 import json
+import math
 
 
 from pathlib import Path
 
 from lib import CONFIG, get_video_duration, log
+import shot_review
 
 from cut_contract import (
     _write_edited_source_meta,
@@ -90,6 +92,18 @@ def main():
         "lets validate lint the SAME padded/pruned plan the mapper uses",
     )
     parser.add_argument(
+        "--review-shots", action="store_true",
+        help="scan actual rendered/reused video for internal short-shot and dense-cut candidates; never repair",
+    )
+    parser.add_argument(
+        "--shot-scene-threshold", type=float, default=None,
+        help="explicit scene recall threshold for --review-shots (default 0.35; not an acceptance criterion)",
+    )
+    parser.add_argument(
+        "--shot-roi", nargs=4, type=int, metavar=("X", "Y", "WIDTH", "HEIGHT"),
+        help="scan only this pixel rectangle with --review-shots; never crop the rendered video",
+    )
+    parser.add_argument(
         "--no-narration-map",
         action="store_true",
         help="render edited_source.mp4 but do NOT map narration.json onto the cut "
@@ -106,6 +120,15 @@ def main():
         help="do not block when validated clip duration is far from --target-duration",
     )
     args = parser.parse_args()
+    if args.shot_scene_threshold is not None and (
+        not args.review_shots or not math.isfinite(args.shot_scene_threshold)
+        or not 0 <= args.shot_scene_threshold <= 1
+    ):
+        parser.error("--shot-scene-threshold requires --review-shots and a finite value in [0,1]")
+    if args.shot_roi is not None and (
+        not args.review_shots or min(args.shot_roi[:2]) < 0 or min(args.shot_roi[2:]) <= 0
+    ):
+        parser.error("--shot-roi requires --review-shots, nonnegative X/Y and positive WIDTH/HEIGHT")
 
     # CLIP_PADDING is declared in every skill's CONFIG, but video-cut is the only place that
     # implements padding — and it used to read the CLI flag alone, so setting the env var did
@@ -275,6 +298,17 @@ def main():
         )
         (work_dir / "clip_plan_validated.json").write_text(
             json.dumps(validated_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    if args.review_shots:
+        review_options = {"plan_path": work_dir / "clip_plan_validated.json"}
+        if args.shot_scene_threshold is not None:
+            review_options["threshold"] = args.shot_scene_threshold
+        if args.shot_roi is not None:
+            review_options["roi"] = args.shot_roi
+        shot_review.write_scan(
+            edited_source_path, work_dir / "shot_review.json",
+            **review_options,
         )
 
     narration_path = (
