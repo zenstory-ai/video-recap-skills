@@ -12,6 +12,7 @@ from audio_mix import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitle_core import _subtitle_style_config
+from narration_binding import binding_fingerprint
 
 AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
 
@@ -74,11 +75,19 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
         },
     }
     if audio_mode == "narration":
+        narration_binding = binding_fingerprint(work_dir) if work_dir else None
+        fingerprint["narration_input_binding"] = narration_binding
+        adopted_tempo = (
+            narration_binding.get("tempo_policy") if narration_binding else None
+        )
         fingerprint["narration_timing"] = {
             "delay_seconds": CONFIG["narration_delay_seconds"],
             "tail_pad_seconds": CONFIG["narration_tail_pad_seconds"],
             "fade_ms": CONFIG["fade_ms"],
-            "narration_speed": CONFIG["narration_speed"],
+            "narration_speed": (
+                adopted_tempo["global_atempo"] if adopted_tempo else CONFIG["narration_speed"]
+            ),
+            "tempo_source": "adoption" if adopted_tempo else "configuration",
             "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
             "tts_segment_tempo_max": CONFIG["tts_segment_tempo_max"],
         }

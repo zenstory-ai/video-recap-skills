@@ -24,6 +24,7 @@ All notable changes to this project are documented here.
 - **独立字幕轨。** `subtitle_track.json` 以整数 tick 绑定当前音画（仅 `adopted-packet-copy` 模式），标注估计 / 校准 / 强对齐精度，渲染前核对陈旧轨与不可显示短 cue；投影到 ASS 厘秒时保证在同一帧翻转，`assembly_manifest.json` 只引用当前绑定的轨。
 - **前景合成。** `compose_foreground.py` 把调用方渲染好的 RGBA PNG 序列（可选片尾卡）叠加到锁定母版，音频按包复制并逐包核对不变，输出帧钟与解码元数据核对后才写入新目录。
 - **声音路径显式化（recap）。** `recap.py --audio-mode {narration,source-mix,adopted-packet-copy}` 把声音策略与 `--edit-mode` 解耦：`source-mix` / `adopted-packet-copy` 不跑校验、评审和 TTS，full 直接合成，cut 剪完不再等 `narration.json`；运行清单记录音频策略，错配或含未绑定 `narration.json` 的 work-dir 被拒绝，续跑命令保留选择。
+- **配音采用绑定（assemble）。** `--tts-meta` + `--narration-adoption` 把已采用的文字、处理后 WAV 指纹、请求的引擎/声线与速度策略绑定到实际混音：输入快照、派生 WAV 封存、隐藏候选渲染后经 QC 再与 `narration_input_binding.json` 一起发布或一起放弃；采用的速度策略按形状与范围校验，不再只接受全 1.0；旧入口保持兼容并标记为未核验。
 
 ### Changed
 

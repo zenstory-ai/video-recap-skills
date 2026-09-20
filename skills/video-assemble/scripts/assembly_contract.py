@@ -29,7 +29,8 @@ _AUDIO_QC_CODES = frozenset({
 
 def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                                tts_meta_path=None, final_output=None, *, settings_fingerprint,
-                               audio_mode="narration", audio_stream_index=0):
+                               audio_mode="narration", audio_stream_index=0,
+                               narration_input_binding=None):
     """Slim render record. The orchestrator reads `final_output` to report the result;
     `source_video` stays None unless cut mode explicitly passed --source-video, proving a
     stale ambient SOURCE_VIDEO never leaked into a full-mode timeline / 剪映 export."""
@@ -65,6 +66,7 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
         "qc_loudnorm_measurement": qc.get("loudnorm_measurement"),
         "audio_operations": qc.get("audio_operations", {}),
         "adopted_audio": qc.get("adopted_audio"),
+        "narration_input_binding": narration_input_binding,
         "audio_segments": [
             {
                 "index": seg["index"],
@@ -176,7 +178,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
                        source_has_audio=None, loudness_mode=None, loudnorm_measurement=None,
                        visual_qc=None, render_delivery=None, audio_mode="narration",
                        audio_operations=None, adopted_audio=None,
-                       source_audio_status=None):
+                       narration_input_binding=None, source_audio_status=None):
     """Machine-readable assembly release gate.
 
     Visual facts are rolled up from visual_qc.json. Delivery/render facts live here
@@ -265,6 +267,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
         "audio_mode": audio_mode,
         "audio_operations": audio_operations or {},
         "adopted_audio": adopted_audio,
+        "narration_input_binding": narration_input_binding,
         "source_audio": source_audio,
         "loudness_mode": loudness_mode or _loudness_mode(loudnorm_measurement),
         "loudnorm_measurement": loudnorm_measurement,
