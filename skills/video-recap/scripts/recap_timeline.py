@@ -23,6 +23,7 @@ PHASE_LEDGER = "recap_phase.json"
 CUT_TIMELINE_CRAFT_BULLETS = [
     "- 片段顺序必须服务同一条故事主线，而不是无序高光；可使用 0–1 个 cold open，随后回到 setup → turn → escalation → payoff。",
     "- 每个片段必须对应 `recap_story_plan.json` 中的一个 change-based beat；删除后不损失因果、人物或情绪的片段通常不保留。",
+    "- 已从源证据确认的必保问答、反应或兑现段，写入同一 `clip_plan.json.required_evidence`（nodes登记id/source绝对路径/start/end原片秒/track/content，before登记必要先后）；只锁具体区间，不锁整个beat。剪点吸附后工具会核验，reason或花字不能代替缺失的源段。",
     "- `reason` 统一写成 `beat_id | function | change | POV | preferred moment | 入点 | 出点`，不能只写 hook、重要剧情或事件摘要。",
     "- 优先保留因果、揭示、决定、关系移动、情绪转向与不可替代的表演/反应；跳过片尾、广告、重复静态画面和水印废片段。",
     "- 片段追求最短但完整：建立镜头可以短，关键表演/反应允许多停一点；在完整台词、完整动作或自然声音边界结束，避免原声从半句中切入或切出。",

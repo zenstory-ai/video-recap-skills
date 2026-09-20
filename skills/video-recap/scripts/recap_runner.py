@@ -357,7 +357,7 @@ def main():
     )
     if explicit_mimo_voice and args.voice_ref:
         ap.error("--mimo-tts-voice and --voice-ref are mutually exclusive")
-    if args.tts_provider == "fish-audio" and (explicit_mimo_voice or args.voice_ref):
+    if args.tts_provider in {"fish-audio", "index-tts"} and (explicit_mimo_voice or args.voice_ref):
         ap.error(
             "--mimo-tts-voice/--voice-ref are only supported by --tts-provider mimo-tts"
         )
@@ -365,9 +365,9 @@ def main():
         ap.error(
             "--voice-ref is only supported in full/cut modes; dub clones the source voice automatically"
         )
-    if args.edit_mode == "dub" and args.tts_provider == "fish-audio":
+    if args.edit_mode == "dub" and args.tts_provider in {"fish-audio", "index-tts"}:
         ap.error(
-            "--tts-provider fish-audio is only supported in full/cut modes; "
+            f"--tts-provider {args.tts_provider} is only supported in full/cut modes; "
             "dub uses MiMo voice cloning"
         )
     if args.edit_mode == "dub" and args.subtitle_y_top is not None:

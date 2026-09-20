@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Lock
 
 from fish_audio import synthesize_fish_audio
+import index_tts as index_provider
 from lib import (
     CONFIG,
     _text_char_count,
@@ -27,7 +28,7 @@ from lib import (
 # Re-exported: tests and callers reach these through voiceover, the module owns the flow.
 from tts_audio import _maybe_normalize_tts_wav, _normalize_tts_wav_rms  # noqa: F401
 
-SUPPORTED_TTS_ENGINES = {"mimo-tts", "fish-audio"}
+SUPPORTED_TTS_ENGINES = {"mimo-tts", "fish-audio", "index-tts"}
 SEGMENT_AUDIO_SCHEMA_VERSION = 1
 TTS_CACHE_VERSION = 2
 VOICE_REFERENCE_PREP_VERSION = 1
@@ -109,11 +110,13 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine):
     if prepared is None:
         return None
     text, output_wav, rate, pitch, cache_key = prepared
-    cached = _reuse_tts_segment_cache(i, seg, output_wav, cache_key)
+    cached = _reuse_tts_segment_cache(i, seg, output_wav, cache_key, engine)
     if cached:
         return cached
 
-    _run_tts_engine(engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"))
+    provider_receipt = _run_tts_engine(
+        engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion")
+    )
 
     dur = get_video_duration(output_wav)
     seg_slot = seg["end"] - seg["start"]
@@ -133,20 +136,26 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine):
             text = shortened
             truncated = True
             truncate_reason = "sentence_boundary"
-            _run_tts_engine(engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"))
+            provider_receipt = _run_tts_engine(
+                engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion")
+            )
             dur = get_video_duration(output_wav)
 
     norm_meta = _maybe_normalize_tts_wav(output_wav)
     if norm_meta:
         dur = get_video_duration(output_wav)
+    processed_hash = file_fingerprint(output_wav)
+    provider_receipt = index_provider.finalize_receipt(provider_receipt, processed_hash)
     _write_tts_segment_cache(output_wav, cache_key, text, dur, rate_offset,
-                             truncated, truncate_reason, norm_meta)
+                             truncated, truncate_reason, norm_meta, provider_receipt)
     return _build_tts_segment_result(
-        i, seg, text, output_wav, dur, rate_offset, truncated, truncate_reason, norm_meta)
+        i, seg, text, output_wav, dur, rate_offset, truncated, truncate_reason, norm_meta,
+        provider_receipt, processed_hash)
 
 
 def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offset,
-                              truncated=False, truncate_reason="none", norm_meta=None):
+                              truncated=False, truncate_reason="none", norm_meta=None,
+                              provider_receipt=None, processed_wav_sha256=None):
     budget = narration_tempo_budget(rate_offset)
     authored_text = _clean_narration_text(seg["narration"])
     resolved_truncated = truncated or text != authored_text
@@ -174,6 +183,8 @@ def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offse
         "tts_rate_offset": rate_offset,
         "pause_after_ms": seg.get("pause_after_ms", CONFIG["breath_ms"]),
         "overlaps_speech": seg.get("overlaps_speech", True),
+        "provider_receipt": provider_receipt,
+        "processed_wav_sha256": processed_wav_sha256,
     }
     for optional_key in ("source_start", "source_end", "source_clip_id", "emotion"):
         if optional_key in seg:
@@ -218,12 +229,11 @@ def synthesize_tts(narration, work_dir):
 
     if not narration:
         raise RuntimeError("narration.json 没有可配音的解说段，已中止以避免生成无解说视频")
-
     cache_engine = _configured_tts_engine_for_cache()
-    if cache_engine == "fish-audio" and voice_ref:
-        raise RuntimeError(
-            "Fish Audio 不接受本地 VOICE_REF/--voice-ref；请改用 FISH_TTS_REFERENCE_ID"
-        )
+    if cache_engine in {"fish-audio", "index-tts"} and voice_ref:
+        if cache_engine == "fish-audio":
+            raise RuntimeError("Fish Audio 不接受本地 VOICE_REF/--voice-ref；请改用 FISH_TTS_REFERENCE_ID")
+        raise RuntimeError("index-tts 不支持本地 VOICE_REF/--voice-ref 克隆")
     # A fully cached narration needs no credential: probe every segment's sidecar first.
     cached_segments = []
     needs_fresh = False
@@ -233,7 +243,7 @@ def synthesize_tts(narration, work_dir):
         if prepared is None:
             continue
         prepared_count += 1
-        cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4])
+        cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], cache_engine)
         if not cached:
             needs_fresh = True
             break
@@ -299,20 +309,25 @@ def synthesize_tts(narration, work_dir):
 def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=None):
     """Run one TTS engine with retry and remove partial files after failures."""
     if engine not in SUPPORTED_TTS_ENGINES:
-        raise RuntimeError(f"不支持的 TTS 引擎: {engine}。当前支持 mimo-tts、fish-audio。")
+        raise RuntimeError(f"不支持的 TTS 引擎: {engine}。支持 mimo-tts、fish-audio、index-tts。")
+    if engine == "index-tts":
+        index_provider.validate_controls(rate, pitch, emotion)
     retries = CONFIG["tts_retries"]
     last_error = None
 
     for attempt in range(1, retries + 1):
         try:
             _cleanup_partial_tts_outputs(output_wav)
+            receipt = None
             if engine == "mimo-tts":
                 _tts_mimo(text, output_wav, rate=rate, pitch=pitch, emotion=emotion)
-            else:
+            elif engine == "fish-audio":
                 synthesize_fish_audio(text, output_wav, rate=rate)
+            else:
+                receipt = index_provider.synthesize_configured(text, output_wav, CONFIG)
             if get_video_duration(output_wav) <= 0:
                 raise RuntimeError(f"{engine} 输出音频时长无效")
-            return
+            return receipt
         except Exception as exc:
             last_error = exc
             _cleanup_partial_tts_outputs(output_wav)
@@ -345,7 +360,9 @@ def _prepare_tts_segment(index, seg, narration, tts_dir, engine):
     if not text:
         return None
     output_wav = tts_dir / f"narr_{index:03d}.wav"
-    if CONFIG["tts_dynamic_params"]:
+    if engine == "index-tts":
+        rate, pitch = index_provider.default_controls(seg)
+    elif CONFIG["tts_dynamic_params"]:
         rate, pitch = _compute_tts_params(text, narration, index)
     else:
         rate, pitch = "+0%", "+0Hz"
@@ -353,9 +370,11 @@ def _prepare_tts_segment(index, seg, narration, tts_dir, engine):
     return text, output_wav, rate, pitch, cache_key
 
 
-def _reuse_tts_segment_cache(index, seg, output_wav, cache_key):
+def _reuse_tts_segment_cache(index, seg, output_wav, cache_key, engine):
     cached = _load_tts_segment_cache(output_wav, cache_key)
     if cached is None:
+        return None
+    if engine == "index-tts" and not index_provider.valid_cached_receipt(cached, CONFIG):
         return None
     # The sidecar's audio_fingerprint already proved these exact bytes are what produced
     # `audio_duration`; re-probing would be one ffprobe process per segment on every rerun.
@@ -370,6 +389,8 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_key):
         cached["truncated"],
         cached["truncate_reason"],
         cached["normalization"],
+        cached.get("provider_receipt"),
+        cached.get("processed_wav_sha256"),
     )
 
 
@@ -416,7 +437,8 @@ def _load_tts_segment_cache(output_wav, cache_key):
 
 
 def _write_tts_segment_cache(output_wav, cache_key, spoken_text, duration, rate_offset,
-                             truncated=False, truncate_reason="none", norm_meta=None):
+                             truncated=False, truncate_reason="none", norm_meta=None,
+                             provider_receipt=None):
     """Persist non-secret provenance for safe per-segment TTS reuse."""
     _tts_segment_cache_path(output_wav).write_text(
         json.dumps({
@@ -429,6 +451,8 @@ def _write_tts_segment_cache(output_wav, cache_key, spoken_text, duration, rate_
             "truncated": truncated,
             "truncate_reason": truncate_reason if truncated else "none",
             "normalization": norm_meta or None,
+            "provider_receipt": provider_receipt,
+            "processed_wav_sha256": file_fingerprint(output_wav),
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
@@ -441,9 +465,12 @@ def _configured_tts_engine_for_cache():
         if CONFIG["mimo_tts_api_key"] or not CONFIG["fish_api_key"]:
             return "mimo-tts"
         return "fish-audio"
+    if provider == "index-tts":
+        index_provider.configured_values(CONFIG)
+        return provider
     if provider not in SUPPORTED_TTS_ENGINES:
         raise RuntimeError(
-            "TTS_PROVIDER/--tts-provider 必须是 auto、mimo-tts 或 fish-audio"
+            "TTS_PROVIDER/--tts-provider 必须是 auto、mimo-tts、fish-audio 或 index-tts"
         )
     return provider
 
@@ -451,6 +478,8 @@ def _configured_tts_engine_for_cache():
 def resolve_tts_engine():
     """Resolve the selected MiMo or Fish Audio TTS engine and require its credential."""
     engine = _configured_tts_engine_for_cache()
+    if engine == "index-tts":
+        return engine
     if engine == "fish-audio":
         if CONFIG["fish_api_key"]:
             return engine
@@ -475,7 +504,9 @@ def tts_settings_fingerprint(engine):
         "tts_segment_target_rms_dbfs": CONFIG["tts_segment_target_rms_dbfs"],
         "tts_segment_peak_limit": CONFIG["tts_segment_peak_limit"],
     }
-    if engine == "fish-audio":
+    if engine == "index-tts":
+        settings.update(index_provider.cache_settings(CONFIG))
+    elif engine == "fish-audio":
         settings.update(
             {
                 "fish_tts_api_url": CONFIG["fish_tts_api_url"],
@@ -645,7 +676,7 @@ def main():
     ap.add_argument(
         "--tts-provider",
         default=os.environ.get("TTS_PROVIDER", "auto"),
-        choices=["auto", "mimo-tts", "fish-audio"],
+        choices=["auto", "mimo-tts", "fish-audio", "index-tts"],
         help="TTS provider (default: MiMo when configured, otherwise Fish Audio)",
     )
     ap.add_argument("--voice-ref", default=None,
@@ -655,6 +686,7 @@ def main():
     args = ap.parse_args()
     work_dir = Path(args.work_dir)
     CONFIG["tts_provider"] = args.tts_provider
+    index_provider.load_private_config(CONFIG, os.environ)
     CONFIG["voice_ref"] = (
         args.voice_ref if args.voice_ref is not None else os.environ.get("VOICE_REF", "").strip()
     )
@@ -664,6 +696,10 @@ def main():
         ap.error("--mimo-voice and --voice-ref are mutually exclusive")
     if args.tts_provider == "fish-audio" and (args.mimo_voice or CONFIG["voice_ref"]):
         ap.error("--mimo-voice/--voice-ref are only supported by the MiMo TTS provider")
+    try:
+        index_provider.validate_cli_options(args.tts_provider, args.mimo_voice, CONFIG["voice_ref"])
+    except ValueError as exc:
+        ap.error(str(exc))
     # Voice-reference normalization is intentionally lazy: a fully cached rerun should not
     # invoke ffmpeg. _tts_mimo uses a process-wide lock so a fresh parallel run still converts
     # the reference exactly once.
