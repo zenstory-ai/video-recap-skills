@@ -20,6 +20,7 @@ All notable changes to this project are documented here.
 - **自托管 TTS 端点。** `--tts-provider index-tts` 通过 `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 接入 index-tts 协议的 JSON→WAV 服务；端点只以 sha256 落盘，拒绝带凭证的 URL 与重定向，`doctor` 离线校验配置而不探测连通性。每段 TTS 缓存与结果记录 provider receipt 与处理后 WAV 的 sha256。
 - **最终 QC 可选阻断。** `--require-final-qc` 开启后，`final_qc.json` 与 `golden_eval.json` 摘要必须均为 `ok: true` 且 `blocker_count: 0`，否则不打印完成、非零退出；续跑命令保留该选项，不影响缓存指纹；不支持 dub 模式。
 - **声音路径显式化（assemble）。** `assemble.py --audio-mode {narration,source-mix,adopted-packet-copy}` 与 `--audio-stream-index`：`source-mix` 不读 `tts_meta.json`、只对所选原声流做音量/BGM/响度处理；`adopted-packet-copy` 复用已采用的完整混音并按 AAC 包逐包比对，不重编码、不裁尾。`assembly_qc.json` / `assembly_manifest.json` 记录 `audio_mode` 与实际执行的音频操作；`pair_media.py` 可把独立画面与已采用音轨按流复制配对并证明包身份。
+- **批准稿保护。** `--preserve-approved-text` 贯穿 full / 单源 cut / 多源 cut 的校验器再到 TTS：文本装不下窗口时列出具体段落与时长，不自动缩稿、不静默变速；失败不沿用旧的 `tts_meta.json`，成功元数据原子写入。
 - **独立字幕轨。** `subtitle_track.json` 以整数 tick 绑定当前音画（仅 `adopted-packet-copy` 模式），标注估计 / 校准 / 强对齐精度，渲染前核对陈旧轨与不可显示短 cue；投影到 ASS 厘秒时保证在同一帧翻转，`assembly_manifest.json` 只引用当前绑定的轨。
 
 ### Changed
@@ -29,6 +30,7 @@ All notable changes to this project are documented here.
 - 剪辑手法与审稿提示补充：保住动机与接受条件、反打是否新增信息、跨场镜头不得拼成虚假因果、只写证据已呈现的结果、REVISION 只提可定位的局部修法；brief 不再把 ASR 行尾当作安全剪点，改为听审后再定。
 - **`recap.py` 关闭 argparse 前缀缩写**（`allow_abbrev=False`），显式选项由 parser 记录到 `args._explicit_options`，后续守卫不再靠扫描 `sys.argv`。
 - **理解缓存不再把全空转写当作有效命中**（`EMPTY_UNKNOWN` 与 `UNAVAILABLE_NO_DURATION` 同样视为 MISS）；没有 sidecar 的旧缓存以 `LEGACY_UNVERIFIED` 复用。ASR 音频提取或 provider 失败时清理陈旧的 `audio.wav` 与 `asr_result.json`，时长改从提取后的 `audio.wav` 读取。
+- **批准稿结构校验拒绝 `end <= start`**、乱序与空文本，结构错误以清晰的 `SystemExit` 报出并写入 `narration_lint.json`；cut_output 模式下 `--output-duration` 缺失或越界同样记录到 lint 文件，不再留下过期的 PASS。
 
 ### Fixed
 
