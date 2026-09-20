@@ -9,8 +9,10 @@ import assemble_constants as constants
 import assembly_contract
 import assembly_settings
 import audio_mix
+import frozen_audio
 import media
 import narration_audio
+import pair_media
 import render_preflight
 import subtitle_render
 import timeline_emit
@@ -27,28 +29,68 @@ __all__ = [
 ]
 
 
-def assemble_video(input_video, tts_segments, work_dir, output_path):
-    """组装最终视频"""
-    if not tts_segments:
-        raise RuntimeError("tts_meta.json 没有有效解说音频，已中止以避免生成无解说视频")
+AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
 
+
+def assemble_video(input_video, tts_segments, work_dir, output_path, *,
+                   audio_mode="narration", audio_stream_index=0):
+    """组装最终视频"""
+    if audio_mode not in AUDIO_MODES:
+        raise RuntimeError(f"不支持的 audio_mode: {audio_mode}")
+    if isinstance(audio_stream_index, bool) or not isinstance(audio_stream_index, int) or audio_stream_index < 0:
+        raise RuntimeError("audio_stream_index 必须是非负整数")
+    if audio_mode == "narration" and not tts_segments:
+        raise RuntimeError("tts_meta.json 没有有效解说音频，已中止以避免生成无解说视频")
+    if audio_mode == "narration" and audio_stream_index != 0:
+        raise RuntimeError("narration 当前不支持非零 audio_stream_index")
+    if audio_mode == "source-mix" and tts_segments:
+        raise RuntimeError("source-mix 与 TTS 解说不兼容")
+    bgm_path = lib.CONFIG["bgm_path"]
+    has_bgm = bool(bgm_path) and os.path.exists(bgm_path)
+    if audio_mode == "source-mix" and bgm_path and not has_bgm:
+        raise RuntimeError(f"source-mix 声明的 BGM 文件不存在: {bgm_path}")
+    if (
+        audio_mode != "narration"
+        and audio_stream_index != 0
+        and lib.CONFIG["export_jianying"]
+    ):
+        raise RuntimeError("剪映导出当前不支持选择非零音频流")
+    if audio_mode == "adopted-packet-copy":
+        if tts_segments:
+            raise RuntimeError("adopted-packet-copy 与 TTS 解说不兼容")
+        if bgm_path:
+            raise RuntimeError("adopted-packet-copy 与 BGM 混音不兼容")
+
+    output_path = Path(output_path)
     video_duration = lib.get_video_duration(input_video)
     canvas = media._probe_canvas(input_video)  # drives subtitle PlayRes/scale so 竖屏 text isn't stretched
     burn_subtitles = lib.CONFIG["burn_subtitles"]
+    adopted_source_audio = None
+    if audio_mode == "adopted-packet-copy":
+        adopted_source_audio = frozen_audio.validate_adopted_source(
+            input_video, audio_stream_index
+        )
+        if type(adopted_source_audio["sample_rate"]) is not int \
+                or adopted_source_audio["sample_rate"] <= 0:
+            raise RuntimeError("adopted audio sample rate must be a positive integer")
+    elif audio_mode == "source-mix":
+        frozen_audio.probe_audio_packets(input_video, audio_stream_index)
 
     # 解说整体提速（可选）后，将所有 TTS 片段按时间位置合成到与视频等长的音轨上
-    narration_audio._apply_narration_speed(tts_segments, work_dir)
-    narration_wav = work_dir / "narration.wav"
-    narration_audio._build_timed_narration(tts_segments, narration_wav, video_duration, work_dir)
-    handoffs = audio_mix._apply_source_sentence_handoffs(tts_segments, work_dir, video_duration)
-    if handoffs:
-        lib.log(
-            "原声句末交接: "
-            + ", ".join(
-                f"{item['end']:.2f}s→{item.get('restore_at', item['end']):.2f}s({item['status']})"
-                for item in handoffs
+    narration_wav = None
+    if audio_mode == "narration":
+        narration_audio._apply_narration_speed(tts_segments, work_dir)
+        narration_wav = work_dir / "narration.wav"
+        narration_audio._build_timed_narration(tts_segments, narration_wav, video_duration, work_dir)
+        handoffs = audio_mix._apply_source_sentence_handoffs(tts_segments, work_dir, video_duration)
+        if handoffs:
+            lib.log(
+                "原声句末交接: "
+                + ", ".join(
+                    f"{item['end']:.2f}s→{item.get('restore_at', item['end']):.2f}s({item['status']})"
+                    for item in handoffs
+                )
             )
-        )
 
     # 始终生成 SRT 字幕文件（原声留白处补烧原声字幕，传入成片时长以计算留白区间）
     srt_path = subtitle_render._generate_srt(tts_segments, work_dir, video_duration)
@@ -59,15 +101,16 @@ def assemble_video(input_video, tts_segments, work_dir, output_path):
         lib.log(f"压制字幕文件: {ass_path}")
 
     # 可选 BGM：作为一条独立音轨（input [2:a]）混入，旁白处自动压低
-    bgm_path = lib.CONFIG["bgm_path"]
-    has_bgm = bool(bgm_path) and os.path.exists(bgm_path)
     if bgm_path and not has_bgm:
         lib.log(f"  ⚠️ BGM 文件不存在，跳过: {bgm_path}")
     elif has_bgm:
         lib.log(f"BGM 铺底: {bgm_path} (音量 {lib.CONFIG['bgm_volume']}，旁白时 {lib.CONFIG['bgm_ducking_volume']})")
 
     # 多轨时间线模型（timeline.json）：canonical 渲染仍是 ffmpeg，此模型供检视/可选导出
-    timeline_emit._emit_timeline(input_video, tts_segments, work_dir, video_duration, canvas, has_bgm)
+    timeline_emit._emit_timeline(
+        input_video, tts_segments, work_dir, video_duration, canvas, has_bgm,
+        audio_mode=audio_mode, selected_audio_stream=audio_stream_index,
+    )
 
     overlay_filters, overlay_qc = visual_render._visual_overlay_filters(work_dir, canvas, video_duration)
     mask_filter = visual_render._source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
@@ -86,65 +129,91 @@ def assemble_video(input_video, tts_segments, work_dir, output_path):
         codes = ", ".join(visual_qc["blocking_codes"])
         raise RuntimeError(f"视觉 QC 失败: {codes}；详见 {Path(work_dir) / constants.VISUAL_QC}")
 
-    # 混合原始音频 + 解说音频（+ 可选 BGM）
+    # Select exactly one of three explicit audio paths. Only narration may synthesize
+    # a missing original track; adopted copy never decodes, mixes, normalizes or trims.
     source_has_audio = media._has_audio_stream(input_video)
-    if source_has_audio:
-        original_audio_input = []
-        original_audio_label = "0:a"
-        bgm_audio_label = "2:a"
+    adopted_audio = None
+    loudnorm_measurement = None
+    original_audio_input = []
+    bgm_input = []
+    filter_complex = None
+    filter_args = []
+    audio_input_args = []
+    fc_script = None
+    if audio_mode == "adopted-packet-copy":
+        audio_map = f"0:a:{audio_stream_index}"
+    elif audio_mode == "source-mix":
+        audio_map = "[aoutln]"
+        source_label = f"0:a:{audio_stream_index}"
+        filter_complex = f"[{source_label}]volume={lib.CONFIG['idle_orig_volume']}[source]"
+        if has_bgm:
+            bgm_input = ["-stream_loop", "-1", "-i", str(bgm_path)]
+            filter_complex += (
+                f";[1:a]volume={lib.CONFIG['bgm_volume']}[bgm]"
+                ";[source][bgm]amix=inputs=2:duration=first:dropout_transition=0[aout]"
+            )
+        else:
+            filter_complex += ";[source]anull[aout]"
+        final_ln = audio_mix.final_loudnorm_filter()
+        filter_complex += f";[aout]{final_ln}[aoutln]"
+        lib.log(f"source-mix 音频处理: source volume + {final_ln}")
     else:
-        lib.log("源视频无音轨，使用静音原声音轨进行混音")
-        original_audio_input = [
-            "-f", "lavfi", "-t", str(video_duration),
-            "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-        ]
-        original_audio_label = "2:a"
-        bgm_audio_label = "3:a"
-    filter_complex = audio_mix._build_audio_filter_complex(
-        tts_segments,
-        has_bgm,
-        original_audio_label=original_audio_label,
-        bgm_audio_label=bgm_audio_label,
-    )
-
-    # BGM is input [2:a]; -stream_loop -1 loops it to cover the whole timeline (amix
-    # duration=first + -t trim it back to the video length).
-    bgm_input = ["-stream_loop", "-1", "-i", str(bgm_path)] if has_bgm else []
-
-    # 末端整体响度归一：ducking 只管相对平衡，这一步统一成片绝对响度
-    loudnorm_measurement = audio_mix._run_loudnorm_first_pass(
-        input_video,
-        narration_wav,
-        original_audio_input,
-        bgm_input,
-        filter_complex,
-        work_dir,
-    )
-    final_ln = audio_mix.final_loudnorm_filter(loudnorm_measurement)
-    filter_complex += f";[aout]{final_ln}[aoutln]"
-    lib.log(f"成片响度归一: {final_ln}")
+        # 混合原始音频 + 解说音频（+ 可选 BGM）
+        if source_has_audio:
+            original_audio_label = "0:a"
+            bgm_audio_label = "2:a"
+        else:
+            lib.log("源视频无音轨，使用静音原声音轨进行混音")
+            original_audio_input = [
+                "-f", "lavfi", "-t", str(video_duration),
+                "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
+            ]
+            original_audio_label = "2:a"
+            bgm_audio_label = "3:a"
+        filter_complex = audio_mix._build_audio_filter_complex(
+            tts_segments,
+            has_bgm,
+            original_audio_label=original_audio_label,
+            bgm_audio_label=bgm_audio_label,
+        )
+        # BGM is input [2:a]; -stream_loop -1 loops it to cover the whole timeline (amix
+        # duration=first + -t trim it back to the video length).
+        bgm_input = ["-stream_loop", "-1", "-i", str(bgm_path)] if has_bgm else []
+        # 末端整体响度归一：ducking 只管相对平衡，这一步统一成片绝对响度
+        loudnorm_measurement = audio_mix._run_loudnorm_first_pass(
+            input_video,
+            narration_wav,
+            original_audio_input,
+            bgm_input,
+            filter_complex,
+            work_dir,
+        )
+        final_ln = audio_mix.final_loudnorm_filter(loudnorm_measurement)
+        filter_complex += f";[aout]{final_ln}[aoutln]"
+        lib.log(f"成片响度归一: {final_ln}")
+        audio_map = "[aoutln]"
+        audio_input_args = ["-i", str(narration_wav), *original_audio_input]
 
     # 对于超长 volume 表达式（多段解说），使用 -filter_complex_script 避免命令行溢出
-    fc_script = None
-    if len(filter_complex.encode("utf-8")) > constants.FILTER_SCRIPT_THRESHOLD_BYTES:
-        fc_script = Path(work_dir) / ".filter_complex.txt"
-        fc_script.write_text(filter_complex, encoding="utf-8")
-        lib.log(f"使用 filter_complex_script (表达式长度 {len(filter_complex.encode('utf-8'))} bytes)")
-        filter_args = ["-filter_complex_script", str(fc_script)]
-    else:
-        filter_args = ["-filter_complex", filter_complex]
+    if filter_complex is not None:
+        if len(filter_complex.encode("utf-8")) > constants.FILTER_SCRIPT_THRESHOLD_BYTES:
+            fc_script = Path(work_dir) / ".filter_complex.txt"
+            fc_script.write_text(filter_complex, encoding="utf-8")
+            lib.log(f"使用 filter_complex_script (表达式长度 {len(filter_complex.encode('utf-8'))} bytes)")
+            filter_args = ["-filter_complex_script", str(fc_script)]
+        else:
+            filter_args = ["-filter_complex", filter_complex]
     cmd = [
         "ffmpeg", "-y",
         "-i", str(input_video),
-        "-i", str(narration_wav),
-        *original_audio_input,
+        *audio_input_args,
         *bgm_input,
         *filter_args,
         # 0:v:0 (not 0:v): sources with attached cover art carry a second video stream.
         # -vf only ever applies to the first one, so mapping all of them makes ffmpeg
         # abort with "Could not write header (incorrect codec parameters ?)" and leave
         # an unreadable file — after the whole pipeline has already run.
-        "-map", "0:v:0", "-map", "[aoutln]",
+        "-map", "0:v:0", "-map", audio_map,
     ]
 
     # Video filter chain: mask source subtitles first (drawbox), then burn our subtitles
@@ -199,8 +268,14 @@ def assemble_video(input_video, tts_segments, work_dir, output_path):
 
     # +faststart relocates the moov atom to the front so web/social players can start
     # before the full file downloads; valid (and beneficial) on the copy path too.
-    cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
-            "-t", str(video_duration), str(output_path)]
+    if audio_mode == "adopted-packet-copy":
+        # No -t/-shortest: either would discard valid AAC priming or tail packets.
+        cmd += ["-c:a", "copy", "-movie_timescale",
+                str(adopted_source_audio["sample_rate"]),
+                "-movflags", "+faststart", str(output_path)]
+    else:
+        cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
+                "-t", str(video_duration), str(output_path)]
     try:
         result = lib.run_cmd(cmd)
         if result.returncode != 0:
@@ -212,6 +287,28 @@ def assemble_video(input_video, tts_segments, work_dir, output_path):
         if video_filter_script is not None:
             video_filter_script.unlink(missing_ok=True)
 
+    if audio_mode == "adopted-packet-copy":
+        adopted_audio = frozen_audio.verify_adopted_audio(
+            input_video, output_path, audio_stream_index
+        )
+        try:
+            pair_media.validate_aac_packet_interval(adopted_audio["output"])
+        except ValueError:
+            output_path.unlink(missing_ok=True)
+            raise
+    audio_operations = {
+        "narration": audio_mode == "narration",
+        "source_mix": audio_mode == "source-mix",
+        "bgm_mix": has_bgm and audio_mode != "adopted-packet-copy",
+        "ducking": audio_mode == "narration",
+        "loudness_normalization": (
+            audio_mode != "adopted-packet-copy" and lib.CONFIG["final_loudnorm"]
+        ),
+        "limiter": audio_mode != "adopted-packet-copy",
+        "resample": audio_mode != "adopted-packet-copy",
+        "tempo": audio_mode == "narration",
+        "packet_copy": audio_mode == "adopted-packet-copy",
+    }
     lib.log(f"最终视频: {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f}MB)")
     assembly_contract._write_assembly_qc(
         work_dir,
@@ -220,13 +317,22 @@ def assemble_video(input_video, tts_segments, work_dir, output_path):
             video_duration,
             output_path=output_path,
             source_has_audio=source_has_audio,
+            loudness_mode="not_run" if audio_mode == "adopted-packet-copy" else None,
             loudnorm_measurement=loudnorm_measurement,
             visual_qc=visual_qc,
+            audio_mode=audio_mode,
+            audio_operations=audio_operations,
+            adopted_audio=adopted_audio,
             render_delivery={
                 "video_encode_passes": 1 if reencode else 0,
                 "reencode_reason": notes,
-                "audio_sample_rate": 48000,
-                "final_compat_notes": ["yuv420p"] if reencode else ["video_copy", "aac_48000", "faststart"],
+                "audio_sample_rate": (
+                    adopted_audio["output"]["sample_rate"] if adopted_audio else 48000
+                ),
+                "final_compat_notes": (
+                    (["yuv420p"] if reencode else ["video_copy"])
+                    + (["aac_packet_copy", "faststart"] if adopted_audio else ["aac_48000", "faststart"])
+                ),
             },
         ),
     )
@@ -241,6 +347,14 @@ def main():
     ap.add_argument("video", help="source video (edited_source.mp4 in cut mode, else the original)")
     ap.add_argument("--work-dir", required=True)
     ap.add_argument("--tts-meta", default=None, help="tts_meta.json (default: <work-dir>/tts_meta.json)")
+    ap.add_argument(
+        "--audio-mode", choices=AUDIO_MODES,
+        default="narration", help="audio path (default: narration)",
+    )
+    ap.add_argument(
+        "--audio-stream-index", type=int, default=0,
+        help="zero-based input audio stream ordinal for source/adopted modes",
+    )
     ap.add_argument("--recap-stem", default=None, help="final recap filename stem (default: video stem)")
     ap.add_argument("--output-dir", default=None)
     ap.add_argument("--burn-subtitles", action=argparse.BooleanOptionalAction, default=None,
@@ -296,10 +410,24 @@ def main():
     if args.jianying_no_bundle_media:
         lib.CONFIG["jianying_bundle_media"] = False
     render_preflight._preflight_burn_subtitles()  # fail before the render if burn-in is on but ffmpeg lacks libass
-    tts_meta = Path(args.tts_meta) if args.tts_meta else work_dir / "tts_meta.json"
-    tts_segments = json.loads(tts_meta.read_text(encoding="utf-8"))["segments"]
+    if args.audio_stream_index < 0:
+        ap.error("--audio-stream-index must be non-negative")
+    if args.audio_mode != "narration" and args.tts_meta is not None:
+        ap.error(f"--tts-meta is incompatible with --audio-mode {args.audio_mode}")
+    tts_meta = None
+    tts_segments = []
+    if args.audio_mode == "narration":
+        tts_meta = Path(args.tts_meta) if args.tts_meta else work_dir / "tts_meta.json"
+        tts_segments = json.loads(tts_meta.read_text(encoding="utf-8"))["segments"]
     output_path = work_dir / "output.mp4"
-    assemble_video(args.video, tts_segments, work_dir, output_path)
+    if args.audio_mode == "narration" and args.audio_stream_index == 0:
+        # Preserve the legacy CLI-to-API call shape for isolated skill consumers.
+        assemble_video(args.video, tts_segments, work_dir, output_path)
+    else:
+        assemble_video(
+            args.video, tts_segments, work_dir, output_path,
+            audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
+        )
     assembly_qc = artifacts._load_work_json(work_dir, constants.ASSEMBLY_QC)
     if assembly_qc["blocking"]:
         codes = ", ".join(assembly_qc["blocking_codes"])
@@ -314,6 +442,8 @@ def main():
         tts_meta_path=tts_meta,
         final_output=final_output,
         settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
+        audio_mode=args.audio_mode,
+        audio_stream_index=args.audio_stream_index,
     )
     assembly_contract._write_assembly_manifest(work_dir, manifest)
     lib.log(f"组装完成: {final_output}")
