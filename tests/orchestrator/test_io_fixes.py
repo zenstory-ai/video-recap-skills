@@ -1,67 +1,42 @@
-import sys
-import os
-import subprocess
-from argparse import Namespace
-from pathlib import Path
-import re
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
-)
 import json
-import pytest  # noqa: F401
+import os
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
 import doctor
-import recap_runner as recap
+import materials as material_lib
 import recap_review
+import recap_runner as recap
 import recap_runtime
 import recap_timeline
-import materials as material_lib
+from _helpers import (
+    manifest_args,
+    multi_cut_clip,
+    seed_cut_work,
+    seed_full_work,
+    seed_multi_work,
+    stub_child_run,
+    write_assemble_output,
+    write_cut_output,
+)
 
 
-def _manifest_args(**overrides):
-    defaults = {
-        "context": "",
-        "scene_threshold": None,
-        "style": "纪录片",
-        "edit_mode": "full",
-        "target_duration": None,
-        "skip_asr": False,
-        "mimo_video_overview": False,
-        "consolidate": False,
-        "consolidate_asr": False,
-        "review_narration": None,
-        "allow_duration_drift": False,
-        "mimo_qc": "off",
-        "mimo_qc_refresh": False,
-        "mimo_tts_voice": None,
-        "tts_provider": "auto",
-        "voice_ref": None,
-        "allow_partial_tts": False,
-        "preserve_approved_text": False,
-        "burn_subtitles": None,
-        "subtitle_y_top": None,
-        "subtitle_y_bot": None,
-        "output_dir": None,
-        "export_jianying": False,
-        "jianying_bundle_media": False,
-        "jianying_no_bundle_media": False,
-        "require_narration_review": False,
-        "material_library_dir": None,
-        "use_materials": False,
-        "save_materials": False,
-    }
-    defaults.update(overrides)
-    return Namespace(**defaults)
+def _argv(monkeypatch, *args):
+    monkeypatch.setattr(sys, "argv", ["recap_runner.py", *map(str, args)])
+
+
+def _call_args(calls, skill, script):
+    return next(call[2] for call in calls if call[:2] == (skill, script))
 
 
 def test_recap_preserve_approved_text_reaches_real_validator_before_voiceover(
     monkeypatch, tmp_path
 ):
-    """The orchestrator must protect approved prose before the TTS child consumes it."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
+    """The orchestrator protects approved prose before TTS; --no-review-narration skips review."""
     approved = [
         {
             "start": 0,
@@ -73,14 +48,7 @@ def test_recap_preserve_approved_text_reaches_real_validator_before_voiceover(
             "overlaps_speech": False,
         }
     ]
-    (work / "narration.json").write_text(
-        json.dumps(approved, ensure_ascii=False), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(
-        work,
-        video.resolve(),
-        _manifest_args(preserve_approved_text=True),
-    )
+    video, work = seed_full_work(tmp_path, approved, preserve_approved_text=True)
 
     class VoiceoverReached(Exception):
         pass
@@ -107,40 +75,17 @@ def test_recap_preserve_approved_text_reaches_real_validator_before_voiceover(
         raise AssertionError(f"unexpected child before voiceover: {skill}/{script}")
 
     monkeypatch.setattr("recap_runner._run", run_through_validation)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--preserve-approved-text",
-            "--no-review-narration",
-        ],
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--preserve-approved-text",
+        "--no-review-narration",
     )
 
     with pytest.raises(VoiceoverReached):
         recap.main()
-
-
-def _write_cut_output(work, clips=None, **qc_overrides):
-    clips = [] if clips is None else clips
-    qc = {
-        "status": "pass",
-        "target_duration_status": "within",
-        "total_duration": sum(float(clip.get("duration", 0)) for clip in clips),
-        "clip_count": len(clips),
-        "join_fade_ms": 20.0,
-        "output_geometry": {"width": 1920, "height": 1080, "fps": 30},
-        "output_geometry_reason": "used_sources",
-        "warnings": [],
-    }
-    qc.update(qc_overrides)
-    (work / "edited_source.mp4").write_bytes(b"edited")
-    (work / "clip_plan_validated.json").write_text(
-        json.dumps({"clips": clips, "qc": qc}), encoding="utf-8"
-    )
 
 
 def _write_stale_lint_pass(work):
@@ -168,44 +113,47 @@ def _assert_validation_replaced_stale_pass(work, expected_code):
     assert "stale" not in lint["metrics"]
 
 
-def test_recap_full_validate_failure_stops_before_review_tts_and_assemble(
-    monkeypatch, tmp_path
-):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": 7}]), encoding="utf-8"
-    )
-    _write_stale_lint_pass(work)
-    recap_runtime._write_run_manifest(
-        work,
-        video.resolve(),
-        _manifest_args(preserve_approved_text=True, review_narration=True),
-    )
-    calls = []
-
-    def run_real_validation(skill, script, *cli_args):
+def _real_validation_then_stop(calls, work=None, clips=None):
+    def run(skill, script, *cli_args):
         calls.append((skill, script))
+        if (skill, script) == ("video-cut", "cut.py"):
+            write_cut_output(work, clips)
+            return None
         if (skill, script) == ("video-script", "validate.py"):
             return recap_runtime._run(skill, script, *cli_args)
         raise AssertionError(
             f"downstream stage ran after failed validation: {skill}/{script}"
         )
 
-    monkeypatch.setattr("recap_runner._run", run_real_validation)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--preserve-approved-text",
-            "--review-narration",
-        ],
+    return run
+
+
+_RAW_APPROVED = json.dumps(
+    [{"start": 0, "end": 2, "narration": "这段合法批准稿完整保留。"}],
+    ensure_ascii=False,
+    separators=(",", ":"),
+)
+
+
+def test_recap_full_validate_failure_stops_before_review_tts_and_assemble(
+    monkeypatch, tmp_path
+):
+    video, work = seed_full_work(
+        tmp_path,
+        [{"start": 0, "end": 1, "narration": 7}],
+        preserve_approved_text=True,
+        review_narration=True,
+    )
+    _write_stale_lint_pass(work)
+    calls = []
+    monkeypatch.setattr("recap_runner._run", _real_validation_then_stop(calls))
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--preserve-approved-text",
+        "--review-narration",
     )
 
     with pytest.raises(SystemExit, match=r"video-script/validate\.py 失败 \(exit 1\)"):
@@ -218,153 +166,74 @@ def test_recap_full_validate_failure_stops_before_review_tts_and_assemble(
 def test_recap_single_cut_validate_failure_stops_before_review_tts_and_assemble(
     monkeypatch, tmp_path
 ):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 0, "end": 2}]), encoding="utf-8"
+    video, work = seed_cut_work(
+        tmp_path,
+        clips=[{"start": 0, "end": 2}],
+        narration=None,
+        preserve_approved_text=True,
+        review_narration=True,
     )
     narration_path = work / "narration.json"
-    narration_raw = json.dumps(
-        [{"start": 0, "end": 2, "narration": "这段合法批准稿完整保留。"}],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    narration_path.write_text(narration_raw, encoding="utf-8")
+    narration_path.write_text(_RAW_APPROVED, encoding="utf-8")
     _write_stale_lint_pass(work)
-    recap_runtime._write_run_manifest(
-        work,
-        video.resolve(),
-        _manifest_args(
-            edit_mode="cut", preserve_approved_text=True, review_narration=True
-        ),
-    )
-    recap_timeline._write_phase_ledger(
-        work,
-        clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
-        edited_source_rendered=True,
-    )
     calls = []
-
-    def run_cut_then_real_validation(skill, script, *cli_args):
-        calls.append((skill, script))
-        if (skill, script) == ("video-cut", "cut.py"):
-            _write_cut_output(work)
-            return None
-        if (skill, script) == ("video-script", "validate.py"):
-            return recap_runtime._run(skill, script, *cli_args)
-        raise AssertionError(
-            f"downstream stage ran after failed validation: {skill}/{script}"
-        )
-
-    monkeypatch.setattr("recap_runner._run", run_cut_then_real_validation)
-    monkeypatch.setattr(
-        "recap_runner._read_video_duration_or_raise", lambda path: 1.0
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--preserve-approved-text",
-            "--review-narration",
-        ],
+    monkeypatch.setattr("recap_runner._run", _real_validation_then_stop(calls, work))
+    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 1.0)
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--edit-mode",
+        "cut",
+        "--preserve-approved-text",
+        "--review-narration",
     )
 
     with pytest.raises(SystemExit, match=r"video-script/validate\.py 失败 \(exit 1\)"):
         recap.main()
 
-    assert calls == [
-        ("video-cut", "cut.py"),
-        ("video-script", "validate.py"),
-    ]
-    assert narration_path.read_text(encoding="utf-8") == narration_raw
+    assert calls == [("video-cut", "cut.py"), ("video-script", "validate.py")]
+    assert narration_path.read_text(encoding="utf-8") == _RAW_APPROVED
     _assert_validation_replaced_stale_pass(work, "invalid_output_timeline")
 
 
 def test_recap_multi_cut_validate_failure_stops_before_review_tts_and_assemble(
     monkeypatch, tmp_path
 ):
-    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
-    videos[0].write_bytes(b"a source")
-    videos[1].write_bytes(b"b source")
-    videos = [video.resolve() for video in videos]
-    work = tmp_path / "project"
-    work.mkdir()
-    args = _manifest_args(
+    args = manifest_args(
         edit_mode="cut", preserve_approved_text=True, review_narration=True
     )
-    records = recap_runtime._build_multi_source_records(videos, args)
-    recap_runtime._write_multi_source_manifest(work, records)
-    recap_runtime._write_project_run_manifest(work, videos, args, records)
-    (work / "clip_plan.json").write_text(
-        json.dumps(
-            {"clips": [{"source_id": records[0]["source_id"], "start": 0, "end": 2}]}
-        ),
-        encoding="utf-8",
-    )
+    videos, work, records = seed_multi_work(tmp_path, args)
     narration_path = work / "narration.json"
-    narration_raw = json.dumps(
-        [{"start": 0, "end": 2, "narration": "这段合法批准稿完整保留。"}],
-        ensure_ascii=False,
-        separators=(",", ":"),
-    )
-    narration_path.write_text(narration_raw, encoding="utf-8")
+    narration_path.write_text(_RAW_APPROVED, encoding="utf-8")
     _write_stale_lint_pass(work)
     calls = []
-
-    def run_cut_then_real_validation(skill, script, *cli_args):
-        calls.append((skill, script))
-        if (skill, script) == ("video-cut", "cut.py"):
-            _write_cut_output(
-                work,
-                [
-                    {
-                        "source_id": records[0]["source_id"],
-                        "source_path": str(videos[0]),
-                        "source_start": 0,
-                        "source_end": 1,
-                        "output_start": 0,
-                        "output_end": 1,
-                        "duration": 1,
-                    }
-                ],
-            )
-            return None
-        if (skill, script) == ("video-script", "validate.py"):
-            return recap_runtime._run(skill, script, *cli_args)
-        raise AssertionError(
-            f"downstream stage ran after failed validation: {skill}/{script}"
-        )
-
-    monkeypatch.setattr("recap_runner._run", run_cut_then_real_validation)
     monkeypatch.setattr(
-        "recap_runner._read_video_duration_or_raise", lambda path: 1.0
+        "recap_runner._run",
+        _real_validation_then_stop(calls, work, [multi_cut_clip(records, videos)]),
     )
+    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 1.0)
 
     with pytest.raises(SystemExit, match=r"video-script/validate\.py 失败 \(exit 1\)"):
         recap._run_multi_cut(videos, work, args)
 
-    assert calls == [
-        ("video-cut", "cut.py"),
-        ("video-script", "validate.py"),
-    ]
-    assert narration_path.read_text(encoding="utf-8") == narration_raw
+    assert calls == [("video-cut", "cut.py"), ("video-script", "validate.py")]
+    assert narration_path.read_text(encoding="utf-8") == _RAW_APPROVED
     _assert_validation_replaced_stale_pass(work, "invalid_output_timeline")
 
 
-def _tools_present(monkeypatch):
-    monkeypatch.setattr("doctor._ffmpeg_filters", lambda: {"subtitles", "ass"})
+def _tools_present(monkeypatch, filters=("subtitles", "ass")):
+    monkeypatch.setattr("doctor._ffmpeg_filters", lambda: set(filters))
     monkeypatch.setattr(
         "doctor._command_path",
         lambda name: f"/usr/bin/{name}" if name in ("ffmpeg", "ffprobe") else None,
     )
+
+
+def _all_mimo_keys(monkeypatch, value="tp-test-key"):
+    for k in ("api_key", "mimo_asr_api_key", "mimo_tts_api_key", "mimo_video_api_key"):
+        monkeypatch.setitem(doctor.CONFIG, k, value)
 
 
 def _capability_names(report, group):
@@ -373,8 +242,7 @@ def _capability_names(report, group):
 
 def test_doctor_ok_when_tools_and_mimo_key_present(monkeypatch):
     _tools_present(monkeypatch)
-    for k in ("api_key", "mimo_asr_api_key", "mimo_tts_api_key", "mimo_video_api_key"):
-        monkeypatch.setitem(doctor.CONFIG, k, "tp-test-key")
+    _all_mimo_keys(monkeypatch)
 
     report = doctor.build_report()
 
@@ -391,14 +259,15 @@ def test_doctor_ok_when_tools_and_mimo_key_present(monkeypatch):
     assert "mimo_asr" in _capability_names(report, "ready")
     assert "subtitle_burn" in _capability_names(report, "ready")
     assert report["capability_menu"]["blocked"] == []
+    assert _capability_names(report, "optional_upgrades") == {
+        "jianying_export",
+        "burned_subtitles",
+    }
 
 
 def test_doctor_fails_without_mimo_key(monkeypatch):
     _tools_present(monkeypatch)
-    monkeypatch.setitem(doctor.CONFIG, "api_key", "")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_video_api_key", "")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_tts_api_key", "")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_asr_api_key", "")
+    _all_mimo_keys(monkeypatch, "")
 
     report = doctor.build_report()
 
@@ -410,9 +279,7 @@ def test_doctor_fails_without_mimo_key(monkeypatch):
 
 def test_doctor_accepts_fish_audio_as_the_selected_tts_provider(monkeypatch):
     _tools_present(monkeypatch)
-    monkeypatch.setitem(doctor.CONFIG, "api_key", "tp-x")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_video_api_key", "tp-x")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_asr_api_key", "tp-x")
+    _all_mimo_keys(monkeypatch, "tp-x")
     monkeypatch.setitem(doctor.CONFIG, "mimo_tts_api_key", "")
     monkeypatch.setitem(doctor.CONFIG, "tts_provider", "fish-audio")
     monkeypatch.setitem(doctor.CONFIG, "fish_api_key", "sk-fish-test")
@@ -473,9 +340,7 @@ def test_doctor_missing_ffmpeg_is_failure(monkeypatch):
 def test_doctor_warns_when_asr_unconfigured_but_key_present(monkeypatch):
     """api_key powers VLM/TTS; an empty ASR key is only a warning (use --skip-asr)."""
     _tools_present(monkeypatch)
-    monkeypatch.setitem(doctor.CONFIG, "api_key", "tp-x")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_video_api_key", "tp-x")
-    monkeypatch.setitem(doctor.CONFIG, "mimo_tts_api_key", "tp-x")
+    _all_mimo_keys(monkeypatch, "tp-x")
     monkeypatch.setitem(doctor.CONFIG, "mimo_asr_api_key", "")
 
     report = doctor.build_report()
@@ -488,13 +353,8 @@ def test_doctor_warns_when_asr_unconfigured_but_key_present(monkeypatch):
 
 
 def test_doctor_warns_when_subtitle_burn_degraded(monkeypatch):
-    monkeypatch.setattr("doctor._ffmpeg_filters", lambda: {"ass"})
-    monkeypatch.setattr(
-        "doctor._command_path",
-        lambda name: f"/usr/bin/{name}" if name in ("ffmpeg", "ffprobe") else None,
-    )
-    for k in ("api_key", "mimo_asr_api_key", "mimo_tts_api_key", "mimo_video_api_key"):
-        monkeypatch.setitem(doctor.CONFIG, k, "tp-test-key")
+    _tools_present(monkeypatch, filters=("ass",))
+    _all_mimo_keys(monkeypatch)
 
     report = doctor.build_report()
 
@@ -521,23 +381,9 @@ def test_doctor_blocks_default_pipeline_when_vlm_or_tts_override_missing(monkeyp
     assert "default_recap_pipeline" not in _capability_names(report, "ready")
 
 
-def test_doctor_optional_upgrades_include_burn_only_when_available(monkeypatch):
-    _tools_present(monkeypatch)
-    for k in ("api_key", "mimo_asr_api_key", "mimo_tts_api_key", "mimo_video_api_key"):
-        monkeypatch.setitem(doctor.CONFIG, k, "tp-test-key")
-
-    report = doctor.build_report()
-
-    assert _capability_names(report, "optional_upgrades") == {
-        "jianying_export",
-        "burned_subtitles",
-    }
-
-
 def test_doctor_human_output_prints_capability_menu(monkeypatch, capsys):
     _tools_present(monkeypatch)
-    for k in ("api_key", "mimo_asr_api_key", "mimo_tts_api_key", "mimo_video_api_key"):
-        monkeypatch.setitem(doctor.CONFIG, k, "tp-test-key")
+    _all_mimo_keys(monkeypatch)
 
     doctor._print_human(doctor.build_report())
     out = capsys.readouterr().out
@@ -551,40 +397,17 @@ def test_doctor_human_output_prints_capability_menu(monkeypatch, capsys):
 
 
 def test_recap_full_mode_passes_explicit_narration_json(monkeypatch, tmp_path):
-    """Full mode passes the work_dir narration.json to voiceover explicitly."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-
+    """Full mode: validate -> review -> voiceover on work_dir/narration.json, no phase ledger."""
+    video, work = seed_full_work(tmp_path)
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
+        "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
     )
+    _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
 
-    voiceover_call = next(
-        call for call in calls if call[:2] == ("video-voiceover", "voiceover.py")
-    )
-    args = voiceover_call[2]
+    args = _call_args(calls, "video-voiceover", "voiceover.py")
     assert args[args.index("--narration") + 1] == str(work / "narration.json")
     order = [script for _, script, _ in calls]
     assert (
@@ -592,79 +415,44 @@ def test_recap_full_mode_passes_explicit_narration_json(monkeypatch, tmp_path):
         < order.index("review.py")
         < order.index("voiceover.py")
     )
+    assert not (work / "recap_phase.json").exists()
 
 
 def test_recap_cut_mode_voiceover_uses_output_time_narration(monkeypatch, tmp_path):
     """Two-pass cut: narration is authored in OUTPUT time, so voiceover gets narration.json
     directly and assemble muxes onto edited_source.mp4."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 2, "end": 5, "narration": "output。"}]),
-        encoding="utf-8",
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 10, "end": 12}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(
-        work,
-        video.resolve(),
-        _manifest_args(edit_mode="cut", preserve_approved_text=True),
-    )
-    recap_timeline._write_phase_ledger(
-        work,
-        clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
-        edited_source_rendered=True,
+    video, work = seed_cut_work(
+        tmp_path,
+        narration=[{"start": 2, "end": 5, "narration": "output。"}],
+        preserve_approved_text=True,
     )
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "cut.py":
-            _write_cut_output(work)
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 10.0)
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--preserve-approved-text",
-        ],
+        "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
+    )
+    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 10.0)
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--edit-mode",
+        "cut",
+        "--preserve-approved-text",
     )
 
     recap.main()
 
-    vo = next(c for c in calls if c[:2] == ("video-voiceover", "voiceover.py"))[2]
-    assert vo[vo.index("--narration") + 1] == str(
-        work / "narration.json"
+    vo = _call_args(calls, "video-voiceover", "voiceover.py")
+    assert vo[vo.index("--narration") + 1] == str(work / "narration.json")
+    assert "--narration" not in _call_args(calls, "video-cut", "cut.py")
+    assert _call_args(calls, "video-assemble", "assemble.py")[0] == str(
+        work / "edited_source.mp4"
     )
-    cut_render = next(c for c in calls if c[:2] == ("video-cut", "cut.py"))[2]
-    assert "--narration" not in cut_render  # cut never sees narration
-    asm = next(c for c in calls if c[:2] == ("video-assemble", "assemble.py"))[2]
-    assert asm[0] == str(work / "edited_source.mp4")
-    validate_args = next(c for c in calls if c[:2] == ("video-script", "validate.py"))[
-        2
-    ]
-    assert "--output-duration" in validate_args
+    validate_args = _call_args(calls, "video-script", "validate.py")
     assert validate_args[validate_args.index("--output-duration") + 1] == "10.000"
     assert "--preserve-approved-text" in validate_args
-    review_args = next(c for c in calls if c[:2] == ("video-script", "review.py"))[2]
+    review_args = _call_args(calls, "video-script", "review.py")
     assert review_args[review_args.index("--timeline") + 1] == "cut_output"
     order = [script for _, script, _ in calls]
     assert (
@@ -675,61 +463,34 @@ def test_recap_cut_mode_voiceover_uses_output_time_narration(monkeypatch, tmp_pa
 
 
 def test_recap_strict_cut_output_review_forwards_strict_evidence(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 2, "end": 5, "narration": "output。"}]),
-        encoding="utf-8",
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 10, "end": 12}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(edit_mode="cut")
-    )
-    recap_timeline._write_phase_ledger(
-        work,
-        clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
-        edited_source_rendered=True,
+    video, work = seed_cut_work(
+        tmp_path, narration=[{"start": 2, "end": 5, "narration": "output。"}]
     )
     calls = []
 
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "cut.py":
-            _write_cut_output(work)
-        if script == "review.py":
-            (work / "narration_review.json").write_text(
-                json.dumps({"verdict": "PASS", "findings": []}), encoding="utf-8"
-            )
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
+    def passing_review(cli):
+        (work / "narration_review.json").write_text(
+            json.dumps({"verdict": "PASS", "findings": []}), encoding="utf-8"
+        )
 
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 10.0)
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--require-narration-review",
-        ],
+        "recap_runner._run",
+        stub_child_run(work, tmp_path / "recap_video.mp4", calls, review=passing_review),
+    )
+    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 10.0)
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--edit-mode",
+        "cut",
+        "--require-narration-review",
     )
 
     recap.main()
 
-    review_args = next(c for c in calls if c[:2] == ("video-script", "review.py"))[2]
+    review_args = _call_args(calls, "video-script", "review.py")
     assert review_args[review_args.index("--timeline") + 1] == "cut_output"
     assert "--strict-evidence" in review_args
 
@@ -748,26 +509,16 @@ def test_recap_manifest_fingerprint_detects_middle_only_source_changes(tmp_path)
 
 def test_recap_phase_b_rejects_work_dir_from_different_source(monkeypatch, tmp_path):
     """Phase B must not apply an existing narration.json to a different input video."""
-    old_video = tmp_path / "old.mp4"
+    _, work = seed_full_work(tmp_path, [{"start": 0, "end": 1, "narration": "old。"}])
     new_video = tmp_path / "new.mp4"
-    old_video.write_bytes(b"old-video")
     new_video.write_bytes(b"new-video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "old。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(work, old_video.resolve(), _manifest_args())
     monkeypatch.setattr(
         "recap_runner._run",
         lambda *args: (_ for _ in ()).throw(
             AssertionError("must fail before stages run")
         ),
     )
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(new_video), "--work-dir", str(work)]
-    )
+    _argv(monkeypatch, new_video, "--work-dir", work)
 
     with pytest.raises(SystemExit, match="work_dir 与当前 recap 输入不匹配"):
         recap.main()
@@ -775,182 +526,190 @@ def test_recap_phase_b_rejects_work_dir_from_different_source(monkeypatch, tmp_p
 
 def test_recap_honors_edit_mode_and_target_duration_env(monkeypatch, tmp_path):
     """Config playbook promises EDIT_MODE/TARGET_DURATION env fallbacks for the orchestrator."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 10, "end": 12, "narration": "source。"}]),
-        encoding="utf-8",
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 10, "end": 12}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(edit_mode="cut", target_duration="10m")
-    )
-    recap_timeline._write_phase_ledger(
-        work,
-        clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
-        edited_source_rendered=True,
+    video, work = seed_cut_work(
+        tmp_path,
+        narration=[{"start": 10, "end": 12, "narration": "source。"}],
+        target_duration="10m",
     )
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "cut.py":
-            _write_cut_output(work)
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
     monkeypatch.setenv("EDIT_MODE", "cut")
     monkeypatch.setenv("TARGET_DURATION", "10m")
-    monkeypatch.setattr("recap_runner._run", fake_run)
+    monkeypatch.setattr(
+        "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
+    )
     monkeypatch.setattr(
         "recap_runner._read_video_duration_or_raise", lambda path: 600.0
     )
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
+    _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
 
-    cut_call = next(call for call in calls if call[:2] == ("video-cut", "cut.py"))
-    cut_args = cut_call[2]
-    assert "--target-duration" in cut_args
+    cut_args = _call_args(calls, "video-cut", "cut.py")
     assert cut_args[cut_args.index("--target-duration") + 1] == "10m"
-    validate_call = next(
-        call for call in calls if call[:2] == ("video-script", "validate.py")
-    )
-    validate_args = validate_call[2]
+    validate_args = _call_args(calls, "video-script", "validate.py")
     assert validate_args[validate_args.index("--mode") + 1] == "cut_output"
     assert validate_args[validate_args.index("--output-duration") + 1] == "600.000"
 
 
 def test_recap_completion_prints_manifest_final_output(monkeypatch, tmp_path, capsys):
     """If assemble avoids a basename collision, recap should report that true path."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
+    video, work = seed_full_work(tmp_path)
     collision_safe = tmp_path / "recap_video_abcd1234ef.mp4"
-
-    def fake_run(skill, script, *cli_args):
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(collision_safe)}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
+    monkeypatch.setattr("recap_runner._run", stub_child_run(work, collision_safe))
+    _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
 
     assert str(collision_safe) in capsys.readouterr().out
 
 
-def test_recap_continuation_preserves_phase_b_flags(tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work dir"
-    args = _manifest_args()
-    args.mimo_tts_voice = "冰糖"
-    args.tts_provider = "mimo-tts"
-    args.burn_subtitles = True
-    args.output_dir = str(tmp_path / "out dir")
-    args.export_jianying = True
-    args.jianying_bundle_media = True
-    args.jianying_no_bundle_media = False
-    args.allow_partial_tts = True
-    args.review_narration = False
-    args.allow_duration_drift = True
+@pytest.mark.parametrize(
+    "overrides, inputs, expected, absent",
+    [
+        pytest.param(
+            {
+                "mimo_tts_voice": "冰糖",
+                "tts_provider": "mimo-tts",
+                "burn_subtitles": True,
+                "output_dir": "out dir",
+                "export_jianying": True,
+                "jianying_bundle_media": True,
+                "allow_partial_tts": True,
+                "review_narration": False,
+                "allow_duration_drift": True,
+            },
+            "in.mp4",
+            [
+                "--mimo-tts-voice",
+                "冰糖",
+                "--tts-provider mimo-tts",
+                "--allow-partial-tts",
+                "--allow-duration-drift",
+                "--burn-subtitles",
+                "--output-dir",
+                "out dir",
+                "--export-jianying",
+                "--jianying-bundle-media",
+                "--no-review-narration",
+            ],
+            ["--jianying-no-bundle-media"],
+            id="phase-b-flags",
+        ),
+        pytest.param(
+            {"require_narration_review": True},
+            "in.mp4",
+            ["--require-narration-review"],
+            ["--no-consolidate"],
+            id="strict-review",
+        ),
+        pytest.param(
+            {"consolidate": False},
+            "in.mp4",
+            ["--no-consolidate"],
+            [],
+            id="consolidate-opt-out",
+        ),
+        pytest.param(
+            {
+                "edit_mode": "cut",
+                "material_library_dir": "lib",
+                "use_materials": True,
+                "save_materials": True,
+            },
+            ["a.mp4", "b.mp4"],
+            [
+                "a.mp4",
+                "b.mp4",
+                "--material-library-dir",
+                "--use-materials",
+                "--save-materials",
+            ],
+            [],
+            id="multi-video-materials",
+        ),
+        pytest.param(
+            {
+                "burn_subtitles": True,
+                "voice_ref": "voice ref.wav",
+                "subtitle_y_top": 610,
+                "subtitle_y_bot": 660,
+            },
+            "in.mp4",
+            ["--voice-ref", "voice ref.wav", "--subtitle-y-top 610", "--subtitle-y-bot 660"],
+            [],
+            id="plus-effect-flags",
+        ),
+        pytest.param(
+            {"mimo_qc": "both", "mimo_qc_refresh": True},
+            "video.mp4",
+            ["--mimo-qc both", "--mimo-qc-refresh"],
+            [],
+            id="mimo-qc",
+        ),
+        pytest.param(
+            {
+                "edit_mode": "cut",
+                "audio_mode": "source-mix",
+                "tts_provider": "fish-audio",
+                "voice_ref": "ambient-voice.wav",
+                "mimo_tts_voice": "ambient-mimo-voice",
+            },
+            "in.mp4",
+            ["--audio-mode source-mix"],
+            ["--tts-provider", "--voice-ref", "--mimo-tts-voice"],
+            id="source-mix-ignores-ambient-tts",
+        ),
+    ],
+)
+def test_continuation_command_preserves_phase_b_flags(
+    tmp_path, overrides, inputs, expected, absent
+):
+    """The printed resume command carries every explicit Phase-B setting and nothing else."""
+    for key in ("output_dir", "material_library_dir", "voice_ref"):
+        if overrides.get(key):
+            overrides[key] = str(tmp_path / overrides[key])
+    if isinstance(inputs, list):
+        inputs = [tmp_path / name for name in inputs]
+    else:
+        inputs = tmp_path / inputs
 
-    cmd = recap_timeline._continuation_command(video, work, args)
+    cmd = recap_timeline._continuation_command(
+        inputs, tmp_path / "work dir", manifest_args(**overrides)
+    )
 
-    assert "--mimo-tts-voice" in cmd and "冰糖" in cmd
-    assert "--tts-provider mimo-tts" in cmd
-    assert "--allow-partial-tts" in cmd
-    assert "--allow-duration-drift" in cmd
-    assert "--burn-subtitles" in cmd
-    assert "--output-dir" in cmd and "out dir" in cmd
-    assert "--export-jianying" in cmd
-    assert "--jianying-bundle-media" in cmd
-    assert "--jianying-no-bundle-media" not in cmd
-    assert "--no-review-narration" in cmd
+    for fragment in expected:
+        assert fragment in cmd, fragment
+    for fragment in absent:
+        assert fragment not in cmd, fragment
 
 
 def test_recap_forwards_tts_provider_and_allow_partial_to_voiceover(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
+    video, work = seed_full_work(tmp_path)
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--allow-partial-tts",
-            "--tts-provider",
-            "fish-audio",
-        ],
+        "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
+    )
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--allow-partial-tts",
+        "--tts-provider",
+        "fish-audio",
     )
 
     recap.main()
 
-    voiceover_call = next(
-        call for call in calls if call[:2] == ("video-voiceover", "voiceover.py")
-    )
-    assert "--allow-partial-tts" in voiceover_call[2]
-    assert voiceover_call[2][voiceover_call[2].index("--tts-provider") + 1] == "fish-audio"
+    voiceover = _call_args(calls, "video-voiceover", "voiceover.py")
+    assert "--allow-partial-tts" in voiceover
+    assert voiceover[voiceover.index("--tts-provider") + 1] == "fish-audio"
 
 
 def test_recap_forwards_explicit_tts_provider_to_doctor(monkeypatch):
     calls = []
-    monkeypatch.setattr(
-        "recap_runner._run",
-        lambda skill, script, *args: calls.append(
-            (skill, script, [str(arg) for arg in args])
-        ),
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["recap_runner.py", "--doctor", "--tts-provider", "fish-audio"],
-    )
+    monkeypatch.setattr("recap_runner._run", stub_child_run(None, calls=calls))
+    _argv(monkeypatch, "--doctor", "--tts-provider", "fish-audio")
 
     recap.main()
 
@@ -959,204 +718,63 @@ def test_recap_forwards_explicit_tts_provider_to_doctor(monkeypatch):
     ]
 
 
-def test_recap_rejects_fish_audio_for_dub_mode(monkeypatch, capsys, tmp_path):
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(tmp_path / "video.mp4"),
-            "--edit-mode",
-            "dub",
-            "--tts-provider",
-            "fish-audio",
-        ],
-    )
-
-    with pytest.raises(SystemExit, match="2"):
-        recap.main()
-
-    assert "dub uses MiMo voice cloning" in capsys.readouterr().err
-
-
-def test_recap_phase_b_allows_environment_changes_when_artifacts_are_unchanged(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    "extra_args, message",
+    [
+        (["--tts-provider", "fish-audio"], "dub uses MiMo voice cloning"),
+        (["--voice-ref", "voice.wav"], "--voice-ref is only supported in full/cut modes"),
+        (
+            ["--subtitle-y-top", "610", "--subtitle-y-bot", "660"],
+            "--subtitle-y-top/--subtitle-y-bot are only supported in full/cut modes",
+        ),
+    ],
+)
+def test_recap_rejects_flags_that_dub_mode_would_ignore(
+    monkeypatch, tmp_path, capsys, extra_args, message
 ):
-    """Phase-B resume is gated on source bytes + settings; harmless env drift must not block it."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "old。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(skip_asr=True)
-    )
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"source")
+    _argv(monkeypatch, video, "--edit-mode", "dub", *extra_args)
 
-    # The minimal resume gate is keyed on source-video bytes + CLI/env settings only.
-    # ASR/VLM endpoint or model env drift does not change Phase-A artifacts already on
-    # disk (Phase B never re-runs them), so it must not block a legitimate resume.
-    calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["recap_runner.py", str(video), "--work-dir", str(work), "--skip-asr"],
-    )
-
-    recap.main()
-
-    assert any(call[:2] == ("video-assemble", "assemble.py") for call in calls)
+    with pytest.raises(SystemExit) as exc_info:
+        recap.main()
+    assert exc_info.value.code == 2
+    assert message in capsys.readouterr().err
 
 
 def test_recap_advisory_review_failure_is_fail_open(monkeypatch, tmp_path, capsys):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
+    """A crashed advisory review continues to TTS/assemble and never surfaces a stale pointer."""
+    video, work = seed_full_work(tmp_path)
+    (work / "narration_review.md").write_text("# stale review", encoding="utf-8")
     calls = []
 
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "review.py":
-            raise SystemExit("review API unavailable")
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
+    def crash(cli):
+        raise SystemExit("review API unavailable")
 
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
+        "recap_runner._run",
+        stub_child_run(work, tmp_path / "recap_video.mp4", calls, review=crash),
     )
+    _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
 
     order = [script for _, script, _ in calls]
-    assert "review.py" in order and "voiceover.py" in order
-    assert order.index("review.py") < order.index("voiceover.py")
-    assert "建议性评审失败" in capsys.readouterr().out
-
-
-def test_recap_does_not_print_stale_review_pointer_after_fail_open(
-    monkeypatch, tmp_path, capsys
-):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    (work / "narration_review.md").write_text("# stale review", encoding="utf-8")
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-
-    def fake_run(skill, script, *cli_args):
-        if script == "review.py":
-            raise SystemExit("review API unavailable")
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
-
-    recap.main()
-
+    assert order.index("review.py") < order.index("voiceover.py") < order.index("assemble.py")
     out = capsys.readouterr().out
     assert "建议性评审失败" in out
     assert "解说评审" not in out
     assert "stale" not in out
 
 
-def test_recap_advisory_review_can_be_disabled(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-    calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--no-review-narration",
-        ],
-    )
-
-    recap.main()
-
-    assert not any(call[:2] == ("video-script", "review.py") for call in calls)
-    assert any(call[:2] == ("video-voiceover", "voiceover.py") for call in calls)
-
-
 def test_recap_cut_duration_read_failure_stops_before_tts(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 1, "end": 3, "narration": "解说。"}]), encoding="utf-8"
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 10, "end": 12}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(edit_mode="cut")
-    )
-    recap_timeline._write_phase_ledger(
-        work,
-        clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
-        edited_source_rendered=True,
+    video, work = seed_cut_work(
+        tmp_path, narration=[{"start": 1, "end": 3, "narration": "解说。"}]
     )
 
     def fake_run(skill, script, *cli_args):
         if script == "cut.py":
-            _write_cut_output(work)
+            write_cut_output(work)
         if script in ("validate.py", "review.py", "voiceover.py", "assemble.py"):
             raise AssertionError(f"{script} must not run when duration cannot be read")
 
@@ -1165,190 +783,116 @@ def test_recap_cut_duration_read_failure_stops_before_tts(monkeypatch, tmp_path)
         "recap_runner._read_video_duration_or_raise",
         lambda path: (_ for _ in ()).throw(SystemExit("无法读取成片时长")),
     )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["recap_runner.py", str(video), "--work-dir", str(work), "--edit-mode", "cut"],
-    )
+    _argv(monkeypatch, video, "--work-dir", work, "--edit-mode", "cut")
 
     with pytest.raises(SystemExit, match="无法读取成片时长"):
         recap.main()
 
 
 def test_recap_resumes_old_manifest_missing_consolidate_key(monkeypatch, tmp_path):
-    """Step 2 backward-compat: --consolidate now defaults ON, so its value lives in the run
-    manifest. A work_dir whose manifest predates the consolidate setting (key absent) — or
-    carries the old default false — must still resume, not hard-fail on a settings mismatch."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "old。"}]),
-        encoding="utf-8",
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
+    """A manifest predating the consolidate setting (key absent) must still resume Phase B."""
+    video, work = seed_full_work(tmp_path, [{"start": 0, "end": 1, "narration": "old。"}])
     manifest = json.loads(
         (work / recap_runtime.RUN_MANIFEST).read_text(encoding="utf-8")
     )
-    manifest["settings"].pop(
-        "consolidate", None
-    )  # simulate a pre-consolidate-key manifest
+    manifest["settings"].pop("consolidate", None)
     manifest["settings"].pop("consolidate_asr", None)
     (work / recap_runtime.RUN_MANIFEST).write_text(
         json.dumps(manifest), encoding="utf-8"
     )
-
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
+        "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
     )
+    _argv(monkeypatch, video, "--work-dir", work)
 
-    recap.main()  # must NOT SystemExit on a consolidate settings mismatch
+    recap.main()
 
     assert any(call[:2] == ("video-assemble", "assemble.py") for call in calls)
 
 
-def test_recap_pause_banner_amplifies_research_when_brief_flags_thin(
-    monkeypatch, tmp_path, capsys
+@pytest.mark.parametrize(
+    "brief, amplified",
+    [
+        (
+            "# Agent Narration Brief\n\n"
+            "## ⚑ Research the story FIRST (do this before writing narration)\n",
+            True,
+        ),
+        ("# Agent Narration Brief\n", False),
+    ],
+)
+def test_recap_pause_banner_amplifies_research_only_when_brief_flags_thin(
+    monkeypatch, tmp_path, capsys, brief, amplified
 ):
-    """Step 3: when the Phase-A brief fires the research directive (thin substrate, no research),
-    the recap pause banner amplifies it so the agent researches before writing."""
+    """The Phase-A pause banner repeats the brief's research directive, and only that."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     work = tmp_path / "work"
     work.mkdir()
 
-    def fake_run(skill, script, *cli_args):
-        if script == "understand.py":
-            (work / "agent_narration_brief.md").write_text(
-                "# Agent Narration Brief\n\n## ⚑ Research the story FIRST (do this before writing narration)\n",
-                encoding="utf-8",
-            )
+    def understand(cli):
+        (work / "agent_narration_brief.md").write_text(brief, encoding="utf-8")
 
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
+    monkeypatch.setattr("recap_runner._run", stub_child_run(work, understand=understand))
+    _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()  # Phase A (no narration.json) -> pause
 
     out = capsys.readouterr().out
-    assert "理解素材偏薄" in out
-    assert "Research the story FIRST" in out
-
-
-def test_recap_pause_banner_quiet_when_brief_has_no_research_flag(
-    monkeypatch, tmp_path, capsys
-):
-    """A rich-substrate brief (no research directive) must NOT add a research nag to the banner."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-
-    def fake_run(skill, script, *cli_args):
-        if script == "understand.py":
-            (work / "agent_narration_brief.md").write_text(
-                "# Agent Narration Brief\n", encoding="utf-8"
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
-
-    recap.main()
-
-    assert "理解素材偏薄" not in capsys.readouterr().out
+    assert ("理解素材偏薄" in out) is amplified
+    assert ("Research the story FIRST" in out) is amplified
 
 
 def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
     monkeypatch, tmp_path
 ):
-    """Step 6: cut mode is two-pass. With clip_plan present but narration absent, recap renders
-    the cut (no source-time narration mapping) and PAUSES for OUTPUT-time narration —
-    it does not run voiceover/assemble yet, and the ledger records the rendered cut."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 10, "end": 12}]), encoding="utf-8"
+    """Cut mode is two-pass: with clip_plan but no narration, recap renders the cut (forwarding
+    the cut flags) and pauses for OUTPUT-time narration instead of running voiceover/assemble."""
+    video, work = seed_cut_work(
+        tmp_path, narration=None, rendered=False, target_duration="10m"
     )
     (work / "agent_narration_brief.md").write_text("# brief\n", encoding="utf-8")
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(edit_mode="cut")
-    )
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        cli = [str(a) for a in cli_args]
-        calls.append((skill, script, cli))
-        if script == "cut.py":
-            _write_cut_output(work)
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["recap_runner.py", str(video), "--work-dir", str(work), "--edit-mode", "cut"],
+    monkeypatch.setattr("recap_runner._run", stub_child_run(work, calls=calls))
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--edit-mode",
+        "cut",
+        "--target-duration",
+        "10m",
+        "--allow-duration-drift",
     )
 
     recap.main()  # PASS 2: render the cut, then pause (narration.json absent)
 
     cut_calls = [c for c in calls if c[:2] == ("video-cut", "cut.py")]
     assert cut_calls and all("--narration" not in c[2] for c in cut_calls)
-    assert all(
-        "--normalize-only" not in c[2] for c in cut_calls
-    )  # mapping path is bypassed
-    assert not any(
-        c[1] in ("voiceover.py", "assemble.py") for c in calls
-    )  # paused, not produced
+    assert all("--normalize-only" not in c[2] for c in cut_calls)
+    assert "--allow-duration-drift" in cut_calls[0][2]
+    assert not any(c[1] in ("voiceover.py", "assemble.py") for c in calls)
     assert recap_timeline._read_phase_ledger(work).get("edited_source_rendered") is True
 
 
 def test_cut_narration_stale_guard_logic():
-    """Two-pass cut: the narration is written for the rendered cut, so any clip_plan change
-    while that narration is still present makes it stale (it describes the old cut)."""
+    """Any clip_plan change while a cut narration is present makes that narration stale."""
     assert recap_timeline._cut_narration_is_stale(None, "cp1") is False
     base = {"clip_plan_fingerprint": "cp1"}
-    assert (
-        recap_timeline._cut_narration_is_stale(base, "cp1") is False
-    )  # clip_plan unchanged
-    assert (
-        recap_timeline._cut_narration_is_stale(base, "cp2") is True
-    )  # clip_plan changed -> stale
+    assert recap_timeline._cut_narration_is_stale(base, "cp1") is False
+    assert recap_timeline._cut_narration_is_stale(base, "cp2") is True
 
 
 def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
     monkeypatch, tmp_path
 ):
-    """Step 6: a narration written for a previous clip_plan must not drive a re-cut into TTS;
-    the render may run, but validate/voiceover/assemble must not."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 1, "end": 3, "narration": "解说。"}]), encoding="utf-8"
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 10, "end": 12}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(edit_mode="cut")
+    """A narration written for a previous clip_plan may re-render but never reaches TTS."""
+    video, work = seed_cut_work(
+        tmp_path,
+        narration=[{"start": 1, "end": 3, "narration": "解说。"}],
+        rendered=False,
     )
     recap_timeline._write_phase_ledger(
         work, clip_plan_fingerprint="OLD_DIFFERENT_FP", edited_source_rendered=True
@@ -1356,217 +900,77 @@ def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
 
     def fake_run(skill, script, *cli_args):
         if script == "cut.py":
-            _write_cut_output(work)  # render allowed
+            write_cut_output(work)  # render allowed
         if script in ("validate.py", "voiceover.py", "assemble.py"):
             raise AssertionError(f"{script} ran despite stale narration")
 
     monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        ["recap_runner.py", str(video), "--work-dir", str(work), "--edit-mode", "cut"],
-    )
+    _argv(monkeypatch, video, "--work-dir", work, "--edit-mode", "cut")
 
     with pytest.raises(SystemExit, match="clip_plan.json 已改变"):
         recap.main()
 
 
-def test_recap_full_mode_writes_no_phase_ledger(monkeypatch, tmp_path):
-    """Step 5: the phase ledger is cut-mode only; full mode stays unchanged."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-
-    def fake_run(skill, script, *cli_args):
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "r.mp4")}), encoding="utf-8"
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
-
-    recap.main()
-
-    assert not (work / "recap_phase.json").exists()
+def _review_crashes(work):
+    raise SystemExit("review unavailable")
 
 
-def test_strict_narration_review_blocks_voiceover_on_review_failure(
-    monkeypatch, tmp_path
-):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-
-    def fake_run(skill, script, *cli_args):
-        if script == "review.py":
-            raise SystemExit("review unavailable")
-        if script == "voiceover.py":
-            raise AssertionError("voiceover must not run in strict review mode")
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--require-narration-review",
-        ],
-    )
-
-    with pytest.raises(SystemExit, match="严格解说评审失败"):
-        recap.main()
-
-
-def test_strict_narration_review_blocks_voiceover_on_error_finding(
-    monkeypatch, tmp_path
-):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-
-    def fake_run(skill, script, *cli_args):
-        if script == "review.py":
-            (work / "narration_review.json").write_text(
-                json.dumps(
-                    {
-                        "verdict": "REVISE",
-                        "findings": [{"severity": "error", "issue": "幻觉"}],
-                    }
-                ),
-                encoding="utf-8",
-            )
-            return
-        if script == "voiceover.py":
-            raise AssertionError("voiceover must not run with strict review errors")
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--require-narration-review",
-        ],
-    )
-
-    with pytest.raises(SystemExit, match="error 1"):
-        recap.main()
-
-
-def test_strict_narration_review_requires_fresh_review_artifact(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]), encoding="utf-8"
-    )
+def _review_reports_error(work):
     (work / "narration_review.json").write_text(
         json.dumps(
             {
-                "verdict": "PASS",
-                "findings": [],
+                "verdict": "REVISE",
+                "findings": [{"severity": "error", "issue": "幻觉"}],
             }
         ),
         encoding="utf-8",
     )
-    (work / "narration_review.md").write_text("# stale pass", encoding="utf-8")
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
+
+
+def _review_writes_nothing(work):
+    return None
+
+
+@pytest.mark.parametrize(
+    "review, stale_artifacts, match",
+    [
+        pytest.param(_review_crashes, False, "严格解说评审失败", id="review-crash"),
+        pytest.param(_review_reports_error, False, "error 1", id="error-finding"),
+        pytest.param(
+            _review_writes_nothing,
+            True,
+            "missing or invalid narration_review.json",
+            id="stale-artifact-not-reused",
+        ),
+    ],
+)
+def test_strict_narration_review_blocks_voiceover(
+    monkeypatch, tmp_path, review, stale_artifacts, match
+):
+    """--require-narration-review stops before TTS unless a fresh review passes cleanly."""
+    video, work = seed_full_work(tmp_path)
+    if stale_artifacts:
+        (work / "narration_review.json").write_text(
+            json.dumps({"verdict": "PASS", "findings": []}), encoding="utf-8"
+        )
+        (work / "narration_review.md").write_text("# stale pass", encoding="utf-8")
 
     def fake_run(skill, script, *cli_args):
         if script == "review.py":
-            return
+            return review(work)
         if script == "voiceover.py":
-            raise AssertionError(
-                "voiceover must not run without a fresh review artifact"
-            )
+            raise AssertionError("voiceover must not run in strict review mode")
 
     monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--require-narration-review",
-        ],
-    )
+    _argv(monkeypatch, video, "--work-dir", work, "--require-narration-review")
 
-    with pytest.raises(SystemExit, match="missing or invalid narration_review.json"):
+    with pytest.raises(SystemExit, match=match):
         recap.main()
     assert not (work / "narration_review.md").exists()
 
 
-def test_advisory_narration_review_still_continues_on_failure(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]), encoding="utf-8"
-    )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-    calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append(script)
-        if script == "review.py":
-            raise SystemExit("review unavailable")
-        if script == "assemble.py":
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "r.mp4")}), encoding="utf-8"
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
-    )
-
-    recap.main()
-
-    assert "voiceover.py" in calls
-    assert "assemble.py" in calls
-
-
-def test_continuation_command_preserves_require_narration_review():
-    args = _manifest_args()
-    args.require_narration_review = True
-
-    command = recap_timeline._continuation_command("/tmp/in.mp4", "/tmp/work", args)
-
-    assert "--require-narration-review" in command
-
-
 def test_review_status_does_not_gate_on_bare_model_verdict(tmp_path):
-    """Strict gate must key off parse_error / factual error findings ONLY — never the model's
-    holistic verdict. A subjective FAIL (or REVISE) with no error finding must not block TTS."""
+    """Strict gate keys off parse_error / factual error findings ONLY, never the verdict."""
 
     def _write(payload):
         (tmp_path / "narration_review.json").write_text(
@@ -1623,7 +1027,7 @@ def test_advisory_review_does_not_block_on_malformed_artifact(tmp_path):
     def fake_run(*_args):
         (tmp_path / "narration_review.json").write_text("{}", encoding="utf-8")
 
-    args = _manifest_args(review_narration=True)
+    args = manifest_args(review_narration=True)
 
     assert recap_review.run_narration_review(tmp_path, args, run=fake_run) is True
 
@@ -1634,7 +1038,7 @@ def test_strict_review_blocks_on_malformed_artifact(tmp_path):
             json.dumps({"findings": "invalid"}), encoding="utf-8"
         )
 
-    args = _manifest_args(review_narration=True, require_narration_review=True)
+    args = manifest_args(review_narration=True, require_narration_review=True)
 
     with pytest.raises(SystemExit, match="missing or invalid narration_review.json"):
         recap_review.run_narration_review(tmp_path, args, run=fake_run)
@@ -1649,9 +1053,7 @@ def test_recap_rejects_multi_video_non_cut(monkeypatch, tmp_path):
         "recap_runner._run",
         lambda *args: (_ for _ in ()).throw(AssertionError("must fail first")),
     )
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(v1), str(v2), "--edit-mode", "full"]
-    )
+    _argv(monkeypatch, v1, v2, "--edit-mode", "full")
 
     with pytest.raises(SystemExit, match="多视频输入当前 MVP 只支持 --edit-mode cut"):
         recap.main()
@@ -1683,44 +1085,20 @@ def test_probe_display_height_accounts_for_rotation_and_sar(monkeypatch):
         )
 
 
+@pytest.mark.parametrize("via", ["cli", "env"])
 def test_recap_rejects_global_subtitle_band_for_multi_source_cut(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, via
 ):
     videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
     for video in videos:
         video.write_bytes(b"source")
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            *map(str, videos),
-            "--edit-mode",
-            "cut",
-            "--subtitle-y-top",
-            "100",
-            "--subtitle-y-bot",
-            "130",
-        ],
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        recap.main()
-    assert exc_info.value.code == 2
-    assert "多视频 cut 暂不支持" in capsys.readouterr().err
-
-
-def test_recap_rejects_global_subtitle_band_from_environment_for_multi_source_cut(
-    monkeypatch, tmp_path, capsys
-):
-    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
-    for video in videos:
-        video.write_bytes(b"source")
-    monkeypatch.setenv("SUBTITLE_Y_TOP", "100")
-    monkeypatch.setenv("SUBTITLE_Y_BOT", "130")
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", *map(str, videos), "--edit-mode", "cut"]
-    )
+    band = []
+    if via == "env":
+        monkeypatch.setenv("SUBTITLE_Y_TOP", "100")
+        monkeypatch.setenv("SUBTITLE_Y_BOT", "130")
+    else:
+        band = ["--subtitle-y-top", "100", "--subtitle-y-bot", "130"]
+    _argv(monkeypatch, *videos, "--edit-mode", "cut", *band)
 
     with pytest.raises(SystemExit) as exc_info:
         recap.main()
@@ -1749,19 +1127,15 @@ def test_recap_subtitle_coordinates_do_not_leak_into_process_environment(
             "# brief\n", encoding="utf-8"
         ),
     )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--subtitle-y-top",
-            "610",
-            "--subtitle-y-bot",
-            "660",
-        ],
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--subtitle-y-top",
+        "610",
+        "--subtitle-y-bot",
+        "660",
     )
 
     recap.main()
@@ -1783,9 +1157,7 @@ def test_recap_fails_fast_and_absolutizes_voice_reference(
     monkeypatch.setattr(
         "recap_runner._run_or_restore_understanding", lambda *args: None
     )
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--voice-ref", "missing.wav"]
-    )
+    _argv(monkeypatch, video, "--voice-ref", "missing.wav")
 
     with pytest.raises(SystemExit) as exc_info:
         recap.main()
@@ -1793,32 +1165,11 @@ def test_recap_fails_fast_and_absolutizes_voice_reference(
     assert "reference audio does not exist" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize(
-    "effect_args, message",
-    [
-        (
-            ["--voice-ref", "voice.wav"],
-            "--voice-ref is only supported in full/cut modes",
-        ),
-        (
-            ["--subtitle-y-top", "610", "--subtitle-y-bot", "660"],
-            "--subtitle-y-top/--subtitle-y-bot are only supported in full/cut modes",
-        ),
-    ],
-)
-def test_recap_rejects_plus_effect_flags_ignored_by_dub(
-    monkeypatch, tmp_path, capsys, effect_args, message
-):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"source")
-    monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--edit-mode", "dub", *effect_args]
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        recap.main()
-    assert exc_info.value.code == 2
-    assert message in capsys.readouterr().err
+def _understand_writes_phase_a(cli):
+    wd = Path(cli[cli.index("--work-dir") + 1])
+    wd.mkdir(parents=True, exist_ok=True)
+    (wd / "agent_narration_brief.md").write_text("# per-source\n", encoding="utf-8")
+    (wd / "scenes.json").write_text("[]", encoding="utf-8")
 
 
 def test_recap_multi_video_phase_a_writes_manifest_and_pauses(
@@ -1830,33 +1181,21 @@ def test_recap_multi_video_phase_a_writes_manifest_and_pauses(
     v2.write_bytes(b"b source")
     work = tmp_path / "project"
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(a) for a in cli_args]))
-        if script == "understand.py":
-            wd = Path(cli_args[cli_args.index("--work-dir") + 1])
-            wd.mkdir(parents=True, exist_ok=True)
-            (wd / "agent_narration_brief.md").write_text(
-                "# per-source\n", encoding="utf-8"
-            )
-            (wd / "scenes.json").write_text("[]", encoding="utf-8")
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(v1),
-            str(v2),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--material-library-dir",
-            str(tmp_path / "lib"),
-            "--save-materials",
-        ],
+        "recap_runner._run",
+        stub_child_run(work, calls=calls, understand=_understand_writes_phase_a),
+    )
+    _argv(
+        monkeypatch,
+        v1,
+        v2,
+        "--work-dir",
+        work,
+        "--edit-mode",
+        "cut",
+        "--material-library-dir",
+        tmp_path / "lib",
+        "--save-materials",
     )
 
     recap.main()
@@ -1880,115 +1219,26 @@ def test_recap_multi_video_phase_a_writes_manifest_and_pauses(
     assert "--material-library-dir" in out and "--save-materials" in out
 
 
-def test_recap_single_cut_forwards_allow_duration_drift_and_records_source(
-    monkeypatch, tmp_path
-):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "clip_plan.json").write_text(
-        json.dumps([{"start": 0, "end": 1}]), encoding="utf-8"
-    )
-    (work / "agent_narration_brief.md").write_text("# brief\n", encoding="utf-8")
-    recap_runtime._write_run_manifest(
-        work, video.resolve(), _manifest_args(edit_mode="cut", target_duration="10m")
-    )
-    calls = []
-
-    def fake_run(skill, script, *cli_args):
-        cli = [str(a) for a in cli_args]
-        calls.append((skill, script, cli))
-        if script == "cut.py":
-            assert "--allow-duration-drift" in cli
-            _write_cut_output(work)
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--target-duration",
-            "10m",
-            "--allow-duration-drift",
-        ],
-    )
-
-    recap.main()
-
-    cut_args = next(c for c in calls if c[:2] == ("video-cut", "cut.py"))[2]
-    assert "--allow-duration-drift" in cut_args
-
-
 def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
     monkeypatch, tmp_path
 ):
-    v1 = tmp_path / "a.mp4"
-    v2 = tmp_path / "b.mp4"
-    v1.write_bytes(b"a source")
-    v2.write_bytes(b"b source")
-    work = tmp_path / "project"
-    work.mkdir()
-    args = _manifest_args(edit_mode="cut")
-    records = recap_runtime._build_multi_source_records(
-        [v1.resolve(), v2.resolve()], args
-    )
-    recap_runtime._write_multi_source_manifest(work, records)
-    recap_runtime._write_project_run_manifest(
-        work, [v1.resolve(), v2.resolve()], args, records
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps(
-            {"clips": [{"source_id": records[0]["source_id"], "start": 0, "end": 1}]}
-        ),
-        encoding="utf-8",
-    )
+    videos, work, records = seed_multi_work(tmp_path, manifest_args(edit_mode="cut"))
     calls = []
-
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(a) for a in cli_args]))
-        if script == "cut.py":
-            _write_cut_output(
-                work,
-                [
-                    {
-                        "source_id": records[0]["source_id"],
-                        "source_path": str(v1.resolve()),
-                        "source_start": 0,
-                        "source_end": 1,
-                        "output_start": 0,
-                        "output_end": 1,
-                        "duration": 1,
-                        "reason": "",
-                    }
-                ],
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(v1),
-            str(v2),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-        ],
+        "recap_runner._run",
+        stub_child_run(
+            work,
+            calls=calls,
+            cut=lambda cli: write_cut_output(
+                work, [multi_cut_clip(records, videos) | {"reason": ""}]
+            ),
+        ),
     )
+    _argv(monkeypatch, *videos, "--work-dir", work, "--edit-mode", "cut")
 
     recap.main()
 
-    cut_args = next(c for c in calls if c[:2] == ("video-cut", "cut.py"))[2]
-    assert "--sources-manifest" in cut_args
+    cut_args = _call_args(calls, "video-cut", "cut.py")
     assert cut_args[cut_args.index("--sources-manifest") + 1] == str(
         work / "multi_source_manifest.json"
     )
@@ -1999,122 +1249,37 @@ def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
 def test_multi_cut_forwards_approved_text_protection_to_validation(
     monkeypatch, tmp_path
 ):
-    v1 = tmp_path / "a.mp4"
-    v2 = tmp_path / "b.mp4"
-    v1.write_bytes(b"a source")
-    v2.write_bytes(b"b source")
-    work = tmp_path / "project"
-    work.mkdir()
-    args = _manifest_args(
-        edit_mode="cut",
-        preserve_approved_text=True,
-        review_narration=False,
+    args = manifest_args(
+        edit_mode="cut", preserve_approved_text=True, review_narration=False
     )
-    records = recap_runtime._build_multi_source_records(
-        [v1.resolve(), v2.resolve()], args
-    )
-    recap_runtime._write_multi_source_manifest(work, records)
-    recap_runtime._write_project_run_manifest(
-        work, [v1.resolve(), v2.resolve()], args, records
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps(
-            {"clips": [{"source_id": records[0]["source_id"], "start": 0, "end": 1}]}
-        ),
-        encoding="utf-8",
-    )
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "批准稿。"}]),
-        encoding="utf-8",
+    videos, work, records = seed_multi_work(
+        tmp_path, args, narration=[{"start": 0, "end": 1, "narration": "批准稿。"}]
     )
     calls = []
 
     class VoiceoverReached(Exception):
         pass
 
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "cut.py":
-            _write_cut_output(
-                work,
-                [
-                    {
-                        "source_id": records[0]["source_id"],
-                        "source_path": str(v1.resolve()),
-                        "source_start": 0,
-                        "source_end": 1,
-                        "output_start": 0,
-                        "output_end": 1,
-                        "duration": 1,
-                    }
-                ],
-            )
-        if script == "voiceover.py":
-            raise VoiceoverReached
+    def voiceover(cli):
+        raise VoiceoverReached
 
-    monkeypatch.setattr("recap_runner._run", fake_run)
+    monkeypatch.setattr(
+        "recap_runner._run",
+        stub_child_run(
+            work,
+            calls=calls,
+            cut=lambda cli: write_cut_output(work, [multi_cut_clip(records, videos)]),
+            voiceover=voiceover,
+        ),
+    )
     monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 1.0)
 
     with pytest.raises(VoiceoverReached):
-        recap._run_multi_cut([v1.resolve(), v2.resolve()], work, args)
+        recap._run_multi_cut(videos, work, args)
 
-    validate_args = next(
-        call[2] for call in calls if call[:2] == ("video-script", "validate.py")
-    )
+    validate_args = _call_args(calls, "video-script", "validate.py")
     assert validate_args[validate_args.index("--mode") + 1] == "cut_output"
     assert "--preserve-approved-text" in validate_args
-
-
-def test_continuation_command_preserves_multi_videos_and_material_flags(tmp_path):
-    args = _manifest_args(edit_mode="cut")
-    args.mimo_tts_voice = None
-    args.burn_subtitles = None
-    args.output_dir = None
-    args.export_jianying = False
-    args.jianying_bundle_media = False
-    args.jianying_no_bundle_media = False
-    args.allow_partial_tts = False
-    args.review_narration = None
-    args.require_narration_review = False
-    args.material_library_dir = str(tmp_path / "lib")
-    args.use_materials = True
-    args.save_materials = True
-
-    cmd = recap_timeline._continuation_command(
-        [tmp_path / "a.mp4", tmp_path / "b.mp4"], tmp_path / "work", args
-    )
-
-    assert "a.mp4" in cmd and "b.mp4" in cmd
-    assert "--material-library-dir" in cmd
-    assert "--use-materials" in cmd
-    assert "--save-materials" in cmd
-
-
-def test_continuation_command_preserves_plus_effect_flags(tmp_path):
-    args = _manifest_args()
-    args.mimo_tts_voice = None
-    args.allow_partial_tts = False
-    args.burn_subtitles = True
-    args.output_dir = None
-    args.export_jianying = False
-    args.jianying_bundle_media = False
-    args.jianying_no_bundle_media = False
-    args.review_narration = None
-    args.require_narration_review = False
-    args.material_library_dir = None
-    args.use_materials = False
-    args.save_materials = False
-    args.voice_ref = str(tmp_path / "voice ref.wav")
-    args.subtitle_y_top = 610
-    args.subtitle_y_bot = 660
-
-    cmd = recap_timeline._continuation_command(
-        tmp_path / "in.mp4", tmp_path / "work", args
-    )
-
-    assert "--voice-ref" in cmd and "voice ref.wav" in cmd
-    assert "--subtitle-y-top 610" in cmd
-    assert "--subtitle-y-bot 660" in cmd
 
 
 def test_recap_single_video_phase_a_can_save_materials(monkeypatch, tmp_path):
@@ -2125,32 +1290,40 @@ def test_recap_single_video_phase_a_can_save_materials(monkeypatch, tmp_path):
 
     def fake_run(skill, script, *cli_args):
         assert (skill, script) == ("video-understanding", "understand.py")
-        wd = Path(cli_args[cli_args.index("--work-dir") + 1])
-        wd.mkdir(parents=True, exist_ok=True)
-        (wd / "agent_narration_brief.md").write_text("# solo brief", encoding="utf-8")
-        (wd / "scenes.json").write_text("[]", encoding="utf-8")
+        _understand_writes_phase_a([str(arg) for arg in cli_args])
 
     monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--material-library-dir",
-            str(lib),
-            "--save-materials",
-        ],
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--material-library-dir",
+        lib,
+        "--save-materials",
     )
 
     recap.main()
 
     assert (lib / "materials_index.jsonl").exists()
-    saved = list((lib / "materials").glob("*/material.json"))
-    assert saved
+    assert list((lib / "materials").glob("*/material.json"))
     assert (work / "recap_run_manifest.json").exists()
+
+
+def _save_seed_material(tmp_path, video, args, brief):
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "agent_narration_brief.md").write_text(brief, encoding="utf-8")
+    (seed / "scenes.json").write_text("[]", encoding="utf-8")
+    lib = tmp_path / "materials"
+    material_lib.save_material(
+        lib,
+        seed,
+        video,
+        material_lib.file_fingerprint(video),
+        recap_runtime._material_settings_fingerprint(args),
+    )
+    return lib
 
 
 def test_recap_single_video_phase_a_uses_materials_without_understand(
@@ -2158,17 +1331,9 @@ def test_recap_single_video_phase_a_uses_materials_without_understand(
 ):
     video = tmp_path / "solo.mp4"
     video.write_bytes(b"solo source")
-    seed_work = tmp_path / "seed"
-    seed_work.mkdir()
-    (seed_work / "agent_narration_brief.md").write_text(
-        "# restored brief", encoding="utf-8"
+    lib = _save_seed_material(
+        tmp_path, video, manifest_args(consolidate=True), "# restored brief"
     )
-    (seed_work / "scenes.json").write_text("[]", encoding="utf-8")
-    args = _manifest_args(consolidate=True)
-    fp = material_lib.file_fingerprint(video)
-    settings_fp = recap_runtime._material_settings_fingerprint(args)
-    lib = tmp_path / "materials"
-    material_lib.save_material(lib, seed_work, video, fp, settings_fp)
     work = tmp_path / "work"
 
     def fake_run(*_args):
@@ -2177,18 +1342,14 @@ def test_recap_single_video_phase_a_uses_materials_without_understand(
         )
 
     monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--material-library-dir",
-            str(lib),
-            "--use-materials",
-        ],
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--material-library-dir",
+        lib,
+        "--use-materials",
     )
 
     recap.main()
@@ -2203,13 +1364,12 @@ def test_recap_single_video_phase_a_uses_materials_without_understand(
 def test_recap_single_video_cut_pass2_rebuilds_output_brief_with_materials_enabled(
     monkeypatch, tmp_path
 ):
+    """Pass 2 replaces a restored source-time brief with an OUTPUT-time brief after the cut."""
     video = tmp_path / "solo.mp4"
     video.write_bytes(b"solo source")
     work = tmp_path / "work"
     work.mkdir()
-    args = _manifest_args(edit_mode="cut", consolidate=True)
-    # Existing Phase A state: material restore may have produced a source-time brief, but
-    # pass 2 must replace it with an OUTPUT-time brief after edited_source.mp4 exists.
+    args = manifest_args(edit_mode="cut", consolidate=True)
     recap_runtime._write_run_manifest(work, video, args)
     (work / "clip_plan.json").write_text(
         json.dumps({"clips": [{"start": 0, "end": 1}]}), encoding="utf-8"
@@ -2217,26 +1377,21 @@ def test_recap_single_video_cut_pass2_rebuilds_output_brief_with_materials_enabl
     (work / "agent_narration_brief.md").write_text(
         "SOURCE-TIME BRIEF FROM MATERIAL", encoding="utf-8"
     )
-    lib = tmp_path / "materials"
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    (seed / "agent_narration_brief.md").write_text(
-        "SOURCE-TIME BRIEF FROM MATERIAL", encoding="utf-8"
-    )
-    (seed / "scenes.json").write_text("[]", encoding="utf-8")
-    material_lib.save_material(
-        lib,
-        seed,
-        video,
-        material_lib.file_fingerprint(video),
-        recap_runtime._material_settings_fingerprint(args),
-    )
+    lib = _save_seed_material(tmp_path, video, args, "SOURCE-TIME BRIEF FROM MATERIAL")
     calls = []
 
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(a) for a in cli_args]))
-        if script == "cut.py":
-            _write_cut_output(
+    def understand(cli):
+        assert "--brief-only" in cli
+        (work / "agent_narration_brief.md").write_text(
+            "OUTPUT-TIME BRIEF", encoding="utf-8"
+        )
+
+    monkeypatch.setattr(
+        "recap_runner._run",
+        stub_child_run(
+            work,
+            calls=calls,
+            cut=lambda cli: write_cut_output(
                 work,
                 [
                     {
@@ -2247,28 +1402,20 @@ def test_recap_single_video_cut_pass2_rebuilds_output_brief_with_materials_enabl
                         "duration": 1,
                     }
                 ],
-            )
-        elif script == "understand.py":
-            assert "--brief-only" in [str(a) for a in cli_args]
-            (work / "agent_narration_brief.md").write_text(
-                "OUTPUT-TIME BRIEF", encoding="utf-8"
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--material-library-dir",
-            str(lib),
-            "--use-materials",
-        ],
+            ),
+            understand=understand,
+        ),
+    )
+    _argv(
+        monkeypatch,
+        video,
+        "--work-dir",
+        work,
+        "--edit-mode",
+        "cut",
+        "--material-library-dir",
+        lib,
+        "--use-materials",
     )
 
     recap.main()
@@ -2277,10 +1424,16 @@ def test_recap_single_video_cut_pass2_rebuilds_output_brief_with_materials_enabl
         c for c in calls if c[:2] == ("video-understanding", "understand.py")
     ]
     assert len(understand_calls) == 1
-    assert "--brief-only" in understand_calls[0][2]
     assert (work / "agent_narration_brief.md").read_text(
         encoding="utf-8"
     ) == "OUTPUT-TIME BRIEF"
+
+
+def _json_fences(text):
+    return [
+        json.loads(raw)
+        for raw in re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
+    ]
 
 
 def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
@@ -2301,9 +1454,9 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
                         "text_tail": "来源句子。",
                         "confidence": "high",
                     },
-                        {
-                            "time": "2.5",
-                            "pause_start": "invalid",
+                    {
+                        "time": "2.5",
+                        "pause_start": "invalid",
                         "text_tail": "畸形停顿时间。",
                         "confidence": "medium",
                     },
@@ -2313,11 +1466,11 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
         encoding="utf-8",
     )
     (src / "asr_result.json").write_text(
-            json.dumps([{"start": "0.0", "end": "4.0", "text": "来源完整讲话。"}]),
+        json.dumps([{"start": "0.0", "end": "4.0", "text": "来源完整讲话。"}]),
         encoding="utf-8",
     )
     (src / "silence_periods.json").write_text(
-            json.dumps([{"start": "1.8", "end": "2.2", "has_speech": False}]),
+        json.dumps([{"start": "1.8", "end": "2.2", "has_speech": False}]),
         encoding="utf-8",
     )
     records = [
@@ -2330,17 +1483,15 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
             "material_id": "mat-a",
         }
     ]
-    args = _manifest_args(edit_mode="cut", target_duration="1m")
+    args = manifest_args(edit_mode="cut", target_duration="1m")
 
     recap_timeline._write_multi_source_clip_brief(work, records, args)
     clip_text = (work / "agent_narration_brief.md").read_text(encoding="utf-8")
     clip_headings = set(re.findall(r"(?m)^## (.+)$", clip_text))
-    clip_examples = [
-        json.loads(raw)
-        for raw in re.findall(r"```json\s*\n(.*?)\n```", clip_text, re.DOTALL)
-    ]
     clip_example = next(
-        item for item in clip_examples if isinstance(item, dict) and "clips" in item
+        item
+        for item in _json_fences(clip_text)
+        if isinstance(item, dict) and "clips" in item
     )
     reason_parts = [
         part.strip() for part in clip_example["clips"][0]["reason"].split("|")
@@ -2350,6 +1501,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     assert (
         "recap_story_plan.json" in clip_text and "visual_audio_board.json" in clip_text
     )
+    assert "clip_plan.json.required_evidence" in clip_text
     assert len(reason_parts) == 7
     assert reason_parts[0].startswith("b")
     assert "→" in reason_parts[2]
@@ -2381,12 +1533,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     out_text = (work / "agent_narration_brief.md").read_text(encoding="utf-8")
     output_headings = set(re.findall(r"(?m)^## (.+)$", out_text))
     narration_example = next(
-        item
-        for item in (
-            json.loads(raw)
-            for raw in re.findall(r"```json\s*\n(.*?)\n```", out_text, re.DOTALL)
-        )
-        if isinstance(item, list)
+        item for item in _json_fences(out_text) if isinstance(item, list)
     )
 
     assert {
@@ -2439,26 +1586,13 @@ def test_multi_source_excerpt_preserves_source_evidence_from_a_long_brief(tmp_pa
 
 
 def test_cut_qc_summary_surfaces_canonical_cut_result(tmp_path, capsys):
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(
-            {
-                "qc": {
-                    "status": "warning",
-                    "target_duration_status": "under",
-                    "total_duration": 42.0,
-                    "clip_count": 3,
-                    "join_fade_ms": 20.0,
-                    "output_geometry": {
-                        "width": 1920,
-                        "height": 1080,
-                        "fps": 30,
-                    },
-                    "output_geometry_reason": "used_sources",
-                    "warnings": ["short"],
-                }
-            }
-        ),
-        encoding="utf-8",
+    write_cut_output(
+        tmp_path,
+        status="warning",
+        target_duration_status="under",
+        total_duration=42.0,
+        clip_count=3,
+        warnings=["short"],
     )
     qc = recap_timeline._surface_cut_qc(tmp_path)
     assert qc["target_duration_status"] == "under"
@@ -2469,13 +1603,6 @@ def test_cut_qc_summary_surfaces_canonical_cut_result(tmp_path, capsys):
 
 
 def test_print_narration_review_pointer_surfaces_grounding_qc(capsys, tmp_path):
-    import sys
-    from pathlib import Path
-
-    sys.path.insert(
-        0,
-        str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"),
-    )
     (tmp_path / "grounding_qc.json").write_text(
         json.dumps(
             {
@@ -2492,57 +1619,9 @@ def test_print_narration_review_pointer_surfaces_grounding_qc(capsys, tmp_path):
     assert "Grounding QC" in out and "warn" in out and "warnings 1" in out
 
 
-def test_recap_rewrites_existing_visual_overlays_empty_when_narration_has_no_supported_overlays(
-    tmp_path,
-):
-    work = tmp_path / "work"
-    work.mkdir()
-    existing = work / "visual_overlays.json"
-    existing.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "overlays": [
-                    {"type": "top_title", "text": "stale", "start": 0.0, "end": 1.0}
-                ],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    narration = work / "narration.json"
-    narration.write_text(
-        json.dumps(
-            [
-                {
-                    "start": 0.0,
-                    "end": 2.0,
-                    "narration": "没有受支持的贴片。",
-                    "visual_overlays": [
-                        {
-                            "type": "platform_card",
-                            "text": "unsupported",
-                            "start": 0.0,
-                            "end": 1.0,
-                        }
-                    ],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    assert recap_timeline._write_canonical_visual_overlays(work, narration) == existing
-
-    assert json.loads(existing.read_text(encoding="utf-8")) == {
-        "schema_version": 1,
-        "overlays": [],
-    }
-
-
-def test_recap_rerun_overwrites_prior_visual_overlays_to_empty_for_current_narration(
-    tmp_path,
-):
+def test_recap_rewrites_visual_overlays_for_each_narration(tmp_path):
+    """visual_overlays.json always mirrors the current narration: supported overlays are
+    written out, and a later narration without any supported overlay empties the file."""
     work = tmp_path / "work"
     work.mkdir()
     overlays_path = work / "visual_overlays.json"
@@ -2574,7 +1653,15 @@ def test_recap_rerun_overwrites_prior_visual_overlays_to_empty_for_current_narra
                 {
                     "start": 0.0,
                     "end": 2.0,
-                    "narration": "这一版没有支持的贴片。",
+                    "narration": "没有受支持的贴片。",
+                    "visual_overlays": [
+                        {
+                            "type": "platform_card",
+                            "text": "unsupported",
+                            "start": 0.0,
+                            "end": 1.0,
+                        }
+                    ],
                 }
             ]
         ),
@@ -2591,7 +1678,6 @@ def test_recap_rerun_overwrites_prior_visual_overlays_to_empty_for_current_narra
         recap_timeline._write_canonical_visual_overlays(work, second_narration)
         == overlays_path
     )
-
     assert json.loads(overlays_path.read_text(encoding="utf-8")) == {
         "schema_version": 1,
         "overlays": [],
@@ -2599,73 +1685,50 @@ def test_recap_rerun_overwrites_prior_visual_overlays_to_empty_for_current_narra
 
 
 def test_recap_writes_canonical_visual_overlays_before_assemble(monkeypatch, tmp_path):
-    """Recap/packaging owns the canonical visual_overlays.json input; assemble should not
-    infer overlays from ad-hoc platform artifacts."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps(
-            [
-                {
-                    "start": 0.0,
-                    "end": 2.0,
-                    "narration": "开场标题。",
-                    "visual_overlays": [
-                        {
-                            "type": "top_title",
-                            "text": "今日回顾",
-                            "start": 0.0,
-                            "end": 2.0,
-                        },
-                        {
-                            "type": "inline_label_or_callout",
-                            "text": "关键人物",
-                            "start": 1.0,
-                            "end": 2.0,
-                            "anchor": "center",
-                        },
-                    ],
-                }
-            ]
-        ),
-        encoding="utf-8",
+    """Recap owns the canonical visual_overlays.json input; assemble reads it by contract."""
+    video, work = seed_full_work(
+        tmp_path,
+        [
+            {
+                "start": 0.0,
+                "end": 2.0,
+                "narration": "开场标题。",
+                "visual_overlays": [
+                    {
+                        "type": "top_title",
+                        "text": "今日回顾",
+                        "start": 0.0,
+                        "end": 2.0,
+                    },
+                    {
+                        "type": "inline_label_or_callout",
+                        "text": "关键人物",
+                        "start": 1.0,
+                        "end": 2.0,
+                        "anchor": "center",
+                    },
+                ],
+            }
+        ],
     )
-    recap_runtime._write_run_manifest(work, video.resolve(), _manifest_args())
-
     calls = []
 
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "assemble.py":
-            overlays_path = work / "visual_overlays.json"
-            assert overlays_path.exists(), (
-                "visual_overlays.json must exist before assemble runs"
-            )
-            payload = json.loads(overlays_path.read_text(encoding="utf-8"))
-            assert payload["schema_version"] == 1
-            overlays = payload["overlays"]
-            assert [item["type"] for item in overlays] == [
-                "top_title",
-                "inline_label_or_callout",
-            ]
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
+    def assemble(cli):
+        overlays_path = work / "visual_overlays.json"
+        assert overlays_path.exists(), "visual_overlays.json must exist before assemble runs"
+        payload = json.loads(overlays_path.read_text(encoding="utf-8"))
+        assert payload["schema_version"] == 1
+        assert [item["type"] for item in payload["overlays"]] == [
+            "top_title",
+            "inline_label_or_callout",
+        ]
+        write_assemble_output(work, tmp_path / "recap_video.mp4")
 
-    monkeypatch.setattr("recap_runner._run", fake_run)
     monkeypatch.setattr(
-        sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)]
+        "recap_runner._run", stub_child_run(work, calls=calls, assemble=assemble)
     )
+    _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
 
-    assemble_call = next(
-        call for call in calls if call[:2] == ("video-assemble", "assemble.py")
-    )
-    assert (
-        "--visual-overlays" not in assemble_call[2]
-    )  # assemble reads work_dir/visual_overlays.json by contract
+    assert "--visual-overlays" not in _call_args(calls, "video-assemble", "assemble.py")

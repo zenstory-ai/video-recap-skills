@@ -3,17 +3,15 @@
 import json
 import hashlib
 import sys
-from pathlib import Path
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-recap/scripts'
-sys.path.insert(0, str(SCRIPTS))
-import recap_cli  # noqa: E402
-import recap_runner  # noqa: E402
-import recap_runtime  # noqa: E402
-import recap_source  # noqa: E402
-from test_audio_routing import _args, _finish_stubs  # noqa: E402
+import recap_cli
+import recap_runner
+import recap_runtime
+import recap_source
+from _helpers import manifest_args as _args
+from test_audio_routing import _finish_stubs
 
 
 @pytest.fixture

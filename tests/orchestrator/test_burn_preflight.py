@@ -1,18 +1,14 @@
-import sys
-from argparse import Namespace
-from pathlib import Path
-
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
-)
 """Orchestrator fail-fast: recap.py must reject a burn-on run on an ffmpeg without the
 libass `subtitles` filter BEFORE any understand/VLM/ASR/TTS spend, and must surface the
 advisory narration review to the user at delivery."""
-import json  # noqa: E402
 
-import pytest  # noqa: E402
+import json
+import shutil
+from argparse import Namespace
 
-import recap_runtime as recap  # noqa: E402
+import pytest
+
+import recap_runtime as recap
 import recap_timeline
 
 
@@ -20,45 +16,34 @@ def _args(burn_subtitles=None):
     return Namespace(burn_subtitles=burn_subtitles)
 
 
-def test_burn_intended_default_on(monkeypatch):
-    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
-    assert recap._burn_subtitles_intended(_args()) is True
-
-
-def test_burn_intended_cli_overrides_to_off():
-    assert recap._burn_subtitles_intended(_args(burn_subtitles=False)) is False
-
-
-def test_burn_intended_env_off(monkeypatch):
-    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
-    monkeypatch.setenv("BURN_SUBTITLES", "0")
-    assert recap._burn_subtitles_intended(_args()) is False
-
-
-def test_burn_intended_cli_beats_env(monkeypatch):
-    # explicit --burn-subtitles wins even when the env says off
-    monkeypatch.setenv("BURN_SUBTITLES", "0")
-    assert recap._burn_subtitles_intended(_args(burn_subtitles=True)) is True
-
-
 @pytest.mark.parametrize(
-    "raw,expected",
+    "env, cli, expected",
     [
-        ("on", True),
-        ("yes", True),
-        ("TRUE", True),
-        ("1", True),
-        (" 1 ", True),
-        ("0", False),
-        ("no", False),
-        ("off", False),
-        ("false", False),
-        ("garbage", False),
+        pytest.param(None, None, True, id="default-on"),
+        pytest.param(None, False, False, id="cli-off"),
+        pytest.param("0", True, True, id="cli-beats-env"),
+        *[
+            pytest.param(raw, None, expected, id=f"env-{raw.strip() or 'blank'}")
+            for raw, expected in [
+                ("on", True),
+                ("yes", True),
+                ("TRUE", True),
+                ("1", True),
+                (" 1 ", True),
+                ("0", False),
+                ("no", False),
+                ("off", False),
+                ("false", False),
+                ("garbage", False),
+            ]
+        ],
     ],
 )
-def test_burn_intended_env_token_forms(monkeypatch, raw, expected):
-    monkeypatch.setenv("BURN_SUBTITLES", raw)
-    assert recap._burn_subtitles_intended(_args()) is expected
+def test_burn_intended_resolves_cli_over_env_token(monkeypatch, env, cli, expected):
+    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
+    if env is not None:
+        monkeypatch.setenv("BURN_SUBTITLES", env)
+    assert recap._burn_subtitles_intended(_args(burn_subtitles=cli)) is expected
 
 
 def test_preflight_raises_when_present_but_cannot_burn(monkeypatch):
@@ -82,28 +67,21 @@ def test_preflight_does_not_probe_when_burn_off(monkeypatch):
     recap._preflight_burn_subtitles(_args(burn_subtitles=False))  # must not raise
 
 
-def test_cannot_burn_false_when_ffmpeg_absent(monkeypatch):
-    # ffmpeg absent entirely → this guard stays out of it (fails later / reported by doctor)
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda _n: None)
-    assert recap._ffmpeg_present_but_cannot_burn() is False
-
-
-def test_cannot_burn_true_when_present_without_filter(monkeypatch):
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(recap, "ffmpeg_has_subtitles_filter", lambda: False)
-    assert recap._ffmpeg_present_but_cannot_burn() is True
-
-
-def test_cannot_burn_false_when_present_with_filter(monkeypatch):
-    import shutil
-
-    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(recap, "ffmpeg_has_subtitles_filter", lambda: True)
-    assert recap._ffmpeg_present_but_cannot_burn() is False
+@pytest.mark.parametrize(
+    "ffmpeg_path, has_filter, expected",
+    [
+        # ffmpeg absent entirely -> this guard stays out of it (reported by doctor)
+        pytest.param(None, True, False, id="ffmpeg-absent"),
+        pytest.param("/usr/bin/ffmpeg", False, True, id="present-without-filter"),
+        pytest.param("/usr/bin/ffmpeg", True, False, id="present-with-filter"),
+    ],
+)
+def test_cannot_burn_only_when_ffmpeg_is_present_without_the_filter(
+    monkeypatch, ffmpeg_path, has_filter, expected
+):
+    monkeypatch.setattr(shutil, "which", lambda _n: ffmpeg_path)
+    monkeypatch.setattr(recap, "ffmpeg_has_subtitles_filter", lambda: has_filter)
+    assert recap._ffmpeg_present_but_cannot_burn() is expected
 
 
 def test_review_pointer_prints_verdict(tmp_path, capsys):
@@ -129,17 +107,12 @@ def test_review_pointer_silent_when_absent(tmp_path, capsys):
     assert capsys.readouterr().out == ""
 
 
-def test_review_pointer_md_present_json_absent(tmp_path, capsys):
-    # md exists but no json → fall through to the plain-path branch, never crash
+@pytest.mark.parametrize("review_json", [None, "{ not json"], ids=["absent", "malformed"])
+def test_review_pointer_degrades_to_plain_path_without_usable_json(
+    tmp_path, capsys, review_json
+):
     (tmp_path / "narration_review.md").write_text("# review", encoding="utf-8")
+    if review_json is not None:
+        (tmp_path / "narration_review.json").write_text(review_json, encoding="utf-8")
     recap_timeline._print_narration_review_pointer(tmp_path)
-    out = capsys.readouterr().out
-    assert "narration_review.md" in out
-
-
-def test_review_pointer_json_malformed(tmp_path, capsys):
-    (tmp_path / "narration_review.md").write_text("# review", encoding="utf-8")
-    (tmp_path / "narration_review.json").write_text("{ not json", encoding="utf-8")
-    recap_timeline._print_narration_review_pointer(tmp_path)
-    out = capsys.readouterr().out
-    assert "narration_review.md" in out  # degrades to the plain pointer, no traceback
+    assert "narration_review.md" in capsys.readouterr().out  # no traceback

@@ -1,14 +1,11 @@
 import json
-import sys
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
-)
+import pytest
 
-import final_qc  # noqa: E402
-import qc_contract as qc  # noqa: E402
-import recap_stage_qc as recap  # noqa: E402
+import final_qc
+import qc_contract as qc
+import recap_stage_qc as recap
 
 
 def _write_json(path, value):
@@ -50,36 +47,25 @@ def _upstream_blocker(stage="post_render", artifact="assembly_qc.json"):
     ) | {"artifact": artifact}
 
 
-def test_tail_decode_flags_container_valid_but_undecodable_stream(tmp_path):
-    """Regression: header probing alone passes a container-valid but media-truncated/corrupt
-    render (moov intact + mdat cut). The tail-decode check must flag it as a blocker."""
-    out = tmp_path / "output.mp4"
-    out.write_bytes(
-        b"\x00" * 4096
-    )  # exists + non-empty so we reach the probe/decode branch
+@pytest.mark.parametrize(
+    "decode_result, ok",
+    [
+        pytest.param((False, "Invalid NAL unit size (505 > 107)"), False, id="undecodable"),
+        pytest.param((None, "ffmpeg unavailable"), True, id="decode-skipped"),
+    ],
+)
+def test_tail_decode_blocks_only_a_real_decode_failure(tmp_path, decode_result, ok):
+    """A container-valid but truncated render is a blocker; a skipped decode (no ffmpeg) is not."""
+    (tmp_path / "output.mp4").write_bytes(b"\x00" * 4096)
     report = final_qc.build_final_qc(
         tmp_path,
         final_output="output.mp4",
         probe_runner=lambda p: _probe(),  # header probe passes cleanly
-        decode_runner=lambda p: (False, "Invalid NAL unit size (505 > 107)"),
+        decode_runner=lambda p: decode_result,
     )
-    assert report["ok"] is False
-    assert any(f["code"] == "undecodable_stream" for f in report["findings"])
-
-
-def test_tail_decode_skip_does_not_false_block(tmp_path):
-    """When ffmpeg is unavailable the decode check returns None and must NOT create a blocker."""
-    out = tmp_path / "output.mp4"
-    out.write_bytes(b"\x00" * 4096)
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output="output.mp4",
-        probe_runner=lambda p: _probe(),
-        decode_runner=lambda p: (None, "ffmpeg unavailable"),
-    )
-    assert report["ok"] is True
-    assert report["blocker_count"] == 0
-    assert not any(f["code"] == "undecodable_stream" for f in report["findings"])
+    assert report["ok"] is ok
+    assert (report["blocker_count"] == 0) is ok
+    assert any(f["code"] == "undecodable_stream" for f in report["findings"]) is not ok
 
 
 def test_missing_and_empty_final_output_are_valid_blockers(tmp_path):
@@ -199,47 +185,30 @@ def test_probe_fixture_accepts_numeric_and_rational_video_fps(tmp_path):
     assert qc.validate_report(numeric) is True
 
 
-def test_probe_failure_on_existing_nonempty_mp4_is_deterministic_blocker(tmp_path):
+def _raise(error):
+    return lambda _path: (_ for _ in ()).throw(error)
+
+
+@pytest.mark.parametrize(
+    "probe",
+    [
+        pytest.param({"probe_runner": _raise(RuntimeError("ffprobe boom"))}, id="runtime"),
+        pytest.param({"probe_runner": _raise(OSError("missing executable"))}, id="oserror"),
+        pytest.param(
+            {"probe_fixture": {"streams": [None], "format": {"duration": "1"}}},
+            id="malformed-metadata",
+        ),
+    ],
+)
+def test_probe_failure_on_existing_nonempty_mp4_is_deterministic_blocker(tmp_path, probe):
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
 
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output=output,
-        probe_runner=lambda p: (_ for _ in ()).throw(RuntimeError("ffprobe boom")),
-    )
+    report = final_qc.build_final_qc(tmp_path, final_output=output, **probe)
 
     assert report["ok"] is False
     assert any(f["code"] == "probe_failed" for f in report["findings"])
     assert qc.validate_report(report) is True
-
-
-def test_probe_oserror_on_existing_nonempty_mp4_is_deterministic_blocker(tmp_path):
-    output = tmp_path / "recap.mp4"
-    output.write_bytes(b"fake mp4 bytes")
-
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output=output,
-        probe_runner=lambda _path: (_ for _ in ()).throw(OSError("missing executable")),
-    )
-
-    assert report["ok"] is False
-    assert any(f["code"] == "probe_failed" for f in report["findings"])
-
-
-def test_malformed_nested_probe_metadata_is_a_probe_failure(tmp_path):
-    output = tmp_path / "recap.mp4"
-    output.write_bytes(b"fake mp4 bytes")
-
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output=output,
-        probe_fixture={"streams": [None], "format": {"duration": "1"}},
-    )
-
-    assert report["ok"] is False
-    assert any(f["code"] == "probe_failed" for f in report["findings"])
 
 
 def test_corrupt_advisory_mimo_qc_is_metadata_only(tmp_path):
