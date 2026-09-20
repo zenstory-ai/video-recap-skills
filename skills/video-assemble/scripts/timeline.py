@@ -36,6 +36,12 @@ def _ceil_time(value, digits=4):
     return math.ceil((float(value) * scale) - 1e-9) / scale
 
 
+def _floor_time(value, digits=4):
+    """Round an interval start outward so serialization cannot clip source samples."""
+    scale = 10 ** digits
+    return math.floor((float(value) * scale) + 1e-9) / scale
+
+
 def build_timeline(canvas, duration_s, video_clips, narration_segments,
                    bgm=None, ducking=None, subtitle_segments=None,
                    image_segments=(), resource_packages=None,
@@ -110,7 +116,7 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
     for s in placed:
         narration = {
             "source_path": s["source_path"],
-            "timeline_start": round(float(s["timeline_start"]), 4),
+            "timeline_start": _floor_time(s["timeline_start"], 4),
             "timeline_end": _ceil_time(s["timeline_end"], 4),
             "gain": round(float(s.get("gain", 1.0)), 4),
             "text": s.get("text", ""),
