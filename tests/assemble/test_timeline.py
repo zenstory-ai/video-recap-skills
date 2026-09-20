@@ -494,15 +494,6 @@ def test_variable_ducking_keyframes_do_not_release_to_idle_between_close_windows
 def test_build_video_clips_prefers_per_clip_source_path_without_explicit_source_video(
     monkeypatch, tmp_path
 ):
-    sys.path.insert(
-        0,
-        str(
-            Path(__file__).resolve().parents[2]
-            / "skills"
-            / "video-assemble"
-            / "scripts"
-        ),
-    )
     a = tmp_path / "a.mp4"
     b = tmp_path / "b.mp4"
     rendered = tmp_path / "edited_source.mp4"
@@ -548,15 +539,6 @@ def test_build_video_clips_degrades_only_missing_clip_keeps_present_provenance(
 ):
     """One stale source must degrade ONLY its own clip; clips whose source is present keep
     their real source_id/source_path provenance (no whole-timeline collapse)."""
-    sys.path.insert(
-        0,
-        str(
-            Path(__file__).resolve().parents[2]
-            / "skills"
-            / "video-assemble"
-            / "scripts"
-        ),
-    )
     rendered = tmp_path / "edited_source.mp4"
     rendered.write_bytes(b"e")
     present = tmp_path / "present.mp4"
@@ -606,15 +588,6 @@ def test_build_video_clips_degrades_only_missing_clip_keeps_present_provenance(
 
 
 def test_emit_timeline_marks_degraded_multi_source_fallback(monkeypatch, tmp_path):
-    sys.path.insert(
-        0,
-        str(
-            Path(__file__).resolve().parents[2]
-            / "skills"
-            / "video-assemble"
-            / "scripts"
-        ),
-    )
     rendered = tmp_path / "edited_source.mp4"
     rendered.write_bytes(b"e")
     work = tmp_path / "work"

@@ -8,11 +8,11 @@ from deslop_qc import analyze_deslop_qc
 from narration import build_agent_brief as build_script_agent_brief, lint_narration
 
 
-def _write_deslop_requirements(work_dir, *, owner="video-script.narration", style_card_required=True):
+def _write_deslop_requirements(work_dir):
     (work_dir / "deslop_qc_requirements.json").write_text(json.dumps({
         "schema_version": 1,
-        "owner": owner,
-        "style_card_required": style_card_required,
+        "owner": "video-script.narration",
+        "style_card_required": True,
         "packaging_plan_expected": True,
         "deslop_qc": {
             "report_only": True,
@@ -36,25 +36,8 @@ def test_deslop_qc_ta_pronoun_not_placeholder_but_scaffold_copy_is():
     assert any(b["code"] == "placeholder_leakage" for b in scaffold["blockers"])
 
 
-def test_deslop_qc_separates_objective_blockers_from_advisories(tmp_path):
-    (tmp_path / "style_card.json").write_text('{"voice":"冷静"}', encoding="utf-8")
-    report = analyze_deslop_qc([
-        {"start": 0, "end": 4, "narration": "他不是退缩而是在等证据——他早有准备。"},
-        {"start": 5, "end": 9, "narration": "因为秘密背后真相牵动命运，所以这意味着一场风暴像棋局一样展开。"},
-    ], work_dir=tmp_path)
-
-    assert report["ok"] is False
-    assert report["contract"].startswith("Local readability/QC report only")
-    # em-dash is an objective blocker; the idiomatic 不是…而是 is now advisory-only.
-    assert {item["code"] for item in report["blockers"]} == {"em_dash"}
-    assert {item["severity"] for item in report["advisories"]} == {"advisory"}
-    advisory_codes = {item["code"] for item in report["advisories"]}
-    assert "negative_positive_flip" in advisory_codes
-    assert "cliche_density" in advisory_codes
-
-
 def test_lint_narration_embeds_deslop_qc_and_writes_sibling_report(tmp_path):
-    _write_deslop_requirements(tmp_path, style_card_required=True)
+    _write_deslop_requirements(tmp_path)
     (tmp_path / "agent_narration_brief.md").write_text("Brief text no longer controls style-card gating", encoding="utf-8")
     (tmp_path / "original_subtitles.json").write_text(
         json.dumps([{"start": 1, "end": 2, "text": "原声台词——带破折号"}], ensure_ascii=False),
@@ -115,9 +98,11 @@ def test_deslop_qc_is_report_only_with_blocker_advisory_split(tmp_path):
     ], work_dir=tmp_path)
 
     assert report["ok"] is False
+    assert report["contract"].startswith("Local readability/QC report only")
     assert "not an AIGC detector" in report["contract"]
     assert "never rewrites text" in report["contract"]
     assert report["style_card_required"] is False
+    # em-dash is an objective blocker; the idiomatic 不是…而是 is advisory-only.
     assert {item["code"] for item in report["blockers"]} == {"em_dash"}
 
     advisory_codes = {item["code"] for item in report["advisories"]}
