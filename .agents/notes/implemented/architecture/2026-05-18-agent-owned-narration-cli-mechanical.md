@@ -31,4 +31,4 @@ must / never：
 
 - **收益**：责任边界清楚，Agent 能把背景调研、用户上下文和自己的剪辑判断带进文案；代码里没有脆弱的文案启发式可维护。
 - **代价**：每次成片至少一次暂停（cut 模式两次），无法无人值守；成片质量取决于 Agent，脚本只能守住时间、语速、句子完整性和证据引用，守不住"好不好看"。
-- 例外：`validate.py` 在 full 模式会按安静窗口回写规范化字段与实测的 `overlaps_speech`，但 never 改写文本含义。
+- 例外：`validate.py` 在 full 模式会按安静窗口回写规范化字段与实测的 `overlaps_speech`，但 never 改写文本含义；已批准的定稿传 `--preserve-approved-text`，此时只允许更新实测 `overlaps_speech`，装不下窗口就失败回创作，never 自动缩稿或变速（#99）。

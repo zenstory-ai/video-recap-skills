@@ -19,6 +19,7 @@ cut 模式初版让 Agent 用原片时间写 `narration.json`，再由 `map_narr
 - `recap_phase.json` 记录 `clip_plan` 与 `narration` 的 md5；`clip_plan.json` 变而 `narration.json` 未变时 must 拒绝继续，提示删稿重写。
 - `clip_plan_validated.json` 是 cut 证据的权威来源：输出时间轴的 speech 证据（`speech_boundary_anchors_output.json` 等）must 携带匹配的 `clip_plan_fingerprint`；缺失、过期或畸形一律 fail closed，never 回退到原片时钟，never 信任 Agent 写入的 `overlaps_speech=false`。
 - `review.py --timeline` 默认 `auto`，以 `recap_run_manifest.json` 的 `edit_mode` 为准判断评审时间轴；编排 full 模式显式传 `source`，避免复用目录里的旧 cut 产物误导。
+- `--audio-mode source-mix|adopted-packet-copy` 的 cut 项目只有 PASS 1：剪完直接合成，不重建 brief、不等 `narration.json`，声音归属由 `recap_run_manifest.json` 的 `audio` 块记录（#103）。
 - 例外：单独调用 `cut.py` 且不传 `--no-narration-map` 的旧版单阶段路径仍把原片时间的 `narration.json` 映射为 `narration_mapped.json`，voiceover 需显式 `--narration` 传入；编排路径 never 生成该文件。
 
 来源：187dd2b (#16) Step 4–6、93864f5 (#23)、2c923cf、96af0a7 (#31)、affe325 (#64)
