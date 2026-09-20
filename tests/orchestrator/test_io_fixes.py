@@ -91,7 +91,7 @@ def test_recap_preserve_approved_text_reaches_real_validator_before_voiceover(
             assert "--preserve-approved-text" in cli_args
             result = subprocess.run(
                 [
-                    sys.executable,
+                    sys.executable, "-X", "utf8",
                     str(recap_runtime._entry(skill, script)),
                     *map(str, cli_args),
                 ],
