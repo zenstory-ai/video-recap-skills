@@ -13,20 +13,13 @@ from pathlib import Path
 
 from frozen_audio import probe_audio_packets
 from lib import run_cmd
+from strict_inputs import sha256_file
 from subtitle_track import load_subtitle_track
 
 TRACK = 'subtitle_track.json'
 VALIDATION = 'subtitle_track_validation.json'
 VALIDATION_SCHEMA = 1
 PROJECTOR_VERSION = 1
-
-
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open('rb') as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def current_bindings(video, selected_audio_stream=0, *, edit_plan_path=None):
@@ -38,9 +31,9 @@ def current_bindings(video, selected_audio_stream=0, *, edit_plan_path=None):
     packets = probe_audio_packets(video, selected_audio_stream)
     audio = {'decoder': packets['decoder'], 'packets': packets['packets']}
     audio_hash = hashlib.sha256(json.dumps(audio, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    picture = {'sha256': _sha256(video)}
+    picture = {'sha256': sha256_file(video)}
     if edit_plan_path is not None:
-        picture['edit_sha256'] = _sha256(edit_plan_path)
+        picture['edit_sha256'] = sha256_file(edit_plan_path)
     return {'picture': picture, 'audio': {'sha256': audio_hash, 'selected_stream': selected_audio_stream}}
 
 
@@ -162,11 +155,11 @@ def bound_subtitle_entries(work_dir, video_duration):
     record = loaded['binding']
     if hashlib.sha256(json.dumps(loaded['entries'], sort_keys=True).encode()).hexdigest() != record['projection_sha256']:
         raise ValueError('stale subtitle track: prepared projection changed after validation')
-    if _sha256(work / TRACK) != record['track_sha256']:
+    if sha256_file(work / TRACK) != record['track_sha256']:
         raise ValueError('stale subtitle track: author file changed after prepare')
-    if _sha256(record['input_video']) != record['identities']['picture']['sha256']:
+    if sha256_file(record['input_video']) != record['identities']['picture']['sha256']:
         raise ValueError('stale subtitle track: adopted media changed after prepare')
-    if record['edit_plan'] and _sha256(record['edit_plan']) != record['identities']['picture']['edit_sha256']:
+    if record['edit_plan'] and sha256_file(record['edit_plan']) != record['identities']['picture']['edit_sha256']:
         raise ValueError('stale subtitle track: edit plan changed after prepare')
     if abs(float(Fraction(record['duration'])) - float(video_duration)) > 0.05:
         raise ValueError('stale subtitle track: consumer duration changed after prepare')
@@ -189,7 +182,7 @@ def verify_rendered_picture(work_dir, output_path):
     if actual_hash != loaded['binding']['frame_clock_sha256']:
         raise ValueError('Rendered frame clock changed; subtitle frame projection is no longer valid')
     loaded['rendered_picture'].update(frame_clock_verified=True, frame_count=len(frame_pts),
-                                      frame_clock_sha256=actual_hash, sha256=_sha256(output_path))
+                                      frame_clock_sha256=actual_hash, sha256=sha256_file(output_path))
     path.write_text(json.dumps(loaded, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return loaded['rendered_picture']
 
@@ -204,9 +197,9 @@ def manifest_subtitle_evidence(work_dir, input_video, output_path):
     rendered = loaded.get('rendered_picture', {})
     if rendered.get('frame_clock_verified') is not True:
         raise ValueError('Subtitle output frame clock has not been verified')
-    if _sha256(input_video) != loaded['binding']['identities']['picture']['sha256']:
+    if sha256_file(input_video) != loaded['binding']['identities']['picture']['sha256']:
         raise ValueError('stale subtitle manifest: input media differs')
-    if _sha256(output_path) != rendered.get('sha256'):
+    if sha256_file(output_path) != rendered.get('sha256'):
         raise ValueError('stale subtitle manifest: actual output differs from verified render')
     return {'validation_path': str((work / VALIDATION).resolve()),
             'binding': loaded['binding'], 'metadata': loaded['metadata'], 'rendered_picture': rendered}

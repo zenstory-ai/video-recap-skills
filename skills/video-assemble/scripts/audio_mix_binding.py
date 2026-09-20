@@ -2,9 +2,7 @@
 
 import hashlib
 import json
-import math
 from pathlib import Path
-import re
 import subprocess
 
 from assemble_constants import frame_clock_samples
@@ -12,6 +10,10 @@ from frozen_audio import probe_audio_packets
 import narration_binding
 from pair_media import probe_picture, validate_pair_timing
 import source_score
+from strict_inputs import (
+    SHA256_RE as SHA256, assert_sha256, read_json_bytes, require_digest, require_fields,
+    require_integer, require_local_path, require_number, run_logged, sha256_file,
+)
 
 
 ARTIFACT = "audio_mix_binding"
@@ -20,62 +22,6 @@ RATE = 48_000
 CHANNELS = 2
 CODEC = "pcm_f32le"
 CONVERSION_POLICY = "mono_equal_power_stereo_identity"
-SHA256 = re.compile(r"[a-f0-9]{64}")
-
-
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _fields(value, required, label):
-    if not isinstance(value, dict) or set(value) != set(required):
-        raise ValueError(f"{label} requires exactly fields {required}")
-
-
-def _digest(value, label):
-    if not isinstance(value, str) or not SHA256.fullmatch(value):
-        raise ValueError(f"{label} must be a lowercase SHA256")
-    return value
-
-
-def _integer(value, label, minimum=0):
-    if type(value) is not int or value < minimum:
-        raise ValueError(f"{label} must be an integer >= {minimum}")
-    return value
-
-
-def _number(value, label, minimum, maximum):
-    if type(value) not in (int, float) or not math.isfinite(value) \
-            or not minimum <= value <= maximum:
-        raise ValueError(f"{label} must be finite in [{minimum},{maximum}]")
-    return float(value)
-
-
-def _local(path, label):
-    if not isinstance(path, (str, Path)) or not str(path) or "://" in str(path):
-        raise ValueError(f"{label} requires a local path")
-    resolved = Path(path).resolve()
-    if not resolved.is_file():
-        raise ValueError(f"{label} is missing: {resolved}")
-    return resolved
-
-
-def _json(path, label):
-    resolved = _local(path, label)
-    raw = resolved.read_bytes()
-    try:
-        return resolved, raw, json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{label} is not valid JSON") from exc
-
-
-def _assert_hash(path, expected, label):
-    if _sha256(path) != expected:
-        raise ValueError(f"{label} changed or has the wrong identity")
 
 
 def _picture_format(picture):
@@ -89,24 +35,24 @@ def _picture_format(picture):
 
 def load_adoption(path, *, input_video, narration_adoption_path, tts_segments):
     """Strict read-only preflight; no work artifacts are created here."""
-    adoption_path, raw, value = _json(path, "audio mix adoption")
-    _fields(value, ["artifact", "schema_version", "picture_sha256", "prepared_receipt",
+    adoption_path, raw, value = read_json_bytes(path, "audio mix adoption")
+    require_fields(value, ["artifact", "schema_version", "picture_sha256", "prepared_receipt",
                     "narration_adoption_sha256", "format", "segments", "master_gain_db"],
             "audio mix adoption")
     if value["artifact"] != "audio_mix_adoption" or type(value["schema_version"]) is not int \
             or value["schema_version"] != 1:
         raise ValueError("unsupported audio_mix_adoption schema")
-    input_video = _local(input_video, "picture")
-    picture_hash = _digest(value["picture_sha256"], "picture_sha256")
-    _assert_hash(input_video, picture_hash, "picture")
+    input_video = require_local_path(input_video, "picture")
+    picture_hash = require_digest(value["picture_sha256"], "picture_sha256")
+    assert_sha256(input_video, picture_hash, "picture")
     picture = probe_picture(input_video)
     picture_samples, picture_summary = _picture_format(picture)
 
-    narration_path = _local(narration_adoption_path, "narration adoption")
-    narration_hash = _digest(value["narration_adoption_sha256"],
+    narration_path = require_local_path(narration_adoption_path, "narration adoption")
+    narration_hash = require_digest(value["narration_adoption_sha256"],
                              "narration_adoption_sha256")
-    _assert_hash(narration_path, narration_hash, "narration adoption")
-    _fields(value["format"], ["sample_rate", "channels", "total_samples"], "mix format")
+    assert_sha256(narration_path, narration_hash, "narration adoption")
+    require_fields(value["format"], ["sample_rate", "channels", "total_samples"], "mix format")
     mix_format = value["format"]
     if mix_format != {"sample_rate": RATE, "channels": CHANNELS,
                       "total_samples": picture_samples}:
@@ -120,19 +66,19 @@ def load_adoption(path, *, input_video, narration_adoption_path, tts_segments):
     normalized = []
     seen = set()
     for adopted, segment in zip(value["segments"], tts_segments):
-        _fields(adopted, ["index", "processed_wav_sha256", "output_start_sample", "gain"],
+        require_fields(adopted, ["index", "processed_wav_sha256", "output_start_sample", "gain"],
                 "audio mix segment")
-        index = _integer(adopted["index"], "audio mix segment index")
+        index = require_integer(adopted["index"], "audio mix segment index")
         if index in seen or index != segment.get("index"):
             raise ValueError("audio mix segment index/order differs from narration")
         seen.add(index)
-        digest = _digest(adopted["processed_wav_sha256"], "processed_wav_sha256")
+        digest = require_digest(adopted["processed_wav_sha256"], "processed_wav_sha256")
         if digest != segment.get("processed_wav_sha256"):
             raise ValueError("audio mix segment hash differs from narration")
         normalized.append({**adopted,
-                           "output_start_sample": _integer(
+                           "output_start_sample": require_integer(
                                adopted["output_start_sample"], "output_start_sample"),
-                           "gain": _number(adopted["gain"], "narration gain", 0, 16)})
+                           "gain": require_number(adopted["gain"], "narration gain", 0, 16)})
     return {
         "path": str(adoption_path), "sha256": hashlib.sha256(raw).hexdigest(),
         "picture": {"path": str(input_video), "sha256": picture_hash,
@@ -142,7 +88,7 @@ def load_adoption(path, *, input_video, narration_adoption_path, tts_segments):
         "prepared": prepared_receipt["outputs"],
         "narration_adoption": {"path": str(narration_path), "sha256": narration_hash},
         "format": dict(mix_format), "segments": normalized,
-        "master_gain_db": _number(value["master_gain_db"], "master_gain_db", -24, 24),
+        "master_gain_db": require_number(value["master_gain_db"], "master_gain_db", -24, 24),
         "conversion_policy": CONVERSION_POLICY, "runtime": None,
     }
 
@@ -154,28 +100,22 @@ def assert_current(context):
         (context["prepared_receipt"], "prepared receipt"),
         (context["narration_adoption"], "narration adoption"),
     ):
-        _assert_hash(item["path"], item["sha256"], label)
+        assert_sha256(item["path"], item["sha256"], label)
     for name, identity in context["prepared"].items():
-        _assert_hash(identity["path"], identity["sha256"], name)
+        assert_sha256(identity["path"], identity["sha256"], name)
     runtime = context.get("runtime")
     if runtime:
         for item in runtime["segments"]:
-            _assert_hash(item["placed"]["path"], item["placed"]["sha256"], "placed narration")
+            assert_sha256(item["placed"]["path"], item["placed"]["sha256"], "placed narration")
         for key in ("voice_bus", "premaster", "master"):
-            _assert_hash(runtime[key]["path"], runtime[key]["sha256"], key)
+            assert_sha256(runtime[key]["path"], runtime[key]["sha256"], key)
         if "final_decoded_pcm" in runtime:
-            _assert_hash(runtime["final_decoded_pcm"]["path"],
+            assert_sha256(runtime["final_decoded_pcm"]["path"],
                          runtime["final_decoded_pcm"]["sha256"], "final decoded PCM")
 
 
 def _run(command, work_dir, label):
-    (work_dir / f"explicit_{label}.command.json").write_text(
-        json.dumps(command, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
-    )
-    result = subprocess.run(command, capture_output=True, text=True, timeout=3600)
-    (work_dir / f"explicit_{label}.log").write_text(result.stderr, encoding="utf-8")
-    if result.returncode:
-        raise RuntimeError(f"explicit {label} FFmpeg failed")
+    run_logged(command, work_dir, label, prefix="explicit_")
 
 
 def _channels(path):
@@ -268,10 +208,10 @@ def render_explicit_mix(context, narration_context, tts_segments, work_dir):
     command += ["-filter_complex", ";".join(filters), "-map", "[out]", "-c:a", CODEC,
                 str(voice_bus)]
     for item in rendered:
-        _assert_hash(item["placed"]["path"], item["placed"]["sha256"], "placed narration")
+        assert_sha256(item["placed"]["path"], item["placed"]["sha256"], "placed narration")
     _run(command, directory, "voice_bus")
     for item in rendered:
-        _assert_hash(item["placed"]["path"], item["placed"]["sha256"], "placed narration")
+        assert_sha256(item["placed"]["path"], item["placed"]["sha256"], "placed narration")
     voice_identity = source_score._output_identity(voice_bus)
     narration_binding.seal_render_inputs(narration_context, tts_segments, voice_bus)
     narration_context["sealed"]["narration_bus"]["consumption_status"] = \
@@ -291,11 +231,11 @@ def render_explicit_mix(context, narration_context, tts_segments, work_dir):
     premaster_identity = source_score._output_identity(premaster)
     master = directory / "master.wav"
     gain = 10 ** (context["master_gain_db"] / 20)
-    _assert_hash(premaster, premaster_identity["sha256"], "premaster")
+    assert_sha256(premaster, premaster_identity["sha256"], "premaster")
     _run(["ffmpeg", "-nostdin", "-v", "error", "-n", "-i", str(premaster),
           "-af", f"volume={gain:.17g},aformat=sample_fmts=flt:sample_rates={RATE}:"
           "channel_layouts=stereo", "-c:a", CODEC, str(master)], directory, "master")
-    _assert_hash(premaster, premaster_identity["sha256"], "premaster")
+    assert_sha256(premaster, premaster_identity["sha256"], "premaster")
     runtime = {
         "segments": rendered, "voice_bus": voice_identity,
         "premaster": premaster_identity,
@@ -314,8 +254,8 @@ def stage_final_binding(context, narration_fingerprint, rendered_output, final_o
     if not context.get("runtime"):
         raise RuntimeError("explicit audio mix must be rendered and sealed before finalization")
     assert_current(context)
-    rendered = _local(rendered_output, "rendered output")
-    rendered_digest = _sha256(rendered)
+    rendered = require_local_path(rendered_output, "rendered output")
+    rendered_digest = sha256_file(rendered)
     output_picture = probe_picture(rendered)
     input_clock = _picture_format(context["picture_identity"])[1]
     output_clock = _picture_format(output_picture)[1]
@@ -334,7 +274,7 @@ def stage_final_binding(context, narration_fingerprint, rendered_output, final_o
           "channel_layouts=stereo", "-c:a", CODEC, str(decoded)], decoded.parent,
          "final_decode")
     context["runtime"]["final_decoded_pcm"] = source_score._output_identity(decoded)
-    _assert_hash(rendered, rendered_digest, "rendered output")
+    assert_sha256(rendered, rendered_digest, "rendered output")
     assert_current(context)
     report = {
         "artifact": ARTIFACT, "schema_version": 1, "status": "FINALIZED",
@@ -376,8 +316,8 @@ def staged_binding_fingerprint(report, staged_path, final_path):
     if not isinstance(report, dict) or report.get("artifact") != ARTIFACT \
             or report.get("schema_version") != 1 or report.get("status") != "FINALIZED":
         raise RuntimeError("finalized audio mix binding is missing")
-    staged = _local(staged_path, "staged audio mix binding")
-    return {"path": str(Path(final_path).resolve()), "sha256": _sha256(staged),
+    staged = require_local_path(staged_path, "staged audio mix binding")
+    return {"path": str(Path(final_path).resolve()), "sha256": sha256_file(staged),
             "status": "FINALIZED", "publication_status": "STAGED_UNPUBLISHED"}
 
 
@@ -402,7 +342,7 @@ def binding_fingerprint(work_dir):
     if not isinstance(final, dict) or not SHA256.fullmatch(str(final.get("sha256", ""))):
         return None
     output = Path(str(final.get("path", "")))
-    if not output.is_file() or _sha256(output) != final["sha256"]:
+    if not output.is_file() or sha256_file(output) != final["sha256"]:
         return None
     narration = report.get("narration_input_binding")
     if not isinstance(narration, dict) or not SHA256.fullmatch(
@@ -410,6 +350,6 @@ def binding_fingerprint(work_dir):
     ):
         return None
     narration_path = Path(str(narration.get("path", "")))
-    if not narration_path.is_file() or _sha256(narration_path) != narration["sha256"]:
+    if not narration_path.is_file() or sha256_file(narration_path) != narration["sha256"]:
         return None
-    return {"path": str(path.resolve()), "sha256": _sha256(path), "status": "FINALIZED"}
+    return {"path": str(path.resolve()), "sha256": sha256_file(path), "status": "FINALIZED"}
