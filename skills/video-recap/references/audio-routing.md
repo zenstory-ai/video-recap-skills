@@ -49,7 +49,7 @@ episodes. Use two existing stages rather than sending an old mix binding into a 
 
    ```bash
    python3 <video-cut>/scripts/cut.py ep1.mp4 --work-dir CUT_WORK \
-     --sources-manifest SOURCES_JSON --no-narration-map
+     --sources-manifest SOURCES_JSON
    ```
 
    A single-source cut omits `--sources-manifest`. For already locked frame decisions,

@@ -254,8 +254,6 @@ def _continuation_command(video, work_dir, args):
         parts += ["--target-duration", args.target_duration]
     if args.allow_duration_drift:
         parts.append("--allow-duration-drift")
-    if args.allow_sparse_cut:
-        parts.append("--allow-sparse-cut")
     if args.skip_asr:
         parts.append("--skip-asr")
     if args.mimo_video_overview:

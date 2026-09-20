@@ -212,16 +212,6 @@ def _write_manifest(work_dir, edit_mode):
     )
 
 
-def test_auto_timeline_legacy_single_pass_stays_source(tmp_path):
-    """The legacy direct video-cut single-pass path writes a SOURCE-time narration.json next to
-    an output-time narration_mapped.json. The cut artifacts are present but narration.json is NOT
-    output time, so auto-detect must stay on source (else it inverts the review)."""
-    (tmp_path / "clip_plan_validated.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "edited_source.mp4").write_bytes(b"")
-    (tmp_path / "narration_mapped.json").write_text("[]", encoding="utf-8")
-    assert review_runner._auto_timeline(tmp_path) == "source"
-
-
 def test_auto_timeline_trusts_manifest_edit_mode(tmp_path):
     """recap_run_manifest.json is authoritative: full mode stays source even with stale cut
     artifacts in a reused work_dir, and cut mode selects cut_output."""

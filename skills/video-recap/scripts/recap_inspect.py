@@ -51,7 +51,6 @@ _SCRIPT_ARTIFACTS = [
 ]
 _RENDER_ARTIFACTS = [
     "tts_meta.json",
-    "narration_mapped.json",
     "timeline.json",
     "subtitles.srt",
     "subtitles.ass",

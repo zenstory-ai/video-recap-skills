@@ -289,7 +289,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 
 加一句"导出剪映草稿"，`timeline.json` 就会写成可编辑的多轨草稿：原片、逐段解说、BGM、字幕和图片叠层各占一轨，素材默认打包进 `Resources/local`，草稿搬到别的机器仍能打开。`ffmpeg` 渲染的 `recap_<名>.mp4` 是最终成片，草稿是给你继续改的。
 
-<img alt="导出的剪映草稿：原片、解说、BGM、字幕" src="docs/jianying-export.png" width="100%">
+<img alt="导出的剪映草稿：原片、解说、BGM、字幕" src="docs/jianying-export.jpg" width="100%">
 
 导出内容与边界见[剪映草稿导出与成本](docs/capcut-jianying-draft-export.md)。
 

@@ -289,14 +289,11 @@ def _run_multi_cut(videos, work_dir, args):
         str(work_dir),
         "--sources-manifest",
         str(manifest_path),
-        "--no-narration-map",
     ]
     if args.target_duration:
         crender += ["--target-duration", args.target_duration]
     if args.allow_duration_drift:
         crender.append("--allow-duration-drift")
-    if args.allow_sparse_cut:
-        crender.append("--allow-sparse-cut")
     _run("video-cut", "cut.py", *crender)
     cut_qc = _surface_cut_qc(work_dir)
     _write_shift_left_stage_qc(work_dir, "post_cut", metadata={"cut_qc": cut_qc})
@@ -638,7 +635,7 @@ def _execute_pipeline(args, videos):
         assemble_video_path = video
     else:
         # Cut mode: cut-first / narrate-second (two pauses), so narration is authored against the
-        # REAL output timeline — map_narration_to_clips is never used and cannot drop/clamp/desync.
+        # REAL output timeline — no source-time mapping exists that could drop/clamp/desync.
         if not clip_plan_json.exists():
             # PASS 1: understand -> agent writes clip_plan.json ONLY.
             if not uses_narration(args) and (work_dir / RUN_MANIFEST).exists():
@@ -656,14 +653,12 @@ def _execute_pipeline(args, videos):
         if not uses_narration(args):
             begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
         cp_fp = _file_md5(clip_plan_json)
-        # Render the cut from clip_plan (no narration mapping — narration is OUTPUT-time).
-        crender = [str(video), "--work-dir", str(work_dir), "--no-narration-map"]
+        # Render the cut from clip_plan (narration is authored later, in OUTPUT time).
+        crender = [str(video), "--work-dir", str(work_dir)]
         if args.target_duration:
             crender += ["--target-duration", args.target_duration]
         if args.allow_duration_drift:
             crender.append("--allow-duration-drift")
-        if args.allow_sparse_cut:
-            crender.append("--allow-sparse-cut")
         _run("video-cut", "cut.py", *crender)
         cut_qc = _surface_cut_qc(work_dir)
         _write_shift_left_stage_qc(work_dir, "post_cut", metadata={"cut_qc": cut_qc})

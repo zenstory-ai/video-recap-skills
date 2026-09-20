@@ -143,7 +143,7 @@ output 证据一律 fail closed，不能回退到原片时钟或信任 Agent 写
 
 ## narration.json
 
-Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated cut 模式（`video-recap --edit-mode cut`）下，第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长），不会再生成或消费 `narration_mapped.json`。只有 legacy direct `video-cut` 单 pass 路径才会把原视频时间的 narration remap 成 `narration_mapped.json`：
+Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated cut 模式（`video-recap --edit-mode cut`）下，第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）；不存在原视频时间→输出时间的旁白映射产物：
 
 ```json
 [
@@ -380,23 +380,6 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 `materials_index.jsonl` 每次保存追加一行，字段包括 `schema_version`, `event`, `material_id`, `source_name`, `source_path`, `source_video_fingerprint`, `settings_fingerprint`, `summary`, `tags`, `material_dir`, `updated_at`。当前权威状态始终以 `materials/<material_id>/material.json` 为准。MVP 只承诺 `grep -R "关键词" <library>` 这类文件检索；没有 DB、embedding 或语义搜索。
 
 保存时会对凭证形态（`tp-`/`sk-`/`gh*_`/`AKIA`/JWT 与 `KEY=VALUE` 赋值）和凭证命名的 JSON key 做脱敏，但这只是**尽力而为**的兜底，不是保证：陌生格式的密钥仍可能漏过。请从源头避免把密钥写进分析产物——key 从环境变量/`.env` 读取，不需要落进 scenes/ASR/VLM/summary 等 JSON。
-
-## narration_mapped.json
-
-仅 legacy direct `video-cut` 单 pass 路径会生成。orchestrated cut 模式不使用它：Agent 在 pass2 直接按剪后成片 OUTPUT 时间轴写 `narration.json`。当 legacy 路径启用时，`start/end` 已变成短视频输出时间，`source_start/source_end` 保留原视频时间：
-
-```json
-[
-  {
-    "start": 2.0,
-    "end": 7.0,
-    "source_start": 14.0,
-    "source_end": 19.0,
-    "source_clip_id": 0,
-    "narration": "解说文本"
-  }
-]
-```
 
 ## original_subtitles.json / user_subtitles.{json,srt,ass}（可选，原声留白字幕）
 

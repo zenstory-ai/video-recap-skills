@@ -132,7 +132,6 @@ def _cut(sources, order, work, env):
             work,
             "--sources-manifest",
             manifest,
-            "--no-narration-map",
         ],
         env=env,
     )

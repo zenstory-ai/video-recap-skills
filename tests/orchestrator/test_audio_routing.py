@@ -23,7 +23,7 @@ def _args(**changes):
         "edit_mode": "full", "audio_mode": "narration", "audio_stream_index": 0,
         "target_duration": None, "skip_asr": False, "mimo_video_overview": False,
         "consolidate": True, "consolidate_asr": False,
-        "allow_duration_drift": False, "allow_sparse_cut": False,
+        "allow_duration_drift": False,
         "mimo_qc": "off", "mimo_qc_refresh": False, "mimo_tts_voice": None,
         "tts_provider": "auto", "voice_ref": None, "allow_partial_tts": False,
         "preserve_approved_text": False, "burn_subtitles": None,

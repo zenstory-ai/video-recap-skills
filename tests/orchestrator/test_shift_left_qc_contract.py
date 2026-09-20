@@ -396,7 +396,6 @@ def test_recap_full_mode_writes_shift_left_preflight_stages(monkeypatch, tmp_pat
             review_narration=None,
             require_narration_review=False,
             allow_duration_drift=False,
-            allow_sparse_cut=False,
         ),
     )
 
