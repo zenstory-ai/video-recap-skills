@@ -54,7 +54,7 @@ def test_missing_premise_blocks_before_cached_reuse_and_clears_stale_delivery(ru
            'required_evidence': contract(video)}
     with pytest.raises(SystemExit, match='QC blocking'):
         run(raw, '--allow-sparse-cut', '--allow-duration-drift', '--no-narration-map')
-    current = json.loads((tmp_path / 'clip_plan_validated.json').read_text())
+    current = json.loads((tmp_path / 'clip_plan_validated.json').read_text(encoding='utf-8'))
     assert current['qc']['required_evidence']['selection_status'] == 'BLOCK'
     assert current['qc']['blocking']
     assert not (tmp_path / 'cut_delivery_qc.json').exists()
