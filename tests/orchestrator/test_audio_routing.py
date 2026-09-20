@@ -12,6 +12,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scri
 sys.path.insert(0, str(SCRIPTS))
 
 import recap_runner  # noqa: E402
+import recap_cli  # noqa: E402
 import recap_runtime  # noqa: E402
 import recap_timeline  # noqa: E402
 
@@ -25,7 +26,7 @@ def _args(**changes):
         "allow_duration_drift": False, "allow_sparse_cut": False,
         "mimo_qc": "off", "mimo_qc_refresh": False, "mimo_tts_voice": None,
         "tts_provider": "auto", "voice_ref": None, "allow_partial_tts": False,
-        "burn_subtitles": None,
+        "preserve_approved_text": False, "burn_subtitles": None,
         "subtitle_y_top": None, "subtitle_y_bot": None,
         "review_narration": None, "require_narration_review": False,
         "output_dir": None, "export_jianying": False,
@@ -177,7 +178,28 @@ def test_cut_source_audio_without_plan_keeps_analysis_pause_and_continuation_mod
     assert not (work / "narration.json").exists()
 
 
-@pytest.mark.parametrize("ambient_provider", ["garbage-provider"])
+def test_source_mix_rejects_explicit_subtitle_track_before_cut(monkeypatch, tmp_path):
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"video")
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "subtitle_track.json").write_text("{}", encoding="utf-8")
+    (work / "clip_plan.json").write_text('{"clips":[]}', encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(recap_runner, "_run", lambda *args: calls.append(args))
+    monkeypatch.setattr(recap_runner, "_preflight_burn_subtitles", lambda _args: None)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap.py", str(video), "--work-dir", str(work), "--edit-mode", "cut",
+         "--audio-mode", "source-mix"],
+    )
+
+    with pytest.raises(SystemExit, match="subtitle_track"):
+        recap_runner.main()
+    assert calls == []
+
+
+@pytest.mark.parametrize("ambient_provider", ["index-tts", "garbage-provider"])
 def test_source_full_ignores_ambient_tts_provider(
     monkeypatch, tmp_path, ambient_provider
 ):
@@ -317,6 +339,7 @@ def test_audio_binding_rejects_mode_switch_but_legacy_manifest_defaults_to_narra
         ["--audio-mode", "source-mix", "--allow-partial-tts"],
         ["--audio-mode", "source-mix", "--no-review-narration"],
         ["--audio-mode", "source-mix", "--require-narration-review"],
+        ["--audio-mode", "source-mix", "--preserve-approved-text"],
         ["--edit-mode", "cut", "--audio-mode", "source-mix", "--audio-stream-index", "1"],
     ],
 )
@@ -328,3 +351,49 @@ def test_unsupported_audio_combinations_fail_before_pipeline(monkeypatch, tmp_pa
 
     with pytest.raises(SystemExit):
         recap_runner.main()
+
+
+def test_narration_preserve_approved_text_forwards_and_continues(monkeypatch, tmp_path):
+    args = _args(preserve_approved_text=True)
+    voiceover = recap_runner._voiceover_args(tmp_path, tmp_path / "narration.json", args)
+    continuation = recap_timeline._continuation_command(tmp_path / "in.mp4", tmp_path, args)
+
+    assert "--preserve-approved-text" in voiceover
+    assert "--preserve-approved-text" in continuation
+
+
+def test_index_tts_is_an_explicit_narration_provider_and_forwards(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sys, "argv", ["recap.py", "input.mp4", "--tts-provider", "index-tts"]
+    )
+
+    _, parsed = recap_cli.parse_args()
+    voiceover = recap_runner._voiceover_args(
+        tmp_path, tmp_path / "narration.json", _args(tts_provider=parsed.tts_provider)
+    )
+
+    assert parsed.tts_provider == "index-tts"
+    assert voiceover[voiceover.index("--tts-provider") + 1] == "index-tts"
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        ["--tts-provider", "index-tts", "--voice-ref", "voice.wav"],
+        ["--tts-provider", "index-tts", "--mimo-tts-voice", "voice-id"],
+        ["--edit-mode", "dub", "--tts-provider", "index-tts"],
+    ],
+)
+def test_index_tts_incompatible_voice_and_dub_options_fail_early(
+    monkeypatch, tmp_path, extra
+):
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"video")
+    calls = []
+    monkeypatch.setattr(recap_runner, "_run", lambda *args: calls.append(args))
+    monkeypatch.setattr(recap_runner, "_preflight_burn_subtitles", lambda _args: None)
+    monkeypatch.setattr(sys, "argv", ["recap.py", str(video), *extra])
+
+    with pytest.raises(SystemExit):
+        recap_runner.main()
+    assert calls == []

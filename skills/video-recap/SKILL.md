@@ -158,6 +158,9 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --mimo-qc both
 
 合成前复核会读取脚本、计划和 TTS 元数据；成片后还会读取最多六张临时 JPEG。相同输入命中内容缓存，`--mimo-qc-refresh` 可强制刷新。帧的 base64 与凭证不会写入磁盘。
 
+已有批准解说稿时使用 `--preserve-approved-text`：编排器会在 full、单视频 cut 和多视频 cut 的 TTS 前把保护参数交给真实校验器，保留段落顺序、数量、时间、文本、停顿和扩展元数据；形状、来源边界和时长错误仍会失败，字符预算只形成预警，不能静默缩稿或降级为部分成功。
+这项策略只保护批准的时间线与文本；`overlaps_speech` 仍可依据已有声音证据更新，声音身份、后续 tempo、实际合成 WAV 是否装入时间窗及混音仍须单独核验。
+
 ### 4.5 字幕与克隆旁白
 
 若要把旁白字幕固定在原片字幕区域，先在仓库根目录运行：
@@ -200,7 +203,7 @@ python3 scripts/recap.py adopted.mp4 --work-dir packaging_work --audio-mode adop
 ```
 
 `source-mix` 仍会混音和重编码；`cut + adopted-packet-copy` 冻结的是剪后中间片的声音，不是原片的 AAC 包。
-切换声音模式须新工作目录，不得把旧 TTS、QC 或自动生成的解说花字混入本轮原声生产。细节见 `references/audio-routing.md`。
+当前严格字幕轨只支持 adopted 模式；其他字幕来源没有因此变成精确对齐。切换声音模式须新工作目录，不得把旧 TTS、QC 或自动生成的解说花字混入本轮原声生产。细节见 `references/audio-routing.md`。
 
 ## 5. 英译中原声复刻模式
 
@@ -248,7 +251,7 @@ python3 scripts/recap.py --doctor
 `--tts-meta`、`--narration-adoption`、`--audio-mix-adoption`、
 `--skip-asr`、`--mimo-video-overview`、`--mimo-qc {off,pre-assemble,post-render,both}`、
 `--mimo-qc-refresh`、`--consolidate`、`--consolidate-asr`、`--tts-provider`、`--mimo-tts-voice`、`--voice-ref`、
-`--allow-partial-tts`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、
+`--allow-partial-tts`、`--preserve-approved-text`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、
 `--subtitle-y-top`、`--subtitle-y-bot`、`--no-burn-subtitles`、`--output-dir`、
 `--export-jianying`、`--jianying-bundle-media`、`--jianying-no-bundle-media`、
 `--material-library-dir`、`--use-materials`、`--save-materials`。

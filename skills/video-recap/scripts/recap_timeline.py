@@ -277,6 +277,8 @@ def _continuation_command(video, work_dir, args):
             parts += ["--voice-ref", args.voice_ref]
         if args.allow_partial_tts:
             parts.append("--allow-partial-tts")
+        if getattr(args, "preserve_approved_text", False):
+            parts.append("--preserve-approved-text")
     if args.burn_subtitles is not None:
         parts.append("--burn-subtitles" if args.burn_subtitles else "--no-burn-subtitles")
     if args.subtitle_y_top is not None:

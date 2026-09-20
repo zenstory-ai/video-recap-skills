@@ -118,6 +118,11 @@ def parse_args(argv=None):
         help="allow video-voiceover to continue when some narration segments fail TTS",
     )
     parser.add_argument(
+        "--preserve-approved-text",
+        action="store_true",
+        help="forward strict approved-text preservation to narration voiceover",
+    )
+    parser.add_argument(
         "--burn-subtitles",
         action=argparse.BooleanOptionalAction,
         default=None,
