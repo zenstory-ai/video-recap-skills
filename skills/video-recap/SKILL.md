@@ -22,6 +22,24 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 `source-mix` 不做配音；`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。使用原声模式时读
 `references/audio-routing.md`，不要为了运行工具而编造空解说。
 
+已有预制画面和本地采用的完整声音三件套时，可走严格 assembly-only 路径：
+
+```bash
+python3 scripts/recap.py picture.mp4 --edit-mode full --work-dir NEW_WORK \
+  --output-dir DELIVERY \
+  --tts-meta tts_meta.json \
+  --narration-adoption narration_adoption.json \
+  --audio-mix-adoption audio_mix_adoption.json
+```
+
+三个 JSON 参数必须同时出现。该入口只接受单视频、full、narration、音轨 0、新工作目录和未存在的
+交付文件；不运行理解、写稿、解说评审、TTS、cut、MiMo QC 或剪映导出。语义和媒体身份仍由
+video-assemble 严格验证，recap 不把调用方采用的声音或混音声明成自动创作或发布批准。详见
+`references/audio-routing.md`。
+
+这里的单视频是**已经剪好的母版**。重剪后可以复用未改动的 WAV 与 `tts_meta.json`，但必须按新母版
+重新绑定画面哈希与落点；衔接步骤见 `references/audio-routing.md` 的 “Keep adopted voice after a cut”。
+
 ## 2. 创作职责
 
 这不是单纯的 JSON / 渲染流水线。Agent 是本次内容的创作负责人。先判断本轮的**创作控制模式**；它与 `--edit-mode full|cut|dub` 是两个维度：
@@ -227,6 +245,7 @@ python3 scripts/recap.py --doctor
 `--context`、`--scene-threshold`、`--style`、`--edit-mode {full,cut,dub}`、`--target-duration`、
 `--require-final-qc`（仅 full/cut）、
 `--audio-mode {narration,source-mix,adopted-packet-copy}`、`--audio-stream-index`、
+`--tts-meta`、`--narration-adoption`、`--audio-mix-adoption`、
 `--skip-asr`、`--mimo-video-overview`、`--mimo-qc {off,pre-assemble,post-render,both}`、
 `--mimo-qc-refresh`、`--consolidate`、`--consolidate-asr`、`--tts-provider`、`--mimo-tts-voice`、`--voice-ref`、
 `--allow-partial-tts`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、

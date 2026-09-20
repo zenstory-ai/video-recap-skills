@@ -53,6 +53,18 @@ def parse_args(argv=None):
     parser.add_argument("--audio-mode", choices=AUDIO_MODES, default="narration")
     parser.add_argument("--audio-stream-index", type=int, default=0)
     parser.add_argument(
+        "--tts-meta", default=None,
+        help="local adopted tts_meta.json; requires both adoption flags",
+    )
+    parser.add_argument(
+        "--narration-adoption", default=None,
+        help="local narration_adoption v1; requires --tts-meta and --audio-mix-adoption",
+    )
+    parser.add_argument(
+        "--audio-mix-adoption", default=None,
+        help="local audio_mix_adoption v1 for assembly-only full-sound rendering",
+    )
+    parser.add_argument(
         "--target-duration", default=os.environ.get("TARGET_DURATION") or None
     )
     parser.add_argument(

@@ -1,5 +1,6 @@
 """Orchestrate single- and multi-source recap pipelines."""
 
+import json
 import os
 from pathlib import Path
 
@@ -32,12 +33,19 @@ from recap_stage_qc import (
     _write_shift_left_stage_qc,
 )
 from recap_source import (
+    audio_binding,
+    begin_local_adoption_qc,
     begin_non_narration_qc,
     extend_assemble_args,
+    load_local_assembly_evidence,
     needs_voiceover,
+    owned_local_delivery,
     reject_unbound_narration_workdir,
+    uses_local_adoption,
     uses_narration,
     validate_audio_routing,
+    verify_local_assembly_evidence,
+    remove_owned_local_delivery,
 )
 from recap_timeline import (
     _continuation_command,
@@ -84,6 +92,62 @@ def _finish_recap(work_dir, final_output, args):
         _require_final_qc(final_qc_result, work_dir)
     print(f"[video-recap] ✅ 完成: {final_output}")
     _print_final_qc_pointer(final_qc_result)
+
+
+def _run_local_adoption(video, work_dir, args):
+    """Run the strict local bundle directly through the authoritative assembler."""
+    work_dir.mkdir(parents=True, exist_ok=False)
+    manifest = _write_run_manifest(work_dir, video, args)
+    def assert_manifest_inputs_current():
+        if material_lib.file_fingerprint(video) != manifest["source_video_fingerprint"]:
+            raise SystemExit("local adoption picture changed after run manifest was sealed")
+        if audio_binding(args) != manifest["audio"]:
+            raise SystemExit("local adoption audio bundle changed after run manifest was sealed")
+    def record_failure(exc):
+        failed = {**manifest, "local_adoption_run": {
+            "status": "FAILED", "error_type": type(exc).__name__,
+        }}
+        (work_dir / RUN_MANIFEST).write_text(
+            json.dumps(failed, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    begin_local_adoption_qc(work_dir, _write_shift_left_stage_qc)
+    assemble_args = [
+        str(video),
+        "--work-dir", str(work_dir),
+        "--recap-stem", video.stem,
+        "--output-dir", args.output_dir,
+        "--tts-meta", args.tts_meta,
+        "--narration-adoption", args.narration_adoption,
+        "--audio-mix-adoption", args.audio_mix_adoption,
+    ]
+    if args.burn_subtitles is not None:
+        assemble_args.append(
+            "--burn-subtitles" if args.burn_subtitles else "--no-burn-subtitles"
+        )
+    if args.subtitle_y_top is not None:
+        assemble_args += [
+            "--subtitle-y-top", str(args.subtitle_y_top),
+            "--subtitle-y-bot", str(args.subtitle_y_bot),
+        ]
+    owned_delivery = None
+    try:
+        assert_manifest_inputs_current()
+        _run("video-assemble", "assemble.py", *assemble_args)
+        evidence = load_local_assembly_evidence(work_dir)
+        owned_delivery = owned_local_delivery(evidence)
+        assert_manifest_inputs_current()
+        verify_local_assembly_evidence(evidence, manifest)
+    except BaseException as exc:
+        remove_owned_local_delivery(owned_delivery)
+        record_failure(exc)
+        raise
+    final_output = _read_assembly_output(work_dir)
+    _write_shift_left_stage_qc(
+        work_dir,
+        "post_render",
+        metadata=_post_render_qc_metadata(work_dir, final_output),
+    )
+    _finish_recap(work_dir, final_output, args)
 
 
 def _run_or_restore_understanding(source_record, source_work_dir, args):
@@ -329,6 +393,11 @@ def main():
         ap.error("--require-final-qc is only supported in full/cut modes, not dub")
 
     if args.doctor:
+        if any(
+            getattr(args, field) is not None
+            for field in ("tts_meta", "narration_adoption", "audio_mix_adoption")
+        ):
+            ap.error("--doctor cannot be combined with local adoption inputs")
         if args.tts_provider not in TTS_PROVIDERS:
             ap.error(
                 "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
@@ -338,12 +407,17 @@ def main():
             doctor_args += ["--tts-provider", args.tts_provider]
         _run("video-recap", "doctor.py", *doctor_args)
         return
-    # argparse does not validate environment-derived defaults against choices.
-    if args.mimo_qc not in {"off", "pre-assemble", "post-render", "both"}:
+    if not uses_local_adoption(args) and args.mimo_qc not in {
+        "off", "pre-assemble", "post-render", "both"
+    }:
         ap.error(
             "MIMO_QC/--mimo-qc must be one of: off, pre-assemble, post-render, both"
         )
-    if uses_narration(args) and args.tts_provider not in TTS_PROVIDERS:
+    if (
+        not uses_local_adoption(args)
+        and uses_narration(args)
+        and args.tts_provider not in TTS_PROVIDERS
+    ):
         ap.error(
             "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
         )
@@ -425,6 +499,10 @@ def _execute_pipeline(args, videos):
     # Fail fast before any expensive understanding/VLM/ASR/TTS work if the run will burn
     # subtitles but this ffmpeg can't (otherwise it only blows up at the final render).
     _preflight_burn_subtitles(args)
+
+    if uses_local_adoption(args):
+        _run_local_adoption(videos[0], Path(args.work_dir), args)
+        return
 
     if len(videos) > 1:
         work_dir = (

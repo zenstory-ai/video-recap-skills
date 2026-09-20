@@ -72,14 +72,49 @@ def test_completion_helper_gates_before_success_and_default_stays_advisory(
     assert "仅报告，不阻断" in output
 
 
-def test_both_runner_exits_use_completion_helper():
+def test_all_three_supported_runner_exits_use_completion_helper():
     tree = ast.parse(Path(recap_runner.__file__).read_text(encoding="utf-8"))
     calls = [
         node for node in ast.walk(tree)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
         and node.func.id == "_finish_recap"
     ]
-    assert len(calls) == 2
+    assert len(calls) == 3
+
+
+def test_local_adoption_route_strict_failure_exits_before_success(
+    monkeypatch, tmp_path, capsys
+):
+    video = tmp_path / "picture.mp4"
+    video.write_bytes(b"picture")
+    work = tmp_path / "local-work"
+    final = tmp_path / "local-final.mp4"
+    args = Namespace(
+        output_dir=str(tmp_path), tts_meta="tts.json",
+        narration_adoption="narration.json", audio_mix_adoption="mix.json",
+        burn_subtitles=False, subtitle_y_top=None, subtitle_y_bot=None,
+        require_final_qc=True,
+    )
+    manifest = {"source_video_fingerprint": "picture-id", "audio": "audio-id"}
+    monkeypatch.setattr(recap_runner, "_write_run_manifest", lambda *_: manifest)
+    monkeypatch.setattr(
+        recap_runner.material_lib, "file_fingerprint", lambda *_: "picture-id"
+    )
+    monkeypatch.setattr(recap_runner, "audio_binding", lambda *_: "audio-id")
+    monkeypatch.setattr(recap_runner, "begin_local_adoption_qc", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "_run", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "load_local_assembly_evidence", lambda *_: {})
+    monkeypatch.setattr(recap_runner, "owned_local_delivery", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "verify_local_assembly_evidence", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "_read_assembly_output", lambda *_: final)
+    monkeypatch.setattr(recap_runner, "_write_shift_left_stage_qc", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        recap_runner, "_write_final_qc_reports", lambda *_: _summary(final=False)
+    )
+
+    with pytest.raises(SystemExit):
+        recap_runner._run_local_adoption(video, work, args)
+    assert "✅ 完成" not in capsys.readouterr().out
 
 
 def test_multi_cut_route_strict_failure_exits_before_success(
