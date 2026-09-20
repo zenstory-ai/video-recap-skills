@@ -12,6 +12,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **最终 QC 可选阻断。** `--require-final-qc` 开启后，`final_qc.json` 与 `golden_eval.json` 摘要必须均为 `ok: true` 且 `blocker_count: 0`，否则不打印完成、非零退出；续跑命令保留该选项，不影响缓存指纹；不支持 dub 模式。
 - **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
 
 ### Changed
