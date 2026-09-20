@@ -1,12 +1,16 @@
-"""Serialized narration windows must never shorten a complete sample interval."""
+"""Narration identity must preserve complete sample intervals and mode isolation."""
 
+import json
 from pathlib import Path
 import sys
 import wave
 
+import pytest
+
 SCRIPTS = Path(__file__).resolve().parents[2] / "skills/video-assemble/scripts"
 sys.path.insert(0, str(SCRIPTS))
 
+import assemble  # noqa: E402
 import assembly_contract  # noqa: E402
 from timeline import build_timeline  # noqa: E402
 
@@ -39,3 +43,17 @@ def test_serialized_narration_window_never_shortens_complete_sample_clock(tmp_pa
     item = serialized["segments"][0]
     assert item["timeline_end"] - item["timeline_start"] >= duration
     assert assembly_contract._placed_audio_matches_timeline(segment) is True
+
+
+@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
+def test_non_narration_mode_does_not_read_stale_narration_binding(
+    tmp_path, monkeypatch, audio_mode
+):
+    stale = tmp_path / "narration_input_binding.json"
+    stale.write_text(json.dumps({"artifact": "stale"}))
+
+    def forbidden(_work_dir):
+        raise AssertionError("non-narration mode read stale narration evidence")
+
+    monkeypatch.setattr(assemble.narration_binding, "binding_fingerprint", forbidden)
+    assert assemble._current_narration_binding(tmp_path, audio_mode) is None

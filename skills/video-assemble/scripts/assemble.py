@@ -12,6 +12,7 @@ import audio_mix
 import frozen_audio
 import media
 import narration_audio
+import narration_binding
 import pair_media
 import render_preflight
 import subtitle_render
@@ -33,8 +34,16 @@ __all__ = [
 AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
 
 
+def _current_narration_binding(work_dir, audio_mode):
+    """Read narration evidence only for the explicit narration render path."""
+    if audio_mode != "narration":
+        return None
+    return narration_binding.binding_fingerprint(work_dir)
+
+
 def assemble_video(input_video, tts_segments, work_dir, output_path, *,
-                   audio_mode="narration", audio_stream_index=0):
+                   audio_mode="narration", audio_stream_index=0,
+                   narration_adoption_path=None, tts_meta_path=None):
     """组装最终视频"""
     if audio_mode not in AUDIO_MODES:
         raise RuntimeError(f"不支持的 audio_mode: {audio_mode}")
@@ -61,8 +70,24 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             raise RuntimeError("adopted-packet-copy 与 TTS 解说不兼容")
         if bgm_path:
             raise RuntimeError("adopted-packet-copy 与 BGM 混音不兼容")
+    if audio_mode != "narration" and narration_adoption_path is not None:
+        raise RuntimeError("narration adoption 仅适用于 narration audio_mode")
 
-    output_path = Path(output_path)
+    published_output = Path(output_path)
+    binding = narration_binding.prepare_binding(
+        tts_segments, work_dir,
+        narration_adoption_path=narration_adoption_path,
+        tts_meta_path=tts_meta_path,
+    ) if audio_mode == "narration" else None
+    render_output = published_output
+    if binding and binding["active"]:
+        if published_output.exists():
+            raise RuntimeError("身份约束渲染要求新的 output_path，不能覆盖已有成片")
+        render_output = published_output.with_name(
+            f".{published_output.stem}.narration-rendering{published_output.suffix}"
+        )
+        render_output.unlink(missing_ok=True)
+    output_path = render_output
     video_duration = lib.get_video_duration(input_video)
     canvas = media._probe_canvas(input_video)  # drives subtitle PlayRes/scale so 竖屏 text isn't stretched
     burn_subtitles = lib.CONFIG["burn_subtitles"]
@@ -87,9 +112,29 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     # 解说整体提速（可选）后，将所有 TTS 片段按时间位置合成到与视频等长的音轨上
     narration_wav = None
     if audio_mode == "narration":
-        narration_audio._apply_narration_speed(tts_segments, work_dir)
+        if binding["tempo_policy"]:
+            narration_audio._apply_narration_speed(
+                tts_segments, work_dir, tempo_policy=binding["tempo_policy"]
+            )
+        else:
+            narration_audio._apply_narration_speed(tts_segments, work_dir)
         narration_wav = work_dir / "narration.wav"
-        narration_audio._build_timed_narration(tts_segments, narration_wav, video_duration, work_dir)
+        if binding["tempo_policy"]:
+            narration_audio._build_timed_narration(
+                tts_segments, narration_wav, video_duration, work_dir,
+                tempo_policy=binding["tempo_policy"],
+            )
+            if any(
+                segment.get("blocking") or segment.get("fit_status") == "no_safe_fit"
+                for segment in tts_segments
+            ):
+                raise RuntimeError(
+                    "严格 narration adoption 存在 no_safe_fit，禁止提速或裁尾渲染"
+                )
+        else:
+            narration_audio._build_timed_narration(
+                tts_segments, narration_wav, video_duration, work_dir
+            )
         handoffs = audio_mix._apply_source_sentence_handoffs(tts_segments, work_dir, video_duration)
         if handoffs:
             lib.log(
@@ -99,6 +144,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                     for item in handoffs
                 )
             )
+        narration_binding.seal_render_inputs(binding, tts_segments, narration_wav)
 
     # 始终生成 SRT 字幕文件（原声留白处补烧原声字幕，传入成片时长以计算留白区间）
     srt_path = subtitle_render._generate_srt(tts_segments, work_dir, video_duration)
@@ -285,9 +331,13 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
                 "-t", str(video_duration), str(output_path)]
     try:
+        if binding:
+            narration_binding.assert_current(binding)
         result = lib.run_cmd(cmd)
         if result.returncode != 0:
             raise RuntimeError(f"视频组装失败: {result.stderr}")
+        if binding:
+            narration_binding.assert_current(binding)
     finally:
         # 清理临时 filter 脚本（无论 ffmpeg 是否成功）
         if fc_script is not None:
@@ -318,34 +368,108 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         "tempo": audio_mode == "narration",
         "packet_copy": audio_mode == "adopted-packet-copy",
     }
-    lib.log(f"最终视频: {output_path} ({output_path.stat().st_size / 1024 / 1024:.1f}MB)")
-    assembly_contract._write_assembly_qc(
-        work_dir,
-        assembly_contract._build_assembly_qc(
+    render_delivery = {
+        "video_encode_passes": 1 if reencode else 0,
+        "reencode_reason": notes,
+        "audio_sample_rate": (
+            adopted_audio["output"]["sample_rate"] if adopted_audio else 48000
+        ),
+        "final_compat_notes": (
+            (["yuv420p"] if reencode else ["video_copy"])
+            + (["aac_packet_copy", "faststart"] if adopted_audio else ["aac_48000", "faststart"])
+        ),
+    }
+    loudness_mode = "not_run" if audio_mode == "adopted-packet-copy" else None
+    active = bool(binding and binding["active"])
+    staged_binding = None
+    staged_binding_fingerprint = None
+    binding_published = False
+    try:
+        if active:
+            # Strict adoption: render to a hidden candidate, stage the binding, gate on QC,
+            # then publish the file and the binding together or neither.
+            narration_binding.assert_current(binding)
+            report, staged_binding = narration_binding.stage_final_binding(
+                binding, tts_segments, narration_wav, render_output, published_output
+            )
+            staged_binding_fingerprint = narration_binding.staged_binding_fingerprint(
+                report, staged_binding, Path(work_dir) / narration_binding.FILENAME
+            )
+        elif binding:
+            narration_binding.finalize_binding(
+                binding, tts_segments, narration_wav, render_output
+            )
+        assembly_qc = assembly_contract._build_assembly_qc(
             tts_segments,
             video_duration,
-            output_path=output_path,
+            output_path=(published_output if active else render_output),
             source_has_audio=source_has_audio,
-            loudness_mode="not_run" if audio_mode == "adopted-packet-copy" else None,
+            loudness_mode=loudness_mode,
             loudnorm_measurement=loudnorm_measurement,
             visual_qc=visual_qc,
             audio_mode=audio_mode,
             audio_operations=audio_operations,
             adopted_audio=adopted_audio,
-            render_delivery={
-                "video_encode_passes": 1 if reencode else 0,
-                "reencode_reason": notes,
-                "audio_sample_rate": (
-                    adopted_audio["output"]["sample_rate"] if adopted_audio else 48000
-                ),
-                "final_compat_notes": (
-                    (["yuv420p"] if reencode else ["video_copy"])
-                    + (["aac_packet_copy", "faststart"] if adopted_audio else ["aac_48000", "faststart"])
-                ),
-            },
-        ),
-    )
-    return output_path
+            narration_input_binding=(
+                staged_binding_fingerprint if active
+                else _current_narration_binding(work_dir, audio_mode)
+            ),
+            render_delivery=render_delivery,
+        )
+        if active and assembly_qc["blocking"]:
+            assembly_contract._write_assembly_qc(work_dir, assembly_qc)
+            codes = ", ".join(assembly_qc["blocking_codes"])
+            raise RuntimeError(f"身份约束渲染 QC 失败: {codes}")
+        if active:
+            finalized_binding = narration_binding.finalize_binding(
+                binding, tts_segments, narration_wav, published_output,
+                staged_path=staged_binding,
+            )
+            staged_binding = None
+            binding_path = Path(work_dir) / narration_binding.FILENAME
+            binding_published = binding_path.is_file()
+            if not isinstance(finalized_binding, dict):
+                raise RuntimeError("active narration binding finalize 返回空结果")
+            if not binding_path.is_file():
+                raise RuntimeError("已发布 narration binding 未通过终态验证")
+            prepublish_binding = narration_binding.staged_binding_fingerprint(
+                report, binding_path, binding_path
+            )
+            if prepublish_binding["sha256"] != staged_binding_fingerprint["sha256"]:
+                raise RuntimeError("已发布 narration binding 身份不一致")
+            render_output.rename(published_output)
+            render_output = published_output
+            current_binding = _current_narration_binding(work_dir, audio_mode)
+            if current_binding is None:
+                raise RuntimeError("已发布 narration binding 未通过终态验证")
+            assembly_qc = assembly_contract._build_assembly_qc(
+                tts_segments, video_duration, output_path=render_output,
+                source_has_audio=source_has_audio,
+                loudness_mode=loudness_mode, loudnorm_measurement=loudnorm_measurement,
+                visual_qc=visual_qc, audio_mode=audio_mode,
+                audio_operations=audio_operations, adopted_audio=adopted_audio,
+                narration_input_binding=current_binding,
+                render_delivery=assembly_qc["delivery_qc"],
+            )
+            if assembly_qc["blocking"]:
+                assembly_qc["output"] = {
+                    "path": str(published_output), "exists": False, "bytes": 0,
+                }
+                assembly_contract._write_assembly_qc(work_dir, assembly_qc)
+                codes = ", ".join(assembly_qc["blocking_codes"])
+                raise RuntimeError(f"身份约束渲染终态 QC 失败: {codes}")
+        assembly_contract._write_assembly_qc(work_dir, assembly_qc)
+    except Exception:
+        if active:
+            render_output.unlink(missing_ok=True)
+            published_output.unlink(missing_ok=True)
+            if binding_published:
+                (Path(work_dir) / narration_binding.FILENAME).unlink(missing_ok=True)
+            if staged_binding is not None:
+                Path(staged_binding).unlink(missing_ok=True)
+        raise
+    lib.log(f"最终视频: {render_output} ({render_output.stat().st_size / 1024 / 1024:.1f}MB)")
+    return render_output
 
 
 def main():
@@ -356,6 +480,8 @@ def main():
     ap.add_argument("video", help="source video (edited_source.mp4 in cut mode, else the original)")
     ap.add_argument("--work-dir", required=True)
     ap.add_argument("--tts-meta", default=None, help="tts_meta.json (default: <work-dir>/tts_meta.json)")
+    ap.add_argument("--narration-adoption", default=None,
+                    help="strict narration_adoption v1 bound to an explicit --tts-meta")
     ap.add_argument(
         "--audio-mode", choices=AUDIO_MODES,
         default="narration", help="audio path (default: narration)",
@@ -423,19 +549,25 @@ def main():
         ap.error("--audio-stream-index must be non-negative")
     if args.audio_mode != "narration" and args.tts_meta is not None:
         ap.error(f"--tts-meta is incompatible with --audio-mode {args.audio_mode}")
+    if args.audio_mode != "narration" and args.narration_adoption is not None:
+        ap.error(f"--narration-adoption is incompatible with --audio-mode {args.audio_mode}")
+    if args.narration_adoption is not None and args.tts_meta is None:
+        ap.error("--narration-adoption requires explicit --tts-meta")
     tts_meta = None
     tts_segments = []
     if args.audio_mode == "narration":
         tts_meta = Path(args.tts_meta) if args.tts_meta else work_dir / "tts_meta.json"
         tts_segments = json.loads(tts_meta.read_text(encoding="utf-8"))["segments"]
     output_path = work_dir / "output.mp4"
-    if args.audio_mode == "narration" and args.audio_stream_index == 0:
+    if (args.audio_mode == "narration" and args.audio_stream_index == 0
+            and args.narration_adoption is None):
         # Preserve the legacy CLI-to-API call shape for isolated skill consumers.
         assemble_video(args.video, tts_segments, work_dir, output_path)
     else:
         assemble_video(
             args.video, tts_segments, work_dir, output_path,
             audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
+            narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
         )
     assembly_qc = artifacts._load_work_json(work_dir, constants.ASSEMBLY_QC)
     if assembly_qc["blocking"]:
@@ -449,6 +581,7 @@ def main():
     manifest = assembly_contract._assembly_manifest_payload(
         args.video, tts_segments, work_dir, output_path,
         tts_meta_path=tts_meta,
+        narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
         final_output=final_output,
         settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
         audio_mode=args.audio_mode,

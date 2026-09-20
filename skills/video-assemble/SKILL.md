@@ -34,6 +34,7 @@ description: >
 
 - `<video>`：源视频；cut 模式下为 `edited_source.mp4`。
 - `work_dir/tts_meta.json`：默认 `narration` 模式必需；配音阶段写出的 `{segments: [...]}`。每段包含 `audio_path`、时间、`pause_after_ms`、`overlaps_speech` 和用于混音/字幕的位置。显式 `source-mix` / `adopted-packet-copy` 模式不读取它。
+- 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、WAV 指纹、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与证据边界见 `references/narration-adoption.md`。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
 
@@ -42,6 +43,7 @@ description: >
 ```bash
 python3 scripts/assemble.py <video> --work-dir <work_dir> \
   [--audio-mode narration|source-mix|adopted-packet-copy] [--audio-stream-index <N>] \
+  [--tts-meta <tts_meta.json> --narration-adoption <narration_adoption.json>] \
   [--recap-stem <name>] [--output-dir <dir>] [--no-burn-subtitles] \
   [--subtitle-y-top <inclusive-y> --subtitle-y-bot <exclusive-y>] \
   [--source-video <orig.mp4>] [--export-jianying [--jianying-out <dir>]]
@@ -54,6 +56,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - `subtitles.srt`：旁白字幕；烧录时另有 `subtitles.ass`。
 - `timeline.json`：后端无关的多轨模型，包含视频、原声、旁白、BGM、字幕和 ducking 自动化。
 - `_placed_*.wav`：实际写入主混音的完整逐段旁白 PCM；时间线与剪映只引用这些文件。
+- `narration_input_binding.json`：旁白输入、转换、实际放置、旁白总轨和最终音轨的消费证据。区分旧输入未核、指纹匹配但未经独立采用、与采用决定绑定；不等于声线鉴定或听审。
 - `assembly_manifest.json`：输入来源、cut 来源指纹、渲染设置与最终输出路径。
 - `assembly_qc.json`：旁白完整性、原声句末交接、时间线素材时长与交付质量的发布门禁。
 - 剪映草稿目录：仅 `--export-jianying` 时生成，包含 `draft_content.json`、`draft_info.json` 与 `draft_meta_info.json`。
@@ -64,6 +67,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 音频按轨道混合：原声、可选 BGM 与旁白各自独立。
 - 旁白不做任何容差裁尾；温和加速后仍放不下即 `no_safe_fit`。每段 `_placed_*.wav`
   必须与序列化后的时间线区间等长或更短，否则 `timeline_audio_mismatch` 阻断。
+- 已采用配音的 v1 合同只支持原速、禁止段内适速；不能让环境默认 1.15 倍速或旧缓存覆盖它。放不下就修订安排，不裁尾。严格运行使用新工作目录与新输出路径；输入/实际混音来源变动或 QC 失败时，不发布候选成片。没有采用文件的旧入口仍是兼容模式，不自动获得同等证据。
 - 原声在旁白结束后保持压低到下一可靠句末的 `pause_start`，只在实测停顿内渐强，
   于 `source_restore_at` 回满；无后续锚点时保持压低到时间线末端，而不是放出半句。
 - `--export-jianying` / `EXPORT_JIANYING=1` 可把 `timeline.json` 导出为可编辑草稿。cut 模式应传 `--source-video <orig>`，让草稿引用真实原片区间。
