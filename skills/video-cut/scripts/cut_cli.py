@@ -23,7 +23,8 @@ from cut_render import (
     update_delivery_qc,
     write_cut_delivery_qc,
 )
-from media_geometry import _select_output_geometry
+from media_geometry import _has_audio_stream, _select_output_geometry
+from narrative_selection import check_required_evidence
 from narration_mapping import (
     lint_mapped_narration,
     map_narration_to_clips,
@@ -248,6 +249,21 @@ def main():
         allow_duration_drift=allow_duration_drift,
         duration_drift_allowed_by=drift_source,
     )
+    if isinstance(raw_plan, dict) and 'required_evidence' in raw_plan:
+        # Re-evaluate the final snapped ranges even when the media cache can be reused.
+        # A prior rendered receipt must not survive a failed revision preflight.
+        (work_dir / 'cut_delivery_qc.json').unlink(missing_ok=True)
+        contract = raw_plan['required_evidence']
+        nodes = contract.get('nodes', []) if isinstance(contract, dict) else []
+        needs_audio = isinstance(nodes, list) and any(
+            isinstance(node, dict) and node.get('track') == 'audio' for node in nodes)
+        source_audio = {str(Path(path).resolve()): _has_audio_stream(path)
+                        for path in source_paths} if needs_audio else {}
+        report = check_required_evidence(contract, validated_plan, input_video=args.video,
+                                         source_audio=source_audio)
+        validated_plan['qc']['required_evidence'] = {**report, 'contract': contract}
+        if report['selection_status'] == 'BLOCK':
+            validated_plan['qc'].setdefault('blocking', []).extend(report['findings'])
     update_delivery_qc(
         validated_plan,
         source_paths=source_paths,
@@ -258,7 +274,7 @@ def main():
     )
     if validated_plan["qc"].get("blocking"):
         raise SystemExit(
-            "clip_plan QC blocking: fix unsafe sentence boundaries or target-duration drift. "
+            "clip_plan QC blocking: fix required source evidence, unsafe sentence boundaries or target-duration drift. "
             "Only duration drift can be explicitly accepted with --allow-duration-drift; "
             "sentence truncation is never allowed. See clip_plan_validated.json['qc']."
         )
