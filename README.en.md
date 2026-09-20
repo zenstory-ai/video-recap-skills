@@ -300,7 +300,7 @@ Translated: claim "the disguise slips and the hero understands everything"; foot
 
 Add "export a JianYing draft" to the request and `timeline.json` is written as an editable multi-track draft: source clips, per-segment narration, BGM, subtitles, and image overlays each on their own track, with media bundled under `Resources/local` so the draft still opens on another machine. The `recap_<name>.mp4` that `ffmpeg` renders is the final piece; the draft is for you to keep working on.
 
-<img alt="Exported JianYing draft: source clips, narration, BGM, and subtitles" src="docs/jianying-export.png" width="100%">
+<img alt="Exported JianYing draft: source clips, narration, BGM, and subtitles" src="docs/jianying-export.jpg" width="100%">
 
 Export contents and limits: [JianYing draft export and cost](docs/capcut-jianying-draft-export.md) (Chinese).
 
