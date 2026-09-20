@@ -28,7 +28,7 @@ def _sha256(path):
 
 def _save(path, value):
     temporary = path.with_suffix('.writing.json')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n')
+    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding="utf-8")
     temporary.replace(path)
 
 
@@ -162,7 +162,7 @@ def validate_pair_timing(picture, audio):
 def _run_mux(command, directory):
     _save(directory / 'mux.command.json', command)
     result = subprocess.run(command, capture_output=True, text=True, timeout=600)
-    (directory / 'mux.log').write_text(result.stderr)
+    (directory / 'mux.log').write_text(result.stderr, encoding="utf-8")
     if result.returncode:
         raise RuntimeError('Pair mux failed; see mux.log')
 
