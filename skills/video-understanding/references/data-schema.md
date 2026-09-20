@@ -41,6 +41,52 @@
 ]
 ```
 
+`start/end` 仅表示送入 MiMo ASR 的固定粗分片窗口。该列表为兼容产物，不能据此声称词级
+时间、准确对白边界或静音证明；空 `text` 的原因未知。
+
+## asr_timing_evidence.json
+
+ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构。它用内容指纹绑定源视频、
+`audio.wav`（存在时）和 `asr_result.json`，并明确当前精度边界：
+
+```json
+{
+  "schema_version": 1,
+  "status": "AVAILABLE_COARSE",
+  "source_video_fingerprint": "...",
+  "audio_fingerprint": "...",
+  "asr_result_fingerprint": "...",
+  "glossary": {
+    "policy_version": 1,
+    "names_sha256": "...",
+    "name_count": 3
+  },
+  "precision": {
+    "window_timing": "COARSE_SEGMENT_WINDOWS",
+    "dialogue_boundaries": "NOT_VERIFIED",
+    "word_alignment": "NOT_PERFORMED",
+    "empty_text_meaning": "UNKNOWN_NOT_PROVEN_SILENCE"
+  },
+  "windows": [{
+    "index": 0,
+    "start": 0.0,
+    "end": 3.5,
+    "text_availability": "AVAILABLE",
+    "observed_text": "她叫叶青眉",
+    "post_glossary_text": "她叫叶轻眉",
+    "glossary_modified": true
+  }]
+}
+```
+
+`status` 可为 `AVAILABLE_COARSE`、`EXPLICITLY_SKIPPED`、`UNAVAILABLE_NO_KEY`、
+`UNAVAILABLE_NO_DURATION`、`FAILED_AUDIO_EXTRACTION`、`FAILED_PROVIDER`、`EMPTY_UNKNOWN`
+或 `LEGACY_UNVERIFIED`。`LEGACY_UNVERIFIED` 标记没有旧 sidecar 的兼容缓存，可离线复用但
+`observed_text`/`glossary_modified` 为 `null`，且始终保持 legacy 身份；非 legacy sidecar 绑定
+经排序归一化的人名/别名集合与修正规则版本，损坏或绑定不匹配会使 ASR 缓存失效。
+`UNAVAILABLE_NO_DURATION` 与 `EMPTY_UNKNOWN` 是可重试的不可用结果，不作为缓存命中；写作
+brief 会校验 sidecar 并打印当前状态和 sidecar 指纹，缺失或绑定不匹配显示 `MISSING_OR_STALE`。
+
 ## asr_writing_chunks.json
 
 由 CLI 在生成 `agent_narration_brief.md` 时自动写出。它把长 ASR 按句子边界拆成适合 Agent 消化的语义块；中文按字符计数，非 CJK 文本按词数计数，并尽量保留 scene 对齐。

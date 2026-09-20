@@ -14,6 +14,7 @@ from extract import extract_frames
 from detect import detect_scenes, detect_silence_periods, detect_speech_boundary_anchors
 
 from asr import transcribe_audio
+from asr_timing_evidence import write_asr_timing_evidence, asr_evidence_summary_for_brief
 
 from vlm import (
     analyze_scenes,
@@ -27,6 +28,7 @@ from brief import build_agent_brief, assess_understanding_substrate
 from understanding_brief import _research_context, _write_brief_from_existing_artifacts
 from understanding_cache import (
     _asr_cache_payload,
+    _asr_cache_state,
     _frames_cache_valid,
     _load_json,
     _merge_overview_into_scenes,
@@ -150,16 +152,34 @@ def main():
 
     # Step 3: ASR
     asr_meta = _asr_cache_payload(video, skip_asr=args.skip_asr)
+    cache_state = None
+    if not args.skip_asr and not args.force:
+        cache_state = _asr_cache_state(asr_json, asr_meta, video)
     if args.skip_asr:
         asr_result = []
         asr_json.write_text(
             json.dumps(asr_result, ensure_ascii=False, indent=2), encoding="utf-8"
         )
         _write_stage_meta(asr_json, asr_meta)
+        write_asr_timing_evidence(
+            work_dir, video, "EXPLICITLY_SKIPPED", final_segments=asr_result
+        )
         log("跳过 ASR（--skip-asr）")
-    elif not args.force and _stage_cache_valid(asr_json, asr_meta):
+    elif cache_state in {
+        "FRESH",
+        "LEGACY_UNVERIFIED",
+    }:
         asr_result = _load_json(asr_json)
-        log(f"跳过 ASR（已存在 {len(asr_result)} 段）")
+        if cache_state == "LEGACY_UNVERIFIED":
+            write_asr_timing_evidence(
+                work_dir,
+                video,
+                "LEGACY_UNVERIFIED",
+                final_segments=asr_result,
+            )
+            log(f"复用旧 ASR（{len(asr_result)} 段；时间/声学证据未经验证）")
+        else:
+            log(f"跳过 ASR（证据匹配，已存在 {len(asr_result)} 段）")
     else:
         try:
             asr_result = transcribe_audio(video, work_dir)
@@ -343,6 +363,7 @@ def main():
         args.style,
         mimo_overview_enabled=CONFIG.get("mimo_video_overview", False),
         mimo_overview_video_path=video,
+        asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )
     # C1: post-process the RETURNED brief FILE (not brief.py) so the brief⇄narration twin stays
     # byte-identical. Prepends a storyboard header pointing the agent at the sheet(s).
