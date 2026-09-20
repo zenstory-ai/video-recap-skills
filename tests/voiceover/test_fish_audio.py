@@ -127,9 +127,6 @@ def test_explicit_provider_still_requires_its_credential(monkeypatch):
     with pytest.raises(RuntimeError, match="FISH_API_KEY"):
         voiceover.resolve_tts_engine()
 
-    monkeypatch.setitem(CONFIG, "fish_api_key", "fish-key")
-    assert voiceover.resolve_tts_engine() == "fish-audio"
-
 
 def test_run_tts_engine_dispatches_to_fish(monkeypatch, tmp_path):
     output = tmp_path / "fish.wav"

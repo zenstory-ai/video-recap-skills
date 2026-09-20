@@ -11,12 +11,8 @@ import subprocess
 
 import pytest
 
-
-SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"
-sys.path.insert(0, str(SCRIPTS))
-
-import recap_runner  # noqa: E402
-import recap_source  # noqa: E402
+import recap_runner
+import recap_source
 
 
 def _bundle(tmp_path):

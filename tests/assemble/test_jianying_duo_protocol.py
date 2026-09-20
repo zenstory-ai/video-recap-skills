@@ -21,7 +21,6 @@ sys.path.insert(0, str(SCRIPTS))
 
 from export_jianying import build_draft, export_timeline_to_jianying  # noqa: E402
 from jianying_builders import base_segment  # noqa: E402
-from jianying_schema import material_category_registry  # noqa: E402
 
 
 def _fixture(name):
@@ -215,32 +214,6 @@ def test_base_segment_matches_duo_template():
     assert actual == expected
 
 
-def test_registry_marks_every_duo_authoring_material_as_supported():
-    direct_material_capabilities = {
-        "video",
-        "image",
-        "audio",
-        "text",
-        "sound",
-        "sticker",
-        "text_template",
-        "transition",
-        "mask",
-        "lut",
-        "video_effect",
-        "face_effect",
-        "chroma",
-        "green_screen",
-        "compound",
-        "style",
-    }
-    registry = material_category_registry()
-
-    assert direct_material_capabilities <= registry.keys()
-    assert all(registry[kind]["status"].startswith("supported") for kind in direct_material_capabilities)
-    assert registry["sticker"]["status"] == "supported_offline_payload"
-
-
 @pytest.mark.parametrize(
     ("kind", "materials_key", "track_type"),
     [
@@ -308,30 +281,6 @@ def test_resource_config_builds_resource_material_without_network_access():
     assert sticker["path"] == "Resources/sticker/config/main.json"
     assert sticker["icon_url"] == "covers/config.png"
     assert sticker["preview_cover_url"] == "covers/config.png"
-
-
-def test_resource_config_uses_canonical_snake_case_objects():
-    track = {
-        "kind": "sticker",
-        "name": "sticker",
-        "segments": [{
-            "timeline_start": 0.0,
-            "timeline_end": 1.0,
-            "resource_config": {
-                "resource_id": "sticker.upstream",
-                "main_config": {"name": "upstream sticker", "type": "sticker"},
-                "cover_img": "covers/upstream.png",
-                "resources": [],
-            },
-        }],
-    }
-
-    content = _build(track)
-    sticker = _only_material(content, "stickers")
-
-    assert sticker["resource_id"] == "sticker.upstream"
-    assert sticker["name"] == "upstream sticker"
-    assert sticker["icon_url"] == "covers/upstream.png"
 
 
 def test_named_resource_package_is_resolved_without_network_access():

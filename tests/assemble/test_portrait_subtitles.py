@@ -8,7 +8,8 @@ metrics in the PlayRes coordinate space, so a 16:9 PlayRes on a 9:16 frame squis
 glyphs horizontally and mis-sized the source-subtitle mask band. Landscape output must
 stay byte-identical; portrait must use a frame-matching PlayRes that fits the width.
 """
-from subprocess import CompletedProcess
+import json  # noqa: E402
+from subprocess import CompletedProcess  # noqa: E402
 import media  # noqa: E402
 from subtitle_core import _subtitle_style_config  # noqa: E402
 from subtitle_render import _generate_ass  # noqa: E402
@@ -117,7 +118,6 @@ def test_probe_canvas_applies_rotation_and_sar(monkeypatch, tmp_path):
 
 
 def json_text(value):
-    import json
     return json.dumps(value)
 
 

@@ -1,16 +1,13 @@
-import argparse
 import json
 import inspect
 import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
-)
-
-import qc_contract as qc  # noqa: E402
+import qc_contract as qc
+import recap_runner as recap
+import recap_stage_qc
+from _helpers import seed_full_work, stub_child_run
 
 
 def _deterministic_blocker(**overrides):
@@ -92,44 +89,39 @@ def test_mimo_semantic_default_advisory_non_blocking():
     assert report["blocker_count"] == 0
 
 
-def test_non_deterministic_blocking_without_rule_table_allowance_rejected():
-    with pytest.raises(qc.QCContractError, match="non-deterministic blocking"):
-        qc.build_finding(
-            id="m2",
-            stage="post_tts",
-            severity="blocker",
-            confidence="medium",
-            sample_policy="semantic",
-            category="semantic",
-            code="bad_taste",
-            message="subjective issue tries to block",
-            deterministic=False,
-            blocking=True,
-            source={"artifact": "mimo_qc.json"},
-            evidence={"summary": "subjective"},
-        )
-
-
-def test_non_deterministic_blocking_cannot_be_enabled_by_a_rule_table():
+@pytest.mark.parametrize(
+    "corroboration",
+    [
+        pytest.param({}, id="bare"),
+        pytest.param(
+            {
+                "objective_corroboration": {
+                    "type": "subtitle_span",
+                    "evidence": "asr_result[3]",
+                }
+            },
+            id="claimed-corroboration",
+        ),
+    ],
+)
+def test_non_deterministic_blocking_cannot_be_enabled(corroboration):
+    """No rule table or corroboration claim lets a semantic finding block the pipeline."""
     assert "rule_table" not in inspect.signature(qc.build_finding).parameters
     with pytest.raises(qc.QCContractError, match="non-deterministic blocking"):
         qc.build_finding(
-            id="m3",
+            id="m2",
             stage="post_tts",
             severity="blocker",
             confidence="high",
             sample_policy="semantic",
             category="semantic",
             code="claim_contradiction",
-            message="claim appears contradicted",
+            message="subjective issue tries to block",
             deterministic=False,
             blocking=True,
             source={"artifact": "mimo_qc.json"},
-            evidence={"summary": "model found contradiction"},
-            objective_corroboration={
-                "type": "subtitle_span",
-                "evidence": "asr_result[3]",
-            },
+            evidence={"summary": "subjective"},
+            **corroboration,
         )
 
 
@@ -322,10 +314,6 @@ def test_mimo_qc_artifact_attaches_to_actual_stage_not_stage_value():
         qc.build_report(artifact="mimo_qc.json", stage="mimo_qc", findings=[finding])
 
 
-import recap_runner as recap  # noqa: E402
-import recap_stage_qc
-
-
 def test_preflight_qc_artifact_supported_without_changing_existing_artifacts():
     assert "preflight_qc.json" in qc.ARTIFACTS
     assert {"final_qc.json", "golden_eval.json", "mimo_qc.json"} <= qc.ARTIFACTS
@@ -372,58 +360,23 @@ def test_shift_left_helper_rolls_up_latest_report_per_stage(tmp_path):
 
 
 def test_recap_full_mode_writes_shift_left_preflight_stages(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "narration.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    recap._write_run_manifest(
-        work,
-        video.resolve(),
-        argparse.Namespace(
-            context="",
-            scene_threshold=None,
-            style="纪录片",
-            edit_mode="full",
-            target_duration=None,
-            skip_asr=False,
-            mimo_video_overview=False,
-            consolidate=True,
-            consolidate_asr=False,
-            review_narration=None,
-            require_narration_review=False,
-            allow_duration_drift=False,
-        ),
-    )
-
+    video, work = seed_full_work(tmp_path)
     calls = []
 
-    def fake_run(skill, script, *cli_args):
-        calls.append((skill, script, [str(arg) for arg in cli_args]))
-        if script == "voiceover.py":
-            (work / "tts_segments").mkdir(exist_ok=True)
-            (work / "tts_segments" / "narr_000.wav").write_bytes(b"wav")
-            (work / "tts_meta.json").write_text(
-                json.dumps(
-                    {
-                        "segments": [
-                            {"index": 0, "audio_path": "tts_segments/narr_000.wav"}
-                        ]
-                    }
-                ),
-                encoding="utf-8",
-            )
-        if script == "assemble.py":
-            (work / "output.mp4").write_bytes(b"mp4")
-            (work / "assembly_manifest.json").write_text(
-                json.dumps({"final_output": str(tmp_path / "recap_video.mp4")}),
-                encoding="utf-8",
-            )
+    def voiceover(cli):
+        (work / "tts_segments").mkdir(exist_ok=True)
+        (work / "tts_segments" / "narr_000.wav").write_bytes(b"wav")
+        (work / "tts_meta.json").write_text(
+            json.dumps(
+                {"segments": [{"index": 0, "audio_path": "tts_segments/narr_000.wav"}]}
+            ),
+            encoding="utf-8",
+        )
 
-    monkeypatch.setattr("recap_runner._run", fake_run)
+    monkeypatch.setattr(
+        "recap_runner._run",
+        stub_child_run(work, tmp_path / "recap_video.mp4", calls, voiceover=voiceover),
+    )
     monkeypatch.setattr("recap_runner._preflight_burn_subtitles", lambda args: None)
     monkeypatch.setattr(sys, "argv", ["recap.py", str(video), "--work-dir", str(work)])
 

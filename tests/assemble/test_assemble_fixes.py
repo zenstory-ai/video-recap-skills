@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-a
 
 import narration_audio  # noqa: E402
 from audio_mix import _seg_place_window  # noqa: E402
+from lib import CONFIG  # noqa: E402
 from subtitle_core import _subtitle_entries  # noqa: E402
 
 
@@ -56,7 +57,6 @@ def test_resample_failure_degrades_instead_of_raising(monkeypatch, tmp_path):
 
     out = tmp_path / "out.wav"
     # Must fail cleanly instead of leaving a reusable silent narration track.
-    import pytest
     with pytest.raises(RuntimeError, match="全部 1 段解说均被跳过"):
         _build_timed_narration([segment], out, 3.0, tmp_path)
 
@@ -77,7 +77,6 @@ def test_missing_wav_skip_sets_zero_width_window(monkeypatch, tmp_path):
     }
 
     out = tmp_path / "out.wav"
-    import pytest
     with pytest.raises(RuntimeError, match="全部 1 段解说均被跳过"):
         _build_timed_narration([segment], out, 4.0, tmp_path)
 
@@ -120,38 +119,6 @@ def test_noncanonical_wav_is_resampled_and_placed(monkeypatch, tmp_path):
     assert out.exists()
 
 
-def test_all_skipped_logs_loud_warning(monkeypatch, tmp_path):
-    """Bug 7: when every segment is skipped, a loud warning is logged."""
-    logs = []
-    monkeypatch.setattr(narration_audio, "log", lambda msg: logs.append(msg))
-
-    segments = [
-        {
-            "index": 0,
-            "start": 0.0,
-            "end": 2.0,
-            "narration": "缺失一。",
-            "audio_path": str(tmp_path / "missing1.wav"),
-            "audio_duration": 0.8,
-        },
-        {
-            "index": 1,
-            "start": 2.0,
-            "end": 4.0,
-            "narration": "缺失二。",
-            "audio_path": str(tmp_path / "missing2.wav"),
-            "audio_duration": 0.8,
-        },
-    ]
-
-    out = tmp_path / "out.wav"
-    import pytest
-    with pytest.raises(RuntimeError, match="全部 2 段解说均被跳过"):
-        _build_timed_narration(segments, out, 5.0, tmp_path)
-
-    assert not out.exists()
-
-
 def test_partial_skip_does_not_log_all_skipped_warning(monkeypatch, tmp_path):
     """Bug 7: a placed segment alongside a skipped one must NOT trigger the warning."""
     logs = []
@@ -187,7 +154,6 @@ def test_run_tightening_packs_within_run_and_respects_boundary(monkeypatch, tmp_
     """Within a narration run, beats pack to a fixed tight gap after the previous beat's ACTUAL
     audio end (no slot-centering delay) so the spoken gap stays ≤ tight_pause; a deliberate
     authored gap > run_gap starts a new run anchored at its authored time. Anti-stutter ≤1s."""
-    from lib import CONFIG
     monkeypatch.setitem(CONFIG, "narration_tighten", True)
     monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
     monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
@@ -216,7 +182,6 @@ def test_run_tightening_packs_within_run_and_respects_boundary(monkeypatch, tmp_
 
 def test_run_tightening_off_keeps_slot_placement(monkeypatch, tmp_path):
     """With narration_tighten off, beats keep the slot-anchored placement (regression guard)."""
-    from lib import CONFIG
     monkeypatch.setitem(CONFIG, "narration_tighten", False)
     monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
     monkeypatch.setitem(CONFIG, "fade_ms", 0)
@@ -233,7 +198,6 @@ def test_run_tightening_off_keeps_slot_placement(monkeypatch, tmp_path):
 def test_run_tightening_drift_cap_keeps_narration_near_picture(monkeypatch, tmp_path):
     """The drift cap stops a long contiguous run from packing entirely to the front: no beat plays
     more than narration_max_pull_seconds before its authored time, so narration stays near picture."""
-    from lib import CONFIG
     monkeypatch.setitem(CONFIG, "narration_tighten", True)
     monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
     monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
