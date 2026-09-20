@@ -10,6 +10,14 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
+
+### Changed
+
+- 剪辑手法与审稿提示补充：保住动机与接受条件、反打是否新增信息、跨场镜头不得拼成虚假因果、只写证据已呈现的结果、REVISION 只提可定位的局部修法；brief 不再把 ASR 行尾当作安全剪点，改为听审后再定。
+
 ## [0.5.0] - 2026-09-05
 
 两条主线：新增 Fish Audio TTS 通道与《锅火》60 秒案例；以及一次以「在边界校验一次，之后信任契约」为原则的全量瘦身——删除约 2,600 行防御式代码，把校验集中到真正的输入边界，并修复审查过程中发现的三处真实缺陷。行为收紧之处见 `Changed`。
