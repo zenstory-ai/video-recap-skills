@@ -13,6 +13,7 @@ from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitle_core import _subtitle_style_config
 from narration_binding import binding_fingerprint
+from audio_mix_binding import binding_fingerprint as audio_mix_binding_fingerprint
 
 AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
 
@@ -74,6 +75,13 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
             "selected_stream_index": audio_stream_index,
         },
     }
+    explicit_mix = (
+        audio_mix_binding_fingerprint(work_dir)
+        if work_dir is not None and audio_mode == "narration" else None
+    )
+    if explicit_mix:
+        fingerprint["audio"]["path"] = "explicit_adopted_full_sound"
+        fingerprint["audio_mix_binding"] = explicit_mix
     if audio_mode == "narration":
         narration_binding = binding_fingerprint(work_dir) if work_dir else None
         fingerprint["narration_input_binding"] = narration_binding
@@ -81,17 +89,29 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
             narration_binding.get("tempo_policy") if narration_binding else None
         )
         fingerprint["narration_timing"] = {
-            "delay_seconds": CONFIG["narration_delay_seconds"],
-            "tail_pad_seconds": CONFIG["narration_tail_pad_seconds"],
-            "fade_ms": CONFIG["fade_ms"],
+            "delay_seconds": 0.0 if explicit_mix else CONFIG["narration_delay_seconds"],
+            "tail_pad_seconds": 0.0 if explicit_mix else CONFIG["narration_tail_pad_seconds"],
+            "fade_ms": 0 if explicit_mix else CONFIG["fade_ms"],
             "narration_speed": (
+                1.0 if explicit_mix else
                 adopted_tempo["global_atempo"] if adopted_tempo else CONFIG["narration_speed"]
             ),
-            "tempo_source": "adoption" if adopted_tempo else "configuration",
+            "tempo_source": (
+                "explicit_audio_mix" if explicit_mix else
+                "adoption" if adopted_tempo else "configuration"
+            ),
             "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
-            "tts_segment_tempo_max": CONFIG["tts_segment_tempo_max"],
+            "tts_segment_tempo_max": (
+                adopted_tempo["segment_tempo_max"]
+                if explicit_mix and adopted_tempo else CONFIG["tts_segment_tempo_max"]
+            ),
         }
-    if audio_mode in {"narration", "source-mix"}:
+        if explicit_mix and adopted_tempo:
+            fingerprint["narration_timing"]["narration_cumulative_tempo_max"] = \
+                adopted_tempo["cumulative_tempo_max"]
+            fingerprint["narration_timing"]["narration_cumulative_tempo_hard_max"] = \
+                adopted_tempo["cumulative_tempo_hard_max"]
+    if audio_mode in {"narration", "source-mix"} and not explicit_mix:
         # adopted-packet-copy never decodes or mixes, so mix settings cannot change it.
         fingerprint["audio_mix"] = {
             "ducking_mode": CONFIG["ducking_mode"],

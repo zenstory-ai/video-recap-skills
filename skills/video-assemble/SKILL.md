@@ -35,6 +35,7 @@ description: >
 - `<video>`：源视频；cut 模式下为 `edited_source.mp4`。
 - `work_dir/tts_meta.json`：默认 `narration` 模式必需；配音阶段写出的 `{segments: [...]}`。每段包含 `audio_path`、时间、`pause_after_ms`、`overlaps_speech` 和用于混音/字幕的位置。显式 `source-mix` / `adopted-packet-copy` 模式不读取它。
 - 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、WAV 指纹、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与证据边界见 `references/narration-adoption.md`。
+- 已采用的完整声音底轨与逐段配音可再传 `--audio-mix-adoption`；严格格式、48 kHz 声道矩阵和双 binding 事务见 `references/explicit-audio-mix.md`。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
 
@@ -44,6 +45,7 @@ description: >
 python3 scripts/assemble.py <video> --work-dir <work_dir> \
   [--audio-mode narration|source-mix|adopted-packet-copy] [--audio-stream-index <N>] \
   [--tts-meta <tts_meta.json> --narration-adoption <narration_adoption.json>] \
+  [--audio-mix-adoption <audio_mix_adoption.json>] \
   [--recap-stem <name>] [--output-dir <dir>] [--no-burn-subtitles] \
   [--subtitle-y-top <inclusive-y> --subtitle-y-bot <exclusive-y>] \
   [--source-video <orig.mp4>] [--export-jianying [--jianying-out <dir>]]
@@ -57,6 +59,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - `timeline.json`：后端无关的多轨模型，包含视频、原声、旁白、BGM、字幕和 ducking 自动化。
 - `_placed_*.wav`：实际写入主混音的完整逐段旁白 PCM；时间线与剪映只引用这些文件。
 - `narration_input_binding.json`：旁白输入、转换、实际放置、旁白总轨和最终音轨的消费证据。区分旧输入未核、指纹匹配但未经独立采用、与采用决定绑定；不等于声线鉴定或听审。
+- `audio_mix_binding.json`：显式完整声音分支的画面、底轨、48 kHz 配音、premaster、固定 master gain、最终 PCM/AAC 与另一 binding 的单向身份链。
 - `assembly_manifest.json`：输入来源、cut 来源指纹、渲染设置与最终输出路径。
 - `assembly_qc.json`：旁白完整性、原声句末交接、时间线素材时长与交付质量的发布门禁。
 - 剪映草稿目录：仅 `--export-jianying` 时生成，包含 `draft_content.json`、`draft_info.json` 与 `draft_meta_info.json`。
@@ -64,6 +67,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 ## 6. 合成规则
 
 - 音频模式的处理与冻结语义见 `references/audio-modes.md`。默认仍为 `narration`；另外两种模式必须显式选择。
+- `--audio-mix-adoption` 只与显式 `--tts-meta`、`--narration-adoption` 同时使用；它保留 `narration` 模式名，但跳过旧速度/适配、原声 handoff、环境 BGM、duck、loudnorm 和 limiter。
 - 音频按轨道混合：原声、可选 BGM 与旁白各自独立。
 - 旁白不做任何容差裁尾；温和加速后仍放不下即 `no_safe_fit`。每段 `_placed_*.wav`
   必须与序列化后的时间线区间等长或更短，否则 `timeline_audio_mismatch` 阻断。
@@ -81,6 +85,22 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
 - 烧录字幕需要带 `subtitles` / libass 的 ffmpeg；合成阶段会预检并在缺失时明确失败。
 - 原声留白中的对白字幕优先读取 Agent 校对的 `original_subtitles.json`；否则保守映射 ASR。只有遮罩覆盖留白或用户字幕明确要求替换时才烧录原声对白，并用 `「」` 与旁白区分。
+
+### 按原片区间准备声音，而不是整体压低旧成片
+
+已有多段原声取舍和独立 BGM 决定时，先用
+`references/source-score.md` 的独立 `source_score.py` 操作，从原片声音流
+按精确帧区间重建原声轨、连续音乐轨及两者之和。原片完整解码一次再切样本，
+分别执行保留对白、低位原声和明确静音；渐变也必须显式给定。
+已处理的音乐轨走 `frozen`，不能再次偏移、调增益或加渐变。
+若采用的原声底轨本身已包含完整音乐决定且不再叠加配乐，使用严格的
+`score:{"kind":"none"}`；它生成真实全零 score，并保持 source 与 prepared
+的 canonical PCM payload 相同，不伪造静音音乐资产。
+
+这一步仅输出声音底轨和来源回执，不是最终视频。要与逐段已采用配音合成，
+必须再由调用方提供 `references/explicit-audio-mix.md` 的严格 adoption；不要将
+底轨塞入旧入口再自动 duck，也不要从含旧解说的成片取整条声音来冒充干净
+原声。保留旧入口兼容行为，并区分“底轨已验证”“配音已验证”和“完整混音已验证”。
 
 ## 7. 字幕与可选包装
 
