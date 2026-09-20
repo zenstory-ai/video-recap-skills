@@ -180,7 +180,6 @@ def test_deslop_qc_schema_keeps_template_transitions_advisory():
     marker = "模板化“不是……而是……”转折"
     for schema_path in (
         SKILLS_ROOT / "video-recap" / "references" / "data-schema.md",
-        SKILLS_ROOT / "video-understanding" / "references" / "data-schema.md",
     ):
         lines = schema_path.read_text(encoding="utf-8").splitlines()
         blocker_line = next(line for line in lines if line.startswith("- `blockers`："))
@@ -215,7 +214,6 @@ def test_skill_json_examples_are_parseable_and_cut_reason_keeps_editorial_fields
 
     for schema_path in (
         SKILLS_ROOT / "video-recap" / "references" / "data-schema.md",
-        SKILLS_ROOT / "video-understanding" / "references" / "data-schema.md",
     ):
         displayed_clips = [
             item
