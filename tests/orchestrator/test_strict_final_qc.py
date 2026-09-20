@@ -2,7 +2,11 @@
 
 import ast
 from argparse import Namespace
+import json
+import os
 from pathlib import Path
+import shutil
+import subprocess
 import sys
 
 import pytest
@@ -78,6 +82,45 @@ def test_both_runner_exits_use_completion_helper():
     assert len(calls) == 2
 
 
+def test_multi_cut_route_strict_failure_exits_before_success(
+    monkeypatch, tmp_path, capsys
+):
+    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
+    for video in videos:
+        video.write_bytes(b"source")
+    work = tmp_path / "multi-work"
+    work.mkdir()
+    (work / "clip_plan.json").write_text('{"clips":[]}')
+    final = tmp_path / "multi-final.mp4"
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "recap.py", *map(str, videos), "--work-dir", str(work),
+            "--edit-mode", "cut", "--audio-mode", "source-mix",
+            "--no-burn-subtitles", "--require-final-qc",
+        ],
+    )
+    _parser, args = recap_cli.parse_args()
+    monkeypatch.setattr(recap_runner, "_build_multi_source_records", lambda *_: [])
+    monkeypatch.setattr(
+        recap_runner, "_write_multi_source_manifest",
+        lambda *_: work / "multi_source_manifest.json",
+    )
+    monkeypatch.setattr(recap_runner, "_reject_stale_multi_manifest", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "begin_non_narration_qc", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "_run", lambda *_: None)
+    monkeypatch.setattr(recap_runner, "_surface_cut_qc", lambda *_: {"status": "pass"})
+    monkeypatch.setattr(recap_runner, "_write_shift_left_stage_qc", lambda *_a, **_k: None)
+    monkeypatch.setattr(recap_runner, "_read_assembly_output", lambda *_: final)
+    monkeypatch.setattr(
+        recap_runner, "_write_final_qc_reports", lambda *_: _summary(golden=False)
+    )
+
+    with pytest.raises(SystemExit):
+        recap_runner._run_multi_cut(videos, work, args)
+    assert "✅ 完成" not in capsys.readouterr().out
+
+
 def test_continuation_preserves_strict_flag_without_cache_fingerprint_change(
     monkeypatch
 ):
@@ -150,3 +193,113 @@ def test_legacy_dub_without_strict_flag_still_prepares_and_renders(
         )
     ]
     assert "✅ 配音完成" in capsys.readouterr().out
+
+
+def _minimal_env():
+    return {
+        key: os.environ[key]
+        for key in ("PATH", "HOME", "TMPDIR", "LANG") if key in os.environ
+    }
+
+
+def _make_source(path):
+    subprocess.run(
+        [
+            "ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
+            "color=black:size=160x90:rate=24:duration=1", "-f", "lavfi", "-i",
+            "sine=frequency=330:sample_rate=48000:duration=1", "-c:v", "libx264",
+            "-threads", "2", "-c:a", "aac", "-shortest", str(path),
+        ],
+        check=True,
+    )
+
+
+def _run_source_cli(source, work, output, env, *, strict):
+    command = [
+        sys.executable, str(SCRIPTS / "recap.py"), str(source),
+        "--work-dir", str(work), "--output-dir", str(output),
+        "--audio-mode", "source-mix", "--no-burn-subtitles",
+    ]
+    if strict:
+        command.append("--require-final-qc")
+    return subprocess.run(
+        command, cwd=SCRIPTS, env=env, capture_output=True, text=True, timeout=90
+    )
+
+
+@pytest.mark.skipif(
+    not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
+    reason="requires real ffmpeg and ffprobe",
+)
+def test_real_source_cli_strict_pass_and_exact_final_probe_failure(tmp_path):
+    source = tmp_path / "source.mp4"
+    _make_source(source)
+
+    passing = _run_source_cli(
+        source, tmp_path / "pass-work", tmp_path / "pass-output", _minimal_env(),
+        strict=True,
+    )
+    assert passing.returncode == 0, passing.stdout + passing.stderr
+    assert "✅ 完成" in passing.stdout
+    assert json.loads((tmp_path / "pass-work/final_qc.json").read_text())["ok"] is True
+
+    real_ffprobe = shutil.which("ffprobe")
+    wrapper_dir = tmp_path / "wrapper-bin"
+    wrapper_dir.mkdir()
+    wrapper = wrapper_dir / "ffprobe"
+    wrapper.write_text(
+        """#!/usr/bin/env python3
+import json,os,sys
+args=sys.argv[1:]
+with open(os.environ['FFPROBE_CALLS'], 'a') as stream:
+    stream.write(json.dumps(args)+'\\n')
+expected=['-v','error','-print_format','json','-show_format','-show_streams',os.environ['FINAL_QC_TARGET']]
+if args == expected:
+    sys.stderr.write('isolated final QC probe rejection\\n')
+    raise SystemExit(73)
+os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
+"""
+    )
+    wrapper.chmod(0o755)
+
+    def failing_env(target, calls):
+        env = _minimal_env()
+        env.update(
+            PATH=f"{wrapper_dir}{os.pathsep}{env['PATH']}",
+            REAL_FFPROBE=real_ffprobe,
+            FINAL_QC_TARGET=str(target),
+            FFPROBE_CALLS=str(calls),
+        )
+        return env
+
+    strict_output = tmp_path / "strict-output"
+    strict_target = strict_output / "recap_source.mp4"
+    strict_work = tmp_path / "strict-work"
+    strict_calls = tmp_path / "strict-ffprobe.jsonl"
+    failed = _run_source_cli(
+        source, strict_work, strict_output,
+        failing_env(strict_target, strict_calls), strict=True,
+    )
+    assert failed.returncode != 0
+    assert "✅ 完成" not in failed.stdout
+    assert strict_target.is_file()
+    assert json.loads((strict_work / "assembly_manifest.json").read_text())
+    final_report = json.loads((strict_work / "final_qc.json").read_text())
+    assert any(item["code"] == "probe_failed" for item in final_report["findings"])
+    exact = [json.loads(line) for line in strict_calls.read_text().splitlines()]
+    assert exact.count([
+        "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
+        str(strict_target),
+    ]) == 1
+
+    default_output = tmp_path / "default-output"
+    default_target = default_output / "recap_source.mp4"
+    default_work = tmp_path / "default-work"
+    advisory = _run_source_cli(
+        source, default_work, default_output,
+        failing_env(default_target, tmp_path / "default-ffprobe.jsonl"), strict=False,
+    )
+    assert advisory.returncode == 0, advisory.stdout + advisory.stderr
+    assert "✅ 完成" in advisory.stdout
+    assert "仅报告，不阻断" in advisory.stdout
+    assert json.loads((default_work / "final_qc.json").read_text())["ok"] is False

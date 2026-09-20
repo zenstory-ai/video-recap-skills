@@ -15,6 +15,7 @@ from recap_runtime import (
     _multi_run_manifest_payload,
     _run_manifest_payload,
 )
+from recap_source import audio_binding, uses_narration
 
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 
@@ -158,6 +159,12 @@ def _manifest_mismatches(work_dir, video, args):
     ]
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
+    actual_audio = actual.get("audio", {"mode": "narration", "selected_stream_index": 0})
+    expected_audio = audio_binding(args)
+    if actual_audio != expected_audio:
+        mismatches.append(
+            f"audio: expected {expected_audio!r}, got {actual_audio!r}"
+        )
     return mismatches
 
 
@@ -178,6 +185,12 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         )
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
+    actual_audio = actual.get("audio", {"mode": "narration", "selected_stream_index": 0})
+    expected_audio = audio_binding(args)
+    if actual_audio != expected_audio:
+        mismatches.append(
+            f"audio: expected {expected_audio!r}, got {actual_audio!r}"
+        )
     return mismatches
 
 
@@ -233,6 +246,10 @@ def _continuation_command(video, work_dir, args):
         parts += ["--style", args.style]
     if args.edit_mode != "full":
         parts += ["--edit-mode", args.edit_mode]
+    if getattr(args, "audio_mode", "narration") != "narration":
+        parts += ["--audio-mode", args.audio_mode]
+    if getattr(args, "audio_stream_index", 0) != 0:
+        parts += ["--audio-stream-index", str(args.audio_stream_index)]
     if args.target_duration:
         parts += ["--target-duration", args.target_duration]
     if args.allow_duration_drift:
@@ -251,14 +268,15 @@ def _continuation_command(video, work_dir, args):
         parts.append("--no-consolidate")
     if args.consolidate_asr:
         parts.append("--consolidate-asr")
-    if args.mimo_tts_voice:
-        parts += ["--mimo-tts-voice", args.mimo_tts_voice]
-    if args.tts_provider != "auto":
-        parts += ["--tts-provider", args.tts_provider]
-    if args.voice_ref:
-        parts += ["--voice-ref", args.voice_ref]
-    if args.allow_partial_tts:
-        parts.append("--allow-partial-tts")
+    if uses_narration(args):
+        if args.mimo_tts_voice:
+            parts += ["--mimo-tts-voice", args.mimo_tts_voice]
+        if args.tts_provider != "auto":
+            parts += ["--tts-provider", args.tts_provider]
+        if args.voice_ref:
+            parts += ["--voice-ref", args.voice_ref]
+        if args.allow_partial_tts:
+            parts.append("--allow-partial-tts")
     if args.burn_subtitles is not None:
         parts.append("--burn-subtitles" if args.burn_subtitles else "--no-burn-subtitles")
     if args.subtitle_y_top is not None:
@@ -273,10 +291,13 @@ def _continuation_command(video, work_dir, args):
         parts.append("--jianying-bundle-media")
     if args.jianying_no_bundle_media:
         parts.append("--jianying-no-bundle-media")
-    if args.review_narration is not None:
-        parts.append("--review-narration" if args.review_narration else "--no-review-narration")
-    if args.require_narration_review:
-        parts.append("--require-narration-review")
+    if uses_narration(args):
+        if args.review_narration is not None:
+            parts.append(
+                "--review-narration" if args.review_narration else "--no-review-narration"
+            )
+        if args.require_narration_review:
+            parts.append("--require-narration-review")
     if args.material_library_dir:
         parts += ["--material-library-dir", args.material_library_dir]
     if args.use_materials:
