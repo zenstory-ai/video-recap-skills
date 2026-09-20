@@ -23,6 +23,7 @@ All notable changes to this project are documented here.
 - **批准稿保护。** `--preserve-approved-text` 贯穿 full / 单源 cut / 多源 cut 的校验器再到 TTS：文本装不下窗口时列出具体段落与时长，不自动缩稿、不静默变速；失败不沿用旧的 `tts_meta.json`，成功元数据原子写入。
 - **独立字幕轨。** `subtitle_track.json` 以整数 tick 绑定当前音画（仅 `adopted-packet-copy` 模式），标注估计 / 校准 / 强对齐精度，渲染前核对陈旧轨与不可显示短 cue；投影到 ASS 厘秒时保证在同一帧翻转，`assembly_manifest.json` 只引用当前绑定的轨。
 - **前景合成。** `compose_foreground.py` 把调用方渲染好的 RGBA PNG 序列（可选片尾卡）叠加到锁定母版，音频按包复制并逐包核对不变，输出帧钟与解码元数据核对后才写入新目录。
+- **声音路径显式化（recap）。** `recap.py --audio-mode {narration,source-mix,adopted-packet-copy}` 把声音策略与 `--edit-mode` 解耦：`source-mix` / `adopted-packet-copy` 不跑校验、评审和 TTS，full 直接合成，cut 剪完不再等 `narration.json`；运行清单记录音频策略，错配或含未绑定 `narration.json` 的 work-dir 被拒绝，续跑命令保留选择。
 
 ### Changed
 

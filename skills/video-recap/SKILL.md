@@ -1,7 +1,7 @@
 ---
 name: video-recap
 description: >
- 从输入视频端到端生成中文解说成片。用户提供 .mp4 / .mov / .mkv / .webm，并要求添加旁白、
+ 从输入视频生成中文解说成片或原声剧情短片。用户提供 .mp4 / .mov / .mkv / .webm，并要求剪辑、添加旁白、
  配音、总结、短剧/电视剧/电影/纪录片/科普解说时使用。负责编排 video-* 技能链：视频理解 →
  Agent 制定故事与视听方案 → 剪辑 → 配音 → 合成。触发词：视频解说、视频旁白、生成解说、
  视频 recap、video recap、voiceover、narration、auto-dub、recap。
@@ -17,6 +17,10 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 
 流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会校验
 `recap_run_manifest.json`，拒绝复用来自其他源视频或其他运行参数的旧工作目录；视频理解产物也只在来源一致时复用。
+
+画面流程 `--edit-mode full|cut|dub` 与声音策略分开：`--audio-mode narration` 保留上述解说流程；
+`source-mix` 不做配音；`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。使用原声模式时读
+`references/audio-routing.md`，不要为了运行工具而编造空解说。
 
 ## 2. 创作职责
 
@@ -74,7 +78,7 @@ MiMo QC 默认关闭；每个选定阶段最多请求一次，写入 `mimo_qc.js
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本启动后会自行定位兄弟技能和资源。
 
-## 4. 标准解说流程
+## 4. 标准解说流程（audio-mode narration）
 
 ### 4.1 背景调研
 
@@ -166,6 +170,20 @@ full/cut 交付如需让确定性的最终检查影响命令退出状态，显�
 会保留报告和已渲染诊断媒体，但命令非零退出且不打印完成。默认仍是仅报告、不阻断。
 该参数不支持 `--edit-mode dub`；dub 未传该参数时的准备和渲染行为不变。
 
+### 4.7 不需要解说的片子
+
+```bash
+# 对当前整段输入直接合成；不隐式跑理解/ASR/TTS
+python3 scripts/recap.py locked_picture.mp4 --work-dir source_work --audio-mode source-mix
+# 剪辑计划仍按 cut 流程产生，剪完不再暂停等待 narration.json
+python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --work-dir cut_work --audio-mode source-mix
+# 只换包装时冻结当前整片 AAC；不允许同时加 BGM/TTS
+python3 scripts/recap.py adopted.mp4 --work-dir packaging_work --audio-mode adopted-packet-copy
+```
+
+`source-mix` 仍会混音和重编码；`cut + adopted-packet-copy` 冻结的是剪后中间片的声音，不是原片的 AAC 包。
+切换声音模式须新工作目录，不得把旧 TTS、QC 或自动生成的解说花字混入本轮原声生产。细节见 `references/audio-routing.md`。
+
 ## 5. 英译中原声复刻模式
 
 `--edit-mode dub` 把英文视频翻译为中文，并用原说话者的克隆音色替换人声；它不是在压低原声上叠加解说。
@@ -208,6 +226,7 @@ python3 scripts/recap.py --doctor
 
 `--context`、`--scene-threshold`、`--style`、`--edit-mode {full,cut,dub}`、`--target-duration`、
 `--require-final-qc`（仅 full/cut）、
+`--audio-mode {narration,source-mix,adopted-packet-copy}`、`--audio-stream-index`、
 `--skip-asr`、`--mimo-video-overview`、`--mimo-qc {off,pre-assemble,post-render,both}`、
 `--mimo-qc-refresh`、`--consolidate`、`--consolidate-asr`、`--tts-provider`、`--mimo-tts-voice`、`--voice-ref`、
 `--allow-partial-tts`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、

@@ -31,6 +31,14 @@ from recap_stage_qc import (
     _write_final_qc_reports,
     _write_shift_left_stage_qc,
 )
+from recap_source import (
+    begin_non_narration_qc,
+    extend_assemble_args,
+    needs_voiceover,
+    reject_unbound_narration_workdir,
+    uses_narration,
+    validate_audio_routing,
+)
 from recap_timeline import (
     _continuation_command,
     _cut_narration_is_stale,
@@ -104,14 +112,12 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
                 f"[video-recap] 素材库未复用 {source_record['source_name']}: {result['reason']}",
                 flush=True,
             )
-
     if not restored:
         _run(
             "video-understanding",
             "understand.py",
             *_understand_args_for_source(source_record, source_work_dir, args),
         )
-
     _write_run_manifest(source_work_dir, source_record["source_path"], args)
     if _save_materials_enabled(args):
         meta = material_lib.save_material(
@@ -146,7 +152,6 @@ def _single_source_record(video, args):
 
 def _rebuild_understanding_brief(source_record, source_work_dir, args):
     """Rebuild agent_narration_brief.md from cached/restored analysis only.
-
     Cut pass 2 needs an OUTPUT-time brief after edited_source.mp4 exists. A
     material restore may have supplied pass-1 analysis artifacts (and even a
     source-time brief), but it must not skip this phase-specific brief rebuild.
@@ -175,17 +180,18 @@ def _run_multi_cut(videos, work_dir, args):
     videos = _coerce_videos(videos)
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    reject_unbound_narration_workdir(work_dir, args)
     source_records = _build_multi_source_records(videos, args)
     narration_json = work_dir / "narration.json"
     clip_plan_json = work_dir / "clip_plan.json"
     edited_source = work_dir / "edited_source.mp4"
     inspect_py = _entry("video-recap", "recap_inspect.py")
-
     # If a project manifest already exists, it must match before any Phase-B reuse.
     if (work_dir / RUN_MANIFEST).exists():
         _reject_stale_multi_manifest(work_dir, videos, args, source_records)
     manifest_path = _write_multi_source_manifest(work_dir, source_records)
-
+    if not uses_narration(args):
+        begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
     if not clip_plan_json.exists():
         for record in source_records:
             _run_or_restore_understanding(
@@ -222,68 +228,63 @@ def _run_multi_cut(videos, work_dir, args):
     _run("video-cut", "cut.py", *crender)
     cut_qc = _surface_cut_qc(work_dir)
     _write_shift_left_stage_qc(work_dir, "post_cut", metadata={"cut_qc": cut_qc})
-    if not narration_json.exists():
-        _write_multi_source_output_brief(
-            work_dir, source_records, work_dir / "clip_plan_validated.json"
-        )
+    if uses_narration(args):
+        if not narration_json.exists():
+            _write_multi_source_output_brief(
+                work_dir, source_records, work_dir / "clip_plan_validated.json"
+            )
+            _write_phase_ledger(
+                work_dir,
+                clip_plan_fingerprint=cp_fp,
+                edited_source_rendered=True,
+                multi_source=True,
+            )
+            _pause_for_agent(
+                work_dir,
+                f"{narration_json}（用成片 OUTPUT 时间轴写解说，对着 {edited_source}）",
+                _continuation_command(videos, work_dir, args),
+                inspect_hint=(
+                    f"python3 {inspect_py} --work-dir {work_dir} "
+                    "clip-map --output-start <s> --output-end <e>"
+                ),
+            )
+            return
+        if _cut_narration_is_stale(_read_phase_ledger(work_dir), cp_fp):
+            raise SystemExit(
+                "clip_plan.json 已改变，但 narration.json 仍是对旧剪辑写的，会与剪后画面对不上。"
+                "请删除 narration.json，重跑后按新成片重新写解说。"
+            )
         _write_phase_ledger(
             work_dir,
             clip_plan_fingerprint=cp_fp,
-            edited_source_rendered=True,
+            narration_fingerprint=_file_md5(narration_json),
+            narration_written=True,
             multi_source=True,
         )
-        _pause_for_agent(
-            work_dir,
-            f"{narration_json}（用成片 OUTPUT 时间轴写解说，对着 {edited_source}）",
-            _continuation_command(videos, work_dir, args),
-            inspect_hint=(
-                f"python3 {inspect_py} --work-dir {work_dir} "
-                "clip-map --output-start <s> --output-end <e>"
-            ),
+        output_duration = _read_video_duration_or_raise(edited_source)
+        _run(
+            "video-script", "validate.py", "--work-dir", work_dir,
+            "--mode", "cut_output", "--output-duration", f"{output_duration:.3f}",
         )
-        return
-    if _cut_narration_is_stale(_read_phase_ledger(work_dir), cp_fp):
-        raise SystemExit(
-            "clip_plan.json 已改变，但 narration.json 仍是对旧剪辑写的，会与剪后画面对不上。"
-            "请删除 narration.json，重跑后按新成片重新写解说。"
+        review_ran = run_narration_review(
+            work_dir, args, run=_run, timeline="cut_output"
         )
-    _write_phase_ledger(
-        work_dir,
-        clip_plan_fingerprint=cp_fp,
-        narration_fingerprint=_file_md5(narration_json),
-        narration_written=True,
-        multi_source=True,
-    )
-    output_duration = _read_video_duration_or_raise(edited_source)
-    _run(
-        "video-script",
-        "validate.py",
-        "--work-dir",
-        work_dir,
-        "--mode",
-        "cut_output",
-        "--output-duration",
-        f"{output_duration:.3f}",
-    )
-    review_ran = run_narration_review(work_dir, args, run=_run, timeline="cut_output")
-    _write_shift_left_stage_qc(
-        work_dir,
-        "pre_tts",
-        metadata={"review_ran": review_ran, "timeline": "cut_output"},
-    )
-    _run(
-        "video-voiceover",
-        "voiceover.py",
-        *_voiceover_args(work_dir, narration_json, args),
-    )
-    _write_shift_left_stage_qc(
-        work_dir, "post_tts", metadata=_tts_qc_metadata(work_dir)
-    )
-    overlays_path = _write_canonical_visual_overlays(work_dir, narration_json)
-    _write_shift_left_stage_qc(
-        work_dir, "pre_assemble", metadata={"visual_overlays": str(overlays_path)}
-    )
-    _run_mimo_qc_stage(work_dir, args, "pre_assemble")
+        _write_shift_left_stage_qc(
+            work_dir, "pre_tts",
+            metadata={"review_ran": review_ran, "timeline": "cut_output"},
+        )
+        _run(
+            "video-voiceover", "voiceover.py",
+            *_voiceover_args(work_dir, narration_json, args),
+        )
+        _write_shift_left_stage_qc(
+            work_dir, "post_tts", metadata=_tts_qc_metadata(work_dir)
+        )
+        overlays_path = _write_canonical_visual_overlays(work_dir, narration_json)
+        _write_shift_left_stage_qc(
+            work_dir, "pre_assemble", metadata={"visual_overlays": str(overlays_path)}
+        )
+        _run_mimo_qc_stage(work_dir, args, "pre_assemble")
 
     recap_stem = f"multi_{videos[0].stem}"
     aargs = [
@@ -293,6 +294,7 @@ def _run_multi_cut(videos, work_dir, args):
         "--recap-stem",
         recap_stem,
     ]
+    extend_assemble_args(aargs, args)
     if args.output_dir:
         aargs += ["--output-dir", args.output_dir]
     if args.burn_subtitles is not None:
@@ -313,9 +315,11 @@ def _run_multi_cut(videos, work_dir, args):
         "post_render",
         metadata=_post_render_qc_metadata(work_dir, final_output),
     )
-    _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
+    if uses_narration(args):
+        _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
     _finish_recap(work_dir, final_output, args)
-    _print_narration_review_pointer(work_dir, review_ran=review_ran)
+    if uses_narration(args):
+        _print_narration_review_pointer(work_dir, review_ran=review_ran)
 
 
 def main():
@@ -323,27 +327,36 @@ def main():
 
     if getattr(args, "require_final_qc", False) and args.edit_mode == "dub":
         ap.error("--require-final-qc is only supported in full/cut modes, not dub")
-    # argparse does not validate environment-derived defaults against choices.
-    if args.mimo_qc not in {"off", "pre-assemble", "post-render", "both"}:
-        ap.error(
-            "MIMO_QC/--mimo-qc must be one of: off, pre-assemble, post-render, both"
-        )
-    if args.tts_provider not in TTS_PROVIDERS:
-        ap.error(
-            "TTS_PROVIDER/--tts-provider must be one of: auto, mimo-tts, fish-audio"
-        )
 
     if args.doctor:
+        if args.tts_provider not in TTS_PROVIDERS:
+            ap.error(
+                "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
+            )
         doctor_args = []
         if args.tts_provider != "auto":
             doctor_args += ["--tts-provider", args.tts_provider]
         _run("video-recap", "doctor.py", *doctor_args)
         return
+    # argparse does not validate environment-derived defaults against choices.
+    if args.mimo_qc not in {"off", "pre-assemble", "post-render", "both"}:
+        ap.error(
+            "MIMO_QC/--mimo-qc must be one of: off, pre-assemble, post-render, both"
+        )
+    if uses_narration(args) and args.tts_provider not in TTS_PROVIDERS:
+        ap.error(
+            "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
+        )
     if not args.video:
         ap.error("video is required (unless --doctor)")
+    validate_audio_routing(ap, args)
 
-    if args.voice_ref is None:
+    if needs_voiceover(args) and args.voice_ref is None:
         args.voice_ref = os.environ.get("VOICE_REF", "").strip() or None
+    elif not needs_voiceover(args):
+        # Source-owned audio must not inherit ambient narration configuration. Explicit
+        # narration flags were already rejected by validate_audio_routing().
+        args.voice_ref = None
     try:
         if args.subtitle_y_top is None:
             args.subtitle_y_top = _optional_env_int("SUBTITLE_Y_TOP")
@@ -352,15 +365,18 @@ def main():
     except ValueError as exc:
         ap.error(str(exc))
 
-    explicit_mimo_voice = (
-        args.mimo_tts_voice or os.environ.get("MIMO_TTS_VOICE", "").strip()
-    )
-    if explicit_mimo_voice and args.voice_ref:
-        ap.error("--mimo-tts-voice and --voice-ref are mutually exclusive")
-    if args.tts_provider in {"fish-audio", "index-tts"} and (explicit_mimo_voice or args.voice_ref):
-        ap.error(
-            "--mimo-tts-voice/--voice-ref are only supported by --tts-provider mimo-tts"
+    if needs_voiceover(args):
+        explicit_mimo_voice = (
+            args.mimo_tts_voice or os.environ.get("MIMO_TTS_VOICE", "").strip()
         )
+        if explicit_mimo_voice and args.voice_ref:
+            ap.error("--mimo-tts-voice and --voice-ref are mutually exclusive")
+        if args.tts_provider in {"fish-audio", "index-tts"} and (
+            explicit_mimo_voice or args.voice_ref
+        ):
+            ap.error(
+                "--mimo-tts-voice/--voice-ref are only supported by --tts-provider mimo-tts"
+            )
     if args.edit_mode == "dub" and args.voice_ref:
         ap.error(
             "--voice-ref is only supported in full/cut modes; dub clones the source voice automatically"
@@ -402,6 +418,10 @@ def main():
             ap.error(f"reference audio does not exist or is not a file: {voice_ref}")
         args.voice_ref = str(voice_ref)
 
+    _execute_pipeline(args, videos)
+
+
+def _execute_pipeline(args, videos):
     # Fail fast before any expensive understanding/VLM/ASR/TTS work if the run will burn
     # subtitles but this ffmpeg can't (otherwise it only blows up at the final render).
     _preflight_burn_subtitles(args)
@@ -412,6 +432,8 @@ def main():
             if args.work_dir
             else videos[0].parent / f"work_dir_multi_{videos[0].stem}"
         )
+        # Validate the work-directory audio policy before any run-local QC state is reset.
+        reject_unbound_narration_workdir(work_dir, args)
         _prepare_mimo_qc(work_dir, args)
         _run_multi_cut(videos, work_dir, args)
         return
@@ -423,6 +445,7 @@ def main():
         else video.parent / f"work_dir_{video.stem}"
     )
     work_dir.mkdir(parents=True, exist_ok=True)
+    reject_unbound_narration_workdir(work_dir, args)
     _prepare_mimo_qc(work_dir, args)
     cut = args.edit_mode == "cut"
     narration_json = work_dir / "narration.json"
@@ -503,23 +526,37 @@ def main():
 
     if not cut:
         # Full mode: a single pause (understand -> agent writes narration.json -> produce).
-        if not narration_json.exists():
-            _understand()
-            _write_run_manifest(work_dir, video, args)
-            _pause(
-                f"{narration_json}",
-                inspect_hint=f"python3 {inspect_py} --work-dir {work_dir} state",
+        if uses_narration(args):
+            if not narration_json.exists():
+                _understand()
+                _write_run_manifest(work_dir, video, args)
+                _pause(
+                    f"{narration_json}",
+                    inspect_hint=f"python3 {inspect_py} --work-dir {work_dir} state",
+                )
+                return
+            _reject_stale_manifest()
+            _run(
+                "video-script", "validate.py", "--work-dir", work_dir,
+                "--mode", "full",
             )
-            return
-        _reject_stale_manifest()
-        _run("video-script", "validate.py", "--work-dir", work_dir, "--mode", "full")
-        narration_for_tts = narration_json
+            narration_for_tts = narration_json
+        elif (work_dir / RUN_MANIFEST).exists():
+            _reject_stale_manifest()
+        else:
+            _write_run_manifest(work_dir, video, args)
+        if not uses_narration(args):
+            begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
         assemble_video_path = video
     else:
         # Cut mode: cut-first / narrate-second (two pauses), so narration is authored against the
         # REAL output timeline — map_narration_to_clips is never used and cannot drop/clamp/desync.
         if not clip_plan_json.exists():
             # PASS 1: understand -> agent writes clip_plan.json ONLY.
+            if not uses_narration(args) and (work_dir / RUN_MANIFEST).exists():
+                _reject_stale_manifest()
+            if not uses_narration(args):
+                begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
             _understand()
             _write_run_manifest(work_dir, video, args)
             _pause(
@@ -528,6 +565,8 @@ def main():
             )
             return
         _reject_stale_manifest()
+        if not uses_narration(args):
+            begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
         cp_fp = _file_md5(clip_plan_json)
         # Render the cut from clip_plan (no narration mapping — narration is OUTPUT-time).
         crender = [str(video), "--work-dir", str(work_dir), "--no-narration-map"]
@@ -540,7 +579,7 @@ def main():
         _run("video-cut", "cut.py", *crender)
         cut_qc = _surface_cut_qc(work_dir)
         _write_shift_left_stage_qc(work_dir, "post_cut", metadata={"cut_qc": cut_qc})
-        if not narration_json.exists():
+        if uses_narration(args) and not narration_json.exists():
             # PASS 2: rebuild the brief (now an OUTPUT-timeline variant) and pause for narration.
             _rebuild_output_brief()
             _write_phase_ledger(
@@ -554,57 +593,62 @@ def main():
                 ),
             )
             return
-        if _cut_narration_is_stale(_read_phase_ledger(work_dir), cp_fp):
+        if uses_narration(args) and _cut_narration_is_stale(
+            _read_phase_ledger(work_dir), cp_fp
+        ):
             raise SystemExit(
                 "clip_plan.json 已改变，但 narration.json 仍是对旧剪辑写的，会与剪后画面对不上。"
                 "请删除 narration.json，重跑后按新成片重新写解说。"
             )
-        _write_phase_ledger(
-            work_dir,
-            clip_plan_fingerprint=cp_fp,
-            narration_fingerprint=_file_md5(narration_json),
-            narration_written=True,
-        )
-        output_duration = _read_video_duration_or_raise(edited_source)
-        _run(
-            "video-script",
-            "validate.py",
-            "--work-dir",
-            work_dir,
-            "--mode",
-            "cut_output",
-            "--output-duration",
-            f"{output_duration:.3f}",
-        )
-        narration_for_tts = narration_json
+        if uses_narration(args):
+            _write_phase_ledger(
+                work_dir,
+                clip_plan_fingerprint=cp_fp,
+                narration_fingerprint=_file_md5(narration_json),
+                narration_written=True,
+            )
+            output_duration = _read_video_duration_or_raise(edited_source)
+            _run(
+                "video-script", "validate.py", "--work-dir", work_dir,
+                "--mode", "cut_output", "--output-duration", f"{output_duration:.3f}",
+            )
+            narration_for_tts = narration_json
+        else:
+            _write_phase_ledger(
+                work_dir,
+                clip_plan_fingerprint=cp_fp,
+                edited_source_rendered=True,
+                audio_mode=args.audio_mode,
+                audio_stream_index=args.audio_stream_index,
+            )
         assemble_video_path = edited_source
-    review_ran = run_narration_review(
-        work_dir,
-        args,
-        run=_run,
-        timeline="cut_output" if cut else "source",
-    )
-    _write_shift_left_stage_qc(
-        work_dir,
-        "pre_tts",
-        metadata={
-            "review_ran": review_ran,
-            "timeline": "cut_output" if cut else "source",
-        },
-    )
-    _run(
-        "video-voiceover",
-        "voiceover.py",
-        *_voiceover_args(work_dir, narration_for_tts, args),
-    )
-    _write_shift_left_stage_qc(
-        work_dir, "post_tts", metadata=_tts_qc_metadata(work_dir)
-    )
-    overlays_path = _write_canonical_visual_overlays(work_dir, narration_for_tts)
-    _write_shift_left_stage_qc(
-        work_dir, "pre_assemble", metadata={"visual_overlays": str(overlays_path)}
-    )
-    _run_mimo_qc_stage(work_dir, args, "pre_assemble")
+    if uses_narration(args):
+        review_ran = run_narration_review(
+            work_dir,
+            args,
+            run=_run,
+            timeline="cut_output" if cut else "source",
+        )
+        _write_shift_left_stage_qc(
+            work_dir,
+            "pre_tts",
+            metadata={
+                "review_ran": review_ran,
+                "timeline": "cut_output" if cut else "source",
+            },
+        )
+        _run(
+            "video-voiceover", "voiceover.py",
+            *_voiceover_args(work_dir, narration_for_tts, args),
+        )
+        _write_shift_left_stage_qc(
+            work_dir, "post_tts", metadata=_tts_qc_metadata(work_dir)
+        )
+        overlays_path = _write_canonical_visual_overlays(work_dir, narration_for_tts)
+        _write_shift_left_stage_qc(
+            work_dir, "pre_assemble", metadata={"visual_overlays": str(overlays_path)}
+        )
+        _run_mimo_qc_stage(work_dir, args, "pre_assemble")
 
     aargs = [
         str(assemble_video_path),
@@ -613,6 +657,7 @@ def main():
         "--recap-stem",
         video.stem,
     ]
+    extend_assemble_args(aargs, args)
     if args.output_dir:
         aargs += ["--output-dir", args.output_dir]
     if args.burn_subtitles is not None:
@@ -645,6 +690,8 @@ def main():
         "post_render",
         metadata=_post_render_qc_metadata(work_dir, final_output),
     )
-    _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
+    if uses_narration(args):
+        _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
     _finish_recap(work_dir, final_output, args)
-    _print_narration_review_pointer(work_dir, review_ran=review_ran)
+    if uses_narration(args):
+        _print_narration_review_pointer(work_dir, review_ran=review_ran)

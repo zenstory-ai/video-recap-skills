@@ -4,6 +4,7 @@ import argparse
 import os
 
 from lib import env_bool
+from recap_source import AUDIO_MODES
 
 TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
@@ -49,6 +50,8 @@ def parse_args(argv=None):
         default=os.environ.get("EDIT_MODE", "full"),
         choices=["full", "cut", "dub"],
     )
+    parser.add_argument("--audio-mode", choices=AUDIO_MODES, default="narration")
+    parser.add_argument("--audio-stream-index", type=int, default=0)
     parser.add_argument(
         "--target-duration", default=os.environ.get("TARGET_DURATION") or None
     )
