@@ -23,7 +23,7 @@ def _skill_script_trees():
 def _literal_env_reads(tree):
     reads = set()
     for path in tree.glob("*.py"):
-        parsed = ast.parse(path.read_text())
+        parsed = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(parsed):
             if (
                 isinstance(node, ast.Call)
@@ -52,7 +52,7 @@ def _literal_env_reads(tree):
 
 
 def test_public_env_contract_classifies_all_literal_reads_and_no_credentials():
-    contract = json.loads(INVENTORY.read_text())["variables"]
+    contract = json.loads(INVENTORY.read_text(encoding="utf-8"))["variables"]
     for name in contract:
         assert not any(marker in name for marker in CREDENTIAL_MARKERS), name
         assert not name.endswith("_TOKEN"), name
