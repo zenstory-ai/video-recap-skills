@@ -24,71 +24,6 @@ def _draft_texts(content):
     ]
 
 
-def test_exporter_uses_timeline_display_subtitles_not_raw_narration_text():
-    tl = build_timeline(
-        {"width": 100, "height": 100, "fps": 30},
-        5.0,
-        [
-            {
-                "source_path": "/s.mp4",
-                "source_start": 0.0,
-                "source_end": 5.0,
-                "timeline_start": 0.0,
-                "timeline_end": 5.0,
-            }
-        ],
-        [
-            {
-                "source_path": "/n.wav",
-                "timeline_start": 0.0,
-                "timeline_end": 2.0,
-                "text": "第一句。",
-                "overlaps_speech": True,
-            }
-        ],
-        subtitle_segments=[
-            {"text": "第一句", "timeline_start": 0.0, "timeline_end": 2.0}
-        ],
-    )
-
-    content, _meta, _notes = build_draft(tl, new_id=_counter_ids(), probe=_fake_probe)
-
-    assert _draft_texts(content) == ["第一句"]
-
-
-def test_exporter_keeps_original_gap_display_subtitles_from_timeline():
-    tl = build_timeline(
-        {"width": 100, "height": 100, "fps": 30},
-        6.0,
-        [
-            {
-                "source_path": "/s.mp4",
-                "source_start": 0.0,
-                "source_end": 6.0,
-                "timeline_start": 0.0,
-                "timeline_end": 6.0,
-            }
-        ],
-        [
-            {
-                "source_path": "/n.wav",
-                "timeline_start": 3.0,
-                "timeline_end": 5.0,
-                "text": "旁白原文。",
-                "overlaps_speech": True,
-            }
-        ],
-        subtitle_segments=[
-            {"text": "「他说：「你好」」", "timeline_start": 0.5, "timeline_end": 2.0},
-            {"text": "旁白原文", "timeline_start": 3.0, "timeline_end": 5.0},
-        ],
-    )
-
-    content, _meta, _notes = build_draft(tl, new_id=_counter_ids(), probe=_fake_probe)
-
-    assert _draft_texts(content) == ["「他说：「你好」」", "旁白原文"]
-
-
 def _counter_ids():
     n = [0]
 
@@ -133,6 +68,41 @@ def _sample_timeline():
     bgm = {"source_path": "/bgm.mp3", "volume": 0.18, "ducking_volume": 0.1}
     ducking = {"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25}
     return build_timeline(canvas, 15.0, video, narr, bgm=bgm, ducking=ducking)
+
+
+def test_exporter_uses_timeline_display_subtitles_not_raw_narration_text():
+    # display cues come from the timeline's text track (including original-gap
+    # cues), never from the narration audio segments' raw text.
+    tl = build_timeline(
+        {"width": 100, "height": 100, "fps": 30},
+        6.0,
+        [
+            {
+                "source_path": "/s.mp4",
+                "source_start": 0.0,
+                "source_end": 6.0,
+                "timeline_start": 0.0,
+                "timeline_end": 6.0,
+            }
+        ],
+        [
+            {
+                "source_path": "/n.wav",
+                "timeline_start": 3.0,
+                "timeline_end": 5.0,
+                "text": "旁白原文。",
+                "overlaps_speech": True,
+            }
+        ],
+        subtitle_segments=[
+            {"text": "「他说：「你好」」", "timeline_start": 0.5, "timeline_end": 2.0},
+            {"text": "旁白原文", "timeline_start": 3.0, "timeline_end": 5.0},
+        ],
+    )
+
+    content, _meta, _notes = build_draft(tl, new_id=_counter_ids(), probe=_fake_probe)
+
+    assert _draft_texts(content) == ["「他说：「你好」」", "旁白原文"]
 
 
 def test_us_is_integer_microseconds():
@@ -256,28 +226,21 @@ def test_export_writes_three_files(tmp_path):
     assert meta["draft_name"] == "recap_demo" and meta["tm_duration"] == 15_000_000
 
 
-def test_export_rejects_draft_names_that_escape_output_parent(tmp_path):
+@pytest.mark.parametrize(
+    "draft_name",
+    ["", "   ", ".", "..", "../escape", "nested/name", r"nested\name", "{tmp}/escape"],
+)
+def test_export_rejects_draft_names_that_escape_output_parent(tmp_path, draft_name):
     out = tmp_path / "out"
-    unsafe_names = [
-        "",
-        "   ",
-        ".",
-        "..",
-        "../escape",
-        "nested/name",
-        r"nested\name",
-        str(tmp_path / "escape"),
-    ]
 
-    for draft_name in unsafe_names:
-        with pytest.raises(ValueError):
-            export_timeline_to_jianying(
-                _sample_timeline(),
-                str(out),
-                draft_name=draft_name,
-                new_id=_counter_ids(),
-                probe=_fake_probe,
-            )
+    with pytest.raises(ValueError):
+        export_timeline_to_jianying(
+            _sample_timeline(),
+            str(out),
+            draft_name=draft_name.format(tmp=tmp_path),
+            new_id=_counter_ids(),
+            probe=_fake_probe,
+        )
 
     assert not out.exists()
 
@@ -374,27 +337,6 @@ def test_representative_parity_export_with_bundle_collision_loop_and_keyframes(
         assert "##/Resources/local/" in material["path"]
 
 
-def test_export_uses_collision_safe_draft_folder(tmp_path):
-    existing = tmp_path / "recap_demo"
-    existing.mkdir()
-    (existing / "draft_content.json").write_text("manual edit", encoding="utf-8")
-
-    draft_dir, notes = export_timeline_to_jianying(
-        _sample_timeline(),
-        str(tmp_path),
-        draft_name="recap_demo",
-        new_id=_counter_ids(),
-        probe=_fake_probe,
-    )
-
-    assert Path(draft_dir).name == "recap_demo_2"
-    assert (existing / "draft_content.json").read_text(
-        encoding="utf-8"
-    ) == "manual edit"
-    assert any("避免覆盖" in note for note in notes)
-    assert (Path(draft_dir) / "draft_content.json").exists()
-
-
 def test_exporter_handles_timeline_without_bgm():
     tl = build_timeline(
         {"width": 100, "height": 100, "fps": 30},
@@ -421,54 +363,6 @@ def test_exporter_handles_timeline_without_bgm():
     )
     content, _m, _n = build_draft(tl, new_id=_counter_ids(), probe=_fake_probe)
     assert [t["type"] for t in content["tracks"]] == ["audio", "video", "text"]
-
-
-def test_bundle_media_copies_and_rewrites_paths(tmp_path):
-    src = tmp_path / "src"
-    src.mkdir()
-    vid, wav = src / "orig.mp4", src / "n0.wav"
-    vid.write_bytes(b"video")
-    wav.write_bytes(b"audio")
-    tl = build_timeline(
-        {"width": 100, "height": 100, "fps": 30},
-        5.0,
-        [
-            {
-                "source_path": str(vid),
-                "source_start": 0.0,
-                "source_end": 5.0,
-                "timeline_start": 0.0,
-                "timeline_end": 5.0,
-            }
-        ],
-        [
-            {
-                "source_path": str(wav),
-                "timeline_start": 0.0,
-                "timeline_end": 2.0,
-                "text": "x",
-            }
-        ],
-        bgm=None,
-        ducking=None,
-    )
-    draft_dir, _notes = export_timeline_to_jianying(
-        tl,
-        str(tmp_path / "out"),
-        draft_name="d",
-        new_id=_counter_ids(),
-        probe=_fake_probe,
-        bundle_media=True,
-    )
-    resources = Path(draft_dir) / "Resources" / "local"
-    assert (resources / "video" / "orig.mp4").exists()
-    assert (resources / "audio" / "n0.wav").exists()
-    content = json.loads(
-        (Path(draft_dir) / "draft_content.json").read_text(encoding="utf-8")
-    )
-    for m in content["materials"]["videos"] + content["materials"]["audios"]:
-        assert m["path"].startswith("##_draftpath_placeholder_")
-        assert "##/Resources/local/" in m["path"]
 
 
 def test_exporter_skips_empty_audio_track():
@@ -754,7 +648,7 @@ def test_bundle_uses_duo_resources_contract_and_indexes_deduped_media(
     assert {value["import_time_ms"] for value in values} == {1_700_000_000_123}
 
 
-def test_exporter_repeats_looped_bgm_to_cover_timeline(tmp_path):
+def test_exporter_repeats_looped_bgm_with_keyframes_windowed_per_piece(tmp_path):
     bgm = tmp_path / "bgm.mp3"
     bgm.write_bytes(b"bgm")
 
@@ -775,33 +669,10 @@ def test_exporter_repeats_looped_bgm_to_cover_timeline(tmp_path):
     )
     starts = [seg["target_timerange"]["start"] for seg in bgm_track["segments"]]
     durations = [seg["target_timerange"]["duration"] for seg in bgm_track["segments"]]
+    keyframe_counts = [len(seg["common_keyframes"]) for seg in bgm_track["segments"]]
 
     assert starts == [0, 5_000_000, 10_000_000]
     assert durations == [5_000_000, 5_000_000, 5_000_000]
-    assert sum(durations) == 15_000_000
     assert not any("BGM 素材" in note for note in notes)
-
-
-def test_looped_bgm_keyframes_are_windowed_per_repeated_piece(tmp_path):
-    bgm = tmp_path / "bgm.mp3"
-    bgm.write_bytes(b"bgm")
-
-    def short_bgm_probe(path):
-        if str(path).endswith("bgm.mp3"):
-            return 5_000_000, 0, 0
-        return 15_000_000, 1920, 1080
-
-    timeline = _sample_timeline()
-    for track in timeline["tracks"]:
-        if track.get("role") == "bgm":
-            track["segments"][0]["source_path"] = str(bgm)
-    content, _meta, _notes = build_draft(
-        timeline, new_id=_counter_ids(), probe=short_bgm_probe
-    )
-    bgm_track = next(
-        t for t in content["tracks"] if t["type"] == "audio" and t["name"] == "bgm"
-    )
-    keyframe_counts = [len(seg["common_keyframes"]) for seg in bgm_track["segments"]]
-
-    assert keyframe_counts[0] == 1
-    assert keyframe_counts[1:] == [0, 0]
+    # the ducking keyframes land only on the piece whose window they fall in
+    assert keyframe_counts == [1, 0, 0]

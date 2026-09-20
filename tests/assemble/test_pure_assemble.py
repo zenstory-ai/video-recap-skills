@@ -6,9 +6,11 @@ sys.path.insert(
     0,
     str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"),
 )
+import importlib
 import json
-import pytest  # noqa: F401
-from subprocess import CompletedProcess  # noqa: F401
+import wave
+import pytest
+from subprocess import CompletedProcess
 import assembly_contract
 import audio_mix
 import media
@@ -100,16 +102,17 @@ def _canvas(width=1280, height=720, fps=30.0):
     )
 
 
+def _write_silent_wav(path, seconds, sample_rate=44100, frame=b"\0\0"):
+    with wave.open(str(path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(frame * int(seconds * sample_rate))
+    return path
+
+
 def _mock_assemble_media(monkeypatch, *, duration=4.0, has_audio=True):
-    canvas = media._canvas_from_stream(
-        {
-            "width": 1280,
-            "height": 720,
-            "r_frame_rate": "30/1",
-            "sample_aspect_ratio": "1:1",
-            "display_aspect_ratio": "16:9",
-        }
-    )
+    canvas = _canvas()
     monkeypatch.setattr(assemble.lib, "get_video_duration", lambda _path: duration)
     monkeypatch.setattr(media, "_probe_canvas", lambda _path: canvas)
     monkeypatch.setattr(media, "_has_audio_stream", lambda _path: has_audio)
@@ -168,6 +171,42 @@ def _adjust_result_parts(result):
     return result[0], result[1], result[2]
 
 
+def _duck_config(monkeypatch, **overrides):
+    values = {
+        "ducking_mode": "fixed",
+        "idle_orig_volume": 0.85,
+        "speech_ducking_volume": 0.2,
+        "zone_ducking_volume": 0.12,
+        "duck_fade_seconds": 0.25,
+        **overrides,
+    }
+    for key, value in values.items():
+        monkeypatch.setitem(CONFIG, key, value)
+
+
+def _write_legacy_anchors(work_dir, sentence_anchors):
+    (work_dir / "speech_boundary_anchors.json").write_text(
+        json.dumps({"sentence_anchors": sentence_anchors}), encoding="utf-8"
+    )
+    (work_dir / "asr_result.json").write_text(
+        json.dumps([{"start": 0, "end": 30, "text": "持续原声。"}]), encoding="utf-8"
+    )
+
+
+def _write_cut_output_anchors(work_dir, evidence, *, plan=None, fingerprint=None):
+    plan = {} if plan is None else plan
+    (work_dir / "clip_plan_validated.json").write_text(json.dumps(plan), encoding="utf-8")
+    payload = {
+        "schema_version": 2,
+        "timeline": "cut_output",
+        "clip_plan_fingerprint": fingerprint or _value_fingerprint(plan),
+        **evidence,
+    }
+    (work_dir / "speech_boundary_anchors_output.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+
+
 def test_adjust_tts_speed_derives_outputs_from_audio_name_only(monkeypatch, tmp_path):
     """Parent dirs containing .wav must not redirect adjusted files outside the audio dir."""
     wav_parent = tmp_path / "episode.wav-cache"
@@ -198,40 +237,6 @@ def test_adjust_tts_speed_derives_outputs_from_audio_name_only(monkeypatch, tmp_
     assert commands[-1][-1] == str(wav_parent / "narr_000_adj.wav")
 
 
-def test_adjust_tts_speed_no_safe_fit_keeps_source_audio_and_metadata(
-    monkeypatch, tmp_path
-):
-    wav_parent = tmp_path / "episode.wav-cache"
-    wav_parent.mkdir()
-    src = wav_parent / "narr_000.wav"
-    src.write_bytes(b"wav")
-    commands = []
-
-    def fake_run_cmd(cmd, **kw):
-        commands.append(cmd)
-        Path(cmd[-1]).write_bytes(b"unexpected")
-        return CompletedProcess(cmd, 0, "", "")
-
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.2)
-    monkeypatch.setitem(CONFIG, "narration_cumulative_tempo_max", 1.35)
-    monkeypatch.setattr(
-        narration_audio,
-        "get_video_duration",
-        lambda path: 10.0 if Path(path) == src else 1.0,
-    )
-    monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
-
-    adjusted, actual_dur, meta = _adjust_result_parts(
-        _adjust_tts_speed(src, target_duration=1.0)
-    )
-
-    assert actual_dur == 10.0
-    assert Path(adjusted) == src
-    assert meta["fit_status"] == "no_safe_fit"
-    assert meta.get("blocking") is True
-    assert commands == []
-
-
 def test_build_video_clips_prefers_fingerprint_matched_validated_cut_plan(
     monkeypatch, tmp_path
 ):
@@ -239,7 +244,6 @@ def test_build_video_clips_prefers_fingerprint_matched_validated_cut_plan(
     edited = tmp_path / "edited_source.mp4"
     original.write_bytes(b"orig")
     edited.write_bytes(b"edited")
-    import json
 
     raw_payload = {"clips": [{"source_start": 99.0, "source_end": 100.0}]}
     (tmp_path / "clip_plan.json").write_text(json.dumps(raw_payload), encoding="utf-8")
@@ -355,9 +359,6 @@ def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_pat
 
 
 def test_assemble_main_creates_missing_output_dir(monkeypatch, tmp_path):
-    import sys
-    import assemble
-
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     stale_source = tmp_path / "stale_source.mp4"
@@ -403,7 +404,14 @@ def test_assemble_main_creates_missing_output_dir(monkeypatch, tmp_path):
     assert manifest["final_output"].endswith("recap_demo.mp4")
 
 
-def test_assemble_main_applies_explicit_measured_subtitle_band(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("explicit_opacity_env", "expected_opacity"),
+    [(None, 1.0), ("0.75", 0.75)],
+    ids=("ambient-opacity-forced-opaque", "explicit-opacity-preserved"),
+)
+def test_assemble_main_applies_explicit_measured_subtitle_band(
+    monkeypatch, tmp_path, explicit_opacity_env, expected_opacity
+):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     work = tmp_path / "work"
@@ -437,6 +445,9 @@ def test_assemble_main_applies_explicit_measured_subtitle_band(monkeypatch, tmp_
         "subtitle_mask_opacity": 0.6,
     }.items():
         monkeypatch.setitem(CONFIG, key, value)
+    if explicit_opacity_env is not None:
+        monkeypatch.setenv("SUBTITLE_MASK_OPACITY", explicit_opacity_env)
+        monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", float(explicit_opacity_env))
     monkeypatch.setattr(render_preflight, "_preflight_burn_subtitles", lambda: None)
     monkeypatch.setattr(assemble, "assemble_video", fake_assemble)
     monkeypatch.setattr(
@@ -462,56 +473,8 @@ def test_assemble_main_applies_explicit_measured_subtitle_band(monkeypatch, tmp_
         "mask": True,
         "policy": "opt_in",
         "declared": True,
-        "opacity": 1.0,
+        "opacity": expected_opacity,
     }
-
-
-def test_assemble_main_preserves_explicit_measured_mask_opacity(monkeypatch, tmp_path):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "tts_meta.json").write_text('{"segments": []}', encoding="utf-8")
-    captured = {}
-
-    def fake_assemble(input_video, tts_segments, work_dir, output_path):
-        captured["opacity"] = CONFIG["subtitle_mask_opacity"]
-        Path(output_path).write_bytes(b"mp4")
-        (Path(work_dir) / "assembly_qc.json").write_text(
-            json.dumps({"blocking": False, "blocking_codes": []}), encoding="utf-8"
-        )
-        return output_path
-
-    for key, value in {
-        "subtitle_y_top": -1,
-        "subtitle_y_bot": -1,
-        "mask_source_subtitles": False,
-        "source_subtitle_mask_policy": "off",
-        "source_subtitle_mask_policy_declared": False,
-    }.items():
-        monkeypatch.setitem(CONFIG, key, value)
-    monkeypatch.setenv("SUBTITLE_MASK_OPACITY", "0.75")
-    monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 0.75)
-    monkeypatch.setattr(render_preflight, "_preflight_burn_subtitles", lambda: None)
-    monkeypatch.setattr(assemble, "assemble_video", fake_assemble)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "assemble.py",
-            str(video),
-            "--work-dir",
-            str(work),
-            "--subtitle-y-top",
-            "610",
-            "--subtitle-y-bot",
-            "660",
-        ],
-    )
-
-    assemble.main()
-
-    assert captured["opacity"] == 0.75
 
 
 def test_resolve_final_output_overwrites_stable_alias(tmp_path):
@@ -671,52 +634,35 @@ def test_generate_ass_places_subtitle_bottom_on_measured_y(monkeypatch, tmp_path
     )  # line box + outline + shadow fit above anchored bot
 
 
-def test_generate_ass_rejects_measured_band_outside_canvas(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "subtitle_y_top", 700)
-    monkeypatch.setitem(CONFIG, "subtitle_y_bot", 760)
-
-    with pytest.raises(ValueError, match="字幕带坐标无效"):
-        _generate_ass(
-            [{"start": 0.0, "end": 1.0, "narration": "越界"}],
-            tmp_path,
-            1.0,
-            _canvas(),
-        )
-
-
-def test_generate_ass_rejects_non_bottom_alignment_for_measured_band(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize(
+    ("config", "canvas", "message"),
+    [
+        ({"subtitle_y_top": 700, "subtitle_y_bot": 760}, None, "字幕带坐标无效"),
+        (
+            {"subtitle_y_top": 610, "subtitle_y_bot": 650, "subtitle_alignment": 8},
+            None,
+            "bottom-aligned",
+        ),
+        (
+            {"subtitle_y_top": 300, "subtitle_y_bot": 340},
+            {"width": 720, "height": 1280, "sample_aspect_ratio": "2:1"},
+            "SAR 1:1",
+        ),
+    ],
+    ids=("band-outside-canvas", "non-bottom-alignment", "non-square-pixels"),
+)
+def test_generate_ass_rejects_invalid_measured_band(
+    monkeypatch, tmp_path, config, canvas, message
 ):
-    monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
-    monkeypatch.setitem(CONFIG, "subtitle_y_bot", 650)
-    monkeypatch.setitem(CONFIG, "subtitle_alignment", 8)
+    for key, value in config.items():
+        monkeypatch.setitem(CONFIG, key, value)
 
-    with pytest.raises(ValueError, match="bottom-aligned"):
+    with pytest.raises(ValueError, match=message):
         _generate_ass(
-            [{"start": 0.0, "end": 1.0, "narration": "不能贴合"}],
+            [{"start": 0.0, "end": 1.0, "narration": "测量带无效"}],
             tmp_path,
             1.0,
-            _canvas(),
-        )
-
-
-def test_measured_band_rejects_non_square_pixel_canvas_from_env_route(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setitem(CONFIG, "subtitle_y_top", 300)
-    monkeypatch.setitem(CONFIG, "subtitle_y_bot", 340)
-    canvas = {
-        "width": 720,
-        "height": 1280,
-        "sample_aspect_ratio": "2:1",
-    }
-
-    with pytest.raises(ValueError, match="SAR 1:1"):
-        _generate_ass(
-            [{"start": 0.0, "end": 1.0, "narration": "非方形像素"}],
-            tmp_path,
-            1.0,
-            canvas,
+            canvas or _canvas(),
         )
 
 
@@ -743,9 +689,6 @@ def test_mask_band_stays_one_line_small_when_burning(monkeypatch):
     one_line = (30 + 42 * 1.25 + 10) / 720
     assert ratio_on == pytest.approx(max(0.14, one_line), abs=0.005), ratio_on
     assert ratio_on < 0.16, ratio_on  # stays small — never the old ~0.23 two-line band
-    # not burning -> no mask-only black band
-    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    assert _source_subtitle_mask_filter(_canvas(), Path.cwd(), [], 1.0) is None
 
 
 def test_apply_narration_speed_atempos_each_segment(monkeypatch, tmp_path):
@@ -784,17 +727,11 @@ def test_apply_narration_speed_noop_at_1x(monkeypatch, tmp_path):
     assert segs[0]["audio_path"] == str(src)  # unchanged
 
 
-def test_seconds_to_srt_time():
-    # 3661.5s = 1h 1m 1.5s
-    result = _seconds_to_srt_time(3661.5)
-    assert result.startswith("01:01:01")
-    # 0s
-    assert _seconds_to_srt_time(0) == "00:00:00,000"
-
-
 @pytest.mark.parametrize(
     ("seconds", "expected"),
     [
+        (0, "00:00:00,000"),
+        (3661.5, "01:01:01,500"),
         (1.65, "00:00:01,650"),
         (0.29, "00:00:00,290"),
         (1.001, "00:00:01,001"),
@@ -841,7 +778,7 @@ def test_generate_srt_uses_actual_placement(tmp_path):
     assert "过短跳过" not in srt
 
 
-def test_generate_srt_strips_terminal_display_punctuation_without_mutating_source(
+def test_renderers_strip_terminal_display_punctuation_without_mutating_source(
     tmp_path,
 ):
     narration = [
@@ -869,14 +806,18 @@ def test_generate_srt_strips_terminal_display_punctuation_without_mutating_sourc
     ]
 
     _generate_srt(narration, tmp_path, 6.0)
+    _generate_ass(narration, tmp_path, 6.0, _canvas())
 
     srt = (tmp_path / "subtitles.srt").read_text(encoding="utf-8")
+    ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
     assert "他终于明白真相\n" in srt
     assert "他终于明白真相。" not in srt
     assert "What now\n" in srt
     assert "What now?" not in srt
     assert "It ends\n" in srt
     assert "It ends." not in srt
+    assert "他终于明白真相" in ass
+    assert "他终于明白真相。" not in ass
     assert narration[0]["narration"].endswith(
         "。"
     )  # display-only; TTS source is untouched
@@ -906,39 +847,8 @@ def test_generate_ass_escapes_text_and_writes_style(tmp_path):
     assert _escape_ass_text("{x}\\y") == r"\{x\}\\y"
 
 
-def test_generate_ass_strips_terminal_display_punctuation_before_escaping(tmp_path):
-    _generate_ass(
-        [
-            {
-                "start": 1.0,
-                "end": 4.0,
-                "actual_place_start": 1.25,
-                "actual_place_end": 3.5,
-                "narration": "他终于明白真相。",
-            }
-        ],
-        tmp_path,
-        5.0,
-        _canvas(),
-    )
-
-    ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
-    assert "他终于明白真相" in ass
-    assert "他终于明白真相。" not in ass
-
-
 def test_build_timed_narration_clamps_delay_to_slot(monkeypatch, tmp_path):
-    import wave
-
-    wav = tmp_path / "narr.wav"
-    sample_rate = 44100
-    sample_count = int(sample_rate * 0.8)
-    with wave.open(str(wav), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(b"\0\0" * sample_count)
-
+    wav = _write_silent_wav(tmp_path / "narr.wav", 0.8)
     segment = {
         "index": 0,
         "start": 0.0,
@@ -957,14 +867,7 @@ def test_build_timed_narration_clamps_delay_to_slot(monkeypatch, tmp_path):
 
 
 def test_narration_start_has_no_hidden_default_delay(monkeypatch, tmp_path):
-    import wave
-
-    wav = tmp_path / "narr.wav"
-    with wave.open(str(wav), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(44100)
-        wf.writeframes(b"\0\0" * 22050)
+    wav = _write_silent_wav(tmp_path / "narr.wav", 0.5)
     segment = {
         "index": 0,
         "start": 5.81,
@@ -1006,6 +909,7 @@ def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
     monkeypatch.setitem(
         CONFIG, "mask_source_subtitles", False
     )  # isolate burn behavior from the mask default
+    monkeypatch.setitem(CONFIG, "output_crf", 0)  # lossless is falsy but valid
     _mock_assemble_media(monkeypatch)
     monkeypatch.setattr(
         narration_audio,
@@ -1036,8 +940,8 @@ def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
     assert (tmp_path / "subtitles.ass").exists()
     assert "-vf" in ffmpeg_cmd
     assert any(str(arg).startswith("subtitles=") for arg in ffmpeg_cmd)
-    assert "-c:v" in ffmpeg_cmd
-    assert "libx264" in ffmpeg_cmd
+    assert ffmpeg_cmd[ffmpeg_cmd.index("-c:v") + 1] == "libx264"
+    assert ffmpeg_cmd[ffmpeg_cmd.index("-crf") + 1] == "0"
 
 
 def test_assemble_video_uses_filter_script_for_long_timed_mask(monkeypatch, tmp_path):
@@ -1138,57 +1042,11 @@ def test_emit_timeline_failure_is_not_swallowed(monkeypatch, tmp_path):
     assert not (tmp_path / "timeline.json").exists()
 
 
-def test_assemble_video_without_burn_keeps_video_copy(monkeypatch, tmp_path):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"video")
-    output = tmp_path / "output.mp4"
-    commands = []
-
-    def fake_run_cmd(cmd):
-        commands.append(cmd)
-        output.write_bytes(b"mp4")
-        return CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    monkeypatch.setitem(CONFIG, "force_video_reencode", False)
-    monkeypatch.setitem(
-        CONFIG, "mask_source_subtitles", False
-    )  # nothing should force a re-encode here
-    _mock_assemble_media(monkeypatch)
-    monkeypatch.setattr(
-        narration_audio,
-        "_build_timed_narration",
-        lambda segments, out, duration, wd: Path(out).write_bytes(b"narration"),
-    )
-    monkeypatch.setattr("assemble.lib.run_cmd", fake_run_cmd)
-
-    assemble_video(
-        video,
-        [
-            {
-                "start": 0.0,
-                "end": 3.0,
-                "actual_place_start": 0.0,
-                "actual_place_end": 1.0,
-                "narration": "外挂字幕仍生成。",
-                "audio_path": str(tmp_path / "narr.wav"),
-                "audio_duration": 1.0,
-            }
-        ],
-        tmp_path,
-        output,
-    )
-
-    ffmpeg_cmd = commands[-1]
-    assert (tmp_path / "subtitles.srt").exists()
-    assert not (tmp_path / "subtitles.ass").exists()
-    assert "-vf" not in ffmpeg_cmd
-    assert ffmpeg_cmd[ffmpeg_cmd.index("-c:v") + 1] == "copy"
-
-
-def test_assemble_video_no_burn_ignores_source_mask_default(monkeypatch, tmp_path):
-    # no-burn sidecar mode must not draw a mask-only black band, even if the
-    # ambient/default mask_source_subtitles setting is true.
+def test_assemble_video_no_burn_keeps_video_copy_and_ignores_source_mask_default(
+    monkeypatch, tmp_path
+):
+    # no-burn sidecar mode keeps the video stream a copy and must not draw a
+    # mask-only black band, even if the ambient mask_source_subtitles default is true.
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     output = tmp_path / "output.mp4"
@@ -1229,20 +1087,15 @@ def test_assemble_video_no_burn_ignores_source_mask_default(monkeypatch, tmp_pat
 
     ffmpeg_cmd = commands[-1]
     assert (tmp_path / "subtitles.srt").exists()
+    assert not (tmp_path / "subtitles.ass").exists()
     assert "-vf" not in ffmpeg_cmd
     assert not any("drawbox=" in str(arg) for arg in ffmpeg_cmd)
     assert ffmpeg_cmd[ffmpeg_cmd.index("-c:v") + 1] == "copy"
 
 
 def test_build_audio_filter_complex_gap_fill_envelope(monkeypatch):
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
-    monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
-    monkeypatch.setitem(CONFIG, "zone_ducking_volume", 0.12)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(
-        CONFIG, "duck_bridge_seconds", 0.5
-    )  # keep the 3s gap unbridged so each beat keeps its own level
+    # keep the 3s gap unbridged so each beat keeps its own level
+    _duck_config(monkeypatch, duck_bridge_seconds=0.5)
     fc = _build_audio_filter_complex(
         [
             {
@@ -1275,10 +1128,7 @@ def test_build_audio_filter_complex_all_overlap_still_fills_gaps(monkeypatch):
     # Regression: all-overlap beats used to fall back to a constant duck, leaving the
     # original quiet across the whole video (dead air). A single beat ducks only under its
     # own window; the lead-in/out around it still swells back to idle.
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
-    monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
+    _duck_config(monkeypatch)
     fc = _build_audio_filter_complex(
         [
             {
@@ -1299,11 +1149,7 @@ def test_build_audio_filter_complex_all_overlap_still_fills_gaps(monkeypatch):
 def test_build_audio_filter_complex_bridges_short_gaps(monkeypatch):
     # The fix: beats separated by a gap smaller than duck_bridge_seconds stay ducked across
     # the gap (one held span) so the source dialogue does not pop back up between sentences.
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
-    monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(CONFIG, "duck_bridge_seconds", 6.0)
+    _duck_config(monkeypatch, duck_bridge_seconds=6.0)
     fc = _build_audio_filter_complex(
         [
             {
@@ -1326,47 +1172,13 @@ def test_build_audio_filter_complex_bridges_short_gaps(monkeypatch):
     assert fc.count("(-0.650)") == 1  # a single coalesced duck term
 
 
-def test_build_audio_filter_complex_releases_long_gaps(monkeypatch):
-    # A genuine gap >= duck_bridge_seconds still releases the original to idle so the
-    # picture can breathe (e.g. a deliberate long pause between sections).
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
-    monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(CONFIG, "duck_bridge_seconds", 6.0)
-    fc = _build_audio_filter_complex(
-        [
-            {
-                "actual_place_start": 0.0,
-                "actual_place_end": 2.0,
-                "overlaps_speech": True,
-            },
-            {
-                "actual_place_start": 10.0,
-                "actual_place_end": 12.0,
-                "overlaps_speech": True,
-            },  # gap 8.0 >= 6.0
-        ]
-    )
-    assert _eval_duck_expr(fc, 0.0) == pytest.approx(0.2)
-    assert _eval_duck_expr(fc, 2.0) == pytest.approx(0.2)
-    assert _eval_duck_expr(fc, 6.0) == pytest.approx(
-        0.85
-    )  # two separate dips with idle between
-    assert _eval_duck_expr(fc, 10.0) == pytest.approx(0.2)
-    assert _eval_duck_expr(fc, 12.0) == pytest.approx(0.2)
-    assert fc.count("(-0.650)") == 2
-
-
 def test_build_audio_filter_complex_original_blocks_play_full_volume(monkeypatch):
-    # New default model: narration comes in BLOCKS that duck the original, and the deliberate
-    # stretches BETWEEN blocks are "original blocks" that play at FULL volume (idle=1.0). A short
-    # bridge (1.5s) keeps within-block micro-gaps ducked but lets the between-block gap swell to 1.0.
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 1.0)
-    monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
-    monkeypatch.setitem(CONFIG, "duck_bridge_seconds", 1.5)
+    # Narration comes in BLOCKS that duck the original; a gap >= duck_bridge_seconds between
+    # blocks is an "original block" that releases to FULL volume (idle=1.0) so the picture can
+    # breathe, while the short bridge keeps within-block micro-gaps ducked.
+    _duck_config(
+        monkeypatch, idle_orig_volume=1.0, duck_fade_seconds=0.3, duck_bridge_seconds=1.5
+    )
     fc = _build_audio_filter_complex(
         [
             {
@@ -1395,12 +1207,7 @@ def test_build_audio_filter_complex_original_blocks_play_full_volume(monkeypatch
 def test_build_audio_filter_complex_bridged_mixed_levels_flatten_to_min(monkeypatch):
     # A bridged span mixing a speech beat (0.2) and a quiet beat (0.12) flattens to the MIN
     # level across the span — matching variable_ducking_keyframes so the 剪映 draft == the mp4.
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
-    monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
-    monkeypatch.setitem(CONFIG, "zone_ducking_volume", 0.12)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(CONFIG, "duck_bridge_seconds", 6.0)
+    _duck_config(monkeypatch, duck_bridge_seconds=6.0)
     fc = _build_audio_filter_complex(
         [
             {
@@ -1426,11 +1233,9 @@ def test_build_audio_filter_complex_bridged_mixed_levels_flatten_to_min(monkeypa
 
 def test_build_audio_filter_complex_bgm_envelope_bridges_short_gaps(monkeypatch):
     # The BGM bed bridges the same way: two beats within the bridge coalesce to one BGM dip.
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "bgm_volume", 0.18)
-    monkeypatch.setitem(CONFIG, "bgm_ducking_volume", 0.10)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(CONFIG, "duck_bridge_seconds", 6.0)
+    _duck_config(
+        monkeypatch, bgm_volume=0.18, bgm_ducking_volume=0.10, duck_bridge_seconds=6.0
+    )
     fc = _build_audio_filter_complex(
         [
             {
@@ -1448,34 +1253,11 @@ def test_build_audio_filter_complex_bgm_envelope_bridges_short_gaps(monkeypatch)
     )
     bgm_part = fc.split("[bgm]")[0]  # the bgm chain comes first
     assert "(-0.080)" in bgm_part  # 0.18 -> 0.10 in one coalesced BGM dip
-    assert "(-0.080)" in bgm_part and bgm_part.count("(-0.080)") == 1
-
-
-def test_build_audio_filter_complex_all_quiet_ducks_to_zone(monkeypatch):
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
-    monkeypatch.setitem(CONFIG, "zone_ducking_volume", 0.12)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    fc = _build_audio_filter_complex(
-        [
-            {
-                "actual_place_start": 1.0,
-                "actual_place_end": 4.0,
-                "overlaps_speech": False,
-            },
-        ]
-    )
-    assert _eval_duck_expr(fc, 1.0) == pytest.approx(0.12)
-    assert _eval_duck_expr(fc, 4.0) == pytest.approx(0.12)
-    assert "(-0.730)" in fc  # 0.85 -> 0.12
-    assert "eval=frame" in fc
+    assert bgm_part.count("(-0.080)") == 1
 
 
 def test_build_audio_filter_complex_bgm_adds_third_track(monkeypatch):
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
-    monkeypatch.setitem(CONFIG, "bgm_volume", 0.18)
-    monkeypatch.setitem(CONFIG, "bgm_ducking_volume", 0.10)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
+    _duck_config(monkeypatch, bgm_volume=0.18, bgm_ducking_volume=0.10)
     segs = [
         {"actual_place_start": 0.0, "actual_place_end": 2.0, "overlaps_speech": True}
     ]
@@ -1545,22 +1327,51 @@ def test_final_loudnorm_filter_and_fingerprint(monkeypatch):
     )
 
 
-def test_assembly_settings_fingerprint_tracks_render_affecting_settings(monkeypatch):
-    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.14)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.0)
-    monkeypatch.setitem(CONFIG, "bgm_path", "")
-    monkeypatch.setitem(CONFIG, "bgm_volume", 0.18)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(CONFIG, "output_crf", 18)
-    monkeypatch.setitem(CONFIG, "output_preset", "veryfast")
-    monkeypatch.setitem(CONFIG, "output_max_height", 0)
-    base = assembly_settings_fingerprint()
+_FINGERPRINT_BASE_SETTINGS = {
+    "burn_subtitles": False,
+    "mask_source_subtitles": False,
+    "source_subtitle_mask_ratio": 0.14,
+    "narration_speed": 1.0,
+    "bgm_path": "",
+    "bgm_volume": 0.18,
+    "duck_fade_seconds": 0.25,
+    "output_crf": 18,
+    "output_preset": "veryfast",
+    "output_max_height": 0,
+}
 
-    monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    legacy_implicit = assembly_settings_fingerprint()
-    assert legacy_implicit != base
+
+def _fingerprint_with(monkeypatch, **overrides):
+    for key, value in {**_FINGERPRINT_BASE_SETTINGS, **overrides}.items():
+        monkeypatch.setitem(CONFIG, key, value)
+    return assembly_settings_fingerprint()
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("mask_source_subtitles", True),
+        ("burn_subtitles", True),
+        ("narration_speed", 1.2),
+        ("bgm_path", "/tmp/bgm.mp3"),
+        ("bgm_volume", 0.30),
+        ("duck_fade_seconds", 0.50),
+        ("output_crf", 24),
+        ("output_preset", "slow"),
+        ("output_max_height", 720),
+    ],
+)
+def test_assembly_settings_fingerprint_tracks_render_affecting_settings(
+    monkeypatch, key, value
+):
+    base = _fingerprint_with(monkeypatch)
+
+    assert _fingerprint_with(monkeypatch, **{key: value}) != base
+
+
+def test_assembly_settings_fingerprint_records_legacy_implicit_mask_policy(monkeypatch):
+    legacy_implicit = _fingerprint_with(monkeypatch, mask_source_subtitles=True)
+
     assert (
         legacy_implicit["video_filters"]["source_subtitle_mask_policy"]
         == "legacy_implicit"
@@ -1569,33 +1380,9 @@ def test_assembly_settings_fingerprint_tracks_render_affecting_settings(monkeypa
         legacy_implicit["video_filters"]["source_subtitle_mask_policy_declared"]
         is False
     )
+    # the mask ratio only matters once a mask is actually burned
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.20)
     assert assembly_settings_fingerprint() == legacy_implicit
-    monkeypatch.setitem(CONFIG, "burn_subtitles", True)
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.14)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.2)
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.0)
-    monkeypatch.setitem(CONFIG, "bgm_path", "/tmp/bgm.mp3")
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "bgm_path", "")
-    monkeypatch.setitem(CONFIG, "bgm_volume", 0.30)
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "bgm_volume", 0.18)
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.50)
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.25)
-    monkeypatch.setitem(CONFIG, "output_crf", 24)
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "output_crf", 18)
-    monkeypatch.setitem(CONFIG, "output_preset", "slow")
-    assert assembly_settings_fingerprint() != base
-    monkeypatch.setitem(CONFIG, "output_preset", "veryfast")
-    monkeypatch.setitem(CONFIG, "output_max_height", 720)
-    assert assembly_settings_fingerprint() != base
 
 
 def test_assemble_video_uses_silent_original_track_when_source_has_no_audio(
@@ -1754,7 +1541,6 @@ def test_subtitle_entries_never_drops_a_sub_threshold_chunk():
 def test_output_compression_knobs_default_and_override(monkeypatch):
     """OUTPUT_CRF / OUTPUT_PRESET / OUTPUT_MAX_HEIGHT drive the re-encode; defaults keep the prior
     visually-lossless behaviour (crf 18, veryfast, no scaling)."""
-    import importlib
     import lib as _lib
 
     try:
@@ -1784,23 +1570,6 @@ def test_output_compression_knobs_default_and_override(monkeypatch):
         importlib.reload(_lib)
 
 
-def test_output_crf_zero_is_not_overridden_to_default():
-    """CRF 0 (x264 lossless) is falsy but valid; the mux must pass '0', never silently fall back to 18."""
-    import importlib
-    import lib as _lib
-    import assemble
-
-    try:
-        _lib.CONFIG["output_crf"] = 0
-        importlib.reload(
-            assemble
-        )  # assemble reads CONFIG from the reloaded lib at call time
-        assert str(assemble.lib.CONFIG.get("output_crf", 18)) == "0"
-    finally:
-        importlib.reload(_lib)
-        importlib.reload(assemble)
-
-
 def test_output_downscale_filter_forces_even_height():
     """An odd OUTPUT_MAX_HEIGHT must still yield an even output height (libx264/yuv420p reject odd),
     and the filter must never regress to the width-only `-2:'min(ih,H)'` form that crashed the mux."""
@@ -1827,7 +1596,6 @@ def test_foreign_source_audio_near_mutes_original_under_narration(monkeypatch):
     """FOREIGN_SOURCE_AUDIO near-mutes the original UNDER narration so a foreign-language
     soundtrack (e.g. Japanese) doesn't bleed under Chinese narration as 怪音. Gaps stay full
     (idle_orig_volume), and an explicit SPEECH_DUCKING_VOLUME still overrides the foreign default."""
-    import importlib
     import lib as _lib
 
     try:
@@ -1927,24 +1695,14 @@ def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path
     assert meta["fit_status"] == "no_safe_fit"
     assert meta["truncate_reason"] in {"no_safe_boundary", "no_room"}
     assert meta.get("blocking") is True
-    assert not any("-t" in cmd for cmd in commands), (
-        "P0 forbids assemble-side time-only speech cuts"
-    )
-    assert not any(str(cmd[-1]).endswith("_cut.wav") for cmd in commands)
+    assert commands == [], "P0 forbids assemble-side atempo or time-only speech cuts"
 
 
 def test_p0_build_timed_narration_propagates_no_safe_fit_metadata(
     monkeypatch, tmp_path
 ):
     """_build_timed_narration must preserve audio/text truth and expose no-safe-fit for QC."""
-    wav = tmp_path / "long.wav"
-    import wave
-
-    with wave.open(str(wav), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(44100)
-        wf.writeframes(b"\x00\x10" * int(2.0 * 44100))
+    wav = _write_silent_wav(tmp_path / "long.wav", 2.0, frame=b"\x00\x10")
 
     def fake_adjust(path, target_duration, tts_rate_offset=0.0):
         return (
@@ -2065,26 +1823,14 @@ def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
     monkeypatch, tmp_path
 ):
     """A few milliseconds may contain the final phoneme; block instead of trimming."""
-    import wave
-
-    wav = tmp_path / "orig.wav"
-    with wave.open(str(wav), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(44100)
-        wf.writeframes(
-            b"\x00\x10" * int(2.1 * 44100)
-        )  # longer than the 2.0s slot -> triggers fit
+    # longer than the 2.0s slot -> triggers fit
+    wav = _write_silent_wav(tmp_path / "orig.wav", 2.1, frame=b"\x00\x10")
 
     def fake_adjust(path, target_duration, tts_rate_offset=0.0):
         # simulate atempo landing ~10ms over the fit target (real ffmpeg rounding drift)
-        over = tmp_path / "over.wav"
-        n = int((target_duration + 0.010) * 44100)
-        with wave.open(str(over), "wb") as w:
-            w.setnchannels(1)
-            w.setsampwidth(2)
-            w.setframerate(44100)
-            w.writeframes(b"\x00\x10" * n)
+        over = _write_silent_wav(
+            tmp_path / "over.wav", target_duration + 0.010, frame=b"\x00\x10"
+        )
         return (
             str(over),
             target_duration + 0.010,
@@ -2139,25 +1885,13 @@ def test_speech_safe_fades_do_not_attenuate_edge_phonemes():
 
 
 def test_source_handoff_restores_only_at_next_sentence_anchor(monkeypatch, tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [
-                    {"time": 5.81, "pause_start": 5.22, "confidence": "high"},
-                    {"time": 14.34, "pause_start": 13.74, "confidence": "high"},
-                    {"time": 22.86, "pause_start": 22.27, "confidence": "high"},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps(
-            [
-                {"start": 0, "end": 30, "text": "持续原声。"},
-            ]
-        ),
-        encoding="utf-8",
+    _write_legacy_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "pause_start": 5.22, "confidence": "high"},
+            {"time": 14.34, "pause_start": 13.74, "confidence": "high"},
+            {"time": 22.86, "pause_start": 22.27, "confidence": "high"},
+        ],
     )
     monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
     seg = {
@@ -2219,22 +1953,7 @@ def test_source_handoff_restores_only_at_next_sentence_anchor(monkeypatch, tmp_p
 def test_source_handoff_holds_to_end_when_no_later_sentence_anchor(
     monkeypatch, tmp_path
 ):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [{"time": 22.86, "confidence": "high"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps(
-            [
-                {"start": 0, "end": 30, "text": "持续原声。"},
-            ]
-        ),
-        encoding="utf-8",
-    )
+    _write_legacy_anchors(tmp_path, [{"time": 22.86, "confidence": "high"}])
     seg = {
         "index": 0,
         "actual_place_start": 22.86,
@@ -2267,22 +1986,7 @@ def test_source_handoff_holds_to_end_when_no_later_sentence_anchor(
 
 
 def test_source_handoff_blocks_unsafe_entry_and_missing_anchors_with_speech(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [{"time": 10.0, "confidence": "high"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps(
-            [
-                {"start": 0, "end": 30, "text": "持续原声。"},
-            ]
-        ),
-        encoding="utf-8",
-    )
+    _write_legacy_anchors(tmp_path, [{"time": 10.0, "confidence": "high"}])
     unsafe = {
         "index": 0,
         "actual_place_start": 7.0,
@@ -2305,97 +2009,105 @@ def test_source_handoff_blocks_unsafe_entry_and_missing_anchors_with_speech(tmp_
     assert missing["source_entry_status"] == "anchors_unavailable"
 
 
-def test_source_handoff_uses_output_speech_evidence_over_authored_flag(tmp_path):
-    plan = {}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": _value_fingerprint(plan),
-                "sentence_anchors": [
-                    {"time": 4.0, "pause_start": 3.8, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 0.0, "end": 10.0}],
-                "quiet_windows": [{"start": 3.8, "end": 4.1}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "start": 2.0,
-        "end": 3.0,
-        "actual_place_start": 2.0,
-        "actual_place_end": 3.0,
-        "overlaps_speech": False,
-    }
+_CUT_OUTPUT_HANDOFF_CASES = [
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
+            "speech_spans": [{"start": 0.0, "end": 10.0}],
+            "quiet_windows": [{"start": 3.8, "end": 4.1}],
+        },
+        {"start": 2.0, "end": 3.0, "actual_place_start": 2.0, "actual_place_end": 3.0,
+         "overlaps_speech": False},
+        {"source_handoff_blocking": True, "source_entry_status": "unsafe_entry"},
+        {"status": "sentence_boundary"},
+        id="output-speech-evidence-beats-authored-flag",
+    ),
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 1.0, "pause_start": 0.95, "confidence": "high"}],
+            "speech_spans": [{"start": 0.0, "end": 1.0}],
+            "quiet_windows": [{"start": 1.0, "end": 10.0}],
+        },
+        {"actual_place_start": 0.8, "actual_place_end": 10.0, "overlaps_speech": False},
+        {"source_handoff_blocking": True, "source_entry_status": "unsafe_entry"},
+        {},
+        id="entry-checked-before-later-quiet",
+    ),
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 6.0, "pause_start": 5.8, "confidence": "high"}],
+            "speech_spans": [{"start": 3.0, "end": 10.0}],
+            "quiet_windows": [{"start": 0.0, "end": 3.0}],
+        },
+        {"actual_place_start": 1.0, "actual_place_end": 5.0, "overlaps_speech": True},
+        {"source_handoff_blocking": None, "source_entry_status": "quiet_source"},
+        {"status": "sentence_boundary"},
+        id="quiet-entry-stays-safe-when-later-audio-is-speech",
+    ),
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 10.0, "pause_start": 9.8, "confidence": "high"}],
+            "speech_spans": [{"start": 8.5, "end": 10.0}],
+            "quiet_windows": [{"start": 0.0, "end": 8.5}],
+        },
+        {"actual_place_start": 1.0, "actual_place_end": 10.0, "overlaps_speech": False},
+        {"overlaps_speech": True, "source_entry_status": "quiet_source"},
+        {"status": "sentence_boundary"},
+        id="later-speech-ducked-after-mostly-quiet-entry",
+    ),
+    pytest.param(
+        {"sentence_anchors": [], "speech_spans": [], "quiet_windows": []},
+        {"actual_place_start": 1.0, "actual_place_end": 2.0, "overlaps_speech": False},
+        {"overlaps_speech": True, "source_handoff_blocking": True,
+         "source_entry_status": "anchors_unavailable"},
+        {"status": "anchors_unavailable"},
+        id="current-but-empty-evidence-fails-closed",
+    ),
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 10.0, "pause_start": 9.8, "confidence": "high"}],
+            "speech_spans": [],
+            "quiet_windows": [{"start": 0.0, "end": 4.0}, {"start": 0.0, "end": 4.0}],
+        },
+        {"actual_place_start": 0.0, "actual_place_end": 10.0, "overlaps_speech": False},
+        {"overlaps_speech": True},
+        {"status": "sentence_boundary"},
+        id="overlapping-quiet-evidence-not-double-counted",
+    ),
+]
+
+
+@pytest.mark.parametrize(
+    ("evidence", "segment", "expected_segment", "expected_report"),
+    _CUT_OUTPUT_HANDOFF_CASES,
+)
+def test_source_handoff_reads_cut_output_speech_evidence(
+    tmp_path, evidence, segment, expected_segment, expected_report
+):
+    _write_cut_output_anchors(tmp_path, evidence)
 
     report = audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
 
-    assert segment["source_handoff_blocking"] is True
-    assert segment["source_entry_status"] == "unsafe_entry"
-    assert report[0]["status"] == "sentence_boundary"
-
-
-def test_source_handoff_checks_entry_before_later_quiet(tmp_path):
-    plan = {}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": _value_fingerprint(plan),
-                "sentence_anchors": [
-                    {"time": 1.0, "pause_start": 0.95, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 0.0, "end": 1.0}],
-                "quiet_windows": [{"start": 1.0, "end": 10.0}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "actual_place_start": 0.8,
-        "actual_place_end": 10.0,
-        "overlaps_speech": False,
-    }
-
-    audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
-
-    assert segment["source_handoff_blocking"] is True
-    assert segment["source_entry_status"] == "unsafe_entry"
+    for key, value in expected_segment.items():
+        if value is None:
+            assert segment.get(key) is not True, key
+        else:
+            assert segment[key] == value, key
+    for key, value in expected_report.items():
+        assert report[0][key] == value, key
 
 
 def test_source_handoff_rejects_stale_cut_output_evidence(tmp_path):
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps({"clips": [{"source_start": 0, "source_end": 10}]}),
-        encoding="utf-8",
+    _write_cut_output_anchors(
+        tmp_path,
+        {
+            "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
+            "speech_spans": [{"start": 0.0, "end": 10.0}],
+        },
+        plan={"clips": [{"source_start": 0, "source_end": 10}]},
+        fingerprint="stale",
     )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": "stale",
-                "sentence_anchors": [
-                    {"time": 4.0, "pause_start": 3.8, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 0.0, "end": 10.0}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "actual_place_start": 4.0,
-        "actual_place_end": 5.0,
-        "overlaps_speech": False,
-    }
+    segment = {"actual_place_start": 4.0, "actual_place_end": 5.0, "overlaps_speech": False}
 
     report = audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
 
@@ -2404,158 +2116,13 @@ def test_source_handoff_rejects_stale_cut_output_evidence(tmp_path):
     assert report[0]["anchor_artifact"] is None
 
 
-def test_source_handoff_keeps_quiet_entry_safe_when_later_audio_is_speech(tmp_path):
-    plan = {}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": _value_fingerprint(plan),
-                "sentence_anchors": [
-                    {"time": 6.0, "pause_start": 5.8, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 3.0, "end": 10.0}],
-                "quiet_windows": [{"start": 0.0, "end": 3.0}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "actual_place_start": 1.0,
-        "actual_place_end": 5.0,
-        "overlaps_speech": True,
-    }
-
-    report = audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
-
-    assert segment.get("source_handoff_blocking") is not True
-    assert segment["source_entry_status"] == "quiet_source"
-    assert report[0]["status"] == "sentence_boundary"
-
-
-def test_source_handoff_ducks_later_speech_after_mostly_quiet_entry(tmp_path):
-    plan = {}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": _value_fingerprint(plan),
-                "sentence_anchors": [
-                    {"time": 10.0, "pause_start": 9.8, "confidence": "high"}
-                ],
-                "speech_spans": [{"start": 8.5, "end": 10.0}],
-                "quiet_windows": [{"start": 0.0, "end": 8.5}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "actual_place_start": 1.0,
-        "actual_place_end": 10.0,
-        "overlaps_speech": False,
-    }
-
-    report = audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
-
-    assert segment["overlaps_speech"] is True
-    assert segment["source_entry_status"] == "quiet_source"
-    assert report[0]["status"] == "sentence_boundary"
-
-
-def test_source_handoff_fails_closed_for_current_but_empty_cut_evidence(tmp_path):
-    plan = {}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": _value_fingerprint(plan),
-                "sentence_anchors": [],
-                "speech_spans": [],
-                "quiet_windows": [],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "actual_place_start": 1.0,
-        "actual_place_end": 2.0,
-        "overlaps_speech": False,
-    }
-
-    report = audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
-
-    assert segment["overlaps_speech"] is True
-    assert segment["source_handoff_blocking"] is True
-    assert segment["source_entry_status"] == "anchors_unavailable"
-    assert report[0]["status"] == "anchors_unavailable"
-
-
-def test_source_handoff_does_not_double_count_overlapping_quiet_evidence(tmp_path):
-    plan = {}
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(plan), encoding="utf-8"
-    )
-    (tmp_path / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 2,
-                "timeline": "cut_output",
-                "clip_plan_fingerprint": _value_fingerprint(plan),
-                "sentence_anchors": [
-                    {"time": 10.0, "pause_start": 9.8, "confidence": "high"}
-                ],
-                "speech_spans": [],
-                "quiet_windows": [
-                    {"start": 0.0, "end": 4.0},
-                    {"start": 0.0, "end": 4.0},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    segment = {
-        "actual_place_start": 0.0,
-        "actual_place_end": 10.0,
-        "overlaps_speech": False,
-    }
-
-    report = audio_mix._apply_source_sentence_handoffs([segment], tmp_path, 10.0)
-
-    assert segment["overlaps_speech"] is True
-    assert report[0]["status"] == "sentence_boundary"
-
-
 def test_source_handoff_blocks_entry_after_anchor_pause_has_ended(tmp_path):
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps(
-            {
-                "sentence_anchors": [
-                    {"time": 10.0, "pause_start": 9.7, "confidence": "high"},
-                    {"time": 20.0, "pause_start": 19.7, "confidence": "high"},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps(
-            [
-                {"start": 0, "end": 30, "text": "持续原声。"},
-            ]
-        ),
-        encoding="utf-8",
+    _write_legacy_anchors(
+        tmp_path,
+        [
+            {"time": 10.0, "pause_start": 9.7, "confidence": "high"},
+            {"time": 20.0, "pause_start": 19.7, "confidence": "high"},
+        ],
     )
     seg = {
         "index": 0,
@@ -2595,28 +2162,6 @@ def test_p0_subtitles_use_spoken_text_not_authored_narration(tmp_path):
     assert "实际说出的第一句" in ass
 
 
-def test_p0_final_loudness_filter_records_mode_and_peak_protection(monkeypatch):
-    monkeypatch.setitem(CONFIG, "final_loudnorm", True)
-    monkeypatch.setitem(CONFIG, "target_lufs", -14.0)
-    monkeypatch.setitem(CONFIG, "target_true_peak", -1.0)
-    monkeypatch.setitem(CONFIG, "target_lra", 11.0)
-    filt = final_loudnorm_filter()
-    assert "loudnorm=" in filt
-    assert "linear=true" in filt
-    assert "alimiter=limit=0.98:level=false" in filt
-    fp = assembly_settings_fingerprint()["audio_mix"]
-    assert fp["loudness_mode"] in {"two_pass_linear", "equivalent"}
-    assert fp["final_loudnorm"] == filt
-
-    monkeypatch.setitem(CONFIG, "final_loudnorm", False)
-    off_filt = final_loudnorm_filter()
-    assert "loudnorm" not in off_filt
-    assert "alimiter=limit=0.98:level=false" in off_filt
-    assert (
-        assembly_settings_fingerprint()["audio_mix"]["loudness_mode"] == "limiter_only"
-    )
-
-
 def test_p0_manifest_references_audio_qc_artifact(tmp_path):
     video = tmp_path / "input.mp4"
     output = tmp_path / "out.mp4"
@@ -2653,94 +2198,67 @@ def test_p0_manifest_references_audio_qc_artifact(tmp_path):
     }
 
 
-def test_p0_assembly_qc_blocks_skipped_segments(tmp_path):
-    qc = assembly_contract._build_assembly_qc(
-        [
-            {
-                "index": 0,
-                "fit_status": "fits",
-                "placed_audio_duration": 0.0,
-                "effective_tempo": 1.15,
-            },
-            {
-                "index": 1,
-                "fit_status": "skipped",
-                "truncate_reason": "missing_wav",
-                "placed_audio_duration": 0.0,
-                "effective_tempo": 1.15,
-            },
-        ],
-        3.0,
-        source_has_audio=True,
-        loudness_mode="two_pass_linear",
-    )
+@pytest.mark.parametrize(
+    ("segments", "expected_codes", "expected_summary"),
+    [
+        pytest.param(
+            [
+                {"index": 0, "fit_status": "fits", "placed_audio_duration": 0.0,
+                 "effective_tempo": 1.15},
+                {"index": 1, "fit_status": "skipped", "truncate_reason": "missing_wav",
+                 "placed_audio_duration": 0.0, "effective_tempo": 1.15},
+            ],
+            {"skipped_segments"},
+            {"skipped_segments": [1]},
+            id="skipped-segments",
+        ),
+        pytest.param(
+            [
+                {"index": 0, "fit_status": "no_safe_fit",
+                 "truncate_reason": "no_safe_boundary", "placed_audio_duration": 0.0,
+                 "effective_tempo": 1.15},
+            ],
+            {"no_safe_fit"},
+            {"no_safe_fit_segments": [0]},
+            id="no-safe-fit",
+        ),
+        pytest.param(
+            [
+                {"index": 0, "fit_status": "tempo_adjusted", "placed_audio_duration": 0.0,
+                 "effective_tempo": 1.2, "truncate_reason": "tail_trim_tolerance",
+                 "source_handoff_blocking": True},
+            ],
+            {"truncated_speech", "unsafe_source_handoff"},
+            {},
+            id="tail-trim-and-unsafe-source-handoff",
+        ),
+        pytest.param(
+            [
+                {"index": 0, "fit_status": "tempo_adjusted", "placed_audio_duration": 1.0,
+                 "actual_place_start": 1.0, "actual_place_end": 2.0,
+                 "placed_audio_path": "/nonexistent/missing.wav", "effective_tempo": 1.2},
+            ],
+            {"timeline_audio_mismatch"},
+            {"timeline_audio_mismatch_segments": [0]},
+            id="editable-timeline-audio-mismatch",
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    "source_facts",
+    [{}, {"source_has_audio": True, "loudness_mode": "two_pass_linear"}],
+    ids=("unknown-source-audio", "declared-source-audio"),
+)
+def test_assembly_qc_blocks_unsafe_narration(
+    segments, expected_codes, expected_summary, source_facts
+):
+    qc = assembly_contract._build_assembly_qc(segments, 3.0, **source_facts)
 
     assert qc["verdict"] == "FAIL"
-    assert "skipped_segments" in qc["blocking_codes"]
-    assert qc["summary"]["skipped_segments"] == [1]
-
-
-def test_p0_assembly_qc_blocks_no_safe_fit(tmp_path):
-    qc = assembly_contract._build_assembly_qc(
-        [
-            {
-                "index": 0,
-                "fit_status": "no_safe_fit",
-                "truncate_reason": "no_safe_boundary",
-                "placed_audio_duration": 0.0,
-                "effective_tempo": 1.15,
-            }
-        ],
-        3.0,
-        source_has_audio=True,
-        loudness_mode="two_pass_linear",
-    )
-
-    assert qc["verdict"] == "FAIL"
-    assert "no_safe_fit" in qc["blocking_codes"]
-    assert qc["summary"]["no_safe_fit_segments"] == [0]
-
-
-def test_assembly_qc_blocks_any_tail_trim_or_unsafe_source_handoff():
-    qc = assembly_contract._build_assembly_qc(
-        [
-            {
-                "index": 0,
-                "fit_status": "tempo_adjusted",
-                "placed_audio_duration": 0.0,
-                "effective_tempo": 1.2,
-                "truncate_reason": "tail_trim_tolerance",
-                "source_handoff_blocking": True,
-            },
-        ],
-        2.0,
-    )
-
-    assert qc["verdict"] == "FAIL"
-    assert "truncated_speech" in qc["blocking_codes"]
-    assert "unsafe_source_handoff" in qc["blocking_codes"]
     assert qc["release_gate"]["audio_qc"] == "FAIL"
-
-
-def test_assembly_qc_blocks_editable_timeline_audio_mismatch(tmp_path):
-    qc = assembly_contract._build_assembly_qc(
-        [
-            {
-                "index": 0,
-                "fit_status": "tempo_adjusted",
-                "placed_audio_duration": 1.0,
-                "actual_place_start": 1.0,
-                "actual_place_end": 2.0,
-                "placed_audio_path": str(tmp_path / "missing.wav"),
-                "effective_tempo": 1.2,
-            },
-        ],
-        3.0,
-    )
-
-    assert qc["verdict"] == "FAIL"
-    assert "timeline_audio_mismatch" in qc["blocking_codes"]
-    assert qc["summary"]["timeline_audio_mismatch_segments"] == [0]
+    assert expected_codes <= set(qc["blocking_codes"])
+    for key, value in expected_summary.items():
+        assert qc["summary"][key] == value
 
 
 # --- Subtitle / visual-presentation special plan contracts -------------------
@@ -3004,8 +2522,6 @@ def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
 ):
     """A stale/pre-render PASS assembly_qc.json must be removed before render, and a
     failed ffmpeg delivery must not leave a PASS final assembly_qc behind."""
-    from subprocess import CompletedProcess
-
     input_video = tmp_path / "input.mp4"
     output = tmp_path / "out.mp4"
     input_video.write_bytes(b"video")
@@ -3147,7 +2663,6 @@ def test_measured_subtitle_qc_contains_normal_line_above_anchored_bottom(
 
 
 def test_legacy_mask_env_without_explicit_policy_is_blocking(monkeypatch):
-    import importlib
     import lib as assemble_lib
 
     snapshot = dict(CONFIG)
