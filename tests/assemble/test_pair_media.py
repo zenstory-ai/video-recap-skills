@@ -14,6 +14,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import pair_media
 from frozen_audio import probe_audio_packets
+from subtitle_track_binding import current_bindings, prepare_subtitle_track
 
 
 pytestmark = pytest.mark.skipif(
@@ -49,7 +50,7 @@ def media(tmp_path):
     return picture, donor, plan, document
 
 
-def test_real_pair_selected_audio_copy_and_picture_unchanged(media, tmp_path):
+def test_real_pair_selected_audio_copy_picture_and_bound_cues(media, tmp_path):
     picture, donor, plan, _ = media
     target = tmp_path / 'new'
     report = pair_media.run_pair(plan, target)
@@ -72,6 +73,23 @@ def test_real_pair_selected_audio_copy_and_picture_unchanged(media, tmp_path):
     for forbidden in ['-shortest', '-t', '-r', '-af', '-filter_complex', '-itsoffset', '-ar']:
         assert forbidden not in command
     assert command[command.index('-c') + 1] == 'copy'
+    binding = current_bindings(output, 0)
+    assert binding['picture']['sha256'] == sha(output) != sha(picture)
+    assert binding['audio']['selected_stream'] == 0
+    track = {'schema_version': 1, 'clock': {'kind': 'output',
+              'timebase': {'numerator': 1, 'denominator': 24}, 'duration_ticks': 48},
+             'overlap_policy': 'forbid', 'bindings': binding,
+             'cues': [{'start_tick': 12, 'end_tick': 24, 'text': 'test',
+                       'attribution': {'kind': 'source', 'ref': 'test:1'},
+                       'timing_evidence': {'kind': 'legacy_estimate', 'calibration': 'none',
+                                           'word_alignment': 'none', 'evidence_refs': []}}]}
+    (target / 'subtitle_track.json').write_text(json.dumps(track))
+    prepared = prepare_subtitle_track(output, target, 2, audio_mode='adopted-packet-copy')
+    assert prepared is not None
+    track['bindings']['picture']['sha256'] = sha(picture)
+    (target / 'subtitle_track.json').write_text(json.dumps(track))
+    with pytest.raises(ValueError):
+        prepare_subtitle_track(output, target, 2, audio_mode='adopted-packet-copy')
 
 
 def test_plan_only_existing_directory_and_independent_cli(media, tmp_path):

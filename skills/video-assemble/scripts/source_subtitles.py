@@ -17,6 +17,7 @@ from assemble_constants import (
     _MIN_READABLE_SECONDS,
     _SUBTITLE_CLOSING_QUOTES,
 )
+from subtitle_track_binding import bound_subtitle_entries
 from subtitle_core import (
     _bracketed_original_chunks,
     _subtitle_entries,
@@ -406,6 +407,9 @@ def _sentence_subspan(seg, sentence):
 def _combined_subtitle_entries(narration, work_dir, video_duration):
     """Narration subtitle entries plus original-dialogue entries in the gaps, sorted by start.
     Original entries are confined to narration gaps, so they never overlap narration entries."""
+    bound = bound_subtitle_entries(work_dir, video_duration)
+    if bound is not None:
+        return bound
     entries = _subtitle_entries(narration)
     entries.extend(_original_gap_subtitle_entries(narration, work_dir, video_duration))
     entries.sort(key=lambda x: (x["start"], x["end"]))

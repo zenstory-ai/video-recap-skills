@@ -15,6 +15,7 @@ import narration_audio
 import pair_media
 import render_preflight
 import subtitle_render
+import subtitle_track_binding
 import timeline_emit
 import visual_render
 import lib
@@ -65,6 +66,13 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     video_duration = lib.get_video_duration(input_video)
     canvas = media._probe_canvas(input_video)  # drives subtitle PlayRes/scale so 竖屏 text isn't stretched
     burn_subtitles = lib.CONFIG["burn_subtitles"]
+    subtitle_track_binding.prepare_subtitle_track(
+        input_video,
+        work_dir,
+        video_duration,
+        audio_mode=audio_mode,
+        selected_audio_stream=audio_stream_index,
+    )
     adopted_source_audio = None
     if audio_mode == "adopted-packet-copy":
         adopted_source_audio = frozen_audio.validate_adopted_source(
@@ -296,6 +304,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         except ValueError:
             output_path.unlink(missing_ok=True)
             raise
+    subtitle_track_binding.verify_rendered_picture(work_dir, output_path)
     audio_operations = {
         "narration": audio_mode == "narration",
         "source_mix": audio_mode == "source-mix",
