@@ -33,7 +33,7 @@ description: >
 ## 3. 输入契约
 
 - `<video>`：源视频；cut 模式下为 `edited_source.mp4`。
-- `work_dir/tts_meta.json`：配音阶段写出的 `{segments: [...]}`。每段包含 `audio_path`、时间、`pause_after_ms`、`overlaps_speech` 和用于混音/字幕的位置。
+- `work_dir/tts_meta.json`：默认 `narration` 模式必需；配音阶段写出的 `{segments: [...]}`。每段包含 `audio_path`、时间、`pause_after_ms`、`overlaps_speech` 和用于混音/字幕的位置。显式 `source-mix` / `adopted-packet-copy` 模式不读取它。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
 
@@ -41,6 +41,7 @@ description: >
 
 ```bash
 python3 scripts/assemble.py <video> --work-dir <work_dir> \
+  [--audio-mode narration|source-mix|adopted-packet-copy] [--audio-stream-index <N>] \
   [--recap-stem <name>] [--output-dir <dir>] [--no-burn-subtitles] \
   [--subtitle-y-top <inclusive-y> --subtitle-y-bot <exclusive-y>] \
   [--source-video <orig.mp4>] [--export-jianying [--jianying-out <dir>]]
@@ -59,6 +60,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 
 ## 6. 合成规则
 
+- 音频模式的处理与冻结语义见 `references/audio-modes.md`。默认仍为 `narration`；另外两种模式必须显式选择。
 - 音频按轨道混合：原声、可选 BGM 与旁白各自独立。
 - 旁白不做任何容差裁尾；温和加速后仍放不下即 `no_safe_fit`。每段 `_placed_*.wav`
   必须与序列化后的时间线区间等长或更短，否则 `timeline_audio_mismatch` 阻断。
@@ -95,3 +97,6 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 不生成旁白文字，也不合成 TTS。
 - 不重新转写视频，不擅自改变 Agent 的时间决定。
 - 字幕烧录默认开启；关闭时不会重编码绘制字幕区域。
+
+画面回原片重建后，若需保留另一文件中的已采用完整混音，先按
+`references/pair-media.md` 显式配对独立画面与音轨。配对只复制流，不补字幕或片名卡。

@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **声音路径显式化（assemble）。** `assemble.py --audio-mode {narration,source-mix,adopted-packet-copy}` 与 `--audio-stream-index`：`source-mix` 不读 `tts_meta.json`、只对所选原声流做音量/BGM/响度处理；`adopted-packet-copy` 复用已采用的完整混音并按 AAC 包逐包比对，不重编码、不裁尾。`assembly_qc.json` / `assembly_manifest.json` 记录 `audio_mode` 与实际执行的音频操作；`pair_media.py` 可把独立画面与已采用音轨按流复制配对并证明包身份。
+
 ### Changed
 
 - **同一句源字幕跨同源连续剪点时先合并再筛短片段**，不再把一句话切碎；不同源、真实删段、输出空隙不合并。`SUBTITLE_RENDER_VERSION` 提升到 9。
