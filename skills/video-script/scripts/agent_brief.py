@@ -65,6 +65,7 @@ def build_agent_brief(
     *,
     mimo_overview_enabled=None,
     mimo_overview_video_path=None,
+    asr_evidence=None,
 ):
     """Write a compact brief that tells the agent exactly how to author recap artifacts."""
     # account for the global narration atempo (CONFIG['narration_speed']) so a beat's text
@@ -129,6 +130,28 @@ def build_agent_brief(
         f"- Target duration (cut mode): {target_duration}",
         f"- Effective speech budget: {effective_rate:.2f} Chinese chars/sec after {breath_sec:.2f}s pause allowance",
     ]
+    # Understanding validates evidence before calling; the standalone script skill
+    # has no producer dependency and must not invent an available ASR status.
+    if asr_evidence is None:
+        asr_evidence = {"status": "MISSING_OR_STALE", "evidence_fingerprint": None,
+                        "glossary_modifications": None}
+
+    lines.extend(
+        [
+            "",
+            "## ASR timing evidence",
+            "",
+            f"- Status: {asr_evidence['status']}",
+            f"- Evidence fingerprint: {asr_evidence['evidence_fingerprint'] or '(missing)'}",
+            f"- Glossary modifications: {asr_evidence.get('glossary_modifications') or '(unverified)'}; details: asr_timing_evidence.json",
+            "- Empty text: UNKNOWN_NOT_PROVEN_SILENCE; these windows locate a search region, not subtitle onsets.",
+            "- Timing: coarse provider windows; word alignment: NOT_PERFORMED; dialogue boundaries: NOT_VERIFIED.",
+            "- ASR window ends and timeline-fusion/quiet-window recommendations are advisory only. "
+            "They must not be treated as verified dialogue boundaries or safe cut points; use direct listening "
+            "and picture review before preserving or cutting original dialogue.",
+            "",
+        ]
+    )
     if thin_substrate:
         lines.append(
             f"- Narration density: substrate is {substrate['level']} — do NOT chase a beat count. "
@@ -256,7 +279,8 @@ def build_agent_brief(
                     "- Use `reason` to preserve the actual edit decision: `beat_id | function | change | POV | preferred moment | 入点 | 出点`, not merely 'important plot'. Function is `cold_open`, `setup`, `turn`, `escalation`, or `payoff`.",
                     "- Clip length follows the moment. Vary pace; after any cold-open, order clips by causality so the cut reads as one coherent story, not a flat highlights reel.",
                     "- Inspect dense scene-change candidates before locking boundaries. For source-authored cuts, delete irrelevant short shots and extend relevant shots to a complete action/reaction; for edit-created joins, move boundaries, restore same-source motion, or merge clips so the artificial cut disappears where possible. Do not hide a bad join with a transition.",
-                    "- End a clip on a COMPLETE spoken line — set the clip end at or just after an ASR line-end (or inside the quiet window that follows it), never mid-sentence, so the original dialogue is never chopped off. Use the ASR [start–end] times + Quiet windows below as safe cut points; the CLI also snaps clip ends to the nearest line-end as a safety net.",
+                    "- Preserve complete spoken lines, but do not infer completeness from ASR window ends or quiet-window suggestions. Directly listen and inspect picture around each proposed boundary, then place the cut after the verified utterance/reaction; automatic snapping is only an advisory candidate.",
+                    "- Advisory does not mean absent: the cut CLI still snaps clip ends to sentence boundaries by default and blocks a cut that lands mid-sentence, using `silence_periods.json` and `speech_boundary_anchors.json` as the executable safety net under your listening.",
                     "",
                     "### clip_plan.json shape (original source timestamps)",
                     "",
@@ -318,7 +342,7 @@ def build_agent_brief(
             "1. Assign `audio_owner` and `narration_job` before prose. No clear narration job means no narration for that beat.",
             "2. When narration owns a beat, write one fluent BLOCK that completes a continuous thought (often premise -> trigger/action -> change/meaning) for one TTS call. Sentence count is not a target: use one or a few complete connected sentences, and never split TTS merely because captions need shorter cues.",
             "3. 7:3 is a rough fallback, never a coverage quota. A strong dialogue/performance/action/silence beat may contain no narration; an exposition bridge may be narration-led.",
-            "4. Default `overlaps_speech` to true only for authored narration windows. If source speech has already started, begin at an `原声句末安全切入点`; never enter mid-sentence. Do not cover a must-hear original-audio anchor; leave that beat un-narrated or place narration around it.",
+            "4. Default `overlaps_speech` to true only for authored narration windows. If source speech has already started, use a sentence end confirmed by direct listening and picture review; ASR coarse ends are not proof. Do not cover a must-hear original-audio anchor; leave that beat un-narrated or place narration around it.",
             "5. Do not describe what the viewer can already see; narration may add context, causal links, foreshadowing, evidence-grounded interpretation, or transitions.",
             "6. Keep timing visually local: anchor each block to the planned beat and exact footage it covers; don't let prose run past the change it explains.",
             "7. Preserve performance: consider the listener/reaction instead of the speaker/action, and leave enough time for an irreplaceable look, pause, mistake, or action sound to land.",

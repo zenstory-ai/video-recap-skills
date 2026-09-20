@@ -13,6 +13,7 @@ def _apply_narration_speed(
     command_runner=run_cmd,
     duration_probe=get_video_duration,
     logger=log,
+    tempo_policy=None,
 ):
     """Globally speed up narration audio via atempo (CONFIG['narration_speed']).
 
@@ -20,7 +21,7 @@ def _apply_narration_speed(
     snappier without the chipmunk effect. Rewrites each segment's audio_path/duration
     to the sped copy so the rest of assembly is unchanged. No-op at speed 1.0.
     """
-    speed = CONFIG["narration_speed"]
+    speed = tempo_policy["global_atempo"] if tempo_policy else CONFIG["narration_speed"]
     if abs(speed - 1.0) <= 1e-3:
         return
     done = 0
@@ -34,6 +35,7 @@ def _apply_narration_speed(
         if res.returncode != 0:
             raise RuntimeError(f"解说提速失败 {src}: {res.stderr}")
         seg["audio_path"] = out
+        seg["narration_conversion_path"] = out
         seg["audio_duration"] = duration_probe(out)
         done += 1
     logger(f"解说整体提速: atempo={speed:.2f} ({done} 段)")
@@ -47,6 +49,7 @@ def _adjust_tts_speed(
     command_runner=run_cmd,
     duration_probe=get_video_duration,
     logger=log,
+    tempo_policy=None,
 ):
     """Fit overlong TTS with bounded atempo; never time-trim speech in assemble.
 
@@ -57,6 +60,14 @@ def _adjust_tts_speed(
     audio_path = Path(audio_path)
     current_dur = duration_probe(audio_path)
     budget = narration_tempo_budget(tts_rate_offset)
+    if tempo_policy:
+        budget.update({
+            "global_narration_speed": tempo_policy["global_atempo"],
+            "tts_rate_factor": 1.0,
+            "segment_tempo_max": tempo_policy["segment_tempo_max"],
+            "cumulative_tempo_max": tempo_policy["cumulative_tempo_max"],
+            "cumulative_tempo_hard_max": tempo_policy["cumulative_tempo_hard_max"],
+        })
     meta = {
         "fit_status": "fits",
         "blocking": False,
@@ -73,6 +84,14 @@ def _adjust_tts_speed(
         "cumulative_tempo_hard_max": budget["cumulative_tempo_hard_max"],
     }
     if current_dur <= target_duration:
+        return (str(audio_path), current_dur, meta)
+
+    if tempo_policy and not tempo_policy["bounded_segment_fit"]:
+        meta.update({
+            "fit_status": "no_safe_fit", "blocking": True,
+            "truncate_reason": "no_safe_boundary", "placed_audio_duration": 0.0,
+            "needed_tempo_factor": current_dur / target_duration,
+        })
         return (str(audio_path), current_dur, meta)
 
     ratio = current_dur / target_duration
@@ -173,6 +192,7 @@ def _build_timed_narration(
     adjust_speed=_adjust_tts_speed,
     command_runner=run_cmd,
     logger=log,
+    tempo_policy=None,
 ):
     """将 TTS 片段按时间轴放置到一条与视频等长的音轨上"""
     sample_rate = 44100
@@ -210,10 +230,15 @@ def _build_timed_narration(
             continue
 
         original_wav_path = wav_path
-        with wave.open(wav_path, "rb") as wf_check:
-            needs_resample = (
-                wf_check.getnchannels(), wf_check.getsampwidth(), wf_check.getframerate()
-            ) != (1, 2, sample_rate)
+        try:
+            with wave.open(wav_path, "rb") as wf_check:
+                needs_resample = (
+                    wf_check.getnchannels(), wf_check.getsampwidth(), wf_check.getframerate()
+                ) != (1, 2, sample_rate)
+        except (wave.Error, EOFError):
+            # Valid post-processed WAV may use IEEE float, which Python's wave
+            # reader does not support. FFmpeg performs the explicit PCM conversion.
+            needs_resample = True
 
         tts_rate_offset = seg.get("tts_rate_offset", 0.0)
         tts_dur = seg["audio_duration"]
@@ -240,7 +265,15 @@ def _build_timed_narration(
         available_samples = end_boundary - actual_start
         available_duration = max(available_samples / sample_rate, 0)
         if tts_dur > available_duration > 0:
-            wav_path, _actual_dur, fit_meta = adjust_speed(wav_path, available_duration, tts_rate_offset)
+            if tempo_policy:
+                wav_path, _actual_dur, fit_meta = adjust_speed(
+                    wav_path, available_duration, tts_rate_offset,
+                    tempo_policy=tempo_policy,
+                )
+            else:
+                wav_path, _actual_dur, fit_meta = adjust_speed(
+                    wav_path, available_duration, tts_rate_offset
+                )
             seg.update({
                 "fit_status": fit_meta["fit_status"],
                 "segment_tempo_factor": fit_meta["segment_tempo_factor"],
@@ -257,6 +290,11 @@ def _build_timed_narration(
                 continue
         else:
             budget = narration_tempo_budget(tts_rate_offset)
+            if tempo_policy:
+                budget.update({
+                    "global_narration_speed": tempo_policy["global_atempo"],
+                    "tts_rate_factor": 1.0,
+                })
             seg.update({
                 "fit_status": "fits",
                 "segment_tempo_factor": 1.0,
@@ -280,6 +318,7 @@ def _build_timed_narration(
                 skipped_count += 1
                 continue
             wav_path = tmp_path
+            seg["narration_conversion_path"] = tmp_path
 
         with wave.open(wav_path, "rb") as wf:
             wf_data = bytearray(wf.readframes(wf.getnframes()))

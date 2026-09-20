@@ -81,3 +81,27 @@ def test_asr_span_tol_matches_across_files():
     assert set(values.values()) == {0.05}, (
         f"_ASR_SPAN_TOL drifted across files: {values}"
     )
+
+
+def test_script_brief_is_standalone_without_understanding_producer(tmp_path):
+    import shutil
+    import subprocess
+    import sys
+    copied = tmp_path / 'script'
+    shutil.copytree(SCRIPT_SCRIPTS, copied, ignore=shutil.ignore_patterns('__pycache__'))
+    assert not (copied / 'asr_timing_evidence.py').exists()
+    program = '''import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from agent_brief import build_agent_brief
+work=Path(sys.argv[2]); work.mkdir()
+text=build_agent_brief([], [], [], 2.0, work).read_text()
+assert 'MISSING_OR_STALE' in text
+assert 'UNKNOWN_NOT_PROVEN_SILENCE' in text
+assert 'ASR [start–end] times + Quiet windows below as safe cut points' not in text
+'''
+    # -I ignores PYTHON* environment variables, so force UTF-8 stdio with -X utf8 (Windows).
+    result = subprocess.run([sys.executable, '-I', '-X', 'utf8', '-c', program, str(copied), str(tmp_path/'work')],
+                            cwd=tmp_path, capture_output=True, text=True, encoding='utf-8',
+                            errors='replace')
+    assert result.returncode == 0, result.stderr

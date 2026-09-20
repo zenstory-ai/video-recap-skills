@@ -10,6 +10,39 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **video-cut `clip_plan.required_evidence`。** Agent 声明必保源片刻（节点、来源、原片秒、轨道、先后关系），工具在句界/画面吸附之后、渲染之前核对；缺段、错序或无效声明写入 `clip_plan_validated.json.qc.required_evidence` 并阻断，缓存复用同样重检。
+- **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
+- **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
+- **video-cut `--review-shots`。** 扫描实际渲染文件内部的短镜与密集切点（只召回、不修复），结果写入 `shot_review.json` 并绑定计划/源/成片指纹；`--shot-roi` 可按实测画窗扫描。短镜阈值按实测帧率推导，不再固定 24 帧。
+- **ASR 时序证据 sidecar。** `asr_timing_evidence.json` 记录来源指纹、可用性状态与词级对齐是否执行，词表修正与原始转写分列，粗窗不再被当作精字幕；brief 显示经验证的状态与指纹，缺失或陈旧时显示 `MISSING_OR_STALE`。
+- **自托管 TTS 端点。** `--tts-provider index-tts` 通过 `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 接入 index-tts 协议的 JSON→WAV 服务；端点只以 sha256 落盘，拒绝带凭证的 URL 与重定向，`doctor` 离线校验配置而不探测连通性。每段 TTS 缓存与结果记录 provider receipt 与处理后 WAV 的 sha256。
+- **最终 QC 可选阻断。** `--require-final-qc` 开启后，`final_qc.json` 与 `golden_eval.json` 摘要必须均为 `ok: true` 且 `blocker_count: 0`，否则不打印完成、非零退出；续跑命令保留该选项，不影响缓存指纹；不支持 dub 模式。
+- **声音路径显式化（assemble）。** `assemble.py --audio-mode {narration,source-mix,adopted-packet-copy}` 与 `--audio-stream-index`：`source-mix` 不读 `tts_meta.json`、只对所选原声流做音量/BGM/响度处理；`adopted-packet-copy` 复用已采用的完整混音并按 AAC 包逐包比对，不重编码、不裁尾。`assembly_qc.json` / `assembly_manifest.json` 记录 `audio_mode` 与实际执行的音频操作；`pair_media.py` 可把独立画面与已采用音轨按流复制配对并证明包身份。
+- **批准稿保护。** `--preserve-approved-text` 贯穿 full / 单源 cut / 多源 cut 的校验器再到 TTS：文本装不下窗口时列出具体段落与时长，不自动缩稿、不静默变速；失败不沿用旧的 `tts_meta.json`，成功元数据原子写入。
+- **独立字幕轨。** `subtitle_track.json` 以整数 tick 绑定当前音画（仅 `adopted-packet-copy` 模式），标注估计 / 校准 / 强对齐精度，渲染前核对陈旧轨与不可显示短 cue；投影到 ASS 厘秒时保证在同一帧翻转，`assembly_manifest.json` 只引用当前绑定的轨。
+- **前景合成。** `compose_foreground.py` 把调用方渲染好的 RGBA PNG 序列（可选片尾卡）叠加到锁定母版，音频按包复制并逐包核对不变，输出帧钟与解码元数据核对后才写入新目录。
+- **声音路径显式化（recap）。** `recap.py --audio-mode {narration,source-mix,adopted-packet-copy}` 把声音策略与 `--edit-mode` 解耦：`source-mix` / `adopted-packet-copy` 不跑校验、评审和 TTS，full 直接合成，cut 剪完不再等 `narration.json`；运行清单记录音频策略，错配或含未绑定 `narration.json` 的 work-dir 被拒绝，续跑命令保留选择。
+- **配音采用绑定（assemble）。** `--tts-meta` + `--narration-adoption` 把已采用的文字、处理后 WAV 指纹、请求的引擎/声线与速度策略绑定到实际混音：输入快照、派生 WAV 封存、隐藏候选渲染后经 QC 再与 `narration_input_binding.json` 一起发布或一起放弃；采用的速度策略按形状与范围校验，不再只接受全 1.0；旧入口保持兼容并标记为未核验。
+- **显式完整混音（assemble）。** `source_score.py` 从原片声音流按精确帧区间重建原声轨、连续音乐轨与 `prepared_bed.wav` 并出具回执；`--audio-mix-adoption` 把已采用的底轨、逐段 48 kHz 配音落点与固定 master gain 渲染成最终音轨，跳过环境 BGM/duck/loudnorm/tempo，与 `narration_input_binding.json` 一起以 `audio_mix_binding.json` 事务发布；29.97/59.94 fps 画面按精确分数投影到采样钟。剪映时间线导出时，跳过的旁白段不再让其后段落的增益与采样落点错位。
+- **已采用配音的本地复用（recap）。** `--tts-meta` + `--narration-adoption` + `--audio-mix-adoption` 三件套走严格 assembly-only 路径：只接受单视频、full、narration、音轨 0、新工作目录和未存在的交付文件；全有或全无、显式 TTS/评审/QC/导出参数一律拒绝；运行清单以 sha256 封存三件套，子进程 binding 与清单不符或交付文件非本次产出时不删除、非零退出，清理以 `assembly_manifest.json` 的实际输出为准。
+- **批准稿保护与自托管 TTS 贯通编排器。** `recap.py --preserve-approved-text` 在 full / 单源 cut / 多源 cut 的 TTS 前把保护参数交给真实校验器与配音器，续跑命令保留；`--tts-provider index-tts` 显式透传，不能与 MiMo 声线参数或 dub 同用；`source-mix` 拒绝含显式 `subtitle_track.json` 的 work-dir。
+
+### Changed
+
+- **同一句源字幕跨同源连续剪点时先合并再筛短片段**，不再把一句话切碎；不同源、真实删段、输出空隙不合并。`SUBTITLE_RENDER_VERSION` 提升到 9。
+- **SRT 毫秒改为向下量化**，避免帧边界时间被四舍五入后延迟一帧；负值钳到零。
+- 剪辑手法与审稿提示补充：保住动机与接受条件、反打是否新增信息、跨场镜头不得拼成虚假因果、只写证据已呈现的结果、REVISION 只提可定位的局部修法；brief 不再把 ASR 行尾当作安全剪点，改为听审后再定。
+- **`recap.py` 关闭 argparse 前缀缩写**（`allow_abbrev=False`），显式选项由 parser 记录到 `args._explicit_options`，后续守卫不再靠扫描 `sys.argv`。
+- **理解缓存不再把全空转写当作有效命中**（`EMPTY_UNKNOWN` 与 `UNAVAILABLE_NO_DURATION` 同样视为 MISS）；没有 sidecar 的旧缓存以 `LEGACY_UNVERIFIED` 复用。ASR 音频提取或 provider 失败时清理陈旧的 `audio.wav` 与 `asr_result.json`，时长改从提取后的 `audio.wav` 读取。
+- **批准稿结构校验拒绝 `end <= start`**、乱序与空文本，结构错误以清晰的 `SystemExit` 报出并写入 `narration_lint.json`；cut_output 模式下 `--output-duration` 缺失或越界同样记录到 lint 文件，不再留下过期的 PASS。
+
+### Fixed
+
+- `timeline.json` 的旁白起点改为向下取整到 1e-4 秒网格，序列化后不再截掉已放置音频的首个采样。
+- 已放置的旁白 WAV 若为 IEEE float 格式（Python `wave` 不支持），改用 ffprobe 读取时长，不再在装配和一致性检查时报错。
+
 ## [0.5.0] - 2026-09-05
 
 两条主线：新增 Fish Audio TTS 通道与《锅火》60 秒案例；以及一次以「在边界校验一次，之后信任契约」为原则的全量瘦身——删除约 2,600 行防御式代码，把校验集中到真正的输入边界，并修复审查过程中发现的三处真实缺陷。行为收紧之处见 `Changed`。

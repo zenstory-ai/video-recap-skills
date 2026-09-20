@@ -4,13 +4,41 @@ import argparse
 import os
 
 from lib import env_bool
+from recap_source import AUDIO_MODES
 
-TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio")
+TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
-def parse_args():
+class _RecordExplicit:
+    """Record the option argparse actually consumed, not the raw argv spelling."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if option_string is not None:
+            recorded = getattr(namespace, "_explicit_options", None)
+            if recorded is None:
+                recorded = set()
+                setattr(namespace, "_explicit_options", recorded)
+            recorded.add(option_string)
+        super().__call__(parser, namespace, values, option_string)
+
+
+def _record_explicit_options(parser):
+    """Make every optional action report itself, so guards never re-parse sys.argv."""
+    tracked = {}
+    for action in parser._actions:
+        if not action.option_strings:
+            continue
+        base = type(action)
+        if not issubclass(base, _RecordExplicit):
+            action.__class__ = tracked.setdefault(
+                base, type(base.__name__, (_RecordExplicit, base), {})
+            )
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Full video recap orchestrator (video-* skill bundle)."
+        description="Full video recap orchestrator (video-* skill bundle).",
+        allow_abbrev=False,
     )
     parser.add_argument("video", nargs="*")
     parser.add_argument("--work-dir", default=None)
@@ -21,6 +49,20 @@ def parse_args():
         "--edit-mode",
         default=os.environ.get("EDIT_MODE", "full"),
         choices=["full", "cut", "dub"],
+    )
+    parser.add_argument("--audio-mode", choices=AUDIO_MODES, default="narration")
+    parser.add_argument("--audio-stream-index", type=int, default=0)
+    parser.add_argument(
+        "--tts-meta", default=None,
+        help="local adopted tts_meta.json; requires both adoption flags",
+    )
+    parser.add_argument(
+        "--narration-adoption", default=None,
+        help="local narration_adoption v1; requires --tts-meta and --audio-mix-adoption",
+    )
+    parser.add_argument(
+        "--audio-mix-adoption", default=None,
+        help="local audio_mix_adoption v1 for assembly-only full-sound rendering",
     )
     parser.add_argument(
         "--target-duration", default=os.environ.get("TARGET_DURATION") or None
@@ -63,7 +105,7 @@ def parse_args():
         "--tts-provider",
         default=os.environ.get("TTS_PROVIDER", "auto"),
         choices=TTS_PROVIDERS,
-        help="voiceover provider; auto prefers configured MiMo, then Fish Audio",
+        help="voiceover provider; auto prefers configured MiMo, then Fish Audio; Index is explicit",
     )
     parser.add_argument(
         "--voice-ref",
@@ -74,6 +116,11 @@ def parse_args():
         "--allow-partial-tts",
         action="store_true",
         help="allow video-voiceover to continue when some narration segments fail TTS",
+    )
+    parser.add_argument(
+        "--preserve-approved-text",
+        action="store_true",
+        help="forward strict approved-text preservation to narration voiceover",
     )
     parser.add_argument(
         "--burn-subtitles",
@@ -103,6 +150,11 @@ def parse_args():
         "--require-narration-review",
         action="store_true",
         help="make narration review a strict pre-TTS gate (also REQUIRE_NARRATION_REVIEW=1)",
+    )
+    parser.add_argument(
+        "--require-final-qc",
+        action="store_true",
+        help="full/cut: require literal passing final_qc and golden_eval summaries",
     )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
@@ -137,4 +189,7 @@ def parse_args():
         help="save analyzed JSON/MD artifacts into the material library",
     )
     parser.add_argument("--doctor", action="store_true")
-    return parser, parser.parse_args()
+    _record_explicit_options(parser)
+    args = parser.parse_args(argv)
+    args._explicit_options = frozenset(getattr(args, "_explicit_options", ()))
+    return parser, args

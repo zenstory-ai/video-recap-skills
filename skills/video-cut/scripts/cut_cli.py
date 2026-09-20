@@ -1,11 +1,13 @@
 """Command-line orchestration for the video-cut skill."""
 
 import json
+import math
 
 
 from pathlib import Path
 
 from lib import CONFIG, get_video_duration, log
+import shot_review
 
 from cut_contract import (
     _write_edited_source_meta,
@@ -21,7 +23,8 @@ from cut_render import (
     update_delivery_qc,
     write_cut_delivery_qc,
 )
-from media_geometry import _select_output_geometry
+from media_geometry import _has_audio_stream, _select_output_geometry
+from narrative_selection import check_required_evidence
 from narration_mapping import (
     lint_mapped_narration,
     map_narration_to_clips,
@@ -90,6 +93,18 @@ def main():
         "lets validate lint the SAME padded/pruned plan the mapper uses",
     )
     parser.add_argument(
+        "--review-shots", action="store_true",
+        help="scan actual rendered/reused video for internal short-shot and dense-cut candidates; never repair",
+    )
+    parser.add_argument(
+        "--shot-scene-threshold", type=float, default=None,
+        help="explicit scene recall threshold for --review-shots (default 0.35; not an acceptance criterion)",
+    )
+    parser.add_argument(
+        "--shot-roi", nargs=4, type=int, metavar=("X", "Y", "WIDTH", "HEIGHT"),
+        help="scan only this pixel rectangle with --review-shots; never crop the rendered video",
+    )
+    parser.add_argument(
         "--no-narration-map",
         action="store_true",
         help="render edited_source.mp4 but do NOT map narration.json onto the cut "
@@ -106,6 +121,15 @@ def main():
         help="do not block when validated clip duration is far from --target-duration",
     )
     args = parser.parse_args()
+    if args.shot_scene_threshold is not None and (
+        not args.review_shots or not math.isfinite(args.shot_scene_threshold)
+        or not 0 <= args.shot_scene_threshold <= 1
+    ):
+        parser.error("--shot-scene-threshold requires --review-shots and a finite value in [0,1]")
+    if args.shot_roi is not None and (
+        not args.review_shots or min(args.shot_roi[:2]) < 0 or min(args.shot_roi[2:]) <= 0
+    ):
+        parser.error("--shot-roi requires --review-shots, nonnegative X/Y and positive WIDTH/HEIGHT")
 
     # CLIP_PADDING is declared in every skill's CONFIG, but video-cut is the only place that
     # implements padding — and it used to read the CLI flag alone, so setting the env var did
@@ -225,6 +249,21 @@ def main():
         allow_duration_drift=allow_duration_drift,
         duration_drift_allowed_by=drift_source,
     )
+    if isinstance(raw_plan, dict) and 'required_evidence' in raw_plan:
+        # Re-evaluate the final snapped ranges even when the media cache can be reused.
+        # A prior rendered receipt must not survive a failed revision preflight.
+        (work_dir / 'cut_delivery_qc.json').unlink(missing_ok=True)
+        contract = raw_plan['required_evidence']
+        nodes = contract.get('nodes', []) if isinstance(contract, dict) else []
+        needs_audio = isinstance(nodes, list) and any(
+            isinstance(node, dict) and node.get('track') == 'audio' for node in nodes)
+        source_audio = {str(Path(path).resolve()): _has_audio_stream(path)
+                        for path in source_paths} if needs_audio else {}
+        report = check_required_evidence(contract, validated_plan, input_video=args.video,
+                                         source_audio=source_audio)
+        validated_plan['qc']['required_evidence'] = {**report, 'contract': contract}
+        if report['selection_status'] == 'BLOCK':
+            validated_plan['qc'].setdefault('blocking', []).extend(report['findings'])
     update_delivery_qc(
         validated_plan,
         source_paths=source_paths,
@@ -235,7 +274,7 @@ def main():
     )
     if validated_plan["qc"].get("blocking"):
         raise SystemExit(
-            "clip_plan QC blocking: fix unsafe sentence boundaries or target-duration drift. "
+            "clip_plan QC blocking: fix required source evidence, unsafe sentence boundaries or target-duration drift. "
             "Only duration drift can be explicitly accepted with --allow-duration-drift; "
             "sentence truncation is never allowed. See clip_plan_validated.json['qc']."
         )
@@ -275,6 +314,17 @@ def main():
         )
         (work_dir / "clip_plan_validated.json").write_text(
             json.dumps(validated_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+    if args.review_shots:
+        review_options = {"plan_path": work_dir / "clip_plan_validated.json"}
+        if args.shot_scene_threshold is not None:
+            review_options["threshold"] = args.shot_scene_threshold
+        if args.shot_roi is not None:
+            review_options["roi"] = args.shot_roi
+        shot_review.write_scan(
+            edited_source_path, work_dir / "shot_review.json",
+            **review_options,
         )
 
     narration_path = (
