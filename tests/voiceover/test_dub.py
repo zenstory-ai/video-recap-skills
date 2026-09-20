@@ -77,16 +77,12 @@ def test_atempo_chain():
     assert dub._atempo_chain(0.1) == "atempo=0.5000"  # floored at 0.5
 
 
-def test_ref_window_clamps_short_video():
-    start, dur = dub._ref_window(3.0, 2.0, 10.0)
+def test_ref_window_clamps_to_video_duration():
+    assert dub._ref_window(60.0, 2.0, 10.0) == (2.0, 10.0)  # long video: requested window as-is
+    start, dur = dub._ref_window(3.0, 2.0, 10.0)  # short video: shifted and shortened to fit
     assert 0.0 <= start <= 1.0
     assert dur >= 2.0
     assert start + dur <= 3.01
-
-
-def test_ref_window_normal_video():
-    start, dur = dub._ref_window(60.0, 2.0, 10.0)
-    assert (start, dur) == (2.0, 10.0)
 
 
 def test_build_dub_track_anchors_line_at_its_start(tmp_path):
@@ -134,18 +130,6 @@ def test_brief_lists_windows_for_the_agent():
     assert "Hello there." in md
 
 
-def test_dub_lint_fails_empty_overlap_and_bounds():
-    script = [
-        {"start": 0.0, "end": 2.0, "zh": "第一句"},
-        {"start": 1.5, "end": 6.0, "zh": ""},
-    ]
-    lint = dub.lint_dub_script(script, duration=5.0)
-
-    assert lint["verdict"] == "FAIL"
-    codes = {issue["code"] for issue in lint["issues"]}
-    assert {"overlap", "empty_translation", "time_out_of_range"} <= codes
-
-
 def test_dub_lint_rejects_non_list_script(tmp_path):
     """A malformed (non-list) dub_script.json is a clean FAIL, not a traceback."""
     report = dub.lint_dub_script(
@@ -176,15 +160,6 @@ def test_dub_lint_tolerates_subframe_rounding():
     assert "overlap" not in codes and "time_out_of_range" not in codes
 
 
-def test_dub_lint_warns_fast_speech_without_blocking():
-    script = [{"start": 0.0, "end": 1.0, "zh": "这是一句非常非常非常长的中文配音台词"}]
-    lint = dub.lint_dub_script(script, duration=3.0)
-
-    assert lint["verdict"] == "PASS"
-    assert any(issue["code"] == "fast_speech" for issue in lint["issues"])
-    assert lint["summary"]["max_chars_per_second"] > 8.0
-
-
 def test_dub_review_maps_lint_to_revise_edits():
     script = [{"start": 0.0, "end": 1.0, "zh": "这是一句非常非常非常长的中文配音台词"}]
     transcript = {
@@ -208,6 +183,7 @@ def test_dub_lint_reports_blocking_script_errors(tmp_path):
 
     report = dub.lint_dub_script(script, duration=6.0, work_dir=tmp_path)
 
+    assert report["verdict"] == "FAIL"
     assert report["blocking"] is True
     assert [issue["code"] for issue in report["errors"]] == [
         "empty_translation",
@@ -296,31 +272,31 @@ def _prepare_render_cache_fixture(tmp_path, text="你好"):
     return ref, raw
 
 
-def _mock_time_fit(monkeypatch):
+def _stub_render_pipeline(monkeypatch):
+    """Replace the ffmpeg-backed time-fit, track build and mux steps with file-writing fakes."""
     def fake_time_fit(_raw, fitted, _room):
         _write_test_wav(fitted)
         return 0.1
 
     monkeypatch.setattr(dub, "_time_fit", fake_time_fit)
+    monkeypatch.setattr(
+        dub, "_build_dub_track", lambda _lines, _duration, out: _write_test_wav(out)
+    )
+    monkeypatch.setattr(
+        dub, "_mux", lambda _video, _wav, out: Path(out).write_bytes(b"mp4")
+    )
 
 
 def test_dub_render_reuses_matching_voiceclone_cache(monkeypatch, tmp_path):
     ref, raw = _prepare_render_cache_fixture(tmp_path)
     dub._write_clone_cache_meta(raw, "你好", ref.read_bytes())
-    _mock_time_fit(monkeypatch)
-
+    _stub_render_pipeline(monkeypatch)
     monkeypatch.setattr(
         dub,
         "_clone_tts",
         lambda *_args, **_kwargs: pytest.fail(
             "matching voiceclone cache must skip the API"
         ),
-    )
-    monkeypatch.setattr(
-        dub, "_build_dub_track", lambda _lines, _duration, out: _write_test_wav(out)
-    )
-    monkeypatch.setattr(
-        dub, "_mux", lambda _video, _wav, out: Path(out).write_bytes(b"mp4")
     )
 
     dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
@@ -334,7 +310,7 @@ def test_dub_render_invalidates_voiceclone_cache_when_text_changes(
 ):
     ref, raw = _prepare_render_cache_fixture(tmp_path, text="新台词")
     dub._write_clone_cache_meta(raw, "旧台词", ref.read_bytes())
-    _mock_time_fit(monkeypatch)
+    _stub_render_pipeline(monkeypatch)
     calls = []
 
     def clone(text, _ref_b64, out):
@@ -342,12 +318,6 @@ def test_dub_render_invalidates_voiceclone_cache_when_text_changes(
         _write_test_wav(out)
 
     monkeypatch.setattr(dub, "_clone_tts", clone)
-    monkeypatch.setattr(
-        dub, "_build_dub_track", lambda _lines, _duration, out: _write_test_wav(out)
-    )
-    monkeypatch.setattr(
-        dub, "_mux", lambda _video, _wav, out: Path(out).write_bytes(b"mp4")
-    )
 
     dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
 
