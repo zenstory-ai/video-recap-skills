@@ -8,9 +8,36 @@ from lib import env_bool
 TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio")
 
 
-def parse_args():
+class _RecordExplicit:
+    """Record the option argparse actually consumed, not the raw argv spelling."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if option_string is not None:
+            recorded = getattr(namespace, "_explicit_options", None)
+            if recorded is None:
+                recorded = set()
+                setattr(namespace, "_explicit_options", recorded)
+            recorded.add(option_string)
+        super().__call__(parser, namespace, values, option_string)
+
+
+def _record_explicit_options(parser):
+    """Make every optional action report itself, so guards never re-parse sys.argv."""
+    tracked = {}
+    for action in parser._actions:
+        if not action.option_strings:
+            continue
+        base = type(action)
+        if not issubclass(base, _RecordExplicit):
+            action.__class__ = tracked.setdefault(
+                base, type(base.__name__, (_RecordExplicit, base), {})
+            )
+
+
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(
-        description="Full video recap orchestrator (video-* skill bundle)."
+        description="Full video recap orchestrator (video-* skill bundle).",
+        allow_abbrev=False,
     )
     parser.add_argument("video", nargs="*")
     parser.add_argument("--work-dir", default=None)
@@ -137,4 +164,7 @@ def parse_args():
         help="save analyzed JSON/MD artifacts into the material library",
     )
     parser.add_argument("--doctor", action="store_true")
-    return parser, parser.parse_args()
+    _record_explicit_options(parser)
+    args = parser.parse_args(argv)
+    args._explicit_options = frozenset(getattr(args, "_explicit_options", ()))
+    return parser, args
