@@ -31,7 +31,6 @@ def _manifest_args(**overrides):
         "consolidate_asr": False,
         "review_narration": None,
         "allow_duration_drift": False,
-        "allow_sparse_cut": False,
         "mimo_qc": "off",
         "mimo_qc_refresh": False,
         "mimo_tts_voice": None,
@@ -552,17 +551,13 @@ def test_doctor_human_output_prints_capability_menu(monkeypatch, capsys):
 
 
 def test_recap_full_mode_passes_explicit_narration_json(monkeypatch, tmp_path):
-    """A stale cut-mode narration_mapped.json must not override full-mode narration."""
+    """Full mode passes the work_dir narration.json to voiceover explicitly."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     work = tmp_path / "work"
     work.mkdir()
     (work / "narration.json").write_text(
         json.dumps([{"start": 0, "end": 1, "narration": "full。"}]),
-        encoding="utf-8",
-    )
-    (work / "narration_mapped.json").write_text(
-        json.dumps([{"start": 0, "end": 1, "narration": "stale cut。"}]),
         encoding="utf-8",
     )
 
@@ -601,7 +596,7 @@ def test_recap_full_mode_passes_explicit_narration_json(monkeypatch, tmp_path):
 
 def test_recap_cut_mode_voiceover_uses_output_time_narration(monkeypatch, tmp_path):
     """Two-pass cut: narration is authored in OUTPUT time, so voiceover gets narration.json
-    directly (no narration_mapped) and assemble muxes onto edited_source.mp4."""
+    directly and assemble muxes onto edited_source.mp4."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     work = tmp_path / "work"
@@ -658,9 +653,9 @@ def test_recap_cut_mode_voiceover_uses_output_time_narration(monkeypatch, tmp_pa
     vo = next(c for c in calls if c[:2] == ("video-voiceover", "voiceover.py"))[2]
     assert vo[vo.index("--narration") + 1] == str(
         work / "narration.json"
-    )  # NOT narration_mapped
+    )
     cut_render = next(c for c in calls if c[:2] == ("video-cut", "cut.py"))[2]
-    assert "--no-narration-map" in cut_render
+    assert "--narration" not in cut_render  # cut never sees narration
     asm = next(c for c in calls if c[:2] == ("video-assemble", "assemble.py"))[2]
     assert asm[0] == str(work / "edited_source.mp4")
     validate_args = next(c for c in calls if c[:2] == ("video-script", "validate.py"))[
@@ -829,7 +824,6 @@ def test_recap_honors_edit_mode_and_target_duration_env(monkeypatch, tmp_path):
     cut_args = cut_call[2]
     assert "--target-duration" in cut_args
     assert cut_args[cut_args.index("--target-duration") + 1] == "10m"
-    assert "--no-narration-map" in cut_args  # cut-first render, no source-time mapping
     validate_call = next(
         call for call in calls if call[:2] == ("video-script", "validate.py")
     )
@@ -1284,7 +1278,7 @@ def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
     monkeypatch, tmp_path
 ):
     """Step 6: cut mode is two-pass. With clip_plan present but narration absent, recap renders
-    the cut (--no-narration-map, no source-time mapping) and PAUSES for OUTPUT-time narration —
+    the cut (no source-time narration mapping) and PAUSES for OUTPUT-time narration —
     it does not run voiceover/assemble yet, and the ledger records the rendered cut."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
@@ -1315,7 +1309,7 @@ def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
     recap.main()  # PASS 2: render the cut, then pause (narration.json absent)
 
     cut_calls = [c for c in calls if c[:2] == ("video-cut", "cut.py")]
-    assert cut_calls and all("--no-narration-map" in c[2] for c in cut_calls)
+    assert cut_calls and all("--narration" not in c[2] for c in cut_calls)
     assert all(
         "--normalize-only" not in c[2] for c in cut_calls
     )  # mapping path is bypassed
@@ -1907,7 +1901,6 @@ def test_recap_single_cut_forwards_allow_duration_drift_and_records_source(
         calls.append((skill, script, cli))
         if script == "cut.py":
             assert "--allow-duration-drift" in cli
-            assert "--allow-sparse-cut" not in cli
             _write_cut_output(work)
 
     monkeypatch.setattr("recap_runner._run", fake_run)
@@ -1931,78 +1924,6 @@ def test_recap_single_cut_forwards_allow_duration_drift_and_records_source(
 
     cut_args = next(c for c in calls if c[:2] == ("video-cut", "cut.py"))[2]
     assert "--allow-duration-drift" in cut_args
-
-
-def test_recap_multi_cut_forwards_allow_sparse_cut_compat_and_records_source(
-    monkeypatch, tmp_path
-):
-    v1 = tmp_path / "a.mp4"
-    v2 = tmp_path / "b.mp4"
-    v1.write_bytes(b"a source")
-    v2.write_bytes(b"b source")
-    work = tmp_path / "project"
-    work.mkdir()
-    args = _manifest_args(edit_mode="cut", target_duration="10m")
-    records = recap_runtime._build_multi_source_records(
-        [v1.resolve(), v2.resolve()], args
-    )
-    recap_runtime._write_multi_source_manifest(work, records)
-    recap_runtime._write_project_run_manifest(
-        work, [v1.resolve(), v2.resolve()], args, records
-    )
-    (work / "clip_plan.json").write_text(
-        json.dumps(
-            {"clips": [{"source_id": records[0]["source_id"], "start": 0, "end": 1}]}
-        ),
-        encoding="utf-8",
-    )
-    calls = []
-
-    def fake_run(skill, script, *cli_args):
-        cli = [str(a) for a in cli_args]
-        calls.append((skill, script, cli))
-        if script == "cut.py":
-            assert "--allow-sparse-cut" in cli
-            assert "--allow-duration-drift" not in cli
-            _write_cut_output(
-                work,
-                [
-                    {
-                        "source_id": records[0]["source_id"],
-                        "source_path": str(v1.resolve()),
-                        "source_start": 0,
-                        "source_end": 1,
-                        "output_start": 0,
-                        "output_end": 1,
-                        "duration": 1,
-                        "reason": "",
-                    }
-                ],
-            )
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap_runner.py",
-            str(v1),
-            str(v2),
-            "--work-dir",
-            str(work),
-            "--edit-mode",
-            "cut",
-            "--target-duration",
-            "10m",
-            "--allow-sparse-cut",
-        ],
-    )
-
-    recap.main()
-
-    cut_args = next(c for c in calls if c[:2] == ("video-cut", "cut.py"))[2]
-    assert "--sources-manifest" in cut_args
-    assert "--allow-sparse-cut" in cut_args
 
 
 def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
@@ -2071,7 +1992,6 @@ def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
     assert cut_args[cut_args.index("--sources-manifest") + 1] == str(
         work / "multi_source_manifest.json"
     )
-    assert "--no-narration-map" in cut_args
     assert not any(c[1] in ("voiceover.py", "assemble.py") for c in calls)
     assert recap_timeline._read_phase_ledger(work)["multi_source"] is True
 

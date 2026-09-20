@@ -25,11 +25,7 @@ from cut_render import (
 )
 from media_geometry import _has_audio_stream, _select_output_geometry
 from narrative_selection import check_required_evidence
-from narration_mapping import (
-    lint_mapped_narration,
-    map_narration_to_clips,
-    update_cut_qc,
-)
+from narration_mapping import update_cut_qc
 from sentence_boundaries import (
     _combine_boundary_windows,
     _load_sentence_boundary_windows,
@@ -53,7 +49,7 @@ def main():
     parser.add_argument(
         "--work-dir",
         required=True,
-        help="dir holding clip_plan.json (and optionally narration.json)",
+        help="dir holding clip_plan.json",
     )
     parser.add_argument(
         "--clip-plan",
@@ -64,11 +60,6 @@ def main():
         "--sources-manifest",
         default=None,
         help="multi-source manifest json mapping source_id values to source media",
-    )
-    parser.add_argument(
-        "--narration",
-        default=None,
-        help="narration json to map (default: <work-dir>/narration.json)",
     )
     parser.add_argument(
         "--target-duration",
@@ -89,8 +80,8 @@ def main():
     parser.add_argument(
         "--normalize-only",
         action="store_true",
-        help="only normalize the clip plan -> clip_plan_validated.json (no render/map); "
-        "lets validate lint the SAME padded/pruned plan the mapper uses",
+        help="only normalize the clip plan -> clip_plan_validated.json (no render); "
+        "lets validate lint the SAME padded/pruned plan the render uses",
     )
     parser.add_argument(
         "--review-shots", action="store_true",
@@ -103,17 +94,6 @@ def main():
     parser.add_argument(
         "--shot-roi", nargs=4, type=int, metavar=("X", "Y", "WIDTH", "HEIGHT"),
         help="scan only this pixel rectangle with --review-shots; never crop the rendered video",
-    )
-    parser.add_argument(
-        "--no-narration-map",
-        action="store_true",
-        help="render edited_source.mp4 but do NOT map narration.json onto the cut "
-        "(cut-first/narrate-second: narration is authored in OUTPUT time, no mapping)",
-    )
-    parser.add_argument(
-        "--allow-sparse-cut",
-        action="store_true",
-        help="do not block on heavy narration drop / sparse output (e.g. an intentional montage)",
     )
     parser.add_argument(
         "--allow-duration-drift",
@@ -238,16 +218,10 @@ def main():
     _, _, _, geometry_qc = _select_output_geometry(source_paths, validated_plan["clips"])
     validated_plan["qc"]["output_geometry"] = geometry_qc
     validated_plan["qc"]["output_geometry_reason"] = geometry_qc["reason"]
-    allow_duration_drift = bool(args.allow_duration_drift or args.allow_sparse_cut)
-    drift_source = (
-        "--allow-duration-drift"
-        if args.allow_duration_drift
-        else ("--allow-sparse-cut" if args.allow_sparse_cut else None)
-    )
     update_cut_qc(
         validated_plan,
-        allow_duration_drift=allow_duration_drift,
-        duration_drift_allowed_by=drift_source,
+        allow_duration_drift=bool(args.allow_duration_drift),
+        duration_drift_allowed_by="--allow-duration-drift" if args.allow_duration_drift else None,
     )
     if isinstance(raw_plan, dict) and 'required_evidence' in raw_plan:
         # Re-evaluate the final snapped ranges even when the media cache can be reused.
@@ -327,36 +301,6 @@ def main():
             **review_options,
         )
 
-    narration_path = (
-        Path(args.narration) if args.narration else work_dir / "narration.json"
-    )
-    if narration_path.exists() and not args.no_narration_map:
-        narration = json.loads(narration_path.read_text(encoding="utf-8"))
-        mapped = map_narration_to_clips(narration, validated_plan)
-        if not mapped:
-            raise SystemExit("narration 没有落入 clip_plan 片段内的有效解说")
-        (work_dir / "narration_mapped.json").write_text(
-            json.dumps(mapped, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        log(f"映射解说 {len(mapped)} 段 → narration_mapped.json")
-        report = lint_mapped_narration(
-            mapped, len(narration), validated_plan["total_duration"]
-        )
-        (work_dir / "narration_mapped_lint.json").write_text(
-            json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-        for w in report["warnings"]:
-            log(f"  ⚠️ 剪后解说同步: {w['message']} [{w['code']}]")
-        if report["clamped_count"]:
-            raise SystemExit(
-                "剪后解说有句子被 clip 边界裁断。移动 clip_plan 边界或重写整句后重跑；"
-                "--allow-sparse-cut 不能跳过语句完整性门禁。详见 narration_mapped_lint.json"
-            )
-        if report["blocking"] and not args.allow_sparse_cut:
-            raise SystemExit(
-                "剪后解说与保留片段对不上：丢弃过多或成片过稀疏。改 narration.json / clip_plan.json "
-                "让解说落在保留片段内后重跑，或加 --allow-sparse-cut 接受当前映射。详见 narration_mapped_lint.json"
-            )
     log(
         f"剪辑模式: {len(validated_plan['clips'])} 个片段 → {validated_plan['total_duration']:.1f}s"
     )

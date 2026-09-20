@@ -31,7 +31,6 @@ def _manifest_args(**overrides):
         "review_narration": None,
         "require_narration_review": False,
         "allow_duration_drift": False,
-        "allow_sparse_cut": False,
         "mimo_qc": "off",
         "mimo_qc_refresh": False,
         "mimo_tts_voice": None,

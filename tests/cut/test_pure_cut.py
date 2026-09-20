@@ -18,13 +18,10 @@ import sentence_boundaries
 from lib import env_float
 from cut import (
     build_edited_source_video,
-    lint_mapped_narration,
-    map_narration_to_clips,
     normalize_clip_plan,
     parse_duration_seconds,
     snap_clip_ends_to_lines,
     snap_clips_off_shot_changes,
-    source_time_to_output_time,
 )
 
 _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
@@ -53,92 +50,6 @@ def _mock_media_probes(monkeypatch):
     monkeypatch.setattr(
         sentence_boundaries, "_detect_shot_changes", lambda *_args, **_kwargs: []
     )
-
-
-def test_lint_mapped_narration_flags_dropped_and_sparse():
-    """Post-map re-lint must surface beats dropped by the mapper and a sparse cut output
-    (the otherwise-invisible half of cut-mode desync)."""
-    mapped = [
-        {"start": 5.0, "end": 8.0, "narration": "一。", "clamped": False},
-        {"start": 50.0, "end": 53.0, "narration": "二。", "clamped": False},
-    ]
-    report = lint_mapped_narration(mapped, original_count=8, output_duration=60.0)
-    codes = {w["code"] for w in report["warnings"]}
-    assert "many_beats_dropped" in codes  # 6/8 dropped
-    assert "low_density_output" in codes  # 2 beats over 60s
-    assert "long_gap_output" in codes  # 42s gap between the two beats
-    assert report["dropped"] == 6
-    assert report["drop_ratio"] == 0.75
-
-    dense = [
-        {"start": float(i * 6), "end": float(i * 6 + 4), "narration": "一句。", "clamped": False}
-        for i in range(10)
-    ]
-    healthy = lint_mapped_narration(dense, original_count=10, output_duration=60.0)
-    assert healthy["warnings"] == []
-
-
-def test_lint_mapped_narration_blocking_and_clamped_flags():
-    """Heavy drop/sparse output and any clipped narration sentence are BLOCKING."""
-    sparse = [
-        {"start": 5.0, "end": 8.0, "narration": "一。", "clamped": False},
-        {"start": 50.0, "end": 53.0, "narration": "二。", "clamped": False},
-    ]
-    assert (
-        lint_mapped_narration(sparse, original_count=8, output_duration=60.0)[
-            "blocking"
-        ]
-        is True
-    )
-
-    dense = [
-        {"start": float(i * 6), "end": float(i * 6 + 4), "narration": "一句。", "clamped": False}
-        for i in range(10)
-    ]
-    assert (
-        lint_mapped_narration(dense, original_count=10, output_duration=60.0)[
-            "blocking"
-        ]
-        is False
-    )
-
-    clamped = [
-        {"start": 0.0, "end": 4.0, "narration": "一。", "clamped": True},
-        {"start": 5.0, "end": 9.0, "narration": "二。", "clamped": False},
-    ]
-    rep = lint_mapped_narration(clamped, original_count=2, output_duration=12.0)
-    assert rep["clamped_count"] == 1
-    assert any(w["code"] == "clamped_beats" for w in rep["warnings"])
-    assert rep["blocking"] is True
-
-
-def test_map_narration_to_clips_tags_clamped_beats():
-    """Step 4: a beat trimmed to a clip edge is tagged clamped (its text may describe cut footage)."""
-    plan = {
-        "clips": [
-            {
-                "clip_id": 0,
-                "source_start": 10.0,
-                "source_end": 20.0,
-                "output_start": 0.0,
-                "output_end": 10.0,
-            }
-        ]
-    }
-    mapped = map_narration_to_clips(
-        [
-            {"start": 12.0, "end": 18.0, "narration": "完全在片段内。"},  # not clamped
-            {
-                "start": 15.0,
-                "end": 22.0,
-                "narration": "尾巴越界被裁。",
-            },  # mid 18.5 in clip, end 22>20 -> clamped to 20
-        ],
-        plan,
-    )
-    by_text = {m["narration"]: m for m in mapped}
-    assert by_text["完全在片段内。"]["clamped"] is False
-    assert by_text["尾巴越界被裁。"]["clamped"] is True
 
 
 def test_cut_main_normalize_only_writes_validated_plan_without_render(
@@ -246,47 +157,6 @@ def test_cut_main_keeps_sentence_gate_when_line_snapping_is_disabled(
         for row in blockers
         if row.get("code") == "unsafe_clip_sentence_boundary"
     } == {"start", "end"}
-
-
-def test_cut_main_blocks_on_heavy_drop_unless_allow_sparse(monkeypatch, tmp_path):
-    """Step 4: a cut whose narration mostly falls outside the kept clips FAILS the preflight
-    (before TTS), unless --allow-sparse-cut is given."""
-    _mock_media_probes(monkeypatch)
-    import sys
-    import json as _json
-    import pytest as _pytest
-    import cut
-
-    video = tmp_path / "v.mp4"
-    video.write_bytes(b"v")
-    (tmp_path / "clip_plan.json").write_text(
-        '{"clips":[{"start":10.0,"end":20.0}]}', encoding="utf-8"
-    )
-    (tmp_path / "narration.json").write_text(
-        _json.dumps(
-            [
-                {"start": 12.0, "end": 15.0, "narration": "片段内。"},
-                {"start": 100.0, "end": 103.0, "narration": "片段外一。"},
-                {"start": 110.0, "end": 113.0, "narration": "片段外二。"},
-                {"start": 120.0, "end": 123.0, "narration": "片段外三。"},
-            ]
-        ),
-        encoding="utf-8",
-    )
-    monkeypatch.setattr("cut_cli.get_video_duration", lambda p: 200.0)
-    monkeypatch.setattr("cut.should_reuse_edited_source", lambda *a, **k: False)
-    monkeypatch.setattr(
-        "cut_cli.build_edited_source_video",
-        lambda *a, **k: (tmp_path / "edited_source.mp4").write_bytes(b"e"),
-    )
-    base = ["cut.py", str(video), "--work-dir", str(tmp_path)]
-
-    monkeypatch.setattr(sys, "argv", base)
-    with _pytest.raises(SystemExit):
-        cut.main()
-
-    monkeypatch.setattr(sys, "argv", base + ["--allow-sparse-cut"])
-    cut.main()  # override -> must not raise
 
 
 def test_parse_duration_seconds_accepts_common_forms():
@@ -442,7 +312,7 @@ def test_clip_padding_env_reaches_the_only_skill_that_implements_it(monkeypatch,
         "cut_cli.build_edited_source_video", lambda *a, **k: Path(a[-1])
     )
     monkeypatch.setattr(
-        sys, "argv", ["cut.py", str(video), "--work-dir", str(work), "--no-narration-map"]
+        sys, "argv", ["cut.py", str(video), "--work-dir", str(work)]
     )
 
     cut.main()
@@ -460,72 +330,6 @@ def test_clip_plan_rejects_overlapping_source_ranges():
             ],
             video_duration=10.0,
         )
-
-
-def test_source_time_and_narration_mapping_preserve_source_trace():
-    plan = normalize_clip_plan(
-        [
-            {"start": 10.0, "end": 20.0, "reason": "A"},
-            {"start": 40.0, "end": 50.0, "reason": "B"},
-        ],
-        video_duration=60.0,
-    )
-
-    assert source_time_to_output_time(12.5, plan["clips"]) == 2.5
-    assert source_time_to_output_time(45.0, plan["clips"]) == 15.0
-    assert source_time_to_output_time(30.0, plan["clips"]) is None
-
-    mapped = map_narration_to_clips(
-        [
-            {"start": 12.0, "end": 16.0, "narration": "第一段。"},
-            {
-                "start": 43.0,
-                "end": 48.0,
-                "narration": "第二段。",
-                "overlaps_speech": True,
-            },
-            {"start": 22.0, "end": 24.0, "narration": "会被丢弃。"},
-        ],
-        plan,
-    )
-
-    assert [(m["start"], m["end"]) for m in mapped] == [(2.0, 6.0), (13.0, 18.0)]
-    assert mapped[0]["source_start"] == 12.0
-    assert mapped[1]["source_clip_id"] == 1
-    assert mapped[1]["overlaps_speech"] is True
-
-
-def test_narration_mapping_uses_explicit_source_clip_id_for_repeated_ranges():
-    plan = normalize_clip_plan(
-        [
-            {"start": 10.0, "end": 20.0},
-            {"start": 10.0, "end": 20.0},
-        ],
-        video_duration=30.0,
-        allow_overlap=True,
-    )
-
-    unmapped = map_narration_to_clips(
-        [
-            {"start": 12.0, "end": 14.0, "narration": "重复画面但没说用哪次。"},
-        ],
-        plan,
-    )
-    mapped = map_narration_to_clips(
-        [
-            {
-                "start": 12.0,
-                "end": 14.0,
-                "source_clip_id": 1,
-                "narration": "重复画面第二次出现。",
-            },
-        ],
-        plan,
-    )
-
-    assert unmapped == []
-    assert mapped[0]["start"] == 12.0
-    assert mapped[0]["source_clip_id"] == 1
 
 
 def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
@@ -1884,20 +1688,20 @@ def test_update_cut_qc_duration_status_and_allow_drift():
         == "--allow-duration-drift"
     )
 
-    allowed_compat = {
+    allowed_custom = {
         "clips": [{"duration": 4.0}],
         "total_duration": 4.0,
         "target_duration": 10.0,
     }
     cut.update_cut_qc(
-        allowed_compat,
+        allowed_custom,
         allow_duration_drift=True,
-        duration_drift_allowed_by="--allow-sparse-cut",
+        duration_drift_allowed_by="operator-override",
     )
-    assert "blocking" not in allowed_compat["qc"]
+    assert "blocking" not in allowed_custom["qc"]
     assert (
-        allowed_compat["qc"]["target_duration"]["duration_drift_allowed_by"]
-        == "--allow-sparse-cut"
+        allowed_custom["qc"]["target_duration"]["duration_drift_allowed_by"]
+        == "operator-override"
     )
 
 

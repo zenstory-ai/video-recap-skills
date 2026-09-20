@@ -16,7 +16,7 @@ python3 scripts/shot_review.py edited_source.mp4 \
 python3 scripts/shot_review.py packaged.mp4 --roi "$X" "$Y" "$WIDTH" "$HEIGHT" \
   --output review/shot_review_picture.json
 # 正常 cut 后显式开启；缓存命中也查实际文件；normalize-only 不扫描：
-python3 scripts/cut.py source.mp4 --work-dir work --no-narration-map --review-shots
+python3 scripts/cut.py source.mp4 --work-dir work --review-shots
 # 同一画窗/阈值参数也可传给 cut.py --review-shots --shot-roi X Y WIDTH HEIGHT --shot-scene-threshold T
 ```
 

@@ -124,15 +124,14 @@ def _auto_timeline(work_dir):
     orchestrator does: cut_output when narration.json is in the cut OUTPUT timeline, else
     source. Without this, reviewing a cut narration on the default 'source' timeline compares
     OUTPUT-time narration against SOURCE-time evidence and floods false-positive 'hallucination'
-    findings (and the inverse flood for a legacy source-time narration mis-read as cut_output).
+    findings.
 
     Detection is authoritative-first: the orchestrator records the run's edit_mode in
     recap_run_manifest.json. In orchestrated cut mode narration.json is OUTPUT time; in full
     mode it is SOURCE time. Trusting edit_mode is correct even when stale cut artifacts from a
     prior run linger in a reused work_dir. Only when no manifest is present (standalone review
-    or a hand-built work_dir) do we fall back to artifact sniffing — and even then the legacy
-    legacy direct single-pass path writes a SOURCE-time narration.json alongside a separate
-    output-time narration_mapped.json, so its presence pins us back to source."""
+    or a hand-built work_dir) do we fall back to artifact sniffing: a rendered cut
+    (clip_plan_validated.json + edited_source.mp4) means narration.json is OUTPUT time."""
     work_dir = Path(work_dir)
     manifest = work_dir / "recap_run_manifest.json"
     if manifest.exists():
@@ -151,9 +150,7 @@ def _auto_timeline(work_dir):
     has_cut = (work_dir / "clip_plan_validated.json").exists() and (
         work_dir / "edited_source.mp4"
     ).exists()
-    if has_cut and not (work_dir / "narration_mapped.json").exists():
-        return "cut_output"
-    return "source"
+    return "cut_output" if has_cut else "source"
 
 
 def main():

@@ -193,7 +193,7 @@ def test_cut_cli_opt_in_reviews_actual_cut_not_plan_only(tmp_path, monkeypatch, 
     monkeypatch.setattr(cut_cli, "build_edited_source_video", lambda a, b, c, d: d.write_bytes(b"edited"))
     scans = []
     monkeypatch.setattr(shot_review, "write_scan", lambda *a, **k: scans.append((a, k)))
-    args = ["cut.py", str(video), "--work-dir", str(work), "--no-narration-map", "--review-shots"]
+    args = ["cut.py", str(video), "--work-dir", str(work), "--review-shots"]
     if normalize_only:
         args.append("--normalize-only")
     if threshold is not None:

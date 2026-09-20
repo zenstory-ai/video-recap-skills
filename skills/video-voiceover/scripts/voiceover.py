@@ -735,7 +735,7 @@ def main():
         description="video-voiceover: synthesize narration audio segments from narration.json.")
     ap.add_argument("--work-dir", required=True)
     ap.add_argument("--narration", default=None,
-                    help="narration json (default: <work-dir>/narration.json; pass narration_mapped.json explicitly for legacy cut runs)")
+                    help="narration json (default: <work-dir>/narration.json)")
     ap.add_argument("--mimo-voice", default=None, help="MiMo TTS voice name")
     ap.add_argument(
         "--tts-provider",
@@ -778,9 +778,8 @@ def main():
     if args.narration:
         narration_path = Path(args.narration)
     else:
-        # Canonical cut mode is cut-first/narrate-second: narration.json is already on the
-        # output timeline. A stale legacy narration_mapped.json in the same work_dir must not
-        # silently override it; legacy direct-cut callers can still pass --narration explicitly.
+        # Cut mode is cut-first/narrate-second: narration.json is already on the output
+        # timeline, so the default needs no remapping.
         narration_path = work_dir / "narration.json"
     if CONFIG["preserve_approved_text"]:
         archive_current_meta(work_dir / "tts_meta.json")
