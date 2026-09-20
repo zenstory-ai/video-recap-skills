@@ -1,6 +1,6 @@
 """Shared constants for the self-contained video-assemble skill."""
 
-SUBTITLE_RENDER_VERSION = 8
+SUBTITLE_RENDER_VERSION = 9
 SUBTITLE_TEXT_NORMALIZE_VERSION = 1
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 ASSEMBLY_QC = "assembly_qc.json"
@@ -18,6 +18,11 @@ _SUBTITLE_CLOSING_QUOTES = "」』”’）)]】》〉\"'"
 _MIN_GAP_TO_SUBTITLE = 0.8
 _MIN_READABLE_SECONDS = 0.3
 _MIN_ASR_CLIP_OVERLAP = 0.05
+# timeline.py serializes interval bounds onto a 1e-4 second grid, flooring starts
+# and ceiling ends, so two bounds that were identical before serialization can come
+# back one grid step apart. Contiguity joins must tolerate that whole step.
+_TIMELINE_TIME_GRID_SECONDS = 1e-4
+_CLIP_CONTIGUITY_TOLERANCE = 1.5 * _TIMELINE_TIME_GRID_SECONDS
 _MAX_ORIGINAL_READ_CPS = 9.0
 _AUTO_ORIGINAL_READ_CPS = 6.0
 

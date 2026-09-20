@@ -1,7 +1,9 @@
 """Assembly manifest/QC persistence and delivery contract helpers."""
 
 import json
+from fractions import Fraction
 import math
+import subprocess
 import wave
 from pathlib import Path
 
@@ -126,10 +128,27 @@ def _placed_audio_matches_timeline(seg):
     placed_path = Path(seg["placed_audio_path"])
     if not placed_path.exists():
         return False
-    with wave.open(str(placed_path), "rb") as placed_wav:
-        placed_duration = placed_wav.getnframes() / placed_wav.getframerate()
-        tolerance = 1.0 / placed_wav.getframerate()
-    timeline_start = round(float(seg["actual_place_start"]), 4)
+    try:
+        with wave.open(str(placed_path), "rb") as placed_wav:
+            placed_duration = placed_wav.getnframes() / placed_wav.getframerate()
+            tolerance = 1.0 / placed_wav.getframerate()
+    except wave.Error:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
+             "stream=sample_rate,time_base,duration_ts", "-of", "json", str(placed_path)],
+            capture_output=True, text=True, timeout=600,
+        )
+        streams = json.loads(result.stdout).get("streams", []) if not result.returncode else []
+        if len(streams) != 1:
+            return False
+        stream = streams[0]
+        try:
+            rate = int(stream["sample_rate"])
+            placed_duration = float(Fraction(stream["duration_ts"]) * Fraction(stream["time_base"]))
+            tolerance = 1.0 / rate
+        except (KeyError, TypeError, ValueError, ZeroDivisionError):
+            return False
+    timeline_start = math.floor(float(seg["actual_place_start"]) * 10_000 + 1e-9) / 10_000
     timeline_end = math.ceil(float(seg["actual_place_end"]) * 10_000 - 1e-9) / 10_000
     serialized_span = timeline_end - timeline_start
     return (
