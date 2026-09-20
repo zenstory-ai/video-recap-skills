@@ -14,6 +14,7 @@ from assemble_constants import (
     SEGMENT_AUDIO_SCHEMA_VERSION,
 )
 from audio_mix import _loudness_mode
+from subtitle_track_binding import manifest_subtitle_evidence
 from artifacts import (
     _load_work_json,
     _source_video_identity,
@@ -98,6 +99,9 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
     provenance = _timeline_provenance_status(work_dir)
     if provenance:
         payload["timeline_provenance"] = provenance
+    subtitle_evidence = manifest_subtitle_evidence(work_dir, input_video, output_path)
+    if subtitle_evidence is not None:
+        payload["subtitle_track"] = subtitle_evidence
     return payload
 
 

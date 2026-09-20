@@ -1,6 +1,7 @@
 """Regression contract for explicit non-narration assembly audio modes."""
 
 import json
+import hashlib
 import shutil
 import subprocess
 import sys
@@ -13,6 +14,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "s
 sys.path.insert(0, str(SCRIPTS))
 
 from assemble import assemble_video  # noqa: E402
+import assembly_contract  # noqa: E402
 from assembly_settings import assembly_settings_fingerprint  # noqa: E402
 import frozen_audio  # noqa: E402
 from frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
@@ -51,6 +53,27 @@ def _quiet_visuals(monkeypatch):
 
 def _qc(work):
     return json.loads((work / "assembly_qc.json").read_text(encoding="utf-8"))
+
+
+def test_manifest_only_references_current_bound_subtitle_track(tmp_path):
+    track = tmp_path / "subtitle_track.json"
+    track.write_bytes(b"current track")
+    digest = hashlib.sha256(track.read_bytes()).hexdigest()
+    (tmp_path / "subtitle_track_validation.json").write_text(
+        json.dumps({"binding": {"track_sha256": digest}, "metadata": {"entries": 1}}),
+        encoding="utf-8",
+    )
+    kwargs = dict(settings_fingerprint=lambda _work: {})
+    with pytest.raises(ValueError, match="version"):
+        assembly_contract._assembly_manifest_payload(
+            tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
+        )
+
+    track.unlink()
+    stale = assembly_contract._assembly_manifest_payload(
+        tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
+    )
+    assert "subtitle_track" not in stale
 
 
 def test_default_narration_mode_still_rejects_empty_tts(tmp_path):

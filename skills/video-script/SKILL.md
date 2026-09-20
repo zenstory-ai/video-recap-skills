@@ -23,7 +23,7 @@ description: >
 4. 声音/旁白编辑
 5. 第一次观看的观众
 
-Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理解索引做机械校验；full 模式还会把旁白对齐到安静窗口。
+Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理解索引做机械校验；full 模式默认还会执行预算整理并计算旁白的原声重叠。已有批准稿应加 `--preserve-approved-text`，保留段落顺序、数量、时间、文本、停顿和扩展元数据，仅允许依据现有声音证据更新 `overlaps_speech`。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。本技能不从其他技能目录读取参考文件或辅助脚本；外部输入只来自显式路径与 `work_dir` 产物。
 
@@ -237,10 +237,11 @@ python3 scripts/review.py --work-dir <work_dir>
 
 ```bash
 python3 scripts/validate.py --work-dir <work_dir> --mode full
+python3 scripts/validate.py --work-dir <work_dir> --mode full --preserve-approved-text
 # cut 输出时间线由编排器使用 --mode cut_output
 ```
 
-命令写出 `narration_lint.json`。full 模式还会根据安静窗口重写 `narration.json` 的时间。修复所有 error 后重复运行，直到校验干净，再继续 TTS 与合成。
+命令写出 `narration_lint.json`。full 模式默认执行字符预算整理、去重合并并依据安静窗口计算 `overlaps_speech`，但不会把时间段移动到安静窗口；`--preserve-approved-text` 则保留批准稿的原始时间、文本、停顿、顺序与扩展元数据，只允许更新实测 `overlaps_speech`。修复所有 error 后重复运行，直到校验干净，再继续 TTS 与合成。
 
 片名或题材明确但缺少剧情上下文时，先按本技能的 `references/research-guide.md` 写 `background_research.json`。若理解素材偏薄，brief 中的数量只能当上限：宁可少写、写实，也不要为凑数复述画面。
 
@@ -250,4 +251,4 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full
 - 不合成 TTS，也不渲染视频。
 - 平台研究仅用于明确的宣发任务；不替代当前片内事实，也不默认改变解说和剪辑。
 - `review.py` 不改写 `narration.json`；是否采用严格门禁由调用方决定。
-- `validate.py` 不改写文本含义，只检查或对齐时间与安静窗口。
+- `validate.py --preserve-approved-text` 不会截短、丢弃、合并、重排或改写批准稿；未加该参数时保留原有预算整理行为。

@@ -10,6 +10,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from threading import Lock
 
+from approved_text_policy import (
+    PRESERVE_APPROVED_TEXT_POLICY,
+    ApprovedTextDurationError,
+    archive_current_meta,
+    enforce_duration,
+    policy_name,
+    validate_required_texts,
+    write_json_atomically as _write_tts_meta_atomically,
+)
 from fish_audio import synthesize_fish_audio
 import index_tts as index_provider
 from lib import (
@@ -42,6 +51,20 @@ _VOICE_REFERENCE_STATE_KEYS = (
     "voice_ref_fingerprint",
     "voice_ref_snapshot_locked",
 )
+
+
+def authored_text_policy():
+    """Return the explicit cacheable policy governing creative text mutation."""
+    return policy_name(CONFIG.get("preserve_approved_text", False))
+
+
+def enforce_approved_text_policy(index, seg, authored_text, spoken_text, audio_duration,
+                                  available_duration, max_raw_duration):
+    """Fail closed when immutable approved text cannot fit its authored window."""
+    enforce_duration(
+        index, seg, authored_text, spoken_text, audio_duration, available_duration,
+        max_raw_duration, CONFIG.get("preserve_approved_text", False), CONFIG["breath_ms"],
+    )
 
 
 def _parse_rate_offset(rate_str):
@@ -127,6 +150,11 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine):
     raw_budget = available * budget["max_raw_duration_factor"]
     truncated = False
     truncate_reason = "none"
+    try:
+        enforce_approved_text_policy(i, seg, seg["narration"], text, dur, available, raw_budget)
+    except ApprovedTextDurationError:
+        _cleanup_partial_tts_outputs(output_wav)
+        raise
     if dur > raw_budget and len(text) > 5:
         chars_per_sec = _text_char_count(text) / dur
         target_chars = max(5, int(raw_budget * chars_per_sec) - 1)
@@ -165,6 +193,7 @@ def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offse
         "start": seg["start"],
         "end": seg["end"],
         "narration": authored_text,
+        "authored_text": seg["narration"],
         "spoken_text": text,
         "truncated": resolved_truncated,
         "truncate_reason": (truncate_reason if truncate_reason != "none" else "sentence_boundary") if resolved_truncated else "none",
@@ -183,6 +212,7 @@ def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offse
         "tts_rate_offset": rate_offset,
         "pause_after_ms": seg.get("pause_after_ms", CONFIG["breath_ms"]),
         "overlaps_speech": seg.get("overlaps_speech", True),
+        "authored_text_policy": authored_text_policy(),
         "provider_receipt": provider_receipt,
         "processed_wav_sha256": processed_wav_sha256,
     }
@@ -194,13 +224,18 @@ def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offse
 
 def _tts_failure_record(index, seg, error):
     """Build a user-visible failure record for partial TTS output."""
-    return {
+    record = {
         "index": index,
         "start": seg["start"],
         "end": seg["end"],
         "text": _clean_narration_text(seg["narration"]),
         "error": str(error),
     }
+    if authored_text_policy() == PRESERVE_APPROVED_TEXT_POLICY:
+        record.update({"required": True, "policy": PRESERVE_APPROVED_TEXT_POLICY})
+    if isinstance(error, ApprovedTextDurationError):
+        record.update({"required": True, **error.evidence})
+    return record
 
 
 def _build_tts_meta(segments, engine, narration_name, failures):
@@ -229,6 +264,10 @@ def synthesize_tts(narration, work_dir):
 
     if not narration:
         raise RuntimeError("narration.json 没有可配音的解说段，已中止以避免生成无解说视频")
+    validate_required_texts(
+        narration, _clean_narration_text, CONFIG.get("preserve_approved_text", False)
+    )
+
     cache_engine = _configured_tts_engine_for_cache()
     if cache_engine in {"fish-audio", "index-tts"} and voice_ref:
         if cache_engine == "fish-audio":
@@ -288,6 +327,25 @@ def synthesize_tts(narration, work_dir):
         CONFIG.pop("voice_ref_snapshot_locked", None)
 
     segments.sort(key=lambda x: x["index"])
+    approved_text_failures = [
+        failure for failure in failures
+        if failure.get("failure_kind") == "approved_text_duration_conflict"
+    ]
+    if approved_text_failures:
+        first = approved_text_failures[0]
+        evidence = {
+            key: value for key, value in first.items()
+            if key not in {"text", "error", "required"}
+        }
+        if len(approved_text_failures) > 1:
+            evidence["conflict_count"] = len(approved_text_failures)
+        raise ApprovedTextDurationError(evidence)
+    if failures and authored_text_policy() == PRESERVE_APPROVED_TEXT_POLICY:
+        sample = json.dumps(failures[:3], ensure_ascii=False, sort_keys=True)
+        raise RuntimeError(
+            f"批准稿严格模式有 {len(failures)}/{len(narration)} 个必需 TTS 段失败，"
+            f"不能按部分成功交付: {sample}"
+        )
     if failures and not CONFIG["allow_partial_tts"]:
         sample = "; ".join(f"段 {f['index']+1}: {f['error']}" for f in failures[:3])
         raise RuntimeError(
@@ -409,6 +467,12 @@ def _tts_segment_cache_key(engine, index, seg, source_text, rate, pitch):
         "emotion": seg.get("emotion", ""),
         "settings": tts_settings_fingerprint(engine),
     }
+    if authored_text_policy() == PRESERVE_APPROVED_TEXT_POLICY:
+        payload.update({
+            "authored_text_policy": PRESERVE_APPROVED_TEXT_POLICY,
+            "authored_text": seg["narration"],
+            "provider_text_cleanup": "clean-narration-text-v1",
+        })
     return stable_hash(payload)
 
 
@@ -683,10 +747,16 @@ def main():
                     help="reference audio (wav/mp3/etc.) for mimo-v2.5-tts-voiceclone")
     ap.add_argument("--allow-partial-tts", action="store_true",
                     help="allow output when some narration segments fail TTS")
+    ap.add_argument(
+        "--preserve-approved-text",
+        action="store_true",
+        help="fail closed when approved narration exceeds its window; never auto-truncate/resynthesize",
+    )
     args = ap.parse_args()
     work_dir = Path(args.work_dir)
     CONFIG["tts_provider"] = args.tts_provider
     index_provider.load_private_config(CONFIG, os.environ)
+    CONFIG["preserve_approved_text"] = args.preserve_approved_text
     CONFIG["voice_ref"] = (
         args.voice_ref if args.voice_ref is not None else os.environ.get("VOICE_REF", "").strip()
     )
@@ -712,11 +782,12 @@ def main():
         # output timeline. A stale legacy narration_mapped.json in the same work_dir must not
         # silently override it; legacy direct-cut callers can still pass --narration explicitly.
         narration_path = work_dir / "narration.json"
+    if CONFIG["preserve_approved_text"]:
+        archive_current_meta(work_dir / "tts_meta.json")
     narration = json.loads(narration_path.read_text(encoding="utf-8"))
     tts_segments, engine_used, failures = synthesize_tts(narration, work_dir)
     meta = _build_tts_meta(tts_segments, engine_used, narration_path.name, failures)
-    (work_dir / "tts_meta.json").write_text(
-        json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_tts_meta_atomically(work_dir / "tts_meta.json", meta)
     if failures:
         log(f"配音完成但缺 {len(failures)} 段：成片可预览但不建议直接发布")
     log(f"配音完成: {len(tts_segments)} 段, 引擎 {engine_used}")

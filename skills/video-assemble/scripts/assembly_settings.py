@@ -26,6 +26,10 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
     overlay_fingerprint = (
         _artifact_fingerprint(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
     )
+    subtitle_track_fingerprint = (
+        _artifact_fingerprint(Path(work_dir) / "subtitle_track.json")
+        if work_dir is not None else None
+    )
     if audio_mode not in AUDIO_MODES:
         raise ValueError(f"unsupported audio mode: {audio_mode}")
     fingerprint = {
@@ -104,4 +108,9 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
     if burn_subtitles:
         fingerprint["subtitle_renderer"] = "ass"
         fingerprint["subtitle_style"] = _subtitle_style_config()
+    if subtitle_track_fingerprint is not None:
+        fingerprint["subtitle_track"] = {
+            "artifact": "subtitle_track.json",
+            "fingerprint": subtitle_track_fingerprint,
+        }
     return fingerprint
