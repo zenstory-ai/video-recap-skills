@@ -16,7 +16,14 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- **同一句源字幕跨同源连续剪点时先合并再筛短片段**，不再把一句话切碎；不同源、真实删段、输出空隙不合并。`SUBTITLE_RENDER_VERSION` 提升到 9。
+- **SRT 毫秒改为向下量化**，避免帧边界时间被四舍五入后延迟一帧；负值钳到零。
 - **`recap.py` 关闭 argparse 前缀缩写**（`allow_abbrev=False`），显式选项由 parser 记录到 `args._explicit_options`，后续守卫不再靠扫描 `sys.argv`。
+
+### Fixed
+
+- `timeline.json` 的旁白起点改为向下取整到 1e-4 秒网格，序列化后不再截掉已放置音频的首个采样。
+- 已放置的旁白 WAV 若为 IEEE float 格式（Python `wave` 不支持），改用 ffprobe 读取时长，不再在装配和一致性检查时报错。
 
 ## [0.5.0] - 2026-09-05
 
