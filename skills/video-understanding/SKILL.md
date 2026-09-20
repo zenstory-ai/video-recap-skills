@@ -21,7 +21,8 @@ description: >
 
 1. **场景检测**：写 `scenes.json`，包含切点、时长和废片段过滤结果。
 2. **抽帧**：为视觉分析提取代表帧。
-3. **ASR**：通过 `mimo-v2.5-asr` 写时间戳对白 `asr_result.json`。
+3. **ASR**：通过 `mimo-v2.5-asr` 写粗分段对白 `asr_result.json`，并写
+   `asr_timing_evidence.json` 说明可用性、有限时间精度与文本修正来源。
 4. **静音检测**：写 `silence_periods.json`，标注安静窗口与 `has_speech`。
 5. **VLM 观察**：写 `vlm_analysis.json`，包含场景描述、深层分析和 `frame_facts`。
 6. **时间线融合与创作 brief**：写 `timeline_fusion.json`、`asr_writing_chunks.json` 和 `agent_narration_brief.md`。
@@ -54,6 +55,7 @@ python3 scripts/understand.py <video> --work-dir <work_dir> \
 |------|------|
 | `scenes.json` | 场景切点、起止时间与时长 |
 | `asr_result.json` | `[{start, end, text}]` 时间戳对白 |
+| `asr_timing_evidence.json` | ASR 来源/音频/结果绑定、可用性状态、粗窗口精度与 glossary 前后文本 |
 | `vlm_analysis.json` | 逐场景描述、深层分析与 `frame_facts` |
 | `silence_periods.json` | `[{start, end, duration, has_speech}]` 安静窗口 |
 | `timeline_fusion.json` | VLM、ASR 与静音信息的统一时间线 |
@@ -72,4 +74,10 @@ python3 scripts/understand.py <video> --work-dir <work_dir> \
 - 不写解说词，也不做解说评分；只负责生成理解索引与创作简报。
 - 不剪辑、不配音、不合成视频。
 - 不编造信号无法支持的剧情；当 ASR / VLM 过薄时输出素材警告。
+- MiMo ASR 的 `start/end` 是固定分片形成的**粗窗口**，不是词级对齐，也不是经验证的对白边界；
+  `word_alignment` 固定为 `NOT_PERFORMED`。空文本只表示原因未知，不能当作已证实静音。
+- `asr_timing_evidence.json` 区分显式跳过、缺 key、缺时长、提取/API 失败、未知空文本与
+  `LEGACY_UNVERIFIED` 旧缓存，并分别保留 provider observed text 与 post-glossary text，绑定
+  归一化名字集合和修正规则版本。brief 只显示经当前源视频与 ASR 结果验证的状态/sidecar 指纹；
+  缺失或陈旧时显示 `MISSING_OR_STALE`。
 - 不发布、不调度，只向 `work_dir` 写产物并停止。

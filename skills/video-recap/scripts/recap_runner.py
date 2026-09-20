@@ -25,6 +25,7 @@ from recap_stage_qc import (
     _post_render_qc_metadata,
     _prepare_mimo_qc,
     _print_final_qc_pointer,
+    _require_final_qc,
     _run_mimo_qc_stage,
     _tts_qc_metadata,
     _write_final_qc_reports,
@@ -67,6 +68,14 @@ def _voiceover_args(work_dir, narration_path, args):
     if args.allow_partial_tts:
         result.append("--allow-partial-tts")
     return result
+
+
+def _finish_recap(work_dir, final_output, args):
+    final_qc_result = _write_final_qc_reports(work_dir, final_output)
+    if getattr(args, "require_final_qc", False):
+        _require_final_qc(final_qc_result, work_dir)
+    print(f"[video-recap] ✅ 完成: {final_output}")
+    _print_final_qc_pointer(final_qc_result)
 
 
 def _run_or_restore_understanding(source_record, source_work_dir, args):
@@ -305,15 +314,15 @@ def _run_multi_cut(videos, work_dir, args):
         metadata=_post_render_qc_metadata(work_dir, final_output),
     )
     _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
-    final_qc_result = _write_final_qc_reports(work_dir, final_output)
-    print(f"[video-recap] ✅ 完成: {final_output}")
-    _print_final_qc_pointer(final_qc_result)
+    _finish_recap(work_dir, final_output, args)
     _print_narration_review_pointer(work_dir, review_ran=review_ran)
 
 
 def main():
     ap, args = parse_args()
 
+    if getattr(args, "require_final_qc", False) and args.edit_mode == "dub":
+        ap.error("--require-final-qc is only supported in full/cut modes, not dub")
     # argparse does not validate environment-derived defaults against choices.
     if args.mimo_qc not in {"off", "pre-assemble", "post-render", "both"}:
         ap.error(
@@ -348,7 +357,7 @@ def main():
     )
     if explicit_mimo_voice and args.voice_ref:
         ap.error("--mimo-tts-voice and --voice-ref are mutually exclusive")
-    if args.tts_provider == "fish-audio" and (explicit_mimo_voice or args.voice_ref):
+    if args.tts_provider in {"fish-audio", "index-tts"} and (explicit_mimo_voice or args.voice_ref):
         ap.error(
             "--mimo-tts-voice/--voice-ref are only supported by --tts-provider mimo-tts"
         )
@@ -356,9 +365,9 @@ def main():
         ap.error(
             "--voice-ref is only supported in full/cut modes; dub clones the source voice automatically"
         )
-    if args.edit_mode == "dub" and args.tts_provider == "fish-audio":
+    if args.edit_mode == "dub" and args.tts_provider in {"fish-audio", "index-tts"}:
         ap.error(
-            "--tts-provider fish-audio is only supported in full/cut modes; "
+            f"--tts-provider {args.tts_provider} is only supported in full/cut modes; "
             "dub uses MiMo voice cloning"
         )
     if args.edit_mode == "dub" and args.subtitle_y_top is not None:
@@ -637,7 +646,5 @@ def main():
         metadata=_post_render_qc_metadata(work_dir, final_output),
     )
     _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
-    final_qc_result = _write_final_qc_reports(work_dir, final_output)
-    print(f"[video-recap] ✅ 完成: {final_output}")
-    _print_final_qc_pointer(final_qc_result)
+    _finish_recap(work_dir, final_output, args)
     _print_narration_review_pointer(work_dir, review_ran=review_ran)

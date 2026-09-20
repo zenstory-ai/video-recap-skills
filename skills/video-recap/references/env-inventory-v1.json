@@ -85,6 +85,15 @@
     "IDLE_ORIG_VOLUME": {
       "classification": "value"
     },
+    "INDEX_TTS_CACHE_REVISION": {
+      "classification": "value"
+    },
+    "INDEX_TTS_ENDPOINT": {
+      "classification": "url"
+    },
+    "INDEX_TTS_VOICE": {
+      "classification": "value"
+    },
     "JIANYING_BUNDLE_MEDIA": {
       "classification": "value"
     },

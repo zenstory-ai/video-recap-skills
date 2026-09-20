@@ -6,6 +6,7 @@ import json
 
 from pathlib import Path
 
+from asr_timing_evidence import EVIDENCE_FILENAME, validate_asr_timing_evidence
 from extract import FRAME_TIME_CONVENTION_VERSION
 from lib import CONFIG, log, file_fingerprint, load_prompt
 
@@ -211,6 +212,26 @@ def _asr_cache_payload(video_path, *, skip_asr=False):
             "asr_segment_seconds": CONFIG.get("asr_segment_seconds"),
         },
     }
+
+
+def _asr_cache_state(artifact_path, expected_meta, video_path):
+    """Classify an ASR cache without upgrading stale evidence into new authority."""
+    artifact_path = Path(artifact_path)
+    if not _stage_cache_valid(artifact_path, expected_meta):
+        return "MISS"
+    evidence_path = artifact_path.parent / EVIDENCE_FILENAME
+    if not evidence_path.exists():
+        return "LEGACY_UNVERIFIED"
+    if validate_asr_timing_evidence(evidence_path, video_path, artifact_path):
+        evidence = _load_json(evidence_path)
+        if evidence.get("status") == "LEGACY_UNVERIFIED":
+            return "LEGACY_UNVERIFIED"
+        # An all-empty transcription is an unexplained outcome, not proven silence; treating it
+        # as fresh would make one bad run a permanent cache hit.
+        if evidence.get("status") in {"UNAVAILABLE_NO_DURATION", "EMPTY_UNKNOWN"}:
+            return "MISS"
+        return "FRESH"
+    return "MISS"
 
 
 def _silence_cache_payload(video_path, asr_json):

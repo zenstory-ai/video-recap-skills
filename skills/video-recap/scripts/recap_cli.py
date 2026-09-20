@@ -5,7 +5,7 @@ import os
 
 from lib import env_bool
 
-TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio")
+TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
 class _RecordExplicit:
@@ -90,7 +90,7 @@ def parse_args(argv=None):
         "--tts-provider",
         default=os.environ.get("TTS_PROVIDER", "auto"),
         choices=TTS_PROVIDERS,
-        help="voiceover provider; auto prefers configured MiMo, then Fish Audio",
+        help="voiceover provider; auto prefers configured MiMo, then Fish Audio; Index is explicit",
     )
     parser.add_argument(
         "--voice-ref",
@@ -130,6 +130,11 @@ def parse_args(argv=None):
         "--require-narration-review",
         action="store_true",
         help="make narration review a strict pre-TTS gate (also REQUIRE_NARRATION_REVIEW=1)",
+    )
+    parser.add_argument(
+        "--require-final-qc",
+        action="store_true",
+        help="full/cut: require literal passing final_qc and golden_eval summaries",
     )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(

@@ -59,6 +59,10 @@ export MIMO_API_KEY=***
 
 TTS 可通过 `--tts-provider fish-audio` / `TTS_PROVIDER=fish-audio` 改用 Fish Audio；此时另需 `FISH_API_KEY`，默认模型为 `s2.1-pro-free`，默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），可用 `FISH_TTS_REFERENCE_ID` 覆盖。ASR/VLM 仍使用 MiMo。
 
+自托管 TTS 端点（index-tts 协议）可显式选择 `--tts-provider index-tts`，端点与音色由
+`INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 配置；协议、能力限制见配音技能。`auto` 不会选它，
+`--doctor` 仅离线核配置，不证明服务可用或声线正确。
+
 `tp-*` Token Plan 密钥默认使用中国区集群，可用 `MIMO_TOKEN_PLAN_CLUSTER` 覆盖。
 
 可选能力：
@@ -156,6 +160,12 @@ python3 tools/measure_subtitle.py <video>
 
 scene score、亮度统计、contact sheet 与自动 QC 只负责定位候选问题；最终判断以真实播放为准。短时间内出现密集候选时，必须判断每个切点来自原片还是本次拼接：原片无关短镜头整段删，相关短镜头扩展到完整动作/反应；人工拼接点优先移动边界、恢复同源连续运动或合并片段，能消除就不保留。修复失败时回到剪点、声音或文案层，不用更多包装掩盖。
 
+full/cut 交付如需让确定性的最终检查影响命令退出状态，显式传
+`--require-final-qc`。只有 `final_qc.json` 与 `golden_eval.json` 的摘要均为
+`ok: true` 且整数 `blocker_count: 0` 才打印完成并返回成功；缺失、畸形或 blocker
+会保留报告和已渲染诊断媒体，但命令非零退出且不打印完成。默认仍是仅报告、不阻断。
+该参数不支持 `--edit-mode dub`；dub 未传该参数时的准备和渲染行为不变。
+
 ## 5. 英译中原声复刻模式
 
 `--edit-mode dub` 把英文视频翻译为中文，并用原说话者的克隆音色替换人声；它不是在压低原声上叠加解说。
@@ -197,6 +207,7 @@ python3 scripts/recap.py --doctor
 可透传参数：
 
 `--context`、`--scene-threshold`、`--style`、`--edit-mode {full,cut,dub}`、`--target-duration`、
+`--require-final-qc`（仅 full/cut）、
 `--skip-asr`、`--mimo-video-overview`、`--mimo-qc {off,pre-assemble,post-render,both}`、
 `--mimo-qc-refresh`、`--consolidate`、`--consolidate-asr`、`--tts-provider`、`--mimo-tts-voice`、`--voice-ref`、
 `--allow-partial-tts`、`--review-narration`、`--no-review-narration`、`--require-narration-review`、
