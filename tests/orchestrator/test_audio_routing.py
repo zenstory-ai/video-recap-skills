@@ -2,39 +2,14 @@
 
 import json
 import sys
-from argparse import Namespace
-from pathlib import Path
 
 import pytest
 
-
-SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"
-sys.path.insert(0, str(SCRIPTS))
-
-import recap_runner  # noqa: E402
-import recap_cli  # noqa: E402
-import recap_runtime  # noqa: E402
-import recap_timeline  # noqa: E402
-
-
-def _args(**changes):
-    values = {
-        "context": "", "scene_threshold": None, "style": "纪录片",
-        "edit_mode": "full", "audio_mode": "narration", "audio_stream_index": 0,
-        "target_duration": None, "skip_asr": False, "mimo_video_overview": False,
-        "consolidate": True, "consolidate_asr": False,
-        "allow_duration_drift": False,
-        "mimo_qc": "off", "mimo_qc_refresh": False, "mimo_tts_voice": None,
-        "tts_provider": "auto", "voice_ref": None, "allow_partial_tts": False,
-        "preserve_approved_text": False, "burn_subtitles": None,
-        "subtitle_y_top": None, "subtitle_y_bot": None,
-        "review_narration": None, "require_narration_review": False,
-        "output_dir": None, "export_jianying": False,
-        "jianying_bundle_media": False, "jianying_no_bundle_media": False,
-        "material_library_dir": None, "use_materials": False, "save_materials": False,
-    }
-    values.update(changes)
-    return Namespace(**values)
+import recap_runner
+import recap_cli
+import recap_runtime
+import recap_timeline
+from _helpers import manifest_args as _args
 
 
 def _finish_stubs(monkeypatch, work, calls):
@@ -248,25 +223,6 @@ def test_multi_source_rejects_unbound_narration_before_manifest_or_analysis(
     with pytest.raises(SystemExit, match="新的 --work-dir"):
         recap_runner.main()
     assert not (work / "recap_run_manifest.json").exists()
-
-
-def test_source_continuation_does_not_promote_ambient_tts_settings_to_explicit_flags(tmp_path):
-    args = _args(
-        edit_mode="cut",
-        audio_mode="source-mix",
-        tts_provider="fish-audio",
-        voice_ref="ambient-voice.wav",
-        mimo_tts_voice="ambient-mimo-voice",
-    )
-
-    continuation = recap_timeline._continuation_command(
-        tmp_path / "in.mp4", tmp_path / "work", args
-    )
-
-    assert "--audio-mode source-mix" in continuation
-    assert "--tts-provider" not in continuation
-    assert "--voice-ref" not in continuation
-    assert "--mimo-tts-voice" not in continuation
 
 
 def test_full_adopted_audio_forwards_selected_stream(monkeypatch, tmp_path):

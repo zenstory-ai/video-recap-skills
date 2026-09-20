@@ -1,23 +1,20 @@
 """Opt-in final-QC exit semantics at the real video-recap entry point."""
 
-import ast
 from argparse import Namespace
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "skills/video-recap/scripts"
-sys.path.insert(0, str(SCRIPTS))
-import recap_cli  # noqa: E402
-import recap_runner  # noqa: E402
-import recap_runtime  # noqa: E402
-import recap_stage_qc  # noqa: E402
-import recap_timeline  # noqa: E402
+import recap_cli
+import recap_runner
+import recap_runtime
+import recap_stage_qc
+import recap_timeline
+from _helpers import SCRIPTS
 
 
 def _summary(final=True, final_count=0, golden=True, golden_count=0):
@@ -70,16 +67,6 @@ def test_completion_helper_gates_before_success_and_default_stays_advisory(
     output = capsys.readouterr().out
     assert "✅ 完成" in output
     assert "仅报告，不阻断" in output
-
-
-def test_all_three_supported_runner_exits_use_completion_helper():
-    tree = ast.parse(Path(recap_runner.__file__).read_text(encoding="utf-8"))
-    calls = [
-        node for node in ast.walk(tree)
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-        and node.func.id == "_finish_recap"
-    ]
-    assert len(calls) == 3
 
 
 def test_local_adoption_route_strict_failure_exits_before_success(

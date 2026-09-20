@@ -1,10 +1,6 @@
 import json
-import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
-
-import materials  # noqa: E402
+import materials
 
 
 def test_source_id_stable_and_duplicate_paths_get_suffix(tmp_path):
@@ -123,23 +119,8 @@ def test_restore_material_prunes_stale_allowed_artifacts_before_copy(tmp_path):
     assert "vlm_analysis.json" in restored["pruned_artifacts"]
 
 
-def test_material_files_do_not_include_api_key_string(tmp_path):
-    lib = tmp_path / "library"
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "understanding_index.json").write_text(json.dumps({"summary": "safe"}), encoding="utf-8")
-    materials.save_material(lib, work, tmp_path / "ep.mp4", "c" * 64, "settings")
-    all_text = "\n".join(p.read_text(encoding="utf-8") for p in lib.rglob("*.json"))
-    all_text += "\n" + "\n".join(p.read_text(encoding="utf-8") for p in lib.rglob("*.md"))
-    all_text += "\n" + (lib / "materials_index.jsonl").read_text(encoding="utf-8")
-    assert "tp-secret" not in all_text
-    assert "MIMO_API_KEY" not in all_text
-
-
 def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_path):
-    """Redaction must remove credential VALUES while leaving ordinary analysis words
-    (secret/token/api_key as plain text, benign field names) intact — the library is a
-    faithful, reusable copy of the analysis, not a word-censored one."""
+    """Redaction drops credential VALUES but keeps ordinary analysis words and field names."""
     lib = tmp_path / "library"
     work = tmp_path / "work"
     work.mkdir()

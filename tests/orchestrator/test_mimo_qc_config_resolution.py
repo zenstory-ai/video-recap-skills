@@ -16,16 +16,11 @@ So the latter two are exercised by evaluating lib.py in a fresh module namespace
 variable set, not by patching os.environ after the fact.
 """
 import importlib.util
-import sys
-from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[2]
-RECAP_SCRIPTS = ROOT / "skills" / "video-recap" / "scripts"
-sys.path.insert(0, str(RECAP_SCRIPTS))
-
-from mimo_qc_evidence import safe_mimo_config  # noqa: E402
+from _helpers import SCRIPTS as RECAP_SCRIPTS
+from mimo_qc_evidence import safe_mimo_config
 
 MODEL_ENV_VARS = ("MIMO_QC_MODEL", "MIMO_MODEL", "MIMO_VIDEO_MODEL")
 

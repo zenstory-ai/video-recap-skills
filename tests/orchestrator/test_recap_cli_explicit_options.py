@@ -1,13 +1,10 @@
 """recap.py must not accept option abbreviations, and must know which options were explicit."""
 
 import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/video-recap/scripts"))
-
-import recap_cli  # noqa: E402
+import recap_cli
 
 
 def test_parse_args_records_explicit_options_from_its_own_argv(monkeypatch):
