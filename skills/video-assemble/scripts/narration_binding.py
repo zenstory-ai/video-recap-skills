@@ -4,16 +4,18 @@ import hashlib
 import json
 import math
 from pathlib import Path
-import re
 import shutil
 import subprocess
 
 from frozen_audio import probe_audio_packets
+from strict_inputs import (
+    SHA256_RE as SHA256, read_json_bytes, require_digest, require_fields,
+    require_local_path, sha256_file, write_json_atomic,
+)
 
 
 ARTIFACT = "narration_input_binding"
 FILENAME = "narration_input_binding.json"
-SHA256 = re.compile(r"[a-f0-9]{64}")
 # The conservative default an adoption gets when it declares nothing stronger.
 TEMPO_POLICY = {
     "global_atempo": 1.0,
@@ -26,25 +28,6 @@ TEMPO_NUMBERS = ("global_atempo", "segment_tempo_max", "cumulative_tempo_max",
                  "cumulative_tempo_hard_max")
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _fields(value, required, label):
-    if not isinstance(value, dict) or set(value) != set(required):
-        raise ValueError(f"{label} requires exactly fields {required}")
-
-
-def _digest(value, label):
-    if not isinstance(value, str) or not SHA256.fullmatch(value):
-        raise ValueError(f"{label} must be a lowercase SHA256")
-    return value
-
-
 def validate_tempo_policy(value):
     """Accept any adoption-declared tempo policy whose shape and bounds hold.
 
@@ -52,7 +35,7 @@ def validate_tempo_policy(value):
     played; the module only refuses policies that are malformed or that would
     let a segment exceed the cumulative hard ceiling the policy itself declares.
     """
-    _fields(value, sorted(TEMPO_POLICY), "tempo_policy")
+    require_fields(value, sorted(TEMPO_POLICY), "tempo_policy")
     policy = {}
     for key in TEMPO_NUMBERS:
         number = value[key]
@@ -75,37 +58,18 @@ def validate_tempo_policy(value):
     return policy
 
 
-def _local_file(path, label):
-    if not isinstance(path, (str, Path)) or not str(path) or "://" in str(path):
-        raise ValueError(f"{label} requires a local path")
-    resolved = Path(path).resolve()
-    if not resolved.is_file():
-        raise ValueError(f"{label} file is missing: {resolved}")
-    return resolved
-
-
-def _read_json_bytes(path, label):
-    path = _local_file(path, label)
-    raw = path.read_bytes()
-    try:
-        value = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"{label} is not valid JSON") from exc
-    return path, raw, value
-
-
 def load_adoption(path, *, tts_meta_path, tts_segments):
     """Load strict v1 adoption and bind it to exact current tts_meta bytes/memory."""
     if tts_meta_path is None:
         raise ValueError("narration adoption requires explicit tts_meta_path")
-    adoption_path, adoption_raw, adoption = _read_json_bytes(path, "narration adoption")
-    _fields(adoption, ["artifact", "schema_version", "tts_meta_sha256", "segments",
+    adoption_path, adoption_raw, adoption = read_json_bytes(path, "narration adoption")
+    require_fields(adoption, ["artifact", "schema_version", "tts_meta_sha256", "segments",
                        "tempo_policy"], "narration adoption")
     if adoption["artifact"] != "narration_adoption" or type(adoption["schema_version"]) is not int \
             or adoption["schema_version"] != 1:
         raise ValueError("unsupported narration_adoption schema")
-    tts_meta_path, tts_raw, tts_meta = _read_json_bytes(tts_meta_path, "tts_meta")
-    expected_meta_hash = _digest(adoption["tts_meta_sha256"], "tts_meta_sha256")
+    tts_meta_path, tts_raw, tts_meta = read_json_bytes(tts_meta_path, "tts_meta")
+    expected_meta_hash = require_digest(adoption["tts_meta_sha256"], "tts_meta_sha256")
     if hashlib.sha256(tts_raw).hexdigest() != expected_meta_hash:
         raise ValueError("tts_meta bytes do not match narration adoption")
     if not isinstance(tts_meta, dict) or not isinstance(tts_meta.get("segments"), list):
@@ -117,14 +81,14 @@ def load_adoption(path, *, tts_meta_path, tts_segments):
         raise ValueError("adoption segments must exactly cover tts_meta segments")
     normalized_segments = []
     for adopted, actual in zip(adoption["segments"], tts_segments):
-        _fields(adopted, ["index", "spoken_text", "processed_wav_sha256",
+        require_fields(adopted, ["index", "spoken_text", "processed_wav_sha256",
                           "requested_provider", "requested_voice"], "adoption segment")
         if type(adopted["index"]) is not int or adopted["index"] != actual.get("index"):
             raise ValueError("adoption segment index/order differs from tts_meta")
         spoken = actual.get("spoken_text", actual.get("narration"))
         if not isinstance(adopted["spoken_text"], str) or adopted["spoken_text"] != spoken:
             raise ValueError("adoption spoken_text differs from tts_meta")
-        _digest(adopted["processed_wav_sha256"], "adoption processed_wav_sha256")
+        require_digest(adopted["processed_wav_sha256"], "adoption processed_wav_sha256")
         if adopted["processed_wav_sha256"] != actual.get("processed_wav_sha256"):
             raise ValueError("adoption segment hash differs from bound tts_meta")
         for key in ("requested_provider", "requested_voice"):
@@ -190,7 +154,7 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
             path = Path(str(segment.get("audio_path", ""))).resolve()
             originals.append({
                 "index": segment.get("index", position), "source": path,
-                "sha256": _sha256(path) if path.is_file() else None,
+                "sha256": sha256_file(path) if path.is_file() else None,
                 "spoken_text": segment.get("spoken_text", segment.get("narration")),
             })
         return {
@@ -208,11 +172,11 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
         adopted = adoption["segments"][position] if adoption else None
         declared = segment.get("processed_wav_sha256")
         if declared is not None:
-            _digest(declared, "processed_wav_sha256")
+            require_digest(declared, "processed_wav_sha256")
         if adopted and declared != adopted["processed_wav_sha256"]:
             raise ValueError("tts_meta processed hash differs from narration adoption")
-        source = _local_file(segment.get("audio_path"), "narration audio")
-        actual_hash = _sha256(source)
+        source = require_local_path(segment.get("audio_path"), "narration audio")
+        actual_hash = sha256_file(source)
         if declared is not None and actual_hash != declared:
             raise ValueError("narration audio hash identity mismatch")
         if adopted and actual_hash != adopted["processed_wav_sha256"]:
@@ -236,7 +200,7 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
         suffix = original["source"].suffix or ".audio"
         snapshot = snapshot_dir / f"segment_{position:04d}_{segment['index']}{suffix}"
         _copy_snapshot(original["source"], snapshot)
-        if _sha256(snapshot) != original["sha256"]:
+        if sha256_file(snapshot) != original["sha256"]:
             raise ValueError("narration snapshot differs from validated input")
         segment["audio_path"] = str(snapshot)
         segment["narration_input_original"] = {
@@ -262,14 +226,14 @@ def assert_current(context):
         return
     adoption = context.get("adoption")
     if adoption:
-        if _sha256(adoption["path"]) != adoption["sha256"]:
+        if sha256_file(adoption["path"]) != adoption["sha256"]:
             raise ValueError("narration adoption changed during assembly")
-        if _sha256(adoption["tts_meta"]["path"]) != adoption["tts_meta"]["sha256"]:
+        if sha256_file(adoption["tts_meta"]["path"]) != adoption["tts_meta"]["sha256"]:
             raise ValueError("tts_meta changed during assembly")
     for item in context["segments"]:
-        if _sha256(item["original"]["path"]) != item["original"]["sha256"]:
+        if sha256_file(item["original"]["path"]) != item["original"]["sha256"]:
             raise ValueError("original narration input changed during assembly")
-        if _sha256(item["snapshot"]["path"]) != item["snapshot"]["sha256"]:
+        if sha256_file(item["snapshot"]["path"]) != item["snapshot"]["sha256"]:
             raise ValueError("narration snapshot changed during assembly")
     sealed = context.get("sealed")
     if sealed:
@@ -278,10 +242,10 @@ def assert_current(context):
             if item["conversion"]["applied"]:
                 assets.append(item["conversion"])
             for asset in assets:
-                if _sha256(asset["path"]) != asset["sha256"]:
+                if sha256_file(asset["path"]) != asset["sha256"]:
                     raise ValueError("sealed narration derivative changed during assembly")
         bus = sealed["narration_bus"]
-        if _sha256(bus["path"]) != bus["sha256"]:
+        if sha256_file(bus["path"]) != bus["sha256"]:
             raise ValueError("sealed narration bus changed during assembly")
 
 
@@ -303,8 +267,8 @@ def _pcm(path):
 
 
 def _asset(path, *, pcm=False):
-    path = _local_file(path, "binding asset")
-    value = {"path": str(path), "sha256": _sha256(path)}
+    path = require_local_path(path, "binding asset")
+    value = {"path": str(path), "sha256": sha256_file(path)}
     if pcm:
         value["pcm"] = _pcm(path)
     return value
@@ -357,14 +321,14 @@ def _active_report(context, rendered_output, final_output):
             "conversion": sealed[item["index"]]["conversion"],
             "placed": sealed[item["index"]]["placed"],
         })
-    rendered_path = _local_file(rendered_output, "rendered output")
+    rendered_path = require_local_path(rendered_output, "rendered output")
     final_audio = probe_audio_packets(rendered_path, 0)
     return {
         "artifact": ARTIFACT, "schema_version": 1, "status": "FINALIZED",
         "identity_status": context["identity_status"], "adoption": context["adoption"],
         "segments": segments, "narration_bus": context["sealed"]["narration_bus"],
         "final_output": {
-            "path": str(Path(final_output).resolve()), "sha256": _sha256(rendered_path),
+            "path": str(Path(final_output).resolve()), "sha256": sha256_file(rendered_path),
             "audio_stream_identity": {
                 "decoder": final_audio["decoder"], "packet_count": final_audio["packet_count"],
                 "payload_sha256": final_audio["payload_sha256"],
@@ -387,9 +351,9 @@ def stage_final_binding(context, tts_segments, narration_wav, rendered_output, f
 def staged_binding_fingerprint(report, staged_path, final_path):
     if not isinstance(report, dict) or report.get("status") != "FINALIZED":
         raise RuntimeError("active finalized narration binding is missing")
-    staged_path = _local_file(staged_path, "staged narration binding")
+    staged_path = require_local_path(staged_path, "staged narration binding")
     return {
-        "path": str(Path(final_path).resolve()), "sha256": _sha256(staged_path),
+        "path": str(Path(final_path).resolve()), "sha256": sha256_file(staged_path),
         "identity_status": report["identity_status"],
         "tempo_policy": (
             report["adoption"]["tempo_policy"] if report.get("adoption") else None
@@ -421,23 +385,17 @@ def finalize_binding(context, tts_segments, narration_wav, final_output, *, stag
                 for original in context["originals"]
             ],
             "narration_bus": ({"path": str(Path(narration_wav).resolve()),
-                               "sha256": _sha256(narration_wav)}
+                               "sha256": sha256_file(narration_wav)}
                               if Path(narration_wav).is_file() else None),
             "final_output": ({"path": str(Path(final_output).resolve()),
-                              "sha256": _sha256(final_output)}
+                              "sha256": sha256_file(final_output)}
                              if Path(final_output).is_file() else None),
             "voice_authentication": "NOT_CHECKED", "direct_listening": "NOT_CHECKED",
         }
-        destination = Path(narration_wav).resolve().parent / FILENAME
-        temporary = destination.with_suffix(".writing.json")
-        temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(destination)
+        write_json_atomic(Path(narration_wav).resolve().parent / FILENAME, report)
         return report
     report = _active_report(context, final_output, final_output)
-    destination = Path(narration_wav).resolve().parent / FILENAME
-    temporary = destination.with_suffix(".writing.json")
-    temporary.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(destination)
+    write_json_atomic(Path(narration_wav).resolve().parent / FILENAME, report)
     return report
 
 
@@ -474,9 +432,9 @@ def binding_fingerprint(work_dir):
     final_path = Path(str(final_output.get("path", "")))
     expected = final_output.get("sha256")
     if not final_path.is_file() or not SHA256.fullmatch(str(expected)) \
-            or _sha256(final_path) != expected:
+            or sha256_file(final_path) != expected:
         return None
-    return {"path": str(path.resolve()), "sha256": _sha256(path),
+    return {"path": str(path.resolve()), "sha256": sha256_file(path),
             "identity_status": value["identity_status"],
             "tempo_policy": (
                 value["adoption"]["tempo_policy"]

@@ -12,84 +12,21 @@ import shutil
 import subprocess
 
 from assemble_constants import SUPPORTED_PICTURE_CODECS, frame_clock_samples
+from strict_inputs import (
+    canonical_fraction, probe_json, read_json_bytes, require_asset, require_fields,
+    require_integer, require_number, run_logged, sha256_file, write_json_atomic,
+)
 
 
 RATE = 48_000
 CHANNELS = 2
 CODEC = "pcm_f32le"
-SHA256 = re.compile(r"[a-f0-9]{64}")
 SOURCE_ROLES = {"protected_original", "mixed_original_under_narration"}
 FADE_SHAPES = {"linear", "half_cosine"}
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _fields(value, required, label):
-    if not isinstance(value, dict) or set(value) != set(required):
-        raise ValueError(f"{label} requires exactly fields {required}")
-
-
-def _integer(value, label, minimum=0):
-    if type(value) is not int or value < minimum:
-        raise ValueError(f"{label} must be an integer >= {minimum}")
-    return value
-
-
-def _gain(value, label):
-    if type(value) not in (int, float) or not math.isfinite(value) or not 0 <= value <= 16:
-        raise ValueError(f"{label} must be a finite gain in [0,16]")
-    return float(value)
-
-
-def _digest(value, label):
-    if not isinstance(value, str) or not SHA256.fullmatch(value):
-        raise ValueError(f"{label} must be a lowercase SHA256")
-    return value
-
-
-def _asset(path, digest, label):
-    if not isinstance(path, str) or not path or "://" in path:
-        raise ValueError(f"{label} requires a local path")
-    expected = _digest(digest, f"{label} sha256")
-    resolved = Path(path).resolve()
-    if not resolved.is_file() or _sha256(resolved) != expected:
-        raise ValueError(f"{label} identity mismatch or file missing")
-    return resolved, expected
-
-
-def _fraction(value, label):
-    if not isinstance(value, str):
-        raise ValueError(f"{label} must be a canonical rational string")
-    try:
-        result = Fraction(value)
-    except (ValueError, ZeroDivisionError) as exc:
-        raise ValueError(f"invalid {label}") from exc
-    if result <= 0 or value != f"{result.numerator}/{result.denominator}":
-        raise ValueError(f"{label} must be a positive canonical N/D rational")
-    return result
-
-
-def _probe(path, *arguments):
-    result = subprocess.run(
-        ["ffprobe", "-v", "error", *arguments, "-of", "json", str(path)],
-        capture_output=True, text=True, timeout=600,
-    )
-    if result.returncode or result.stderr.strip():
-        raise ValueError(f"media probe failed for {path}: {result.stderr.strip()}")
-    try:
-        return json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"invalid media probe JSON for {path}") from exc
-
-
 def _probe_cfr(path):
-    data = _probe(
+    data = probe_json(
         path, "-select_streams", "v:0", "-show_streams", "-show_packets",
         "-show_entries",
         "stream=codec_name,time_base,start_pts,start_time,duration_ts,duration,"
@@ -102,8 +39,8 @@ def _probe_cfr(path):
     codec = stream.get("codec_name")
     if codec not in SUPPORTED_PICTURE_CODECS:
         raise ValueError("v1 packet/frame CFR proof supports H264 and HEVC picture sources only")
-    average = _fraction(stream.get("avg_frame_rate"), "actual average frame rate")
-    real = _fraction(stream.get("r_frame_rate"), "actual real frame rate")
+    average = canonical_fraction(stream.get("avg_frame_rate"), "actual average frame rate")
+    real = canonical_fraction(stream.get("r_frame_rate"), "actual real frame rate")
     if average != real:
         raise ValueError("source must be same-speed CFR")
     start_time = Fraction(stream.get("start_time", "0"))
@@ -128,7 +65,7 @@ def _probe_cfr(path):
 
 
 def _probe_audio(path, ordinal):
-    data = _probe(
+    data = probe_json(
         path, "-select_streams", f"a:{ordinal}", "-show_streams",
         "-show_entries", "stream=index,codec_name,sample_fmt,sample_rate,channels,"
         "channel_layout,time_base,start_pts,start_time,duration_ts,duration",
@@ -158,8 +95,8 @@ def _probe_pcm(path):
 
 
 def _validate_fades(value, duration, curves, label):
-    fade_in = _integer(value["fade_in_samples"], f"{label} fade_in_samples")
-    fade_out = _integer(value["fade_out_samples"], f"{label} fade_out_samples")
+    fade_in = require_integer(value["fade_in_samples"], f"{label} fade_in_samples")
+    fade_out = require_integer(value["fade_out_samples"], f"{label} fade_out_samples")
     if fade_in + fade_out > duration:
         raise ValueError(f"{label} fades overlap")
     if fade_in == 1 or fade_out == 1:
@@ -170,21 +107,16 @@ def _validate_fades(value, duration, curves, label):
 
 
 def load_plan(plan_path):
-    plan_path = Path(plan_path).resolve()
-    raw = plan_path.read_bytes()
-    try:
-        plan = json.loads(raw)
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("source score plan is not valid JSON") from exc
-    _fields(plan, ["artifact", "schema_version", "output", "source_segments",
+    plan_path, raw, plan = read_json_bytes(plan_path, "source score plan")
+    require_fields(plan, ["artifact", "schema_version", "output", "source_segments",
                    "source_silence", "score"], "source score plan")
     if plan["artifact"] != "source_score_plan" or type(plan["schema_version"]) is not int \
             or plan["schema_version"] != 1:
         raise ValueError("unsupported source_score_plan schema")
-    _fields(plan["output"], ["sample_rate", "channels", "total_samples"], "output")
+    require_fields(plan["output"], ["sample_rate", "channels", "total_samples"], "output")
     if plan["output"]["sample_rate"] != RATE or plan["output"]["channels"] != CHANNELS:
         raise ValueError("v1 output is fixed at 48 kHz stereo")
-    total = _integer(plan["output"]["total_samples"], "total_samples", 1)
+    total = require_integer(plan["output"]["total_samples"], "total_samples", 1)
     if not isinstance(plan["source_segments"], list) or not isinstance(plan["source_silence"], list):
         raise ValueError("source segments and explicit silence must be lists")
     segments = []
@@ -197,15 +129,15 @@ def load_plan(plan_path):
         "fade_out_samples", "fade_shape", "role",
     ]
     for value in plan["source_segments"]:
-        _fields(value, segment_fields, "source segment")
+        require_fields(value, segment_fields, "source segment")
         if not isinstance(value["id"], str) or not value["id"] or value["id"] in ids:
             raise ValueError("source segment id must be unique and non-empty")
         ids.add(value["id"])
-        ordinal = _integer(value["audio_stream"], "audio_stream")
-        path, digest = _asset(value["path"], value["sha256"], "source")
-        fps = _fraction(value["source_fps"], "source_fps")
-        start = _integer(value["source_start_frame"], "source_start_frame")
-        end = _integer(value["source_end_frame"], "source_end_frame", 1)
+        ordinal = require_integer(value["audio_stream"], "audio_stream")
+        path, digest = require_asset(value["path"], value["sha256"], "source")
+        fps = canonical_fraction(value["source_fps"], "source_fps")
+        start = require_integer(value["source_start_frame"], "source_start_frame")
+        end = require_integer(value["source_end_frame"], "source_end_frame", 1)
         if end <= start:
             raise ValueError("source frame interval must be non-empty")
         key = (str(path), digest, ordinal)
@@ -226,20 +158,20 @@ def load_plan(plan_path):
         if duration <= 0:
             raise ValueError("source frame interval is shorter than one 48 kHz sample")
         fade_in, fade_out = _validate_fades(value, duration, {"linear"}, "source")
-        output_start = _integer(value["output_start_sample"], "output_start_sample")
+        output_start = require_integer(value["output_start_sample"], "output_start_sample")
         output_end = output_start + duration
         if output_end > total or value["role"] not in SOURCE_ROLES:
             raise ValueError("source output range or role is unsupported")
-        segments.append({**value, "path": str(path), "gain": _gain(value["gain"], "source gain"),
+        segments.append({**value, "path": str(path), "gain": require_number(value["gain"], "source gain", 0, 16),
                          "source_start_sample": source_start_sample,
                          "source_end_sample": source_end_sample,
                          "output_end_sample": output_end, "fade_in_samples": fade_in,
                          "fade_out_samples": fade_out, "asset_key": key})
     silence = []
     for value in plan["source_silence"]:
-        _fields(value, ["output_start_sample", "output_end_sample", "role"], "source silence")
-        start = _integer(value["output_start_sample"], "silence output_start_sample")
-        end = _integer(value["output_end_sample"], "silence output_end_sample", 1)
+        require_fields(value, ["output_start_sample", "output_end_sample", "role"], "source silence")
+        start = require_integer(value["output_start_sample"], "silence output_start_sample")
+        end = require_integer(value["output_end_sample"], "silence output_end_sample", 1)
         if value["role"] != "silence" or not start < end <= total:
             raise ValueError("invalid explicit source silence range")
         silence.append(dict(value))
@@ -258,21 +190,21 @@ def load_plan(plan_path):
     if not isinstance(score, dict) or score.get("kind") not in {"raw", "frozen", "none"}:
         raise ValueError("score kind must be raw, frozen, or none")
     if score["kind"] == "raw":
-        _fields(score, ["kind", "path", "sha256", "audio_stream", "source_offset_sample",
+        require_fields(score, ["kind", "path", "sha256", "audio_stream", "source_offset_sample",
                         "gain", "fade_in_samples", "fade_out_samples", "fade_shape"], "raw score")
-        score_path, score_hash = _asset(score["path"], score["sha256"], "raw score")
-        ordinal = _integer(score["audio_stream"], "score audio_stream")
-        offset = _integer(score["source_offset_sample"], "score source_offset_sample")
+        score_path, score_hash = require_asset(score["path"], score["sha256"], "raw score")
+        ordinal = require_integer(score["audio_stream"], "score audio_stream")
+        offset = require_integer(score["source_offset_sample"], "score source_offset_sample")
         fade_in, fade_out = _validate_fades(score, total, FADE_SHAPES, "score")
         score = {**score, "path": str(score_path), "sha256": score_hash,
                  "audio_stream": ordinal, "source_offset_sample": offset,
-                 "gain": _gain(score["gain"], "score gain"),
+                 "gain": require_number(score["gain"], "score gain", 0, 16),
                  "fade_in_samples": fade_in, "fade_out_samples": fade_out,
                  "audio": _probe_audio(score_path, ordinal)}
     elif score["kind"] == "frozen":
-        _fields(score, ["kind", "path", "sha256", "audio_stream"], "frozen score")
-        score_path, score_hash = _asset(score["path"], score["sha256"], "frozen score")
-        ordinal = _integer(score["audio_stream"], "score audio_stream")
+        require_fields(score, ["kind", "path", "sha256", "audio_stream"], "frozen score")
+        score_path, score_hash = require_asset(score["path"], score["sha256"], "frozen score")
+        ordinal = require_integer(score["audio_stream"], "score audio_stream")
         if ordinal != 0:
             raise ValueError("frozen WAV supports only a:0")
         pcm = _probe_pcm(score_path)
@@ -280,20 +212,14 @@ def load_plan(plan_path):
             raise ValueError("frozen score must exactly match total_samples")
         score = {**score, "path": str(score_path), "sha256": score_hash, "pcm": pcm}
     else:
-        _fields(score, ["kind"], "none score")
+        require_fields(score, ["kind"], "none score")
     return {"plan_path": plan_path, "plan_sha256": hashlib.sha256(raw).hexdigest(),
             "output": {**plan["output"], "codec": CODEC}, "source_segments": segments,
             "source_silence": silence, "source_assets": list(asset_cache.values()),
             "score": score}
 
 
-def _run(command, directory, label):
-    (directory / f"{label}.command.json").write_text(json.dumps(command, indent=2) + "\n", encoding="utf-8")
-    result = subprocess.run(command, capture_output=True, text=True, timeout=3600)
-    (directory / f"{label}.log").write_text(result.stderr, encoding="utf-8")
-    if result.returncode:
-        raise RuntimeError(f"{label} FFmpeg failed; see {label}.log")
-    return result
+_run = run_logged
 
 
 def _decode_command(path, ordinal, output):
@@ -327,18 +253,18 @@ def _fade_filters(duration, fade_in, fade_out, curve):
 
 
 def _assert_current(plan):
-    if _sha256(plan["plan_path"]) != plan["plan_sha256"]:
+    if sha256_file(plan["plan_path"]) != plan["plan_sha256"]:
         raise ValueError("source score plan changed during operation")
     for asset in plan["source_assets"]:
-        if _sha256(asset["path"]) != asset["sha256"]:
+        if sha256_file(asset["path"]) != asset["sha256"]:
             raise ValueError("source audio asset changed during operation")
     score = plan["score"]
-    if score["kind"] != "none" and _sha256(score["path"]) != score["sha256"]:
+    if score["kind"] != "none" and sha256_file(score["path"]) != score["sha256"]:
         raise ValueError("score asset changed during operation")
 
 
 def _assert_identity(path, identity, label):
-    if _sha256(path) != identity["sha256"]:
+    if sha256_file(path) != identity["sha256"]:
         raise ValueError(f"{label} changed after its identity was sealed")
 
 
@@ -427,7 +353,7 @@ def _astats(path):
 
 
 def _output_identity(path):
-    initial_hash = _sha256(path)
+    initial_hash = sha256_file(path)
     pcm = _probe_pcm(path)
     stats = _astats(path)
     result = subprocess.run(
@@ -438,7 +364,7 @@ def _output_identity(path):
     match = re.fullmatch(r"SHA256=([a-f0-9]{64})\s*", result.stdout)
     if result.returncode or not match:
         raise ValueError("canonical PCM payload hash failed")
-    if _sha256(path) != initial_hash:
+    if sha256_file(path) != initial_hash:
         raise ValueError("audio changed while its identity was being measured")
     return {"path": str(path), "sha256": initial_hash,
             "pcm_payload_sha256": match.group(1), "pcm": pcm, **stats}
@@ -446,19 +372,16 @@ def _output_identity(path):
 
 def validate_prepared_receipt(reference, expected_format):
     """Validate one completed prepared-bed receipt and its three current PCM stems."""
-    _fields(reference, ["path", "sha256"], "prepared receipt reference")
-    _fields(expected_format, ["sample_rate", "channels", "total_samples"],
+    require_fields(reference, ["path", "sha256"], "prepared receipt reference")
+    require_fields(expected_format, ["sample_rate", "channels", "total_samples"],
             "expected prepared format")
     if expected_format["sample_rate"] != RATE or expected_format["channels"] != CHANNELS:
         raise ValueError("prepared format must be 48 kHz stereo")
-    _integer(expected_format["total_samples"], "prepared total_samples", 1)
-    receipt_path, receipt_hash = _asset(
+    require_integer(expected_format["total_samples"], "prepared total_samples", 1)
+    receipt_path, receipt_hash = require_asset(
         reference["path"], reference["sha256"], "prepared receipt"
     )
-    try:
-        receipt = json.loads(receipt_path.read_bytes())
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError("prepared receipt is not valid JSON") from exc
+    receipt = read_json_bytes(receipt_path, "prepared receipt")[2]
     if not isinstance(receipt, dict) or receipt.get("artifact") != "prepared_bed_receipt" \
             or receipt.get("schema_version") != 1 or receipt.get("status") != "PREPARED":
         raise ValueError("prepared receipt is not a completed v1 artifact")
@@ -474,7 +397,7 @@ def validate_prepared_receipt(reference, expected_format):
     for name, declared in outputs.items():
         if not isinstance(declared, dict):
             raise ValueError(f"prepared receipt {name} identity is invalid")
-        path, expected_hash = _asset(declared.get("path"), declared.get("sha256"), name)
+        path, expected_hash = require_asset(declared.get("path"), declared.get("sha256"), name)
         stream = _probe_audio(path, 0)
         if stream["codec_name"] != CODEC or stream["sample_rate"] != str(RATE) or \
                 stream["channels"] != CHANNELS or \
@@ -573,9 +496,7 @@ def prepare_source_score(plan_path, output_dir):
         for name, path in staged.items():
             path.rename(finals[name])
             receipt["outputs"][name]["path"] = str(finals[name])
-        temporary = receipt_path.with_suffix(".writing.json")
-        temporary.write_text(json.dumps(receipt, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        temporary.replace(receipt_path)
+        write_json_atomic(receipt_path, receipt)
         return receipt
     except Exception:
         for path in [*staged.values(), *finals.values(), receipt_path]:

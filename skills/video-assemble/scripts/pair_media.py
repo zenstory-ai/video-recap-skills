@@ -16,47 +16,22 @@ import subprocess
 
 from assemble_constants import SUPPORTED_PICTURE_CODECS
 from frozen_audio import probe_audio_packets, verify_adopted_audio
+from strict_inputs import (
+    probe_json, require_asset, require_fields, require_integer, run_logged, sha256_file,
+    write_json_atomic,
+)
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open('rb') as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b''):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _save(path, value):
-    temporary = path.with_suffix('.writing.json')
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding="utf-8")
-    temporary.replace(path)
-
-
-def _fields(value, required):
-    if not isinstance(value, dict) or set(value) != set(required):
-        raise ValueError(f'Expected exactly these fields: {required}')
+_probe = probe_json
 
 
 def _asset(value, audio=False):
-    _fields(value, ['path', 'sha256', 'selected_stream'] if audio else ['path', 'sha256'])
-    if not isinstance(value['path'], str) or not value['path'] or '://' in value['path']:
-        raise ValueError('Asset requires a local file path')
-    if not isinstance(value['sha256'], str) or not re.fullmatch('[a-f0-9]{64}', value['sha256']):
-        raise ValueError('Asset requires lowercase SHA256')
-    if audio and (type(value['selected_stream']) is not int or value['selected_stream'] < 0):
-        raise ValueError('Audio selected_stream must be a nonnegative integer ordinal')
-    path = Path(value['path']).resolve()
-    if not path.is_file() or _sha256(path) != value['sha256']:
-        raise ValueError('Asset identity mismatch or file missing')
+    require_fields(value, ['path', 'sha256', 'selected_stream'] if audio else ['path', 'sha256'],
+                   'asset')
+    if audio:
+        require_integer(value['selected_stream'], 'Audio selected_stream')
+    path, _ = require_asset(value['path'], value['sha256'], 'asset')
     return {**value, 'path': str(path)}
-
-
-def _probe(path, *args):
-    command = ['ffprobe', '-v', 'error', *args, '-of', 'json', str(path)]
-    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
-    if result.returncode or result.stderr.strip():
-        raise ValueError(f'Media probe failed: {result.stderr.strip()}')
-    return json.loads(result.stdout)
 
 
 def _time(value):
@@ -160,11 +135,7 @@ def validate_pair_timing(picture, audio):
 
 
 def _run_mux(command, directory):
-    _save(directory / 'mux.command.json', command)
-    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
-    (directory / 'mux.log').write_text(result.stderr, encoding="utf-8")
-    if result.returncode:
-        raise RuntimeError('Pair mux failed; see mux.log')
+    run_logged(command, directory, 'mux', timeout=600)
 
 
 def _verify_output(path):
@@ -186,22 +157,22 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
     report = {'artifact': 'media_pair_run', 'schema_version': 1, 'status': 'PREPARING',
               'direct_listening': 'NOT_CHECKED', 'normal_speed_review': 'NOT_CHECKED',
               'release_approved': False}
-    _save(report_path, report)
+    write_json_atomic(report_path, report)
     try:
         raw = plan_path.read_bytes()
         plan_hash = hashlib.sha256(raw).hexdigest()
         plan = json.loads(raw)
-        _fields(plan, ['artifact', 'schema_version', 'picture', 'audio'])
+        require_fields(plan, ['artifact', 'schema_version', 'picture', 'audio'], 'media_pair plan')
         if plan['artifact'] != 'media_pair' or type(plan['schema_version']) is not int or plan['schema_version'] != 1:
             raise ValueError('Unsupported media_pair schema')
         picture, audio = _asset(plan['picture']), _asset(plan['audio'], audio=True)
         report.update(plan={'path': str(plan_path), 'sha256': plan_hash},
                       inputs={'picture': picture, 'audio': audio})
         def assert_inputs():
-            if _sha256(plan_path) != plan_hash:
+            if sha256_file(plan_path) != plan_hash:
                 raise ValueError('Pair plan changed during operation')
             for asset in [picture, audio]:
-                if _sha256(asset['path']) != asset['sha256']:
+                if sha256_file(asset['path']) != asset['sha256']:
                     raise ValueError('Pair input changed during operation')
         video_facts = probe_picture(picture['path'])
         audio_facts = probe_audio_packets(audio['path'], audio['selected_stream'])
@@ -212,7 +183,7 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
                            'packet_count': audio_facts['packet_count']}
         if plan_only:
             report['status'] = 'PLANNED'
-            _save(report_path, report)
+            write_json_atomic(report_path, report)
             return report
         command = ['ffmpeg', '-nostdin', '-v', 'error', '-n', '-copyts',
                    '-i', picture['path'], '-i', audio['path'], '-map', '0:v:0',
@@ -230,13 +201,13 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
         report['output_timing'] = output_timing
         _verify_output(staged)
         assert_inputs()
-        _save(directory / 'picture_identity.json', video_facts)
-        _save(directory / 'adopted_audio_identity.json', proof)
-        report['output'] = {'path': str(output), 'sha256': _sha256(staged), 'full_decode': 'PASS',
+        write_json_atomic(directory / 'picture_identity.json', video_facts)
+        write_json_atomic(directory / 'adopted_audio_identity.json', proof)
+        report['output'] = {'path': str(output), 'sha256': sha256_file(staged), 'full_decode': 'PASS',
                             'picture_identity': 'EXACT', 'audio_packet_identity': 'EXACT'}
         staged.rename(output)
         report['status'] = 'PAIR_RENDERED'
-        _save(report_path, report)
+        write_json_atomic(report_path, report)
         return report
     except Exception as exc:
         # A partial unique run is evidence, never a final/current asset. Keep logs.
@@ -244,7 +215,7 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
         output.unlink(missing_ok=True)
         report.pop('output', None)
         report.update(status='FAILED', error=f'{type(exc).__name__}: {exc}')
-        _save(report_path, report)
+        write_json_atomic(report_path, report)
         raise
 
 
