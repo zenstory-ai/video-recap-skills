@@ -1,9 +1,11 @@
+"""Original-audio blocks (narration gaps) get the original dialogue (from ASR) burned as
+subtitles so the band is never blank while the original speaks. Cut mode remaps ASR to output."""
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
-"""Original-audio blocks (narration gaps) get the original dialogue (from ASR) burned as
-subtitles so the band is never blank while the original speaks. Cut mode remaps ASR to output."""
 import json  # noqa: E402
+
+import pytest  # noqa: E402
 
 import assembly_settings  # noqa: E402
 from assemble_constants import SUBTITLE_TEXT_NORMALIZE_VERSION  # noqa: E402
@@ -47,8 +49,6 @@ def test_plan_clip_spans_from_validated_plan(tmp_path):
     assert spans[1]["source_start"] == 50.0 and spans[1]["output_end"] == 16.0
 
 
-
-
 def test_plan_clip_spans_ignore_stale_validated_plan(tmp_path):
     raw = {"clips": [{"start": 40.0, "end": 45.0}]}
     (tmp_path / "clip_plan.json").write_text(json.dumps(raw), encoding="utf-8")
@@ -66,6 +66,7 @@ def test_plan_clip_spans_ignore_stale_validated_plan(tmp_path):
         "output_end": 5.0,
         "entry": {"start": 40.0, "end": 45.0},
     }]
+
 
 def test_map_asr_identity_in_full_mode():
     asr = [{"start": 1.0, "end": 2.0, "text": "x"}]
@@ -147,21 +148,12 @@ def test_original_gap_entries_suppressed_when_mask_only_follows_narration(monkey
     assert source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0) == []
 
 
-def test_original_gap_entries_suppressed_when_mask_is_transparent(monkeypatch, tmp_path):
-    _burn_on(monkeypatch)
-    monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 0.0)
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps([{"start": 1.0, "end": 4.0, "text": "原声已自带硬字幕"}]), encoding="utf-8"
-    )
-
-    assert source_subtitles._original_gap_subtitle_entries([], tmp_path, 10.0) == []
-
-
-def test_original_gap_entries_suppressed_when_full_timeline_mask_is_translucent(
-    monkeypatch, tmp_path
+@pytest.mark.parametrize("opacity", [0.0, 0.6], ids=("transparent", "translucent"))
+def test_original_gap_entries_suppressed_when_source_subtitles_show_through_mask(
+    monkeypatch, tmp_path, opacity
 ):
     _burn_on(monkeypatch)
-    monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 0.6)
+    monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", opacity)
     (tmp_path / "asr_result.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "原声仍透过遮罩可见"}]),
         encoding="utf-8",
@@ -219,18 +211,8 @@ def test_original_line_assigned_to_single_gap_by_midpoint(monkeypatch, tmp_path)
     assert source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 12.0) == []
 
 
-def test_original_lines_wrapped_in_brackets(monkeypatch, tmp_path):
-    _burn_on(monkeypatch)
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps([{"start": 1.0, "end": 4.0, "text": "我赶回来了"}]), encoding="utf-8")
-    segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说"}]
-    entries = source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0)
-    assert entries
-    joined = "".join(e["text"] for e in entries)
-    assert joined.startswith("「") and joined.endswith("」")
-
-
 def test_original_gap_entries_strip_terminal_punctuation_inside_brackets(monkeypatch, tmp_path):
+    # original lines are wrapped in 「」 and lose their terminal punctuation inside
     _burn_on(monkeypatch)
     (tmp_path / "asr_result.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "原声台词。"}]), encoding="utf-8")
@@ -356,30 +338,31 @@ def test_user_json_output_time_used_verbatim_above_agent(monkeypatch, tmp_path):
     assert all(1.0 <= e["start"] and e["end"] <= 4.0 + 1e-6 for e in entries)
 
 
-def test_user_json_wrapper_source_time_remapped(monkeypatch, tmp_path):
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        # SOURCE-time user json (timeline=source) is remapped to OUTPUT via the clip spans
+        (
+            "user_subtitles.json",
+            json.dumps({
+                "timeline": "source",
+                "lines": [{"start": 12.0, "end": 15.0, "text": "源时间字幕"}],
+            }),
+        ),
+        # .srt defaults to SOURCE-time and is remapped the same way
+        ("user_subtitles.srt", "1\n00:00:12,000 --> 00:00:15,000\n源时间字幕\n"),
+    ],
+    ids=("json-wrapper", "srt-default"),
+)
+def test_user_source_time_subtitles_are_remapped_to_output(
+    monkeypatch, tmp_path, filename, content
+):
     _burn_on(monkeypatch)
-    # SOURCE-time user json (timeline=source) is remapped to OUTPUT via the clip spans
+    # source 12-15 → output 2-5
     (tmp_path / "clip_plan_validated.json").write_text(json.dumps({"clips": [
         {"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0}]}),
         encoding="utf-8")
-    (tmp_path / "user_subtitles.json").write_text(json.dumps({
-        "timeline": "source",
-        "lines": [{"start": 12.0, "end": 15.0, "text": "源时间台词"}],  # source 12-15 → output 2-5
-    }), encoding="utf-8")
-    segs = [{"actual_place_start": 6.0, "actual_place_end": 9.0, "narration": "解说"}]
-    entries = source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0)
-    assert entries
-    assert all(2.0 <= e["start"] and e["end"] <= 5.0 + 1e-6 for e in entries)
-
-
-def test_user_srt_default_source_time_remapped(monkeypatch, tmp_path):
-    _burn_on(monkeypatch)
-    # .srt defaults to SOURCE-time → remapped via clip spans (source 12-15 → output 2-5)
-    (tmp_path / "clip_plan_validated.json").write_text(json.dumps({"clips": [
-        {"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0}]}),
-        encoding="utf-8")
-    (tmp_path / "user_subtitles.srt").write_text(
-        "1\n00:00:12,000 --> 00:00:15,000\n源时间字幕\n", encoding="utf-8")
+    (tmp_path / filename).write_text(content, encoding="utf-8")
     segs = [{"actual_place_start": 6.0, "actual_place_end": 9.0, "narration": "解说"}]
     entries = source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0)
     joined = "".join(e["text"] for e in entries)
@@ -394,7 +377,6 @@ def test_user_subtitles_malformed_is_reported(monkeypatch, tmp_path):
     (tmp_path / "original_subtitles.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "代理兜底"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说"}]
-    import pytest
     with pytest.raises(ValueError, match="不是合法 JSON"):
         source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0)
 
