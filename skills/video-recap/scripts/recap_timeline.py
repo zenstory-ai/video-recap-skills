@@ -283,6 +283,8 @@ def _continuation_command(video, work_dir, args):
         parts.append("--use-materials")
     if args.save_materials:
         parts.append("--save-materials")
+    if getattr(args, "require_final_qc", False):
+        parts.append("--require-final-qc")
     return " ".join(shlex.quote(part) for part in parts)
 
 

@@ -94,6 +94,23 @@ def _print_final_qc_pointer(result):
         )
 
 
+def _require_final_qc(result, work_dir):
+    """Fail closed unless both final summaries are literal blocker-free passes."""
+    paths = [Path(work_dir) / name for name in ("final_qc.json", "golden_eval.json")]
+    print("[video-recap] 最终 QC 报告: " + "; ".join(map(str, paths)))
+    invalid = []
+    for name in ("final_qc", "golden_eval"):
+        summary = result.get(name) if isinstance(result, dict) else None
+        blockers = summary.get("blocker_count") if isinstance(summary, dict) else None
+        if not isinstance(summary, dict) or summary.get("ok") is not True or \
+                type(blockers) is not int or blockers != 0:
+            invalid.append(name)
+    if invalid:
+        raise SystemExit(
+            "严格最终 QC 未通过或摘要格式无效: " + ", ".join(invalid)
+        )
+
+
 def _mimo_qc_stage_enabled(args, stage):
     return (
         args.mimo_qc == "both"

@@ -131,6 +131,11 @@ def parse_args(argv=None):
         action="store_true",
         help="make narration review a strict pre-TTS gate (also REQUIRE_NARRATION_REVIEW=1)",
     )
+    parser.add_argument(
+        "--require-final-qc",
+        action="store_true",
+        help="full/cut: require literal passing final_qc and golden_eval summaries",
+    )
     parser.add_argument("--output-dir", default=None)
     parser.add_argument(
         "--export-jianying",
