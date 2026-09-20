@@ -10,60 +10,30 @@ from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
-import re
 import subprocess
 
 from frozen_audio import probe_audio_packets, verify_adopted_audio
 from pair_media import probe_picture, validate_pair_timing
+from strict_inputs import (
+    canonical_fraction, require_asset, require_digest, require_fields, require_integer,
+    run_logged, sha256_file, write_json_atomic,
+)
 
 
 PATTERN = "frame_%06d.png"
-SHA256 = re.compile(r"[a-f0-9]{64}")
 ENCODING = {
     "video_codec": "libx264", "preset": "fast", "crf": 18,
     "pixel_format": "yuv420p", "color": "bt709_tv", "audio_codec": "copy",
 }
 
 
-def _sha256(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def _save(path, value):
-    temporary = path.with_suffix(".writing.json")
-    temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
-
-
 def _fields(value, required):
-    if not isinstance(value, dict) or set(value) != set(required):
-        raise ValueError(f"Expected exactly these fields: {required}")
-
-
-def _integer(value, label, *, minimum=0):
-    if type(value) is not int or value < minimum:
-        raise ValueError(f"{label} must be an integer >= {minimum}")
-    return value
-
-
-def _digest(value, label):
-    if not isinstance(value, str) or not SHA256.fullmatch(value):
-        raise ValueError(f"{label} requires lowercase SHA256")
-    return value
+    require_fields(value, required, "compose plan")
 
 
 def _local_file(value, label):
     _fields(value, ["path", "sha256"])
-    if not isinstance(value["path"], str) or not value["path"] or "://" in value["path"]:
-        raise ValueError(f"{label} requires a local file path")
-    expected = _digest(value["sha256"], label)
-    path = Path(value["path"]).resolve()
-    if not path.is_file() or _sha256(path) != expected:
-        raise ValueError(f"{label} identity mismatch or file missing")
+    path, expected = require_asset(value["path"], value["sha256"], label)
     return {"path": str(path), "sha256": expected}
 
 
@@ -84,12 +54,12 @@ def _sequence_paths(directory, pattern, start, end):
 
 def ordered_sequence_digest(directory, pattern, start, end):
     """Digest ordered frame numbers and resolved content hashes; symlinks may repeat."""
-    start = _integer(start, "sequence start")
-    end = _integer(end, "sequence end")
+    start = require_integer(start, "sequence start")
+    end = require_integer(end, "sequence end")
     if end <= start:
         raise ValueError("Sequence interval must be non-empty")
     _, paths = _sequence_paths(directory, pattern, start, end)
-    manifest = [{"frame": index, "sha256": _sha256(path.resolve())}
+    manifest = [{"frame": index, "sha256": sha256_file(path.resolve())}
                 for index, path in zip(range(start, end), paths)]
     encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
     return hashlib.sha256(encoded).hexdigest()
@@ -124,25 +94,13 @@ def _sequence(value, required, *, local_count, width, height):
         raise ValueError("Sequence requires a local directory")
     if value["pattern"] != PATTERN:
         raise ValueError(f"Only the literal simple pattern {PATTERN!r} is supported")
-    expected_digest = _digest(value["ordered_sha256"], "sequence")
+    expected_digest = require_digest(value["ordered_sha256"], "sequence")
     resolved, paths = _sequence_paths(directory, value["pattern"], 0, local_count)
     if ordered_sequence_digest(resolved, value["pattern"], 0, local_count) != expected_digest:
         raise ValueError("Sequence ordered content digest mismatch")
     for path in paths:
         _validate_rgba(path, width, height)
     return {**value, "directory": str(resolved)}, paths
-
-
-def _fraction(value, label):
-    if not isinstance(value, str):
-        raise ValueError(f"{label} must be a canonical rational string")
-    try:
-        result = Fraction(value)
-    except (ValueError, ZeroDivisionError) as exc:
-        raise ValueError(f"Invalid {label}") from exc
-    if result <= 0 or value != f"{result.numerator}/{result.denominator}":
-        raise ValueError(f"{label} must be a positive canonical N/D rational")
-    return result
 
 
 def validate_endcard(value, *, foreground_end, total_frames, width, height):
@@ -160,8 +118,8 @@ def validate_endcard(value, *, foreground_end, total_frames, width, height):
         required = ["kind", "directory", "pattern", "start_frame", "end_frame",
                     "ordered_sha256"]
     _fields(value, required)
-    end_start = _integer(value["start_frame"], "endcard start_frame")
-    end_end = _integer(value["end_frame"], "endcard end_frame", minimum=1)
+    end_start = require_integer(value["start_frame"], "endcard start_frame")
+    end_end = require_integer(value["end_frame"], "endcard end_frame", minimum=1)
     if end_start >= end_end:
         raise ValueError("Endcard interval must be non-empty")
     if end_start != foreground_end or end_end != total_frames:
@@ -188,14 +146,14 @@ def validate_plan(plan_path):
     base = _local_file(plan["base"], "base")
     receipt = _local_file(plan["producer_receipt"], "producer_receipt")
     _fields(plan["video"], ["fps", "width", "height", "total_frames"])
-    fps = _fraction(plan["video"]["fps"], "video fps")
-    width = _integer(plan["video"]["width"], "video width", minimum=1)
-    height = _integer(plan["video"]["height"], "video height", minimum=1)
-    total = _integer(plan["video"]["total_frames"], "video total_frames", minimum=1)
+    fps = canonical_fraction(plan["video"]["fps"], "video fps")
+    width = require_integer(plan["video"]["width"], "video width", minimum=1)
+    height = require_integer(plan["video"]["height"], "video height", minimum=1)
+    total = require_integer(plan["video"]["total_frames"], "video total_frames", minimum=1)
     _fields(plan["foreground"], ["directory", "pattern", "start_frame", "end_frame",
                                  "ordered_sha256"])
-    foreground_start = _integer(plan["foreground"]["start_frame"], "foreground start_frame")
-    foreground_end = _integer(plan["foreground"]["end_frame"], "foreground end_frame", minimum=1)
+    foreground_start = require_integer(plan["foreground"]["start_frame"], "foreground start_frame")
+    foreground_end = require_integer(plan["foreground"]["end_frame"], "foreground end_frame", minimum=1)
     if foreground_start != 0 or foreground_end > total:
         raise ValueError("Foreground must start at frame 0 and not exceed the frame clock")
     foreground, foreground_paths = _sequence(
@@ -229,10 +187,10 @@ def validate_plan(plan_path):
 
 
 def _assert_current(validated):
-    if _sha256(validated["plan_path"]) != validated["plan_sha256"]:
+    if sha256_file(validated["plan_path"]) != validated["plan_sha256"]:
         raise ValueError("Compose plan changed during operation")
     for asset in (validated["base"], validated["producer_receipt"]):
-        if _sha256(asset["path"]) != asset["sha256"]:
+        if sha256_file(asset["path"]) != asset["sha256"]:
             raise ValueError("Bound input or producer receipt changed during operation")
     foreground = validated["foreground"]
     if ordered_sequence_digest(foreground["directory"], foreground["pattern"], 0,
@@ -240,7 +198,7 @@ def _assert_current(validated):
         raise ValueError("Foreground sequence changed during operation")
     endcard = validated["endcard"]
     if endcard["kind"] == "still":
-        if _sha256(endcard["path"]) != endcard["sha256"]:
+        if sha256_file(endcard["path"]) != endcard["sha256"]:
             raise ValueError("Endcard changed during operation")
     elif endcard["kind"] == "sequence" and ordered_sequence_digest(
             endcard["directory"], endcard["pattern"], 0,
@@ -249,11 +207,7 @@ def _assert_current(validated):
 
 
 def _run_ffmpeg(command, directory):
-    _save(directory / "compose.command.json", command)
-    result = subprocess.run(command, capture_output=True, text=True, timeout=600)
-    (directory / "compose.log").write_text(result.stderr, encoding="utf-8")
-    if result.returncode:
-        raise RuntimeError("Foreground composition failed; see compose.log")
+    run_logged(command, directory, "compose", timeout=600)
 
 
 def _verify_output(path, validated):
@@ -292,7 +246,7 @@ def run_compose(plan_path, output_dir, *, plan_only=False):
               "status": "PREPARING", "direct_listening": "NOT_CHECKED",
               "normal_speed_review": "NOT_CHECKED", "release_approved": False,
               "encoding": ENCODING}
-    _save(report_path, report)
+    write_json_atomic(report_path, report)
     try:
         value = validate_plan(plan_path)
         report.update(
@@ -305,7 +259,7 @@ def run_compose(plan_path, output_dir, *, plan_only=False):
         _assert_current(value)
         if plan_only:
             report["status"] = "PLANNED"
-            _save(report_path, report)
+            write_json_atomic(report_path, report)
             return report
         fps = value["video"]["fps"]
         command = ["ffmpeg", "-nostdin", "-v", "error", "-n", "-copyts",
@@ -350,21 +304,21 @@ def run_compose(plan_path, output_dir, *, plan_only=False):
         _assert_current(value)
         output_picture, audio_proof = _verify_output(staged, value)
         _assert_current(value)
-        _save(directory / "picture_identity.json", output_picture)
-        _save(directory / "adopted_audio_identity.json", audio_proof)
-        report["output"] = {"path": str(output), "sha256": _sha256(staged),
+        write_json_atomic(directory / "picture_identity.json", output_picture)
+        write_json_atomic(directory / "adopted_audio_identity.json", audio_proof)
+        report["output"] = {"path": str(output), "sha256": sha256_file(staged),
                             "full_decode": "PASS", "frame_clock": "EXACT",
                             "audio_packet_identity": "EXACT"}
         staged.rename(output)
         report["status"] = "FOREGROUND_RENDERED"
-        _save(report_path, report)
+        write_json_atomic(report_path, report)
         return report
     except Exception as exc:
         staged.unlink(missing_ok=True)
         output.unlink(missing_ok=True)
         report.pop("output", None)
         report.update(status="FAILED", error=f"{type(exc).__name__}: {exc}")
-        _save(report_path, report)
+        write_json_atomic(report_path, report)
         raise
 
 
