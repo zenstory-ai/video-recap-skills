@@ -100,6 +100,8 @@ assert 'MISSING_OR_STALE' in text
 assert 'UNKNOWN_NOT_PROVEN_SILENCE' in text
 assert 'ASR [start–end] times + Quiet windows below as safe cut points' not in text
 '''
+    import os
     result = subprocess.run([sys.executable, '-I', '-c', program, str(copied), str(tmp_path/'work')],
-                            cwd=tmp_path, capture_output=True, text=True)
+                            cwd=tmp_path, capture_output=True, text=True, encoding='utf-8',
+                            errors='replace', env={**os.environ, 'PYTHONUTF8': '1'})
     assert result.returncode == 0, result.stderr
