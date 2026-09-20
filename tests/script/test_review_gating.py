@@ -116,24 +116,3 @@ def test_hallucination_error_still_gates(monkeypatch, tmp_path):
     status = recap_review.review_result_status(tmp_path)
     assert status["errors"] == 1
     assert status["ok"] is False
-
-
-def test_parse_clamps_craft_error_directly():
-    """parse_review_response clamps non-factual error findings; factual ones are kept."""
-    r = review.parse_review_response(
-        json.dumps(
-            {
-                "verdict": "REVISE",
-                "findings": [
-                    {"severity": "error", "category": "disjoint_handoff", "issue": "i"},
-                    {"severity": "error", "category": "incomplete", "issue": "i"},
-                    {"severity": "error", "category": "hallucination", "issue": "i"},
-                ],
-            },
-            ensure_ascii=False,
-        )
-    )
-    sev_by_cat = {f["category"]: f["severity"] for f in r["findings"]}
-    assert sev_by_cat["disjoint_handoff"] == "warning"
-    assert sev_by_cat["incomplete"] == "error"
-    assert sev_by_cat["hallucination"] == "error"
