@@ -47,6 +47,25 @@ beat_id | function | change | POV | preferred moment | 入点 reason | 出点 re
 
 不要因为“事件重要”就保留整段；要保留最能让 change 成立的具体表演、反应、动作或揭示。理解与情绪允许时晚进早出，同时保证台词、动作和技术边界完整。
 
+对不能删去的问答、反应或动作兑现，先核源证据，再在同一 `clip_plan.json` 登记精确区间：
+
+```json
+{
+  "clips": [{"start": 12, "end": 18}],
+  "required_evidence": {
+    "nodes": [
+      {"id": "refusal", "source": "/media/episode.mp4", "start": 12.25, "end": 14.5, "track": "audio", "content": "对方拒绝请求"},
+      {"id": "response", "source": "/media/episode.mp4", "start": 15, "end": 17.5, "track": "video", "content": "听到拒绝后的反应与决定"}
+    ],
+    "before": [["refusal", "response"]]
+  }
+}
+```
+
+`source` 使用实际源文件绝对路径，`start/end` 是原片秒；多源可另填 `source_id` 消歧。只登记确实需要保留的具体时刻，不将整个 beat 默认锁死。`before` 只登记本片必需的先后关系；无需约束顺序时写 `before: []`。
+
+工具在全部画面/句界吸附后检查每个必保时刻至少有一处完整连续保留、来源和先后；音频节点还检查源音轨是否存在。每次结果出现（包括局部片段）都需满足其声明的前提，不能用后面的完整段替开头缺前提的片段过关。结果写入 `clip_plan_validated.json.qc.required_evidence`；缺段、错序或无效声明会在预检、缓存复用和渲染前阻断，时长放宽选项不会跳过。该结果验证选段保留，实际语义与最终混音仍按审片步骤核对。
+
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
 
 ## 4. 运行命令
