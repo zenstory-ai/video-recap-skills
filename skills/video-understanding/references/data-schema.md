@@ -190,4 +190,4 @@ brief 会校验 sidecar 并打印当前状态和 sidecar 指纹，缺失或绑�
 
 ## 其他产物
 
-`narration.json`、`narration_lint.json`、`style_card.json`、`packaging_plan.json`、`deslop_qc.json`、`clip_plan.json`、`clip_plan_validated.json` 由 video-script / video-cut 阶段读写，其格式以各自技能的说明与本技能生成的 `agent_narration_brief.md` 为准；编排器 video-recap 的 `references/data-schema.md` 汇总了全部中间产物。
+`narration.json`、`narration_lint.json`、`style_card.json`、`packaging_plan.json`、`deslop_qc.json`、`clip_plan.json`、`clip_plan_validated.json` 由后续的写稿与剪辑阶段读写，本技能既不生成也不校验它们；其格式以本技能生成的 `agent_narration_brief.md` 和编排器的中间产物契约为准。
