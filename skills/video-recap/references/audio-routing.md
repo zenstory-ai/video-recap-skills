@@ -98,6 +98,16 @@ narration review files are not read as evidence for the current run.
 - Local adopted full-sound assembly consumes a prebuilt picture in `full` mode; use the
   two-stage workflow above for single- or multi-source cuts. That assembly invocation
   does not resume an old work directory or export an editor draft.
+- `source-mix` rejects an explicit `subtitle_track.json` before analysis or cut,
+  because the precise-track contract only binds adopted packet audio.
+
+`--preserve-approved-text` remains opt-in and is forwarded unchanged to
+voiceover and continuation only in narration mode.
+
+Narration may explicitly select `--tts-provider index-tts`; `auto` does not
+select Index TTS. Index TTS cannot be combined with MiMo voice selection,
+`--voice-ref`, or `dub`. Its endpoint and voice remain backend configuration,
+not recap defaults.
 
 ## Packaging and frozen-audio boundary
 

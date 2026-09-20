@@ -41,6 +41,7 @@ from recap_source import (
     needs_voiceover,
     owned_local_delivery,
     reject_unbound_narration_workdir,
+    reject_unsupported_subtitle_track,
     uses_local_adoption,
     uses_narration,
     validate_audio_routing,
@@ -83,7 +84,13 @@ def _voiceover_args(work_dir, narration_path, args):
         result += ["--voice-ref", args.voice_ref]
     if args.allow_partial_tts:
         result.append("--allow-partial-tts")
+    if getattr(args, "preserve_approved_text", False):
+        result.append("--preserve-approved-text")
     return result
+
+
+def _approved_validation_args(args):
+    return ["--preserve-approved-text"] if args.preserve_approved_text else []
 
 
 def _finish_recap(work_dir, final_output, args):
@@ -245,6 +252,7 @@ def _run_multi_cut(videos, work_dir, args):
     work_dir = Path(work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     reject_unbound_narration_workdir(work_dir, args)
+    reject_unsupported_subtitle_track(work_dir, args)
     source_records = _build_multi_source_records(videos, args)
     narration_json = work_dir / "narration.json"
     clip_plan_json = work_dir / "clip_plan.json"
@@ -329,6 +337,7 @@ def _run_multi_cut(videos, work_dir, args):
         _run(
             "video-script", "validate.py", "--work-dir", work_dir,
             "--mode", "cut_output", "--output-duration", f"{output_duration:.3f}",
+            *_approved_validation_args(args),
         )
         review_ran = run_narration_review(
             work_dir, args, run=_run, timeline="cut_output"
@@ -455,9 +464,9 @@ def main():
         ap.error(
             "--voice-ref is only supported in full/cut modes; dub clones the source voice automatically"
         )
-    if args.edit_mode == "dub" and args.tts_provider in {"fish-audio", "index-tts"}:
+    if args.edit_mode == "dub" and args.tts_provider == "fish-audio":
         ap.error(
-            f"--tts-provider {args.tts_provider} is only supported in full/cut modes; "
+            "--tts-provider fish-audio is only supported in full/cut modes; "
             "dub uses MiMo voice cloning"
         )
     if args.edit_mode == "dub" and args.subtitle_y_top is not None:
@@ -524,6 +533,7 @@ def _execute_pipeline(args, videos):
     )
     work_dir.mkdir(parents=True, exist_ok=True)
     reject_unbound_narration_workdir(work_dir, args)
+    reject_unsupported_subtitle_track(work_dir, args)
     _prepare_mimo_qc(work_dir, args)
     cut = args.edit_mode == "cut"
     narration_json = work_dir / "narration.json"
@@ -616,7 +626,7 @@ def _execute_pipeline(args, videos):
             _reject_stale_manifest()
             _run(
                 "video-script", "validate.py", "--work-dir", work_dir,
-                "--mode", "full",
+                "--mode", "full", *_approved_validation_args(args),
             )
             narration_for_tts = narration_json
         elif (work_dir / RUN_MANIFEST).exists():
@@ -689,6 +699,7 @@ def _execute_pipeline(args, videos):
             _run(
                 "video-script", "validate.py", "--work-dir", work_dir,
                 "--mode", "cut_output", "--output-duration", f"{output_duration:.3f}",
+                *_approved_validation_args(args),
             )
             narration_for_tts = narration_json
         else:

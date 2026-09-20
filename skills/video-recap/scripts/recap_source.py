@@ -14,6 +14,7 @@ _TTS_OPTIONS = frozenset({
     "--mimo-tts-voice",
     "--voice-ref",
     "--allow-partial-tts",
+    "--preserve-approved-text",
     "--review-narration",
     "--no-review-narration",
     "--require-narration-review",
@@ -216,6 +217,11 @@ def validate_audio_routing(parser, args):
         parser.error("--audio-stream-index must be a non-negative integer")
     if args.edit_mode == "dub" and mode != "narration":
         parser.error("--edit-mode dub cannot be combined with a non-narration --audio-mode")
+    if args.tts_provider == "index-tts":
+        if args.mimo_tts_voice or args.voice_ref:
+            parser.error("--tts-provider index-tts cannot use MiMo voice or --voice-ref")
+        if args.edit_mode == "dub":
+            parser.error("--edit-mode dub does not support --tts-provider index-tts")
     if mode == "narration":
         if stream != 0:
             parser.error("narration currently requires --audio-stream-index 0")
@@ -245,6 +251,17 @@ def extend_assemble_args(cli_args, args):
     if stream != 0:
         cli_args += ["--audio-stream-index", str(stream)]
     return cli_args
+
+
+def reject_unsupported_subtitle_track(work_dir, args):
+    if (
+        getattr(args, "audio_mode", "narration") == "source-mix"
+        and (Path(work_dir) / "subtitle_track.json").exists()
+    ):
+        raise SystemExit(
+            "source-mix 当前不能绑定显式 subtitle_track.json；请使用新的 work_dir，"
+            "或选择 adopted-packet-copy"
+        )
 
 
 def begin_non_narration_qc(work_dir, args, write_stage):
