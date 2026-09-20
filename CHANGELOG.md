@@ -25,6 +25,7 @@ All notable changes to this project are documented here.
 - **前景合成。** `compose_foreground.py` 把调用方渲染好的 RGBA PNG 序列（可选片尾卡）叠加到锁定母版，音频按包复制并逐包核对不变，输出帧钟与解码元数据核对后才写入新目录。
 - **声音路径显式化（recap）。** `recap.py --audio-mode {narration,source-mix,adopted-packet-copy}` 把声音策略与 `--edit-mode` 解耦：`source-mix` / `adopted-packet-copy` 不跑校验、评审和 TTS，full 直接合成，cut 剪完不再等 `narration.json`；运行清单记录音频策略，错配或含未绑定 `narration.json` 的 work-dir 被拒绝，续跑命令保留选择。
 - **配音采用绑定（assemble）。** `--tts-meta` + `--narration-adoption` 把已采用的文字、处理后 WAV 指纹、请求的引擎/声线与速度策略绑定到实际混音：输入快照、派生 WAV 封存、隐藏候选渲染后经 QC 再与 `narration_input_binding.json` 一起发布或一起放弃；采用的速度策略按形状与范围校验，不再只接受全 1.0；旧入口保持兼容并标记为未核验。
+- **显式完整混音（assemble）。** `source_score.py` 从原片声音流按精确帧区间重建原声轨、连续音乐轨与 `prepared_bed.wav` 并出具回执；`--audio-mix-adoption` 把已采用的底轨、逐段 48 kHz 配音落点与固定 master gain 渲染成最终音轨，跳过环境 BGM/duck/loudnorm/tempo，与 `narration_input_binding.json` 一起以 `audio_mix_binding.json` 事务发布；29.97/59.94 fps 画面按精确分数投影到采样钟。剪映时间线导出时，跳过的旁白段不再让其后段落的增益与采样落点错位。
 
 ### Changed
 

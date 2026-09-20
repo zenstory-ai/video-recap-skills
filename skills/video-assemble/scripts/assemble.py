@@ -9,6 +9,7 @@ import assemble_constants as constants
 import assembly_contract
 import assembly_settings
 import audio_mix
+import audio_mix_binding
 import frozen_audio
 import media
 import narration_audio
@@ -41,9 +42,16 @@ def _current_narration_binding(work_dir, audio_mode):
     return narration_binding.binding_fingerprint(work_dir)
 
 
+def _current_audio_mix_binding(work_dir, audio_mode):
+    if audio_mode != "narration":
+        return None
+    return audio_mix_binding.binding_fingerprint(work_dir)
+
+
 def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                    audio_mode="narration", audio_stream_index=0,
-                   narration_adoption_path=None, tts_meta_path=None):
+                   narration_adoption_path=None, tts_meta_path=None,
+                   audio_mix_adoption_path=None):
     """组装最终视频"""
     if audio_mode not in AUDIO_MODES:
         raise RuntimeError(f"不支持的 audio_mode: {audio_mode}")
@@ -72,8 +80,22 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             raise RuntimeError("adopted-packet-copy 与 BGM 混音不兼容")
     if audio_mode != "narration" and narration_adoption_path is not None:
         raise RuntimeError("narration adoption 仅适用于 narration audio_mode")
+    if audio_mix_adoption_path is not None and (
+        audio_mode != "narration" or narration_adoption_path is None or tts_meta_path is None
+    ):
+        raise RuntimeError("audio mix adoption 要求 narration 模式及显式 narration adoption/tts_meta")
 
     published_output = Path(output_path)
+    if audio_mix_adoption_path is not None and published_output.exists():
+        raise RuntimeError("显式音频混合要求新的 output_path，不能覆盖已有成片")
+    explicit_mix = (
+        audio_mix_binding.load_adoption(
+            audio_mix_adoption_path, input_video=input_video,
+            narration_adoption_path=narration_adoption_path, tts_segments=tts_segments,
+        )
+        if audio_mix_adoption_path is not None else None
+    )
+
     binding = narration_binding.prepare_binding(
         tts_segments, work_dir,
         narration_adoption_path=narration_adoption_path,
@@ -111,7 +133,12 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
 
     # 解说整体提速（可选）后，将所有 TTS 片段按时间位置合成到与视频等长的音轨上
     narration_wav = None
-    if audio_mode == "narration":
+    if audio_mode == "narration" and explicit_mix is not None:
+        explicit_runtime = audio_mix_binding.render_explicit_mix(
+            explicit_mix, binding, tts_segments, work_dir
+        )
+        narration_wav = Path(explicit_runtime["voice_bus"]["path"])
+    elif audio_mode == "narration":
         if binding["tempo_policy"]:
             narration_audio._apply_narration_speed(
                 tts_segments, work_dir, tempo_policy=binding["tempo_policy"]
@@ -155,7 +182,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         lib.log(f"压制字幕文件: {ass_path}")
 
     # 可选 BGM：作为一条独立音轨（input [2:a]）混入，旁白处自动压低
-    if bgm_path and not has_bgm:
+    if explicit_mix is not None:
+        lib.log("显式 adopted full-sound：忽略环境 BGM/duck/loudnorm/tempo 配置")
+    elif bgm_path and not has_bgm:
         lib.log(f"  ⚠️ BGM 文件不存在，跳过: {bgm_path}")
     elif has_bgm:
         lib.log(f"BGM 铺底: {bgm_path} (音量 {lib.CONFIG['bgm_volume']}，旁白时 {lib.CONFIG['bgm_ducking_volume']})")
@@ -164,6 +193,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     timeline_emit._emit_timeline(
         input_video, tts_segments, work_dir, video_duration, canvas, has_bgm,
         audio_mode=audio_mode, selected_audio_stream=audio_stream_index,
+        explicit_audio_mix=(
+            {**explicit_mix, **explicit_mix["runtime"]} if explicit_mix is not None else None
+        ),
     )
 
     overlay_filters, overlay_qc = visual_render._visual_overlay_filters(work_dir, canvas, video_duration)
@@ -211,6 +243,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         final_ln = audio_mix.final_loudnorm_filter()
         filter_complex += f";[aout]{final_ln}[aoutln]"
         lib.log(f"source-mix 音频处理: source volume + {final_ln}")
+    elif explicit_mix is not None:
+        audio_map = "1:a:0"
+        audio_input_args = ["-i", explicit_mix["runtime"]["master"]["path"]]
     else:
         # 混合原始音频 + 解说音频（+ 可选 BGM）
         if source_has_audio:
@@ -327,17 +362,25 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         cmd += ["-c:a", "copy", "-movie_timescale",
                 str(adopted_source_audio["sample_rate"]),
                 "-movflags", "+faststart", str(output_path)]
+    elif explicit_mix is not None:
+        cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000",
+                "-movie_timescale", "48000", "-movflags", "+faststart",
+                str(output_path)]
     else:
         cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
                 "-t", str(video_duration), str(output_path)]
     try:
         if binding:
             narration_binding.assert_current(binding)
+        if explicit_mix is not None:
+            audio_mix_binding.assert_current(explicit_mix)
         result = lib.run_cmd(cmd)
         if result.returncode != 0:
             raise RuntimeError(f"视频组装失败: {result.stderr}")
         if binding:
             narration_binding.assert_current(binding)
+        if explicit_mix is not None:
+            audio_mix_binding.assert_current(explicit_mix)
     finally:
         # 清理临时 filter 脚本（无论 ffmpeg 是否成功）
         if fc_script is not None:
@@ -358,16 +401,19 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     audio_operations = {
         "narration": audio_mode == "narration",
         "source_mix": audio_mode == "source-mix",
-        "bgm_mix": has_bgm and audio_mode != "adopted-packet-copy",
-        "ducking": audio_mode == "narration",
+        "bgm_mix": has_bgm and audio_mode != "adopted-packet-copy" and explicit_mix is None,
+        "ducking": audio_mode == "narration" and explicit_mix is None,
         "loudness_normalization": (
-            audio_mode != "adopted-packet-copy" and lib.CONFIG["final_loudnorm"]
+            audio_mode != "adopted-packet-copy" and explicit_mix is None
+            and lib.CONFIG["final_loudnorm"]
         ),
-        "limiter": audio_mode != "adopted-packet-copy",
+        "limiter": audio_mode != "adopted-packet-copy" and explicit_mix is None,
         "resample": audio_mode != "adopted-packet-copy",
-        "tempo": audio_mode == "narration",
+        "tempo": audio_mode == "narration" and explicit_mix is None,
         "packet_copy": audio_mode == "adopted-packet-copy",
     }
+    if explicit_mix is not None:
+        audio_operations["explicit_audio_mix"] = True
     render_delivery = {
         "video_encode_passes": 1 if reencode else 0,
         "reencode_reason": notes,
@@ -379,11 +425,18 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             + (["aac_packet_copy", "faststart"] if adopted_audio else ["aac_48000", "faststart"])
         ),
     }
-    loudness_mode = "not_run" if audio_mode == "adopted-packet-copy" else None
+    loudness_mode = (
+        "not_run" if audio_mode == "adopted-packet-copy" else
+        "fixed_master_gain_no_loudnorm" if explicit_mix is not None else None
+    )
+    source_audio_status = "prepared_bed_adopted" if explicit_mix is not None else None
     active = bool(binding and binding["active"])
     staged_binding = None
     staged_binding_fingerprint = None
     binding_published = False
+    staged_mix_binding = None
+    staged_mix_fingerprint = None
+    mix_binding_published = False
     try:
         if active:
             # Strict adoption: render to a hidden candidate, stage the binding, gate on QC,
@@ -395,6 +448,14 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             staged_binding_fingerprint = narration_binding.staged_binding_fingerprint(
                 report, staged_binding, Path(work_dir) / narration_binding.FILENAME
             )
+            if explicit_mix is not None:
+                mix_report, staged_mix_binding = audio_mix_binding.stage_final_binding(
+                    explicit_mix, staged_binding_fingerprint, render_output, published_output
+                )
+                staged_mix_fingerprint = audio_mix_binding.staged_binding_fingerprint(
+                    mix_report, staged_mix_binding,
+                    Path(work_dir) / audio_mix_binding.FILENAME,
+                )
         elif binding:
             narration_binding.finalize_binding(
                 binding, tts_segments, narration_wav, render_output
@@ -414,6 +475,8 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                 staged_binding_fingerprint if active
                 else _current_narration_binding(work_dir, audio_mode)
             ),
+            audio_mix_binding=staged_mix_fingerprint,
+            source_audio_status=source_audio_status,
             render_delivery=render_delivery,
         )
         if active and assembly_qc["blocking"]:
@@ -421,8 +484,12 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             codes = ", ".join(assembly_qc["blocking_codes"])
             raise RuntimeError(f"身份约束渲染 QC 失败: {codes}")
         if active:
+            if explicit_mix is not None:
+                audio_mix_binding.assert_current(explicit_mix)
             finalized_binding = narration_binding.finalize_binding(
-                binding, tts_segments, narration_wav, published_output,
+                binding, tts_segments,
+                (Path(work_dir) / "narration.wav" if explicit_mix is not None else narration_wav),
+                published_output,
                 staged_path=staged_binding,
             )
             staged_binding = None
@@ -437,11 +504,31 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             )
             if prepublish_binding["sha256"] != staged_binding_fingerprint["sha256"]:
                 raise RuntimeError("已发布 narration binding 身份不一致")
+            if explicit_mix is not None:
+                finalized_mix = audio_mix_binding.finalize_binding(staged_mix_binding, work_dir)
+                staged_mix_binding = None
+                mix_binding_published = (
+                    Path(work_dir) / audio_mix_binding.FILENAME
+                ).is_file()
+                if not isinstance(finalized_mix, dict):
+                    raise RuntimeError("active audio mix binding finalize 返回空结果")
+                published_mix_fingerprint = audio_mix_binding.staged_binding_fingerprint(
+                    finalized_mix, Path(work_dir) / audio_mix_binding.FILENAME,
+                    Path(work_dir) / audio_mix_binding.FILENAME,
+                )
+                if published_mix_fingerprint["sha256"] != staged_mix_fingerprint["sha256"]:
+                    raise RuntimeError("已发布 audio mix binding 身份不一致")
+                audio_mix_binding.assert_current(explicit_mix)
             render_output.rename(published_output)
             render_output = published_output
             current_binding = _current_narration_binding(work_dir, audio_mode)
             if current_binding is None:
                 raise RuntimeError("已发布 narration binding 未通过终态验证")
+            current_mix_binding = _current_audio_mix_binding(work_dir, audio_mode)
+            if explicit_mix is not None and current_mix_binding is None:
+                raise RuntimeError("已发布 audio mix binding 未通过终态验证")
+            if explicit_mix is not None:
+                audio_mix_binding.assert_current(explicit_mix)
             assembly_qc = assembly_contract._build_assembly_qc(
                 tts_segments, video_duration, output_path=render_output,
                 source_has_audio=source_has_audio,
@@ -449,6 +536,8 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                 visual_qc=visual_qc, audio_mode=audio_mode,
                 audio_operations=audio_operations, adopted_audio=adopted_audio,
                 narration_input_binding=current_binding,
+                audio_mix_binding=current_mix_binding,
+                source_audio_status=source_audio_status,
                 render_delivery=assembly_qc["delivery_qc"],
             )
             if assembly_qc["blocking"]:
@@ -465,8 +554,12 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             published_output.unlink(missing_ok=True)
             if binding_published:
                 (Path(work_dir) / narration_binding.FILENAME).unlink(missing_ok=True)
+            if mix_binding_published:
+                (Path(work_dir) / audio_mix_binding.FILENAME).unlink(missing_ok=True)
             if staged_binding is not None:
                 Path(staged_binding).unlink(missing_ok=True)
+            if staged_mix_binding is not None:
+                Path(staged_mix_binding).unlink(missing_ok=True)
         raise
     lib.log(f"最终视频: {render_output} ({render_output.stat().st_size / 1024 / 1024:.1f}MB)")
     return render_output
@@ -482,6 +575,8 @@ def main():
     ap.add_argument("--tts-meta", default=None, help="tts_meta.json (default: <work-dir>/tts_meta.json)")
     ap.add_argument("--narration-adoption", default=None,
                     help="strict narration_adoption v1 bound to an explicit --tts-meta")
+    ap.add_argument("--audio-mix-adoption", default=None,
+                    help="strict audio_mix_adoption v1 for adopted prepared bed and narration")
     ap.add_argument(
         "--audio-mode", choices=AUDIO_MODES,
         default="narration", help="audio path (default: narration)",
@@ -553,31 +648,88 @@ def main():
         ap.error(f"--narration-adoption is incompatible with --audio-mode {args.audio_mode}")
     if args.narration_adoption is not None and args.tts_meta is None:
         ap.error("--narration-adoption requires explicit --tts-meta")
+    if args.audio_mix_adoption is not None and (
+        args.audio_mode != "narration" or args.narration_adoption is None
+        or args.tts_meta is None
+    ):
+        ap.error("--audio-mix-adoption requires narration mode, --narration-adoption and --tts-meta")
     tts_meta = None
     tts_segments = []
     if args.audio_mode == "narration":
         tts_meta = Path(args.tts_meta) if args.tts_meta else work_dir / "tts_meta.json"
         tts_segments = json.loads(tts_meta.read_text(encoding="utf-8"))["segments"]
-    output_path = work_dir / "output.mp4"
-    if (args.audio_mode == "narration" and args.audio_stream_index == 0
-            and args.narration_adoption is None):
-        # Preserve the legacy CLI-to-API call shape for isolated skill consumers.
-        assemble_video(args.video, tts_segments, work_dir, output_path)
-    else:
-        assemble_video(
-            args.video, tts_segments, work_dir, output_path,
-            audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
-            narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
-        )
-    assembly_qc = artifacts._load_work_json(work_dir, constants.ASSEMBLY_QC)
-    if assembly_qc["blocking"]:
-        codes = ", ".join(assembly_qc["blocking_codes"])
-        raise SystemExit(f"组装 QC 阻断交付: {codes}；详见 {work_dir / constants.ASSEMBLY_QC}")
     stem = args.recap_stem or Path(args.video).stem
     base = Path(args.output_dir) if args.output_dir else work_dir.parent
-    base.mkdir(parents=True, exist_ok=True)
     final_output = assembly_contract._resolve_final_output(base, stem)
-    shutil.copy2(str(output_path), str(final_output))
+    if args.audio_mix_adoption is not None:
+        audio_mix_binding.load_adoption(
+            args.audio_mix_adoption, input_video=args.video,
+            narration_adoption_path=args.narration_adoption, tts_segments=tts_segments,
+        )
+        if final_output.exists():
+            ap.error("explicit audio mix requires a new final delivery path")
+    delivery_stage = None
+    owned_alias = None
+    output_path = work_dir / "output.mp4"
+    try:
+        if (args.audio_mode == "narration" and args.audio_stream_index == 0
+                and args.narration_adoption is None and args.audio_mix_adoption is None):
+            # Preserve the legacy CLI-to-API call shape for isolated skill consumers.
+            assemble_video(args.video, tts_segments, work_dir, output_path)
+        else:
+            assemble_video(
+                args.video, tts_segments, work_dir, output_path,
+                audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
+                narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
+                audio_mix_adoption_path=args.audio_mix_adoption,
+            )
+        assembly_qc = artifacts._load_work_json(work_dir, constants.ASSEMBLY_QC)
+        if assembly_qc["blocking"]:
+            codes = ", ".join(assembly_qc["blocking_codes"])
+            raise SystemExit(
+                f"组装 QC 阻断交付: {codes}；详见 {work_dir / constants.ASSEMBLY_QC}"
+            )
+        base.mkdir(parents=True, exist_ok=True)
+        if args.audio_mix_adoption is not None:
+            # Publish the delivery alias only when this process created it: stage a copy,
+            # hard-link it into place (fails if the alias appeared meanwhile), remember the
+            # inode, and roll back only an alias we own.
+            delivery_stage = final_output.with_name(
+                f".{final_output.name}.rendering-{os.getpid()}"
+            )
+            with output_path.open("rb") as source, delivery_stage.open("xb") as target:
+                shutil.copyfileobj(source, target)
+                target.flush()
+                os.fsync(target.fileno())
+            try:
+                os.link(delivery_stage, final_output)
+            except FileExistsError as exc:
+                raise RuntimeError("explicit audio mix delivery alias appeared during render") from exc
+            stat = final_output.stat()
+            owned_alias = (stat.st_dev, stat.st_ino)
+            delivery_stage.unlink()
+            delivery_stage = None
+        else:
+            shutil.copy2(str(output_path), str(final_output))
+        manifest = assembly_contract._assembly_manifest_payload(
+            args.video, tts_segments, work_dir, output_path,
+            tts_meta_path=tts_meta,
+            narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
+            audio_mix_binding=_current_audio_mix_binding(work_dir, args.audio_mode),
+            final_output=final_output,
+            settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
+            audio_mode=args.audio_mode,
+            audio_stream_index=args.audio_stream_index,
+        )
+        assembly_contract._write_assembly_manifest(work_dir, manifest)
+    except BaseException:
+        if delivery_stage is not None:
+            delivery_stage.unlink(missing_ok=True)
+        if owned_alias is not None and final_output.exists():
+            stat = final_output.stat()
+            if (stat.st_dev, stat.st_ino) == owned_alias:
+                final_output.unlink()
+        raise
     manifest = assembly_contract._assembly_manifest_payload(
         args.video, tts_segments, work_dir, output_path,
         tts_meta_path=tts_meta,
