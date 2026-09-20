@@ -47,10 +47,10 @@ def _stage_frames(work_dir, numbers, fps=2.0):
     return frames
 
 
-def _mock_run_cmd_makes_output(monkeypatch, target="storyboard"):
+def _mock_run_cmd_makes_output(monkeypatch):
     """Mock run_cmd so any ffmpeg invocation 'succeeds' by writing its last (output) arg.
 
-    Captures every command for shape assertions. The output path is the last token.
+    Returns the captured commands for shape assertions.
     """
     calls = []
 
@@ -64,9 +64,9 @@ def _mock_run_cmd_makes_output(monkeypatch, target="storyboard"):
             pass
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
-    monkeypatch.setattr(f"{target}.run_cmd", fake_run_cmd)
-    monkeypatch.setattr(f"{target}._ffmpeg_available", lambda: True)
-    monkeypatch.setattr(f"{target}.get_video_duration_safe", lambda v: 30.0)
+    monkeypatch.setattr("storyboard.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
+    monkeypatch.setattr("storyboard.get_video_duration_safe", lambda v: 30.0)
     return calls
 
 
@@ -76,6 +76,9 @@ def _no_font(monkeypatch):
 
 def _with_font(monkeypatch, path="/fake/font.ttf"):
     monkeypatch.setattr("storyboard._probe_font", lambda: path)
+
+
+ONE_SCENE = [{"start": 0, "end": 2}]
 
 
 # ── tile selection: cap + scene anchors ──────────────────────────────────────
@@ -109,26 +112,11 @@ def test_nearest_existing_frame_and_clamp(tmp_path):
     _stage_frames(tmp_path, [0, 2, 4, 10], fps=2.0)  # numbers sparse: gap 4→10
     paths, numbers = storyboard._frame_index(tmp_path)
     assert numbers == [0, 2, 4, 10]
-    # t=1.0 @ fps2 → target 2 → exact frame_00002
-    assert (
-        storyboard._nearest_existing_frame(1.0, 2.0, paths, numbers).name
-        == "frame_00002.jpg"
-    )
-    # t=3.0 → target 6 → gap between 4 and 10; nearest is 4
-    assert (
-        storyboard._nearest_existing_frame(3.0, 2.0, paths, numbers).name
-        == "frame_00004.jpg"
-    )
-    # t below range clamps to first
-    assert (
-        storyboard._nearest_existing_frame(-5.0, 2.0, paths, numbers).name
-        == "frame_00000.jpg"
-    )
-    # t above range clamps to LAST extracted frame (last-frame gap)
-    assert (
-        storyboard._nearest_existing_frame(999.0, 2.0, paths, numbers).name
-        == "frame_00010.jpg"
-    )
+    nearest = lambda t: storyboard._nearest_existing_frame(t, 2.0, paths, numbers).name  # noqa: E731
+    assert nearest(1.0) == "frame_00002.jpg"  # exact target
+    assert nearest(3.0) == "frame_00004.jpg"  # gap between 4 and 10; nearest is 4
+    assert nearest(-5.0) == "frame_00000.jpg"  # below range clamps to first
+    assert nearest(999.0) == "frame_00010.jpg"  # above range clamps to LAST extracted frame
 
 
 # ── source storyboard end-to-end (mocked ffmpeg) ─────────────────────────────
@@ -203,35 +191,33 @@ def _validated_plan():
     }
 
 
-def test_edited_tiles_carry_output_and_source_time(monkeypatch, tmp_path):
+def _build_edited(monkeypatch, tmp_path):
     _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
     _mock_run_cmd_makes_output(monkeypatch)
     _with_font(monkeypatch)
     plan = _validated_plan()
     result = storyboard.build_edited_storyboard(tmp_path, "video.mp4", plan, fps=2.0)
     assert result is not None
+    return plan, result
+
+
+def test_edited_tiles_carry_output_and_source_time_via_forward_map(monkeypatch, tmp_path):
+    plan, result = _build_edited(monkeypatch, tmp_path)
     assert result["timeline"] == "output"
-    clip0_tiles = [t for t in result["tiles"] if t["source_clip_id"] == 0]
-    # clip0 source_start=10 → output 0; verify forward map matches cut.py for the start tile
-    start_tile = min(clip0_tiles, key=lambda t: t["source_timestamp"])
-    assert start_tile["source_timestamp"] == pytest.approx(10.0, abs=0.6)
-    expected_out = 0.0 + (start_tile["source_timestamp"] - 10.0)
-    assert start_tile["output_timestamp"] == pytest.approx(expected_out, abs=0.01)
-    # every tile has both labels
-    assert all(
-        "output_timestamp" in t and "source_timestamp" in t for t in result["tiles"]
-    )
-    assert all("out " in t["label"] and "src " in t["label"] for t in result["tiles"])
+    clips = {c["clip_id"]: c for c in plan["clips"]}
+    for t in result["tiles"]:
+        # every tile has both labels, and output time follows the cut.py forward map
+        assert "output_timestamp" in t and "source_timestamp" in t
+        assert "out " in t["label"] and "src " in t["label"]
+        clip = clips[t["source_clip_id"]]
+        expected = clip["output_start"] + (t["source_timestamp"] - clip["source_start"])
+        expected = max(clip["output_start"], min(expected, clip["output_end"]))
+        assert t["output_timestamp"] == pytest.approx(round(expected, 3), abs=0.01)
 
 
 def test_edited_short_clip_frame_identity_dedupe(monkeypatch, tmp_path):
     # clip1 is 0.6s @ fps2 → source 30/30.3/30.1 all round to the SAME frame number (60)
-    _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
-    _mock_run_cmd_makes_output(monkeypatch)
-    _no_font(monkeypatch)
-    plan = _validated_plan()
-    result = storyboard.build_edited_storyboard(tmp_path, "video.mp4", plan, fps=2.0)
-    assert result is not None
+    _plan, result = _build_edited(monkeypatch, tmp_path)
     clip1_tiles = [t for t in result["tiles"] if t["source_clip_id"] == 1]
     # ≤1s clip → 1-2 tiles, NOT 3 identical
     assert 1 <= len(clip1_tiles) <= 2
@@ -239,36 +225,21 @@ def test_edited_short_clip_frame_identity_dedupe(monkeypatch, tmp_path):
     assert len(frame_files) == len(set(frame_files))  # no duplicate frames
 
 
-def test_edited_output_matches_clip_plan_forward_map(monkeypatch, tmp_path):
-    _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
-    _mock_run_cmd_makes_output(monkeypatch)
-    _no_font(monkeypatch)
-    plan = _validated_plan()
-    result = storyboard.build_edited_storyboard(tmp_path, "video.mp4", plan, fps=2.0)
-    clips = {c["clip_id"]: c for c in plan["clips"]}
-    for t in result["tiles"]:
-        clip = clips[t["source_clip_id"]]
-        expected = clip["output_start"] + (t["source_timestamp"] - clip["source_start"])
-        expected = max(clip["output_start"], min(expected, clip["output_end"]))
-        assert t["output_timestamp"] == pytest.approx(round(expected, 3), abs=0.01)
-
-
 # ── cache reuse vs rebuild on fps change (the staleness regression) ───────────
 
 
-def test_cache_reuse_then_rebuild_on_fps_change(monkeypatch, tmp_path):
-    _stage_frames(tmp_path, [0, 2, 4, 6, 8, 10], fps=2.0)
+def _cached_source_storyboard(monkeypatch, tmp_path):
+    """Stage a work_dir for understand._generate_source_storyboard with a build counter."""
+    _stage_frames(tmp_path, [0, 2, 4, 6], fps=2.0)
     monkeypatch.setitem(CONFIG, "storyboard", True)
     monkeypatch.setitem(CONFIG, "fps", 2.0)
-    _mock_run_cmd_makes_output(monkeypatch, target="storyboard")
+    _mock_run_cmd_makes_output(monkeypatch)
     _with_font(monkeypatch)
     scenes = [{"start": 0.0, "end": 4.0}]
     scenes_json = tmp_path / "scenes.json"
     scenes_json.write_text(json.dumps(scenes), encoding="utf-8")
     video = tmp_path / "video.mp4"
-    video.write_bytes(
-        b"fake-video-bytes"
-    )  # real file so the cache meta can fingerprint it
+    video.write_bytes(b"fake-video-bytes")  # real file so the cache meta can fingerprint it
 
     builds = {"n": 0}
     real_build = storyboard.build_source_storyboard
@@ -281,107 +252,87 @@ def test_cache_reuse_then_rebuild_on_fps_change(monkeypatch, tmp_path):
         "understanding_storyboard.build_source_storyboard", counting_build
     )
 
-    # first run builds
-    understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
+    def generate():
+        return understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
+
+    return generate, builds
+
+
+def test_cache_reuses_identical_inputs_and_rebuilds_on_fps_or_frame_change(
+    monkeypatch, tmp_path
+):
+    """fps sits in the cache key on its own (belt) and the frames manifest is fingerprinted
+    (suspenders): each change alone must rebuild, identical inputs must not."""
+    generate, builds = _cached_source_storyboard(monkeypatch, tmp_path)
+
+    generate()
     assert builds["n"] == 1
-    # second run with identical inputs → cache hit, NO rebuild
-    understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
+    generate()
     assert builds["n"] == 1, "expected cache reuse on identical inputs"
 
-    # fps change MUST invalidate (re-stage frames at new fps so the manifest fp changes too)
+    # flip ONLY CONFIG fps; frames manifest held constant
+    monkeypatch.setitem(CONFIG, "fps", 3.0)
+    generate()
+    assert builds["n"] == 2, "fps in the cache key must invalidate even when frames are unchanged"
+
+    # re-stage frames at the (now current) fps; only the manifest fingerprint changes
     _stage_frames(tmp_path, [0, 3, 6, 9, 12, 15], fps=3.0)
-    monkeypatch.setitem(CONFIG, "fps", 3.0)
-    understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
-    assert builds["n"] == 2, "fps change must invalidate the storyboard cache"
-
-
-def test_fps_only_change_invalidates_cache(monkeypatch, tmp_path):
-    """Isolate the `fps`-in-key claim: hold the frames-manifest CONSTANT and flip ONLY
-    CONFIG['fps']. If fps were dropped from the cache meta this would vacuously reuse;
-    with fps in the key it must rebuild (belt to the frames-manifest suspenders)."""
-    _stage_frames(tmp_path, [0, 2, 4, 6], fps=2.0)
-    monkeypatch.setitem(CONFIG, "storyboard", True)
-    monkeypatch.setitem(CONFIG, "fps", 2.0)
-    _mock_run_cmd_makes_output(monkeypatch, target="storyboard")
-    _with_font(monkeypatch)
-    scenes = [{"start": 0.0, "end": 4.0}]
-    scenes_json = tmp_path / "scenes.json"
-    scenes_json.write_text(json.dumps(scenes), encoding="utf-8")
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"fake-video-bytes")
-
-    builds = {"n": 0}
-    real_build = storyboard.build_source_storyboard
-    monkeypatch.setattr(
-        "understanding_storyboard.build_source_storyboard",
-        lambda *a, **k: (builds.__setitem__("n", builds["n"] + 1), real_build(*a, **k))[
-            1
-        ],
-    )
-
-    understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
-    assert builds["n"] == 1
-    # flip ONLY CONFIG fps; DO NOT re-stage frames (manifest fingerprint held constant)
-    monkeypatch.setitem(CONFIG, "fps", 3.0)
-    understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
-    assert builds["n"] == 2, (
-        "fps in the cache key must invalidate even when frames are unchanged"
-    )
+    generate()
+    assert builds["n"] == 3, "frames-manifest change must invalidate the storyboard cache"
 
 
 def test_cache_hit_corrupt_sidecar_rebuilds_without_traceback(monkeypatch, tmp_path):
-    """MAJOR regression guard: a fingerprint-matching but CORRUPT cached sidecar must NOT raise
-    out of the cache-hit read (advisory invariant) — it degrades to a rebuild."""
-    _stage_frames(tmp_path, [0, 2, 4, 6], fps=2.0)
-    monkeypatch.setitem(CONFIG, "storyboard", True)
-    monkeypatch.setitem(CONFIG, "fps", 2.0)
-    _mock_run_cmd_makes_output(monkeypatch, target="storyboard")
-    _with_font(monkeypatch)
-    scenes = [{"start": 0.0, "end": 4.0}]
-    scenes_json = tmp_path / "scenes.json"
-    scenes_json.write_text(json.dumps(scenes), encoding="utf-8")
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"fake-video-bytes")
+    """A fingerprint-matching but CORRUPT cached sidecar must not raise out of the cache-hit
+    read (advisory invariant); it degrades to a rebuild."""
+    generate, _builds = _cached_source_storyboard(monkeypatch, tmp_path)
 
-    first = understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
-    assert first is not None
+    assert generate() is not None
     json_path = tmp_path / "storyboard" / "source_storyboard.json"
     # cache META stays valid; corrupt ONLY the artifact bytes so the cache-hit read hits bad JSON
     json_path.write_text("{ this is not valid json ", encoding="utf-8")
 
-    rebuilt = understand._generate_source_storyboard(
-        tmp_path, video, scenes, scenes_json
-    )
-    assert rebuilt is not None  # no traceback; rebuilt
+    assert generate() is not None  # no traceback; rebuilt
     assert json.loads(json_path.read_text(encoding="utf-8"))["timeline"] == "source"
 
 
-# ── graceful None on no-frames AND run_cmd failure (brief still builds) ───────
+# ── graceful None on no-frames / run_cmd failure / font-probe raise ───────────
 
 
-def test_source_storyboard_none_without_frames(tmp_path):
-    # no frames staged
-    assert (
-        storyboard.build_source_storyboard(
-            tmp_path, "video.mp4", [{"start": 0, "end": 2}], fps=2.0
-        )
-        is None
-    )
+def _no_frames(monkeypatch, tmp_path):
+    pass
 
 
-def test_source_storyboard_none_on_run_cmd_failure(monkeypatch, tmp_path):
+def _run_cmd_fails(monkeypatch, tmp_path):
     _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
     _with_font(monkeypatch)
     monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
-
-    def failing_run_cmd(cmd, **kwargs):
-        return CompletedProcess(cmd, 1, stdout="", stderr="ffmpeg boom")
-
-    monkeypatch.setattr("storyboard.run_cmd", failing_run_cmd)
-    result = storyboard.build_source_storyboard(
-        tmp_path, "video.mp4", [{"start": 0, "end": 2}], fps=2.0
+    monkeypatch.setattr(
+        "storyboard.run_cmd",
+        lambda cmd, **kwargs: CompletedProcess(cmd, 1, stdout="", stderr="ffmpeg boom"),
     )
-    assert result is None
+
+
+def _font_probe_raises(monkeypatch, tmp_path):
+    _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
+    _mock_run_cmd_makes_output(monkeypatch)
+
+    def boom():
+        raise RuntimeError("font subsystem exploded")
+
+    monkeypatch.setattr("storyboard._probe_font", boom)
+
+
+@pytest.mark.parametrize(
+    "degrade",
+    [_no_frames, _run_cmd_fails, _font_probe_raises],
+    ids=lambda fn: fn.__name__.strip("_"),
+)
+def test_source_storyboard_degrades_to_none_without_traceback(monkeypatch, tmp_path, degrade):
+    degrade(monkeypatch, tmp_path)
+    assert (
+        storyboard.build_source_storyboard(tmp_path, "video.mp4", ONE_SCENE, fps=2.0)
+        is None
+    )
 
 
 def test_brief_still_builds_when_storyboard_fails(monkeypatch, tmp_path):
@@ -412,23 +363,6 @@ def test_font_absent_sheet_still_produced_unlabelled(monkeypatch, tmp_path):
     )
     assert sb_json["labels_burned"] is False
     assert sb_json["tiles"][0]["timestamp"] is not None
-
-
-def test_font_probe_raising_does_not_abort_sheet(monkeypatch, tmp_path):
-    _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
-    _mock_run_cmd_makes_output(monkeypatch)
-
-    def boom():
-        raise RuntimeError("font subsystem exploded")
-
-    # _probe_font itself swallows exceptions; simulate a deeper raise by patching it to raise,
-    # then confirm build_source_storyboard's own guard still yields a sheet (advisory invariant).
-    monkeypatch.setattr("storyboard._probe_font", boom)
-    result = storyboard.build_source_storyboard(
-        tmp_path, "video.mp4", [{"start": 0, "end": 2}], fps=2.0
-    )
-    # A probe that RAISES must not abort: build catches it → None (degraded), never a traceback.
-    assert result is None
 
 
 # ── edited storyboard gating + brief header ──────────────────────────────────

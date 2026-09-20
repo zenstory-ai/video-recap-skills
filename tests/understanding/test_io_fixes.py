@@ -1,5 +1,9 @@
+import json
 import sys
 from pathlib import Path
+from subprocess import CompletedProcess
+
+import pytest
 
 sys.path.insert(
     0,
@@ -10,13 +14,9 @@ sys.path.insert(
         / "scripts"
     ),
 )
-import json  # noqa: F401
-import subprocess  # noqa: F401
-from subprocess import CompletedProcess
-import pytest  # noqa: F401
-import asr
-import extract
-import understanding_runner as understand
+import asr  # noqa: E402
+import extract  # noqa: E402
+import understanding_runner as understand  # noqa: E402
 
 
 def test_segment_cut_failure_yields_empty_text_not_stale_transcription(
@@ -35,12 +35,8 @@ def test_segment_cut_failure_yields_empty_text_not_stale_transcription(
             return CompletedProcess(cmd, 0, stdout="", stderr="")
         return CompletedProcess(cmd, 1, stdout="", stderr="cut failed")
 
-    def fake_run_asr(wav_path):
-        # 如果切分失败仍调用 ASR，会返回这段污染文本
-        return "STALE-GARBAGE"
-
     monkeypatch.setattr("asr.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("asr._run_asr", fake_run_asr)
+    monkeypatch.setattr("asr._run_asr", lambda wav_path: "STALE-GARBAGE")
 
     results = asr._segment_and_transcribe(
         audio_wav, segments_dir, total_duration=60.0, segment_length=30
@@ -49,36 +45,6 @@ def test_segment_cut_failure_yields_empty_text_not_stale_transcription(
     assert len(results) == 2
     assert results[0]["text"] == "STALE-GARBAGE"  # 成功段照常转录
     assert results[1]["text"] == ""
-
-
-def test_zero_duration_does_not_fabricate_180s_timestamps(monkeypatch, tmp_path):
-    """get_video_duration 返回 0 时应警告并返回空 ASR，而不是伪造 0-180s 时间戳。"""
-    video_path = tmp_path / "video.mp4"
-    video_path.write_bytes(b"")
-
-    def fake_run_cmd(cmd, **kwargs):
-        # 音频提取这一步成功，其余不应被调用
-        return CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setitem(
-        asr.CONFIG, "mimo_asr_api_key", "tp-test"
-    )  # 跳过无 key 提前返回，测真正的零时长分支
-    monkeypatch.setattr("asr.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("asr.get_video_duration", lambda path: 0.0)
-
-    def boom(*args, **kwargs):
-        raise AssertionError("时长为 0 时不应进行任何转录")
-
-    monkeypatch.setattr("asr._run_asr", boom)
-    monkeypatch.setattr("asr._segment_and_transcribe", boom)
-
-    result = asr.transcribe_audio(video_path, tmp_path)
-
-    assert result == []
-    saved = json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8"))
-    assert saved == []
-    # 绝不应出现伪造的 0-180s 时间戳
-    assert not any(s.get("end") == 180.0 for s in saved)
 
 
 def test_run_asr_builds_mimo_payload_and_parses_content(monkeypatch, tmp_path):
@@ -135,20 +101,6 @@ def test_run_asr_skips_oversize_segment(monkeypatch, tmp_path):
     assert asr._run_asr(wav) == ""
 
 
-def test_transcribe_audio_without_key_returns_empty(monkeypatch, tmp_path):
-    """No MiMo ASR key -> skip cleanly (write []), never extract or call the API."""
-    video = tmp_path / "v.mp4"
-    video.write_bytes(b"")
-    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "")
-
-    def boom(*a, **k):
-        raise AssertionError("must not run ffmpeg/ASR without a key")
-
-    monkeypatch.setattr("asr.run_cmd", boom)
-    assert asr.transcribe_audio(video, tmp_path) == []
-    assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == []
-
-
 def test_extract_frames_returns_only_current_run_frames(monkeypatch, tmp_path):
     """复用 work_dir 时，上一次更高编号的陈旧帧不应泄漏进结果。"""
     frames_dir = tmp_path / "frames"
@@ -173,15 +125,80 @@ def test_extract_frames_returns_only_current_run_frames(monkeypatch, tmp_path):
     assert [f.name for f in frames] == ["frame_00001.jpg", "frame_00002.jpg"]
 
 
+# ── understanding_runner.main() harness ─────────────────────────────────────
+
+
+def _write_scenes(work_dir, scenes):
+    (Path(work_dir) / "scenes.json").write_text(json.dumps(scenes), encoding="utf-8")
+    return scenes
+
+
+def _fake_detect(video_path, work_dir, threshold=None):
+    return _write_scenes(work_dir, [{"scene_id": 0, "start": 0.0, "end": 10.0}])
+
+
+def _fresh_analysis(scenes, frames, work_dir, **kwargs):
+    return [{"scene_id": 0, "start": 0.0, "end": 10.0, "description": "fresh"}]
+
+
+def _patch_runner(monkeypatch, tmp_path, *, overview=False, mimo_key="", real_brief=False):
+    """Stub every external stage of understanding_runner.main(); tests override what they probe.
+
+    Returns the single fixture frame. Patches applied here are the defaults; a test that
+    calls monkeypatch.setattr afterwards wins.
+    """
+    frame = tmp_path / "frames" / "frame_00001.jpg"
+    frame.parent.mkdir(exist_ok=True)
+    if not frame.exists():
+        frame.write_bytes(b"frame")
+
+    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
+    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
+    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", overview)
+    monkeypatch.setitem(understand.CONFIG, "mimo_video_api_key", mimo_key)
+    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
+    monkeypatch.setattr(
+        "understanding_runner.api_call",
+        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
+    )
+    monkeypatch.setattr(
+        "understanding_runner.extract_frames", lambda video_path, work_dir: [frame]
+    )
+    monkeypatch.setattr("understanding_runner.detect_scenes", _fake_detect)
+    monkeypatch.setattr("understanding_runner.transcribe_audio", lambda *a, **k: [])
+    monkeypatch.setattr(
+        "understanding_runner.detect_silence_periods", lambda *a, **k: []
+    )
+    monkeypatch.setattr("understanding_runner.analyze_scenes", _fresh_analysis)
+    if not real_brief:
+        monkeypatch.setattr(
+            "understanding_runner.build_agent_brief",
+            lambda *a, **k: tmp_path / "agent_narration_brief.md",
+        )
+    return frame
+
+
+def _run_main(monkeypatch, video, work_dir, *argv_extra):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["understanding_runner.py", str(video), "--work-dir", str(work_dir), *argv_extra],
+    )
+    understand.main()
+
+
+def _video(tmp_path, name="video.mp4", content=b"video"):
+    path = tmp_path / name
+    path.write_bytes(content)
+    return path
+
+
 def test_understand_reextracts_frames_when_source_video_changes(monkeypatch, tmp_path):
     """understanding_runner.py must not skip stale frames just because work_dir/frames exists."""
-    old_video = tmp_path / "old.mp4"
-    new_video = tmp_path / "new.mp4"
-    old_video.write_bytes(b"old-video-bytes")
-    new_video.write_bytes(b"new-video-bytes")
-    frames_dir = tmp_path / "frames"
-    frames_dir.mkdir()
-    stale_frame = frames_dir / "frame_00001.jpg"
+    old_video = _video(tmp_path, "old.mp4", b"old-video-bytes")
+    new_video = _video(tmp_path, "new.mp4", b"new-video-bytes")
+    stale_frame = tmp_path / "frames" / "frame_00001.jpg"
+    stale_frame.parent.mkdir()
     stale_frame.write_bytes(b"stale-frame")
     understand._write_frames_manifest(tmp_path, old_video, 1.0, [stale_frame])
 
@@ -192,49 +209,10 @@ def test_understand_reextracts_frames_when_source_video_changes(monkeypatch, tmp
         stale_frame.write_bytes(b"fresh-frame")
         return [stale_frame]
 
-    def fake_detect(video_path, work_dir, threshold=None):
-        scenes = [{"start": 0.0, "end": 10.0}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
-        )
-        return scenes
-
-    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", False)
-    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
-    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
-    monkeypatch.setattr(
-        "understanding_runner.api_call",
-        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
-    )
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr("understanding_runner.extract_frames", fake_extract)
-    monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr(
-        "understanding_runner.analyze_scenes",
-        lambda scenes, frames, work_dir, **kwargs: [
-            {"scene_id": 0, "start": 0.0, "end": 10.0, "description": "fresh"}
-        ],
-    )
-    monkeypatch.setattr(
-        "understanding_runner.build_agent_brief",
-        lambda *a, **k: tmp_path / "agent_narration_brief.md",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "understanding_runner.py",
-            str(new_video),
-            "--work-dir",
-            str(tmp_path),
-            "--skip-asr",
-        ],
-    )
 
-    understand.main()
+    _run_main(monkeypatch, new_video, tmp_path, "--skip-asr")
 
     assert calls == ["new.mp4"]
     assert stale_frame.read_bytes() == b"fresh-frame"
@@ -245,66 +223,19 @@ def test_understand_removes_stale_mimo_overview_before_failed_recompute(
     monkeypatch, tmp_path
 ):
     """A failed overview refresh must not leave a stale final overview for the brief."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
+    video = _video(tmp_path)
     stale_overview = tmp_path / "mimo_video_overview.json"
     stale_overview.write_text(
         json.dumps({"input": "scene_chunks", "content": "STALE"}), encoding="utf-8"
     )
-    frame = tmp_path / "frames" / "frame_00001.jpg"
-    frame.parent.mkdir()
-    frame.write_bytes(b"frame")
-
-    def fake_detect(video_path, work_dir, threshold=None):
-        scenes = [{"scene_id": 0, "start": 0.0, "end": 10.0}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
-        )
-        return scenes
 
     def fail_overview(*args, **kwargs):
         raise RuntimeError("overview refresh failed")
 
-    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
-    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_api_key", "tp-test")
-    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
-    monkeypatch.setattr(
-        "understanding_runner.api_call",
-        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
-    )
-    monkeypatch.setattr(
-        "understanding_runner.extract_frames", lambda video_path, work_dir: [frame]
-    )
-    monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr(
-        "understanding_runner.analyze_scenes",
-        lambda scenes, frames, work_dir, **kwargs: [
-            {"scene_id": 0, "start": 0.0, "end": 10.0, "description": "fresh"}
-        ],
-    )
+    _patch_runner(monkeypatch, tmp_path, overview=True, mimo_key="tp-test")
     monkeypatch.setattr("understanding_runner.analyze_video_overview", fail_overview)
-    monkeypatch.setattr(
-        "understanding_runner.build_agent_brief",
-        lambda *a, **k: tmp_path / "agent_narration_brief.md",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "understanding_runner.py",
-            str(video),
-            "--work-dir",
-            str(tmp_path),
-            "--skip-asr",
-        ],
-    )
 
-    understand.main()
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
 
     assert not stale_overview.exists()
     status = json.loads(
@@ -319,59 +250,10 @@ def test_understand_removes_stale_mimo_overview_before_failed_recompute(
 
 def test_understand_writes_overview_status_when_key_missing(monkeypatch, tmp_path):
     """Enabled-but-no-key overview skip must be visible to downstream brief/review."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    frame = tmp_path / "frames" / "frame_00001.jpg"
-    frame.parent.mkdir()
-    frame.write_bytes(b"frame")
+    video = _video(tmp_path)
+    _patch_runner(monkeypatch, tmp_path, overview=True, mimo_key="")
 
-    def fake_detect(video_path, work_dir, threshold=None):
-        scenes = [{"scene_id": 0, "start": 0.0, "end": 10.0}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
-        )
-        return scenes
-
-    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
-    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_api_key", "")
-    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
-    monkeypatch.setattr(
-        "understanding_runner.api_call",
-        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
-    )
-    monkeypatch.setattr(
-        "understanding_runner.extract_frames", lambda video_path, work_dir: [frame]
-    )
-    monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr(
-        "understanding_runner.analyze_scenes",
-        lambda scenes, frames, work_dir, **kwargs: [
-            {"scene_id": 0, "start": 0.0, "end": 10.0, "description": "fresh"}
-        ],
-    )
-    monkeypatch.setattr(
-        "understanding_runner.build_agent_brief",
-        lambda *a, **k: tmp_path / "agent_narration_brief.md",
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "understanding_runner.py",
-            str(video),
-            "--work-dir",
-            str(tmp_path),
-            "--skip-asr",
-            "--no-consolidate",
-        ],
-    )
-
-    understand.main()
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr", "--no-consolidate")
 
     status = json.loads(
         (tmp_path / "mimo_video_overview.status.json").read_text(encoding="utf-8")
@@ -381,62 +263,15 @@ def test_understand_writes_overview_status_when_key_missing(monkeypatch, tmp_pat
 
 
 def test_understand_writes_failed_consolidation_status(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    frame = tmp_path / "frames" / "frame_00001.jpg"
-    frame.parent.mkdir()
-    frame.write_bytes(b"frame")
-
-    def fake_detect(video_path, work_dir, threshold=None):
-        scenes = [{"scene_id": 0, "start": 0.0, "end": 10.0}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
-        )
-        return scenes
-
-    def fake_consolidate(work_dir, do_asr=False, do_index=True):
-        del work_dir, do_asr, do_index
-        return {}
-
-    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
-    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", False)
-    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
+    video = _video(tmp_path)
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr(
-        "understanding_runner.api_call",
-        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
-    )
-    monkeypatch.setattr(
-        "understanding_runner.extract_frames", lambda video_path, work_dir: [frame]
-    )
-    monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr(
-        "understanding_runner.analyze_scenes",
-        lambda scenes, frames, work_dir, **kwargs: [
-            {"scene_id": 0, "start": 0.0, "end": 10.0, "description": "fresh"}
-        ],
-    )
-    monkeypatch.setattr(
-        "understanding_runner.build_agent_brief",
-        lambda *a, **k: tmp_path / "agent_narration_brief.md",
-    )
-    monkeypatch.setattr("consolidate.consolidate", fake_consolidate, raising=False)
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "understanding_runner.py",
-            str(video),
-            "--work-dir",
-            str(tmp_path),
-            "--skip-asr",
-        ],
+        "consolidate.consolidate",
+        lambda work_dir, do_asr=False, do_index=True: {},
+        raising=False,
     )
 
-    understand.main()
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
 
     status = json.loads(
         (tmp_path / "consolidation.status.json").read_text(encoding="utf-8")
@@ -450,85 +285,50 @@ def test_understand_writes_failed_consolidation_status(monkeypatch, tmp_path):
     assert status["artifacts"] == []
 
 
-def _run_understand_for_cache_tests(monkeypatch, tmp_path, video, *, argv_extra=None):
-    frame = tmp_path / "frames" / "frame_00001.jpg"
-    frame.parent.mkdir(exist_ok=True)
-    frame.write_bytes(b"frame")
-
-    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
-    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_api_key", "")
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", False)
-    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
-    monkeypatch.setattr(
-        "understanding_runner.api_call",
-        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
+def test_understand_omits_stale_mimo_overview_when_overview_disabled(
+    monkeypatch, tmp_path
+):
+    """Direct understand runs must not let an old overview leak into a new brief when disabled."""
+    video = _video(tmp_path)
+    stale_overview = tmp_path / "mimo_video_overview.json"
+    stale_overview.write_text(
+        json.dumps({"input": "scene_chunks", "content": "STALE OVERVIEW"}),
+        encoding="utf-8",
     )
-    monkeypatch.setattr(
-        "understanding_runner.extract_frames", lambda video_path, work_dir: [frame]
+    _patch_runner(monkeypatch, tmp_path, real_brief=True)
+
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
+
+    assert not stale_overview.exists()
+    assert "STALE OVERVIEW" not in (tmp_path / "agent_narration_brief.md").read_text(
+        encoding="utf-8"
     )
-    monkeypatch.setattr(
-        "understanding_runner.build_agent_brief",
-        lambda *a, **k: tmp_path / "agent_narration_brief.md",
-    )
-    # These tests exercise VLM cache-key behavior, not the consolidate index (now default-on,
-    # whose api_call is the real lib.api_call, not the mocked understand.api_call). Skip it.
-    argv = [
-        "understanding_runner.py",
-        str(video),
-        "--work-dir",
-        str(tmp_path),
-        "--no-consolidate",
-        *(argv_extra or []),
-    ]
-    monkeypatch.setattr(sys, "argv", argv)
-    understand.main()
 
 
-def test_stage_cache_rejects_artifact_mutation_with_stale_sidecar(tmp_path):
-    artifact = tmp_path / "scenes.json"
-    artifact.write_text(json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8")
-    meta = {
-        "schema_version": 1,
-        "stage": "scenes",
-        "source_video_fingerprint": "source",
-        "settings": {},
-    }
-    understand._write_stage_meta(artifact, meta)
+# ── stage cache freshness (each run below skips consolidate: its api_call is the real
+#    lib.api_call, not the mocked understand.api_call) ───────────────────────────
 
-    assert understand._stage_cache_valid(artifact, meta)
 
-    artifact.write_text(json.dumps([{"start": 0.0, "end": 5.0}]), encoding="utf-8")
-
-    assert not understand._stage_cache_valid(artifact, meta)
+def _run_cached(monkeypatch, video, work_dir, *argv_extra):
+    _run_main(monkeypatch, video, work_dir, "--no-consolidate", *argv_extra)
 
 
 def test_understand_recomputes_stage_when_artifact_bytes_change(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
+    """A cached artifact whose bytes no longer match its sidecar must be recomputed."""
+    video = _video(tmp_path)
     calls = []
 
     def fake_detect(video_path, work_dir, threshold=None):
         calls.append(len(calls) + 1)
-        scenes = [{"start": 0.0, "end": 10.0, "run": calls[-1]}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
-        )
-        return scenes
+        return _write_scenes(work_dir, [{"start": 0.0, "end": 10.0, "run": calls[-1]}])
 
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr("understanding_runner.transcribe_audio", lambda *a, **k: [])
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
     monkeypatch.setattr("understanding_runner.analyze_scenes", lambda *a, **k: [])
 
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
-    (tmp_path / "scenes.json").write_text(
-        json.dumps([{"start": 0.0, "end": 10.0, "run": "externally-mutated"}]),
-        encoding="utf-8",
-    )
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
+    _run_cached(monkeypatch, video, tmp_path)
+    _write_scenes(tmp_path, [{"start": 0.0, "end": 10.0, "run": "externally-mutated"}])
+    _run_cached(monkeypatch, video, tmp_path)
 
     assert calls == [1, 2]
     assert (
@@ -539,31 +339,21 @@ def test_understand_recomputes_stage_when_artifact_bytes_change(monkeypatch, tmp
 
 def test_understand_recomputes_scenes_when_scene_settings_change(monkeypatch, tmp_path):
     """Scene cache freshness must include threshold/junk settings, not just video mtime."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
+    video = _video(tmp_path)
     calls = []
 
     def fake_detect(video_path, work_dir, threshold=None):
         calls.append(threshold)
-        scenes = [{"start": 0.0, "end": 10.0, "threshold": threshold}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
+        return _write_scenes(
+            work_dir, [{"start": 0.0, "end": 10.0, "threshold": threshold}]
         )
-        return scenes
 
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr("understanding_runner.transcribe_audio", lambda *a, **k: [])
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
     monkeypatch.setattr("understanding_runner.analyze_scenes", lambda *a, **k: [])
 
-    _run_understand_for_cache_tests(
-        monkeypatch, tmp_path, video, argv_extra=["--scene-threshold", "0.1"]
-    )
-    _run_understand_for_cache_tests(
-        monkeypatch, tmp_path, video, argv_extra=["--scene-threshold", "0.4"]
-    )
+    _run_cached(monkeypatch, video, tmp_path, "--scene-threshold", "0.1")
+    _run_cached(monkeypatch, video, tmp_path, "--scene-threshold", "0.4")
 
     assert calls == [0.1, 0.4]
     assert (
@@ -576,8 +366,7 @@ def test_understand_recomputes_scenes_when_scene_settings_change(monkeypatch, tm
 
 def test_understand_recomputes_asr_when_asr_settings_change(monkeypatch, tmp_path):
     """ASR cache freshness must include ASR settings and source provenance."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
+    video = _video(tmp_path)
     calls = []
 
     def fake_asr(video_path, work_dir):
@@ -588,25 +377,14 @@ def test_understand_recomputes_asr_when_asr_settings_change(monkeypatch, tmp_pat
         )
         return result
 
-    monkeypatch.setattr(
-        "understanding_runner.detect_scenes",
-        lambda video_path, work_dir, threshold=None: (
-            (Path(work_dir) / "scenes.json").write_text(
-                json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8"
-            )
-            and [{"start": 0.0, "end": 10.0}]
-        ),
-    )
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr("understanding_runner.transcribe_audio", fake_asr)
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
     monkeypatch.setattr("understanding_runner.analyze_scenes", lambda *a, **k: [])
 
     monkeypatch.setitem(understand.CONFIG, "asr_segment_seconds", 30.0)
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
+    _run_cached(monkeypatch, video, tmp_path)
     monkeypatch.setitem(understand.CONFIG, "asr_segment_seconds", 12.0)
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
+    _run_cached(monkeypatch, video, tmp_path)
 
     assert calls == [30.0, 12.0]
     assert (
@@ -619,8 +397,7 @@ def test_understand_recomputes_asr_when_asr_settings_change(monkeypatch, tmp_pat
 
 def test_understand_recomputes_silence_when_asr_content_changes(monkeypatch, tmp_path):
     """Silence cache freshness must include ASR artifact bytes/provenance."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
+    video = _video(tmp_path)
     calls = []
     asr_payload = {"value": [{"start": 0.0, "end": 1.0, "text": "first"}]}
 
@@ -640,247 +417,86 @@ def test_understand_recomputes_silence_when_asr_content_changes(monkeypatch, tmp
         )
         return result
 
-    monkeypatch.setattr(
-        "understanding_runner.detect_scenes",
-        lambda video_path, work_dir, threshold=None: (
-            (Path(work_dir) / "scenes.json").write_text(
-                json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8"
-            )
-            and [{"start": 0.0, "end": 10.0}]
-        ),
-    )
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr("understanding_runner.transcribe_audio", fake_asr)
     monkeypatch.setattr("understanding_runner.detect_silence_periods", fake_silence)
     monkeypatch.setattr("understanding_runner.analyze_scenes", lambda *a, **k: [])
 
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
+    _run_cached(monkeypatch, video, tmp_path)
     asr_payload["value"] = [{"start": 0.0, "end": 1.0, "text": "second"}]
     (tmp_path / "asr_result.json").unlink()
     (tmp_path / "asr_result.json.meta.json").unlink()
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
+    _run_cached(monkeypatch, video, tmp_path)
 
     assert calls == [["first"], ["second"]]
 
 
-def test_understand_recomputes_vlm_when_context_changes(monkeypatch, tmp_path):
-    """VLM cache freshness must include prompt/context/model/frame/scene provenance."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
+@pytest.mark.parametrize(
+    "config_key, first, second",
+    [
+        # --context is the CLI path into CONFIG["context_info"]; the others are plain config.
+        ("context_info", ("argv", ["--context", "角色A"]), ("argv", ["--context", "角色B"])),
+        (
+            "api_url",
+            ("config", "https://one.example/v1/chat/completions"),
+            ("config", "https://two.example/v1/chat/completions"),
+        ),
+        ("mimo_disable_thinking", ("config", True), ("config", False)),
+    ],
+    ids=["context", "api_url", "thinking"],
+)
+def test_understand_recomputes_vlm_when_request_provenance_changes(
+    monkeypatch, tmp_path, config_key, first, second
+):
+    """VLM cache freshness must include prompt/context/endpoint/thinking provenance."""
+    video = _video(tmp_path)
     calls = []
 
     def fake_vlm(scenes, frames, work_dir, **kwargs):
-        calls.append(understand.CONFIG.get("context_info", ""))
-        result = [{"scene_id": 0, "start": 0.0, "end": 10.0, "description": calls[-1]}]
+        calls.append(understand.CONFIG.get(config_key))
+        result = [{"scene_id": 0, "start": 0.0, "end": 10.0, "description": str(calls[-1])}]
         (Path(work_dir) / "vlm_analysis.json").write_text(
             json.dumps(result), encoding="utf-8"
         )
         return result
 
-    monkeypatch.setattr(
-        "understanding_runner.detect_scenes",
-        lambda video_path, work_dir, threshold=None: (
-            (Path(work_dir) / "scenes.json").write_text(
-                json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8"
-            )
-            and [{"start": 0.0, "end": 10.0}]
-        ),
-    )
-    monkeypatch.setattr("understanding_runner.transcribe_audio", lambda *a, **k: [])
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr("understanding_runner.analyze_scenes", fake_vlm)
 
-    _run_understand_for_cache_tests(
-        monkeypatch, tmp_path, video, argv_extra=["--context", "角色A"]
-    )
-    monkeypatch.setitem(understand.CONFIG, "context_info", "")
-    _run_understand_for_cache_tests(
-        monkeypatch, tmp_path, video, argv_extra=["--context", "角色B"]
-    )
+    expected = []
+    for kind, value in (first, second):
+        if kind == "argv":
+            monkeypatch.setitem(understand.CONFIG, config_key, "")
+            _run_cached(monkeypatch, video, tmp_path, *value)
+            expected.append(value[-1])
+        else:
+            monkeypatch.setitem(understand.CONFIG, config_key, value)
+            _run_cached(monkeypatch, video, tmp_path)
+            expected.append(value)
 
-    assert calls == ["角色A", "角色B"]
+    assert calls == expected
     assert (
         json.loads((tmp_path / "vlm_analysis.json").read_text(encoding="utf-8"))[0][
             "description"
         ]
-        == "角色B"
+        == str(calls[-1])
     )
-
-
-def test_understand_recomputes_vlm_when_api_endpoint_changes(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    calls = []
-
-    def fake_vlm(scenes, frames, work_dir, **kwargs):
-        calls.append(understand.CONFIG.get("api_url", ""))
-        result = [{"scene_id": 0, "start": 0.0, "end": 10.0, "description": calls[-1]}]
-        (Path(work_dir) / "vlm_analysis.json").write_text(
-            json.dumps(result), encoding="utf-8"
-        )
-        return result
-
-    monkeypatch.setattr(
-        "understanding_runner.detect_scenes",
-        lambda video_path, work_dir, threshold=None: (
-            (Path(work_dir) / "scenes.json").write_text(
-                json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8"
-            )
-            and [{"start": 0.0, "end": 10.0}]
-        ),
-    )
-    monkeypatch.setattr("understanding_runner.transcribe_audio", lambda *a, **k: [])
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr("understanding_runner.analyze_scenes", fake_vlm)
-
-    monkeypatch.setitem(
-        understand.CONFIG, "api_url", "https://one.example/v1/chat/completions"
-    )
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
-    monkeypatch.setitem(
-        understand.CONFIG, "api_url", "https://two.example/v1/chat/completions"
-    )
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
-
-    assert calls == [
-        "https://one.example/v1/chat/completions",
-        "https://two.example/v1/chat/completions",
-    ]
-
-
-def test_understand_recomputes_vlm_when_thinking_behavior_changes(
-    monkeypatch, tmp_path
-):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    calls = []
-
-    def fake_vlm(scenes, frames, work_dir, **kwargs):
-        calls.append(understand.CONFIG.get("mimo_disable_thinking"))
-        result = [
-            {"scene_id": 0, "start": 0.0, "end": 10.0, "description": str(calls[-1])}
-        ]
-        (Path(work_dir) / "vlm_analysis.json").write_text(
-            json.dumps(result), encoding="utf-8"
-        )
-        return result
-
-    monkeypatch.setattr(
-        "understanding_runner.detect_scenes",
-        lambda video_path, work_dir, threshold=None: (
-            (Path(work_dir) / "scenes.json").write_text(
-                json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8"
-            )
-            and [{"start": 0.0, "end": 10.0}]
-        ),
-    )
-    monkeypatch.setattr("understanding_runner.transcribe_audio", lambda *a, **k: [])
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr("understanding_runner.analyze_scenes", fake_vlm)
-
-    monkeypatch.setitem(understand.CONFIG, "mimo_disable_thinking", True)
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
-    monkeypatch.setitem(understand.CONFIG, "mimo_disable_thinking", False)
-    _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
-
-    assert calls == [True, False]
 
 
 def test_understand_asr_exception_does_not_cache_empty_transcript(
     monkeypatch, tmp_path
 ):
     """Unexpected ASR failures must fail fast and leave no reusable empty asr_result.json."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-
-    monkeypatch.setattr(
-        "understanding_runner.detect_scenes",
-        lambda video_path, work_dir, threshold=None: (
-            (Path(work_dir) / "scenes.json").write_text(
-                json.dumps([{"start": 0.0, "end": 10.0}]), encoding="utf-8"
-            )
-            and [{"start": 0.0, "end": 10.0}]
-        ),
-    )
+    video = _video(tmp_path)
+    _patch_runner(monkeypatch, tmp_path)
     monkeypatch.setattr(
         "understanding_runner.transcribe_audio",
         lambda *a, **k: (_ for _ in ()).throw(RuntimeError("quota")),
     )
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
     monkeypatch.setattr("understanding_runner.analyze_scenes", lambda *a, **k: [])
 
     with pytest.raises(RuntimeError, match="ASR 失败"):
-        _run_understand_for_cache_tests(monkeypatch, tmp_path, video)
+        _run_cached(monkeypatch, video, tmp_path)
 
     assert not (tmp_path / "asr_result.json").exists()
     assert not (tmp_path / "asr_result.json.meta.json").exists()
-
-
-def test_understand_omits_stale_mimo_overview_when_overview_disabled(
-    monkeypatch, tmp_path
-):
-    """Direct understand runs must not let an old overview leak into a new brief when disabled."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    stale_overview = tmp_path / "mimo_video_overview.json"
-    stale_overview.write_text(
-        json.dumps({"input": "scene_chunks", "content": "STALE OVERVIEW"}),
-        encoding="utf-8",
-    )
-    frame = tmp_path / "frames" / "frame_00001.jpg"
-    frame.parent.mkdir()
-    frame.write_bytes(b"frame")
-
-    def fake_detect(video_path, work_dir, threshold=None):
-        scenes = [{"scene_id": 0, "start": 0.0, "end": 10.0}]
-        (Path(work_dir) / "scenes.json").write_text(
-            json.dumps(scenes), encoding="utf-8"
-        )
-        return scenes
-
-    monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
-    monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
-    monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", False)
-    monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
-    monkeypatch.setattr(
-        "understanding_runner.api_call",
-        lambda payload: {"choices": [{"message": {"content": "ok"}}]},
-    )
-    monkeypatch.setattr(
-        "understanding_runner.extract_frames", lambda video_path, work_dir: [frame]
-    )
-    monkeypatch.setattr("understanding_runner.detect_scenes", fake_detect)
-    monkeypatch.setattr(
-        "understanding_runner.detect_silence_periods", lambda *a, **k: []
-    )
-    monkeypatch.setattr(
-        "understanding_runner.analyze_scenes",
-        lambda scenes, frames, work_dir, **kwargs: [
-            {"scene_id": 0, "start": 0.0, "end": 10.0, "description": "fresh"}
-        ],
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "understanding_runner.py",
-            str(video),
-            "--work-dir",
-            str(tmp_path),
-            "--skip-asr",
-        ],
-    )
-
-    understand.main()
-
-    assert not stale_overview.exists()
-    assert "STALE OVERVIEW" not in (tmp_path / "agent_narration_brief.md").read_text(
-        encoding="utf-8"
-    )

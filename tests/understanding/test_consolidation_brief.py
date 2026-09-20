@@ -1,5 +1,9 @@
+import hashlib
+import json
 import sys
 from pathlib import Path
+
+import pytest
 
 sys.path.insert(
     0,
@@ -10,19 +14,17 @@ sys.path.insert(
         / "scripts"
     ),
 )
-import hashlib
-import json
 
-from lib import CONFIG
-from agent_brief import build_agent_brief
-from agent_text import _chunk_asr_for_writing
-from brief_context import (
+from lib import CONFIG  # noqa: E402
+from agent_brief import build_agent_brief  # noqa: E402
+from agent_text import _chunk_asr_for_writing  # noqa: E402
+from brief_context import (  # noqa: E402
     _clean_asr_prompt_fingerprint,
     _format_consolidation,
     _index_prompt_fingerprint,
     _load_consolidation,
 )
-from brief_inputs import (
+from brief_inputs import (  # noqa: E402
     _load_clean_asr,
     _load_mimo_overview_for_brief,
     _load_optional_stage_status,
@@ -31,33 +33,56 @@ from brief_inputs import (
 SCENES = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
 ASR = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
 SILENCE = [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}]
+INDEX_HEADING = "Understanding index (from consolidate.py)"
 
 
-def _write_index_with_meta(work_dir, index, scenes=SCENES):
+def _md5(path):
+    return hashlib.md5(Path(path).read_bytes()).hexdigest()
+
+
+def _write_index_with_meta(work_dir, index, scenes=SCENES, **meta_overrides):
     (work_dir / "vlm_analysis.json").write_text(json.dumps(scenes), encoding="utf-8")
-    src_md5 = hashlib.md5((work_dir / "vlm_analysis.json").read_bytes()).hexdigest()
     (work_dir / "understanding_index.json").write_text(
         json.dumps(index), encoding="utf-8"
     )
+    meta = {
+        "schema_version": 1,
+        "source_md5": _md5(work_dir / "vlm_analysis.json"),
+        "scene_count": len(scenes),
+        "model": CONFIG.get("vlm_model", ""),
+        "prompt_md5": _index_prompt_fingerprint(),
+        **meta_overrides,
+    }
     (work_dir / "understanding_index.json.meta.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "source_md5": src_md5,
-                "scene_count": len(scenes),
-                "model": CONFIG.get("vlm_model", ""),
-                "prompt_md5": _index_prompt_fingerprint(),
-            }
-        ),
-        encoding="utf-8",
+        json.dumps(meta), encoding="utf-8"
     )
 
 
-def test_brief_noop_without_consolidation(tmp_path):
-    """GOLDEN: with no consolidation artifacts, the brief gains no index section and
-    asr chunking uses RAW asr (byte-identical to the pre-consolidate behavior)."""
-    brief_path = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path)
-    text = brief_path.read_text(encoding="utf-8")
+def _brief_text(tmp_path, **kwargs):
+    return build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path, **kwargs).read_text(
+        encoding="utf-8"
+    )
+
+
+def _write_clean_asr(work_dir, **overrides):
+    """asr_clean.json with fresh provenance for the ASR fixture; overrides break one field."""
+    (work_dir / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
+    payload = {
+        "source_md5": _md5(work_dir / "asr_result.json"),
+        "model": CONFIG.get("vlm_model", ""),
+        "prompt_md5": _clean_asr_prompt_fingerprint(),
+        "segments": [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。CLEANED"}],
+        **overrides,
+    }
+    (work_dir / "asr_clean.json").write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_brief_without_consolidation_uses_raw_asr_and_writes_sidecars(monkeypatch, tmp_path):
+    """GOLDEN: with no consolidation artifacts the brief gains no index section, asr chunking
+    uses RAW asr, and the chunk/fusion sidecars are still written and surfaced."""
+    monkeypatch.setitem(CONFIG, "asr_chunk_min_chars", 5)
+    monkeypatch.setitem(CONFIG, "asr_chunk_max_chars", 12)  # == len(ASR text): max flush
+    text = _brief_text(tmp_path)
     requirements = json.loads(
         (tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8")
     )
@@ -65,38 +90,20 @@ def test_brief_noop_without_consolidation(tmp_path):
         "schema_version": 1,
         "style_card_required": False,
     }
-    assert "Understanding index (from consolidate.py)" not in text
+    assert INDEX_HEADING not in text
+    assert "ASR writing chunks" in text
+    assert "Timeline fusion" in text
     written = json.loads(
         (tmp_path / "asr_writing_chunks.json").read_text(encoding="utf-8")
     )
-    assert written == _chunk_asr_for_writing(ASR, SCENES)
-    assert (tmp_path / "timeline_fusion.json").exists()
-
-
-def test_agent_brief_writes_asr_chunks_and_timeline_fusion(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "edit_mode", "full")
-    monkeypatch.setitem(CONFIG, "target_duration", "")
-    monkeypatch.setitem(CONFIG, "context_info", "")
-    monkeypatch.setitem(CONFIG, "asr_chunk_min_chars", 5)
-    monkeypatch.setitem(CONFIG, "asr_chunk_max_chars", 12)
-
-    brief = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path)
-
-    text = brief.read_text(encoding="utf-8")
-    assert "ASR writing chunks" in text
-    assert "Timeline fusion" in text
-    chunks = json.loads(
-        (tmp_path / "asr_writing_chunks.json").read_text(encoding="utf-8")
-    )
+    assert written and written == _chunk_asr_for_writing(ASR, SCENES)
     fusion = json.loads((tmp_path / "timeline_fusion.json").read_text(encoding="utf-8"))
-    assert chunks
     assert fusion[0]["dialogue_segments"][0]["text"] == ASR[0]["text"]
 
 
 def test_chunk_asr_tolerates_mixed_int_str_scene_ids():
-    """Regression (cut-mode pass2): _remap_brief_evidence_to_output_timeline gives a SPLIT
-    scene a str id like '5.0' while unsplit scenes keep int ids. A chunk spanning both must
-    not crash sorted(current_scene_ids) with 'int < str'."""
+    """Regression (cut-mode pass2): a split scene gets a str id like '5.0' while unsplit scenes
+    keep int ids; a chunk spanning both must not crash sorted() with 'int < str'."""
     scenes = [
         {"scene_id": 5, "start": 0.0, "end": 3.0, "description": "a"},
         {"scene_id": "5.0", "start": 3.0, "end": 6.0, "description": "b"},
@@ -104,7 +111,7 @@ def test_chunk_asr_tolerates_mixed_int_str_scene_ids():
     asr = [{"start": 1.0, "end": 5.0, "text": "一句横跨两个场景的较长原声对白内容。"}]
     chunks = _chunk_asr_for_writing(asr, scenes)  # must not raise TypeError
     ids = chunks[0]["scene_ids"]
-    assert 5 in ids and "5.0" in ids  # both id types survive the type-safe sort
+    assert 5 in ids and "5.0" in ids
 
 
 def test_asr_chunks_split_on_sentences_and_track_scene_ids(monkeypatch):
@@ -131,38 +138,33 @@ def test_asr_chunks_split_on_sentences_and_track_scene_ids(monkeypatch):
     assert chunks[-1]["scene_ids"] == [1]
 
 
+def _write_status(work_dir, name, **fields):
+    (work_dir / name).write_text(json.dumps(fields), encoding="utf-8")
+
+
 def test_optional_stage_warnings_surface_failed_overview_and_consolidation(tmp_path):
-    (tmp_path / "mimo_video_overview.status.json").write_text(
-        json.dumps(
-            {
-                "stage": "mimo_video_overview",
-                "enabled": True,
-                "status": "failed",
-                "message": "quota timeout with stack trace that should not be repeated"
-                * 5,
-                "artifact": None,
-            }
-        ),
-        encoding="utf-8",
+    _write_status(
+        tmp_path,
+        "mimo_video_overview.status.json",
+        stage="mimo_video_overview",
+        enabled=True,
+        status="failed",
+        message="quota timeout with stack trace that should not be repeated" * 5,
+        artifact=None,
     )
-    (tmp_path / "consolidation.status.json").write_text(
-        json.dumps(
-            {
-                "stage": "consolidation",
-                "enabled": True,
-                "do_asr": False,
-                "do_index": True,
-                "status": "failed",
-                "message": "index api failed",
-                "artifacts": [],
-            }
-        ),
-        encoding="utf-8",
+    _write_status(
+        tmp_path,
+        "consolidation.status.json",
+        stage="consolidation",
+        enabled=True,
+        do_asr=False,
+        do_index=True,
+        status="failed",
+        message="index api failed",
+        artifacts=[],
     )
 
-    text = build_agent_brief(
-        SCENES, ASR, SILENCE, 6.0, tmp_path, mimo_overview_enabled=True
-    ).read_text(encoding="utf-8")
+    text = _brief_text(tmp_path, mimo_overview_enabled=True)
 
     assert "Optional stage warnings" in text
     assert "mimo_video_overview: failed" in text
@@ -171,45 +173,31 @@ def test_optional_stage_warnings_surface_failed_overview_and_consolidation(tmp_p
 
 
 def test_optional_stage_warnings_flag_missing_enabled_artifacts(tmp_path):
-    (tmp_path / "mimo_video_overview.status.json").write_text(
-        json.dumps(
-            {
-                "stage": "mimo_video_overview",
-                "enabled": True,
-                "status": "ok",
-                "message": "ok",
-                "artifact": "mimo_video_overview.json",
-            }
-        ),
-        encoding="utf-8",
+    _write_status(
+        tmp_path,
+        "mimo_video_overview.status.json",
+        stage="mimo_video_overview",
+        enabled=True,
+        status="ok",
+        message="ok",
+        artifact="mimo_video_overview.json",
     )
-    (tmp_path / "consolidation.status.json").write_text(
-        json.dumps(
-            {
-                "stage": "consolidation",
-                "enabled": True,
-                "do_asr": False,
-                "do_index": True,
-                "status": "ok",
-                "message": "ok",
-                "artifacts": ["understanding_index.json"],
-            }
-        ),
-        encoding="utf-8",
+    _write_status(
+        tmp_path,
+        "consolidation.status.json",
+        stage="consolidation",
+        enabled=True,
+        do_asr=False,
+        do_index=True,
+        status="ok",
+        message="ok",
+        artifacts=["understanding_index.json"],
     )
 
-    text = build_agent_brief(
-        SCENES, ASR, SILENCE, 6.0, tmp_path, mimo_overview_enabled=True
-    ).read_text(encoding="utf-8")
+    text = _brief_text(tmp_path, mimo_overview_enabled=True)
 
     assert "mimo_video_overview: missing_artifact" in text
     assert "consolidation: missing_index" in text
-
-
-def test_optional_stage_status_loader_treats_malformed_sidecar_as_unavailable(tmp_path):
-    assert _load_optional_stage_status(tmp_path, "missing.status.json") is None
-    (tmp_path / "bad.status.json").write_text("[1, 2, 3]", encoding="utf-8")
-    assert _load_optional_stage_status(tmp_path, "bad.status.json") is None
 
 
 def test_optional_brief_loaders_fall_back_on_invalid_json_schema_and_io(
@@ -229,6 +217,10 @@ def test_optional_brief_loaders_fall_back_on_invalid_json_schema_and_io(
     (tmp_path / "mimo_video_overview.json").mkdir()
     assert _load_mimo_overview_for_brief(tmp_path, SCENES) is None
 
+    assert _load_optional_stage_status(tmp_path, "missing.status.json") is None
+    (tmp_path / "bad.status.json").write_text("[1, 2, 3]", encoding="utf-8")
+    assert _load_optional_stage_status(tmp_path, "bad.status.json") is None
+    (tmp_path / "bad.status.json").unlink()
     (tmp_path / "bad.status.json").mkdir()
     assert _load_optional_stage_status(tmp_path, "bad.status.json") is None
 
@@ -255,6 +247,11 @@ def test_consolidation_cache_files_are_optional_when_malformed_or_unreadable(tmp
     assert _load_consolidation(tmp_path, SCENES) == {}
 
 
+def test_consolidation_loaders_are_safe_when_absent():
+    assert _load_consolidation("/nonexistent-dir", []) == {}
+    assert _format_consolidation({}) == []
+
+
 def test_brief_folds_in_index_when_present(tmp_path):
     _write_index_with_meta(
         tmp_path,
@@ -265,159 +262,62 @@ def test_brief_folds_in_index_when_present(tmp_path):
             "entities": ["匕首"],
         },
     )
-    text = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
-    assert "Understanding index (from consolidate.py)" in text
+    text = _brief_text(tmp_path)
+    assert INDEX_HEADING in text
     assert "张三" in text and "匕首" in text
 
 
-def test_brief_rejects_stale_index_without_matching_vlm_provenance(tmp_path):
-    stale_index = {
-        "characters": [{"name": "旧角色", "description": "旧素材"}],
-        "relationships": [],
-        "plot_points": [],
-        "entities": [],
-    }
-    (tmp_path / "vlm_analysis.json").write_text(json.dumps(SCENES), encoding="utf-8")
-    (tmp_path / "understanding_index.json").write_text(
-        json.dumps(stale_index), encoding="utf-8"
-    )
-    (tmp_path / "understanding_index.json.meta.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "source_md5": "deadbeef",
-                "scene_count": len(SCENES),
-                "model": CONFIG.get("vlm_model", ""),
-                "prompt_md5": _index_prompt_fingerprint(),
-            }
+STALE_INDEX = {
+    "characters": [{"name": "旧角色", "description": "旧素材"}],
+    "relationships": [],
+    "plot_points": [],
+    "entities": [],
+}
+
+
+@pytest.mark.parametrize(
+    "spoil",
+    [
+        lambda mp, tmp: _write_index_with_meta(tmp, STALE_INDEX, source_md5="deadbeef"),
+        lambda mp, tmp: (
+            _write_index_with_meta(tmp, STALE_INDEX),
+            mp.setitem(CONFIG, "vlm_model", "different-model"),
         ),
-        encoding="utf-8",
-    )
+    ],
+    ids=["vlm_source_md5", "model"],
+)
+def test_brief_rejects_index_with_stale_provenance(monkeypatch, tmp_path, spoil):
+    spoil(monkeypatch, tmp_path)
 
-    text = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
+    text = _brief_text(tmp_path)
 
-    assert "Understanding index (from consolidate.py)" not in text
+    assert INDEX_HEADING not in text
     assert "旧角色" not in text
 
 
-def test_consolidation_loaders_are_safe_when_absent():
-    assert _load_consolidation("/nonexistent-dir", []) == {}
-    assert _format_consolidation({}) == []
-
-
 def test_clean_asr_accepted_when_fresh_provenance_timing_ok(tmp_path):
-    (tmp_path / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-    src_md5 = hashlib.md5((tmp_path / "asr_result.json").read_bytes()).hexdigest()
-    (tmp_path / "asr_clean.json").write_text(
-        json.dumps(
-            {
-                "source_md5": src_md5,
-                "model": CONFIG.get("vlm_model", ""),
-                "prompt_md5": _clean_asr_prompt_fingerprint(),
-                "segments": [
-                    {
-                        "start": 1.0,
-                        "end": 5.0,
-                        "text": "第一句对白。第二句反击。CLEANED",
-                    }
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
+    _write_clean_asr(tmp_path)
     got = _load_clean_asr(tmp_path, ASR)
     assert got is not None and got[0]["text"].endswith("CLEANED")
 
 
-def test_clean_asr_rejected_on_bad_provenance_and_mistiming(tmp_path):
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"source_md5": "deadbeef"},
+        {"model": "old-model"},
+        {"prompt_md5": "deadbeef"},
+        {"segments": [{"start": 99.0, "end": 100.0, "text": "x"}]},
+    ],
+    ids=["source_md5", "model", "prompt_md5", "mistimed_span"],
+)
+def test_clean_asr_rejected_on_bad_provenance_or_mistiming(tmp_path, overrides):
+    _write_clean_asr(tmp_path, **overrides)
+    assert _load_clean_asr(tmp_path, ASR) is None
+
+
+def test_clean_asr_absent_is_none(tmp_path):
     (tmp_path / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-    # wrong provenance -> None
-    (tmp_path / "asr_clean.json").write_text(
-        json.dumps(
-            {
-                "source_md5": "deadbeef",
-                "segments": [{"start": 1.0, "end": 5.0, "text": "x"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    assert _load_clean_asr(tmp_path, ASR) is None
-    # correct provenance but mis-timed span -> None (timing guard)
-    src_md5 = hashlib.md5((tmp_path / "asr_result.json").read_bytes()).hexdigest()
-    (tmp_path / "asr_clean.json").write_text(
-        json.dumps(
-            {
-                "source_md5": src_md5,
-                "model": CONFIG.get("vlm_model", ""),
-                "prompt_md5": _clean_asr_prompt_fingerprint(),
-                "segments": [{"start": 99.0, "end": 100.0, "text": "x"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    assert _load_clean_asr(tmp_path, ASR) is None
-    # absent asr_clean.json -> None
-    (tmp_path / "asr_clean.json").unlink()
-    assert _load_clean_asr(tmp_path, ASR) is None
-
-
-def test_brief_rejects_index_when_model_or_prompt_provenance_differs(
-    monkeypatch, tmp_path
-):
-    _write_index_with_meta(
-        tmp_path,
-        {
-            "characters": [{"name": "旧模型角色", "description": "旧模型"}],
-            "relationships": [],
-            "plot_points": [],
-            "entities": [],
-        },
-    )
-    monkeypatch.setitem(CONFIG, "vlm_model", "different-model")
-
-    text = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
-
-    assert "旧模型角色" not in text
-    assert "Understanding index (from consolidate.py)" not in text
-
-
-def test_clean_asr_rejected_when_model_or_prompt_provenance_differs(
-    monkeypatch, tmp_path
-):
-    (tmp_path / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-    src_md5 = hashlib.md5((tmp_path / "asr_result.json").read_bytes()).hexdigest()
-    (tmp_path / "asr_clean.json").write_text(
-        json.dumps(
-            {
-                "source_md5": src_md5,
-                "model": "old-model",
-                "prompt_md5": _clean_asr_prompt_fingerprint(),
-                "segments": [{"start": 1.0, "end": 5.0, "text": "旧模型清洗。"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert _load_clean_asr(tmp_path, ASR) is None
-
-    (tmp_path / "asr_clean.json").write_text(
-        json.dumps(
-            {
-                "source_md5": src_md5,
-                "model": CONFIG.get("vlm_model", ""),
-                "prompt_md5": "deadbeef",
-                "segments": [{"start": 1.0, "end": 5.0, "text": "旧提示清洗。"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-
     assert _load_clean_asr(tmp_path, ASR) is None
 
 
@@ -462,24 +362,15 @@ def test_brief_ignores_stale_mimo_overview_when_disabled_or_chunk_mismatch(
         encoding="utf-8",
     )
 
-    disabled_text = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
-    assert "STALE MIMO OVERVIEW" not in disabled_text
+    assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
 
     monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    mismatch_text = build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path).read_text(
-        encoding="utf-8"
-    )
-    assert "STALE MIMO OVERVIEW" not in mismatch_text
+    assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
 
 
 def test_index_prompt_fingerprint_tracks_consolidate_source_of_truth():
-    """Regression guard for the silent index-drop bug (PR #58 review): the provenance
-    fingerprint MUST hash the exact prompt consolidate stamps into
-    understanding_index.json.meta.json. If consolidate.INDEX_PROMPT is edited without
-    updating this byte-parity copy, the guard in _load_consolidation rejects every index
-    and the narration brief silently loses all character/plot grounding."""
+    """The provenance fingerprint must hash the exact prompt consolidate stamps into
+    understanding_index.json.meta.json, or every index is silently rejected (PR #58)."""
     import consolidate
 
     assert _index_prompt_fingerprint() == consolidate._prompt_fingerprint(

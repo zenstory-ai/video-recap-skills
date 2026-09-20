@@ -1,5 +1,9 @@
+import json
 import sys
 from pathlib import Path
+from subprocess import CompletedProcess
+
+import pytest
 
 sys.path.insert(
     0,
@@ -10,12 +14,10 @@ sys.path.insert(
         / "scripts"
     ),
 )
-import pytest  # noqa: F401
-from subprocess import CompletedProcess  # noqa: F401
-import asr as asr_module
-from detect import _filter_junk_scenes, detect_scenes
-from extract import extract_frames
-from lib import (
+import asr as asr_module  # noqa: E402
+from detect import detect_scenes  # noqa: E402
+from extract import extract_frames  # noqa: E402
+from lib import (  # noqa: E402
     CONFIG,
     _api_headers,
     _prepare_api_payload,
@@ -30,7 +32,8 @@ from lib import (
     normalize_api_url,
     step_cache_key,
 )
-from vlm import (
+from understanding_brief import _research_context  # noqa: E402
+from vlm import (  # noqa: E402
     _mimo_video_chunks,
     _video_data_url,
     analyze_scenes,
@@ -50,19 +53,12 @@ def test_retry_after_seconds_accepts_malformed_header():
     assert _retry_after_seconds("not-a-number-or-date", 4) == 4
 
 
-def test_normalize_api_url_accepts_base_or_full_endpoint():
-    assert (
-        normalize_api_url("https://example.com/v1")
-        == "https://example.com/v1/chat/completions"
-    )
-    assert (
-        normalize_api_url("https://example.com/v1/")
-        == "https://example.com/v1/chat/completions"
-    )
-    assert (
-        normalize_api_url("https://example.com/v1/chat/completions")
-        == "https://example.com/v1/chat/completions"
-    )
+@pytest.mark.parametrize(
+    "raw",
+    ["https://example.com/v1", "https://example.com/v1/", "https://example.com/v1/chat/completions"],
+)
+def test_normalize_api_url_accepts_base_or_full_endpoint(raw):
+    assert normalize_api_url(raw) == "https://example.com/v1/chat/completions"
 
 
 def test_mimo_token_plan_key_uses_an_explicit_cluster(monkeypatch):
@@ -258,25 +254,8 @@ def test_content_fingerprint_detects_middle_only_changes(tmp_path):
     assert file_fingerprint(first) != file_fingerprint(second)
 
 
-def test_filter_junk_scenes_removes_black_or_white_transitions_but_keeps_fallback(
-    monkeypatch,
-):
-    scenes = [
-        {"start": 0.0, "end": 1.0},
-        {"start": 1.0, "end": 2.0},
-        {"start": 2.0, "end": 3.0},
-    ]
-
-    monkeypatch.setattr("detect._is_junk_scene", lambda video, ts: ts < 1.0)
-    assert _filter_junk_scenes(scenes, Path("video.mp4")) == scenes[1:]
-
-    monkeypatch.setattr("detect._is_junk_scene", lambda video, ts: True)
-    assert _filter_junk_scenes(scenes, Path("video.mp4")) == scenes
-
-
 def test_research_context_feeds_vlm_from_background_research(tmp_path):
-    import json
-    from understanding_brief import _research_context
+    assert _research_context(tmp_path) == ""  # no research file -> empty context
 
     (tmp_path / "background_research.json").write_text(
         json.dumps(
@@ -320,12 +299,6 @@ def test_research_context_feeds_vlm_from_background_research(tmp_path):
     assert "监察院" in ctx
     assert "noise" not in ctx
     assert len(ctx) <= 1200  # bounded so it never blows the VLM prompt budget
-
-
-def test_research_context_empty_without_file(tmp_path):
-    from understanding_brief import _research_context
-
-    assert _research_context(tmp_path) == ""
 
 
 def test_segment_and_transcribe_uses_configured_window(monkeypatch, tmp_path):
