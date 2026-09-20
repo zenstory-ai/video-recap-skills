@@ -12,12 +12,14 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
 - **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
 
 ### Changed
 
 - **同一句源字幕跨同源连续剪点时先合并再筛短片段**，不再把一句话切碎；不同源、真实删段、输出空隙不合并。`SUBTITLE_RENDER_VERSION` 提升到 9。
 - **SRT 毫秒改为向下量化**，避免帧边界时间被四舍五入后延迟一帧；负值钳到零。
+- 剪辑手法与审稿提示补充：保住动机与接受条件、反打是否新增信息、跨场镜头不得拼成虚假因果、只写证据已呈现的结果、REVISION 只提可定位的局部修法；brief 不再把 ASR 行尾当作安全剪点，改为听审后再定。
 - **`recap.py` 关闭 argparse 前缀缩写**（`allow_abbrev=False`），显式选项由 parser 记录到 `args._explicit_options`，后续守卫不再靠扫描 `sys.argv`。
 
 ### Fixed
