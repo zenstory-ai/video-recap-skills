@@ -2,15 +2,18 @@
 """video-script validation entrypoint.
 
 Validate an agent-written narration.json against the local understanding index.
-Writes narration_lint.json and, in full mode, rewrites only normalized fields plus
-the measured overlaps_speech flag; authored start/end timing is preserved exactly.
+Legacy full mode performs budget cleanup/deduplication and derives speech ownership.
+Protected mode keeps the approved timeline and metadata exact except for measured
+``overlaps_speech`` ownership.
 """
 
 import argparse
+import copy
 import json
 import math
 from pathlib import Path
 
+from deslop_qc import analyze_deslop_qc
 from lib import CONFIG, log, stable_hash
 from narration_lint import (
     _validate_narration_budget,
@@ -94,6 +97,72 @@ def _validate_output_timeline_bounds(narration, output_duration, tolerance=0.05)
         )
 
 
+def _validate_approved_shape(narration):
+    """Reject malformed approved input before any helper can coerce or reorder it."""
+    if not isinstance(narration, list) or not narration:
+        raise ValueError("approved narration must be a non-empty JSON array")
+    previous_start = None
+    for index, segment in enumerate(narration):
+        if not isinstance(segment, dict):
+            raise ValueError(f"approved narration segment #{index} must be an object")
+        text = segment.get("narration")
+        if not isinstance(text, str) or not text.strip():
+            raise ValueError(
+                f"approved narration segment #{index} narration must be a non-empty string"
+            )
+        start, end = segment.get("start"), segment.get("end")
+        for name, value in (("start", start), ("end", end)):
+            if (
+                not isinstance(value, (int, float))
+                or isinstance(value, bool)
+                or not math.isfinite(value)
+            ):
+                raise ValueError(
+                    f"approved narration segment #{index} {name} must be finite numeric"
+                )
+        if not end > start:
+            raise ValueError(
+                f"approved narration segment #{index} end must be greater than start"
+            )
+        pause = segment.get("pause_after_ms")
+        if pause is not None and (
+            not isinstance(pause, int) or isinstance(pause, bool) or pause < 0
+        ):
+            raise ValueError(
+                f"approved narration segment #{index} pause_after_ms must be a non-negative integer"
+            )
+        if previous_start is not None and start < previous_start:
+            raise ValueError("approved narration segments must remain in chronological order")
+        previous_start = start
+
+
+def _write_approved_shape_failure(work_dir, narration, error):
+    """Replace any stale lint PASS with a current strict-shape failure report."""
+    deslop_qc = analyze_deslop_qc([], work_dir=work_dir)
+    report = {
+        "ok": False,
+        "error_count": 1,
+        "warning_count": 0,
+        "metrics": {"input_fingerprint": stable_hash(narration)},
+        "deslop_qc": deslop_qc,
+        "errors": [
+            {
+                "level": "error",
+                "index": None,
+                "code": "invalid_approved_shape",
+                "message": str(error),
+            }
+        ],
+        "warnings": [],
+    }
+    Path(work_dir, "deslop_qc.json").write_text(
+        json.dumps(deslop_qc, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    Path(work_dir, "narration_lint.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Validate + align agent-written narration.json."
@@ -106,6 +175,11 @@ def main():
         default=None,
         help="cut_output: rendered edited_source.mp4 duration in seconds",
     )
+    ap.add_argument(
+        "--preserve-approved-text",
+        action="store_true",
+        help="validate approved narration without rewriting, truncating, merging, or reordering it",
+    )
     args = ap.parse_args()
 
     work_dir = Path(args.work_dir)
@@ -116,19 +190,42 @@ def main():
         raise SystemExit(f"缺少 {narration_path}；请先按 video-script 规则写解说词")
     vlm_analysis = _load(work_dir / "vlm_analysis.json")
     silence_periods = _load(work_dir / "silence_periods.json") or []
+    if args.preserve_approved_text:
+        try:
+            _validate_approved_shape(narration)
+        except ValueError as exc:
+            _write_approved_shape_failure(work_dir, narration, exc)
+            raise SystemExit(f"批准稿结构无效：{exc}") from exc
+        approved = copy.deepcopy(narration)
     if args.mode == "cut_output":
         # Two-pass cut: narration is authored in OUTPUT time against edited_source.mp4 — there is
         # no source-time clip membership check. Derive speech ownership from the mapped output
         # evidence, then persist that measured flag for voiceover/assemble instead of trusting JSON.
         narration = measure_narration_speech_ownership(
-            narration, work_dir, mode="cut_output"
+            approved if args.preserve_approved_text else narration,
+            work_dir,
+            mode="cut_output",
         )
-        validate_narration_or_raise(
+        report = validate_narration_or_raise(
             narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir
         )
-        if args.output_duration is None:
-            raise SystemExit("--output-duration is required when --mode cut_output")
-        _validate_output_timeline_bounds(narration, args.output_duration)
+        try:
+            if args.output_duration is None:
+                raise SystemExit("--output-duration is required when --mode cut_output")
+            _validate_output_timeline_bounds(narration, args.output_duration)
+        except SystemExit as exc:
+            report["errors"].append({
+                "level": "error",
+                "index": None,
+                "code": "invalid_output_timeline",
+                "message": str(exc),
+            })
+            report["ok"] = False
+            report["error_count"] = len(report["errors"])
+            (work_dir / "narration_lint.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            raise
         narration_path.write_text(
             json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
         )
@@ -137,12 +234,20 @@ def main():
         validate_narration_or_raise(
             narration, vlm_analysis, clip_plan=clip_plan, mode="cut", work_dir=work_dir
         )
-        narration = _validate_narration_budget(narration, vlm_analysis)
+        if not args.preserve_approved_text:
+            narration = _validate_narration_budget(narration, vlm_analysis)
     else:
+        if args.preserve_approved_text:
+            narration = measure_narration_speech_ownership(
+                approved, work_dir, mode="full"
+            )
         validate_narration_or_raise(
             narration, vlm_analysis, clip_plan=None, mode="full", work_dir=work_dir
         )
-        narration = _align_narration_to_quiet(narration, vlm_analysis, silence_periods)
+        if not args.preserve_approved_text:
+            narration = _align_narration_to_quiet(
+                narration, vlm_analysis, silence_periods
+            )
         narration_path.write_text(
             json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
         )
