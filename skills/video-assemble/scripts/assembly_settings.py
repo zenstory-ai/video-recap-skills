@@ -13,7 +13,10 @@ from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitle_core import _subtitle_style_config
 
-def assembly_settings_fingerprint(work_dir=None):
+AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
+
+
+def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
     """Settings that affect the rendered video, used by pipeline resume cache. When work_dir is
     given, a user_subtitles presence flag is included so dropping in a user-subtitle file rebuilds
     the cached subtitles."""
@@ -23,6 +26,8 @@ def assembly_settings_fingerprint(work_dir=None):
     overlay_fingerprint = (
         _artifact_fingerprint(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
     )
+    if audio_mode not in AUDIO_MODES:
+        raise ValueError(f"unsupported audio mode: {audio_mode}")
     fingerprint = {
         "version": SUBTITLE_RENDER_VERSION,
         "subtitle_text_normalize": SUBTITLE_TEXT_NORMALIZE_VERSION,
@@ -59,15 +64,23 @@ def assembly_settings_fingerprint(work_dir=None):
                 "fingerprint": overlay_fingerprint,
             },
         },
-        "narration_timing": {
+        "audio": {
+            "mode": audio_mode,
+            "selected_stream_index": audio_stream_index,
+        },
+    }
+    if audio_mode == "narration":
+        fingerprint["narration_timing"] = {
             "delay_seconds": CONFIG["narration_delay_seconds"],
             "tail_pad_seconds": CONFIG["narration_tail_pad_seconds"],
             "fade_ms": CONFIG["fade_ms"],
             "narration_speed": CONFIG["narration_speed"],
             "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
             "tts_segment_tempo_max": CONFIG["tts_segment_tempo_max"],
-        },
-        "audio_mix": {
+        }
+    if audio_mode in {"narration", "source-mix"}:
+        # adopted-packet-copy never decodes or mixes, so mix settings cannot change it.
+        fingerprint["audio_mix"] = {
             "ducking_mode": CONFIG["ducking_mode"],
             "duck_fade_seconds": CONFIG["duck_fade_seconds"],
             "duck_bridge_seconds": CONFIG["duck_bridge_seconds"],
@@ -87,8 +100,7 @@ def assembly_settings_fingerprint(work_dir=None):
             "bgm_path": CONFIG["bgm_path"],
             "bgm_volume": CONFIG["bgm_volume"],
             "bgm_ducking_volume": CONFIG["bgm_ducking_volume"],
-        },
-    }
+        }
     if burn_subtitles:
         fingerprint["subtitle_renderer"] = "ass"
         fingerprint["subtitle_style"] = _subtitle_style_config()

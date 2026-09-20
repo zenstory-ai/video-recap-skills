@@ -15,6 +15,7 @@ All notable changes to this project are documented here.
 - **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
 - **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
 - **video-cut `--review-shots`。** 扫描实际渲染文件内部的短镜与密集切点（只召回、不修复），结果写入 `shot_review.json` 并绑定计划/源/成片指纹；`--shot-roi` 可按实测画窗扫描。短镜阈值按实测帧率推导，不再固定 24 帧。
+- **声音路径显式化（assemble）。** `assemble.py --audio-mode {narration,source-mix,adopted-packet-copy}` 与 `--audio-stream-index`：`source-mix` 不读 `tts_meta.json`、只对所选原声流做音量/BGM/响度处理；`adopted-packet-copy` 复用已采用的完整混音并按 AAC 包逐包比对，不重编码、不裁尾。`assembly_qc.json` / `assembly_manifest.json` 记录 `audio_mode` 与实际执行的音频操作；`pair_media.py` 可把独立画面与已采用音轨按流复制配对并证明包身份。
 
 ### Changed
 

@@ -25,9 +25,22 @@ def _timeline_subtitle_segments(tts_segments, work_dir, duration_s):
     ]
 
 
-def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_bgm):
+def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_bgm, *,
+                   audio_mode="narration", selected_audio_stream=0):
     """Build and persist the backend-neutral multi-track timeline.json."""
-    video_clips = _build_video_clips(input_video, work_dir, duration_s)
+    if audio_mode == "narration":
+        video_clips = _build_video_clips(input_video, work_dir, duration_s)
+    else:
+        # Non-narration sound comes from the actual current picture input as one
+        # complete interval. Re-expanding an old cut plan would substitute different
+        # source sound and make the optional editor project misrepresent the render.
+        video_clips = [{
+            "source_path": str(Path(input_video)),
+            "source_start": 0.0,
+            "source_end": float(duration_s),
+            "timeline_start": 0.0,
+            "timeline_end": float(duration_s),
+        }]
     narration_segments = []
     for seg in tts_segments:
         s, e = _seg_place_window(seg)
@@ -57,7 +70,7 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
     # carry ducking automation whenever ducking is on at all; even under sidechain
     # mode the draft gets editable volume keyframes (ffmpeg stays the canonical mix)
     ducking = None
-    if CONFIG["ducking_mode"] != "none":
+    if audio_mode == "narration" and CONFIG["ducking_mode"] != "none":
         ducking = {"idle": CONFIG["idle_orig_volume"],
                    "speech": CONFIG["speech_ducking_volume"],
                    "quiet": CONFIG["zone_ducking_volume"],
@@ -67,6 +80,23 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
     timeline = build_timeline(canvas, duration_s, video_clips,
                               narration_segments, bgm=bgm, ducking=ducking,
                               subtitle_segments=subtitle_segments)
+    if audio_mode != "narration":
+        source_gain = 1.0 if audio_mode == "adopted-packet-copy" else CONFIG["idle_orig_volume"]
+        for clip in timeline["tracks"][0]["clips"]:
+            clip["audio"].update({
+                "base_gain": round(float(source_gain), 4),
+                "selected_stream": selected_audio_stream,
+                "mode": audio_mode,
+            })
+        timeline["audio_delivery"] = {
+            "mode": audio_mode,
+            "selected_stream": selected_audio_stream,
+            "packet_frozen": audio_mode == "adopted-packet-copy",
+            "reconstructable": (
+                audio_mode == "adopted-packet-copy" and selected_audio_stream == 0
+            ),
+            "canonical_renderer": "stream_copy" if audio_mode == "adopted-packet-copy" else "ffmpeg_mix",
+        }
     degraded = [
         {"source_path": clip["source_path"], "reason": clip["provenance_reason"]}
         for clip in video_clips
