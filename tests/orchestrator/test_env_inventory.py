@@ -57,7 +57,7 @@ def test_public_env_contract_classifies_all_literal_reads_and_no_credentials():
         assert not any(marker in name for marker in CREDENTIAL_MARKERS), name
         assert not name.endswith("_TOKEN"), name
     assert "MIMO_TOKEN_PLAN_CLUSTER" in contract
-    assert {"REVIEW_NARRATION", "REQUIRE_NARRATION_REVIEW"} <= set(contract)
+    assert {"REVIEW_NARRATION", "REQUIRE_NARRATION_REVIEW", "INDEX_TTS_CACHE_REVISION"} <= set(contract)
 
     trees = _skill_script_trees()
     assert len(trees) >= 6

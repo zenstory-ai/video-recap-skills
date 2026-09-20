@@ -1,7 +1,7 @@
 {
   "name": "video-recap-skills",
   "version": "0.5.0",
-  "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg; remote Xiaomi MiMo ASR, VLM, and default TTS; optional Fish Audio TTS with a separate API key; final playback review required.",
+  "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg; remote Xiaomi MiMo ASR, VLM, and default TTS; optional Fish Audio TTS with a separate API key or a self-hosted HTTP TTS endpoint; final playback review required.",
   "author": {
     "name": "PiteChen"
   }
