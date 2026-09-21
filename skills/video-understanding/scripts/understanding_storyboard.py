@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lib import CONFIG, log, file_identity
+from lib import CONFIG, log
 
 
 from storyboard import build_source_storyboard, build_edited_storyboard
@@ -10,6 +10,7 @@ from storyboard import build_source_storyboard, build_edited_storyboard
 
 from understanding_cache import (
     _artifact_identity,
+    _video_input,
     _frames_manifest_path,
     _load_json,
     _stage_cache_valid,
@@ -60,7 +61,7 @@ def _generate_source_storyboard(
         "schema_version": 1,
         "stage": "source_storyboard",
         "inputs": {
-            "video": file_identity(video_path),
+            "video": _video_input(video_path),
             "scenes": _artifact_identity(scenes_json),
             "frames_manifest": _artifact_identity(_frames_manifest_path(work_dir)),
         },

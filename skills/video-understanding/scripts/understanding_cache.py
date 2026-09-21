@@ -33,6 +33,12 @@ def _load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _video_input(video_path):
+    """The source video as a cache input: resolved path plus {size, mtime_ns}, so two
+    different files written in the same timestamp tick never share a stage output."""
+    return {"path": str(Path(video_path).resolve()), **file_identity(video_path)}
+
+
 def _artifact_identity(path):
     """{size, mtime_ns} of an input artifact, or None when it does not exist."""
     path = Path(path)
@@ -181,7 +187,7 @@ def _scene_cache_payload(video_path):
     return {
         "schema_version": 1,
         "stage": "scenes",
-        "inputs": {"video": file_identity(video_path)},
+        "inputs": {"video": _video_input(video_path)},
         "settings": {
             "scene_threshold": CONFIG.get("scene_threshold"),
             "scene_junk_filter": CONFIG.get("scene_junk_filter"),
@@ -197,7 +203,7 @@ def _asr_cache_payload(video_path, *, skip_asr=False):
     return {
         "schema_version": 1,
         "stage": "asr",
-        "inputs": {"video": file_identity(video_path)},
+        "inputs": {"video": _video_input(video_path)},
         "settings": {
             "skip_asr": bool(skip_asr),
             "mimo_asr_api_key_present": bool(CONFIG.get("mimo_asr_api_key")),
@@ -235,7 +241,7 @@ def _silence_cache_payload(video_path, asr_json):
         "schema_version": 1,
         "stage": "silence",
         "inputs": {
-            "video": file_identity(video_path),
+            "video": _video_input(video_path),
             "asr_result": _artifact_identity(asr_json),
         },
         "asr_meta": _load_json(_artifact_meta_path(asr_json))
@@ -277,7 +283,7 @@ def _vlm_cache_payload(video_path, work_dir, scenes_json, frames):
         "schema_version": 1,
         "stage": "vlm",
         "inputs": {
-            "video": file_identity(video_path),
+            "video": _video_input(video_path),
             "scenes": _artifact_identity(scenes_json),
             "background_research": _artifact_identity(
                 Path(work_dir) / "background_research.json"
@@ -305,7 +311,7 @@ def _frame_cache_payload(video_path, fps, frames):
         # v2: frame number→time is (n-1)/fps, not n/fps. Bumping invalidates frames/VLM
         # artifacts produced under the old off-by-one so they are recomputed, not reused.
         "schema_version": FRAME_TIME_CONVENTION_VERSION,
-        "inputs": {"video": file_identity(video_path)},
+        "inputs": {"video": _video_input(video_path)},
         "fps": float(fps),
         "frame_count": len(frames),
         "frames": frame_names,
