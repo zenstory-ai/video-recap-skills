@@ -130,7 +130,7 @@ cut 模式先根据 `recap_story_plan.json` 与 `visual_audio_board.json` 写原
 beat_id | function | change | POV | preferred moment | 入点 | 出点
 ```
 
-片段顺序必须构成一条完整故事线，而不是无序高光。可使用 0–1 个 cold open，随后回到因果清楚的 setup → turn → escalation → payoff。片段长度服从具体时刻，不使用统一秒数模板；片尾必须保留完整台词或动作。对短时间内密集的 scene-change 候选，先区分原片切点与本次拼接点：原片无关短镜头整段删，相关短镜头扩展到完整动作/反应；本次拼接点优先移动边界、恢复同源连续运动或合并片段，尽量不制造人工闪切。
+片段顺序必须构成一条完整故事线，而不是无序高光。可使用 0–1 个 cold open，随后回到因果清楚的 setup → turn → escalation → payoff。片段长度服从具体时刻，不使用统一秒数模板；片尾必须保留完整台词或动作。密集 scene-change 候选的来源判断与处理规则由剪辑阶段定义，写计划时遵循同一规则，不制造人工闪切。
 
 ## 4. 撰写旁白
 

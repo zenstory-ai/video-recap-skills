@@ -6,7 +6,8 @@ import time
 from pathlib import Path
 
 from lib import CONFIG
-from lib import log, run_cmd, get_video_duration, mimo_asr_api_call, file_fingerprint
+from lib import log, run_cmd, get_video_duration, mimo_asr_api_call
+from detect import _audio_meta_path, _write_audio_meta
 from asr_timing_evidence import (
     EVIDENCE_FILENAME,
     load_glossary_names,
@@ -82,20 +83,6 @@ def _apply_glossary_corrections(segments, work_dir):
             seg["text"] = corrected
     return segments
 
-
-def _audio_meta_path(work_dir):
-    return Path(work_dir) / "audio.wav.meta.json"
-
-
-def _write_audio_meta(work_dir, video_path):
-    _audio_meta_path(work_dir).write_text(
-        json.dumps({
-            "schema_version": 1,
-            "source_video_fingerprint": file_fingerprint(video_path),
-            "audio": "audio.wav",
-        }, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def transcribe_audio(video_path, work_dir):

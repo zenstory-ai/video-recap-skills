@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **skill 层瘦身。** SKILL.md 去掉跨技能重复的创作模式定义、密集切点规则和 TTS 供应商细节，各自只在拥有它的技能里写一次；recap 的参数清单改为指向 `--help`。长段落下沉到 `video-voiceover/references/index-tts.md`、`video-assemble/references/packaging.md`、`source-score.md` 与 `video-cut/references/shot-review.md`。`timeline-and-jianying.md` 移到 `docs/`，`env-inventory-v1.json` 移到 `tests/orchestrator/`。
+
 ### Removed
 
 - `video-understanding/references/data-schema.md` 只保留本技能产出的产物（vlm、asr、asr_timing_evidence、asr_writing_chunks、silence、timeline_fusion、deslop_qc_requirements）与输入 `background_research.json`；narration / clip_plan / style_card / deslop_qc 等段落改由 video-recap 的完整契约与创作简报说明，减少约 135 行重复。
@@ -19,7 +23,7 @@ All notable changes to this project are documented here.
 
 - **video-cut `clip_plan.required_evidence`。** Agent 声明必保源片刻（节点、来源、原片秒、轨道、先后关系），工具在句界/画面吸附之后、渲染之前核对；缺段、错序或无效声明写入 `clip_plan_validated.json.qc.required_evidence` 并阻断，缓存复用同样重检。
 - **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
-- **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
+- **公共环境变量清单。** `tests/orchestrator/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
 - **video-cut `--review-shots`。** 扫描实际渲染文件内部的短镜与密集切点（只召回、不修复），结果写入 `shot_review.json` 并绑定计划/源/成片指纹；`--shot-roi` 可按实测画窗扫描。短镜阈值按实测帧率推导，不再固定 24 帧。
 - **ASR 时序证据 sidecar。** `asr_timing_evidence.json` 记录来源指纹、可用性状态与词级对齐是否执行，词表修正与原始转写分列，粗窗不再被当作精字幕；brief 显示经验证的状态与指纹，缺失或陈旧时显示 `MISSING_OR_STALE`。
 - **自托管 TTS 端点。** `--tts-provider index-tts` 通过 `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 接入 index-tts 协议的 JSON→WAV 服务；端点只以 sha256 落盘，拒绝带凭证的 URL 与重定向，`doctor` 离线校验配置而不探测连通性。每段 TTS 缓存与结果记录 provider receipt 与处理后 WAV 的 sha256。

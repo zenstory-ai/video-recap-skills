@@ -7,71 +7,20 @@ from mimo_qc_evidence import collect_evidence, safe_mimo_config
 from mimo_qc_observations import normalize_observations
 from mimo_qc_payload import build_payload
 from mimo_qc_client import mimo_qc_api_call
-from mimo_qc_contract import DEFAULT_STAGE
 
 sample_video_frames = mimo_qc_report.sample_video_frames
 write_report = mimo_qc_report.write_report
 clear_report = mimo_qc_runner.clear_report
 
 
-def build_report(
-    work_dir,
-    *,
-    stage=DEFAULT_STAGE,
-    fixture=None,
-    dry_run=False,
-    judge=None,
-    config=None,
-    final_output=None,
-    live=False,
-    refresh=False,
-    frame_sampler=None,
-    existing=None,
-):
-    return mimo_qc_report.build_report(
-        work_dir,
-        stage=stage,
-        fixture=fixture,
-        dry_run=dry_run,
-        judge=judge,
-        config=config,
-        final_output=final_output,
-        live=live,
-        refresh=refresh,
-        frame_sampler=frame_sampler,
-        existing=existing,
-        api_call=mimo_qc_api_call,
-    )
+def build_report(work_dir, **kwargs):
+    """mimo_qc_report.build_report with the real MiMo transport bound at call time."""
+    return mimo_qc_report.build_report(work_dir, api_call=mimo_qc_api_call, **kwargs)
 
 
-def run(
-    work_dir,
-    *,
-    stage=DEFAULT_STAGE,
-    fixture=None,
-    dry_run=False,
-    judge=None,
-    config=None,
-    final_output=None,
-    output=None,
-    live=False,
-    refresh=False,
-    frame_sampler=None,
-):
-    return mimo_qc_runner.run(
-        work_dir,
-        stage=stage,
-        fixture=fixture,
-        dry_run=dry_run,
-        judge=judge,
-        config=config,
-        final_output=final_output,
-        output=output,
-        live=live,
-        refresh=refresh,
-        frame_sampler=frame_sampler,
-        api_call=mimo_qc_api_call,
-    )
+def run(work_dir, **kwargs):
+    """mimo_qc_runner.run with the real MiMo transport bound at call time."""
+    return mimo_qc_runner.run(work_dir, api_call=mimo_qc_api_call, **kwargs)
 
 
 def main(argv=None):

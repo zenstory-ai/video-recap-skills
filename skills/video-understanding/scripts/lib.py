@@ -25,7 +25,6 @@ MIMO_TOKEN_PLAN_API_URLS = {
 }
 DEFAULT_MIMO_MODEL = "mimo-v2.5"          # VLM / chat (vision understanding)
 DEFAULT_MIMO_ASR_MODEL = "mimo-v2.5-asr"  # speech-to-text
-DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts"  # text-to-speech
 
 
 def normalize_api_url(raw_url):
@@ -208,24 +207,6 @@ CONFIG = {
 SCRIPT_DIR = Path(__file__).parent
 PROMPTS_DIR = SCRIPT_DIR.parent / "references"
 
-def narration_tempo_budget(tts_rate_offset=0.0, *, config=None):
-    """Return the canonical tempo budget shared by voiceover and assemble."""
-    cfg = config or CONFIG
-    global_speed = max(0.01, float(cfg.get("narration_speed", 1.0) or 1.0))
-    rate_factor = max(0.01, 1.0 + float(tts_rate_offset or 0.0))
-    cumulative_max = max(1.0, float(cfg.get("narration_cumulative_tempo_max", 1.35) or 1.35))
-    hard_max = max(cumulative_max, float(cfg.get("narration_cumulative_tempo_hard_max", 1.40) or 1.40))
-    legacy_segment_cap = max(1.0, float(cfg.get("tts_segment_tempo_max", 1.20) or 1.20))
-    segment_tempo_max = max(1.0, min(legacy_segment_cap, cumulative_max / (global_speed * rate_factor)))
-    return {
-        "global_narration_speed": global_speed,
-        "tts_rate_factor": rate_factor,
-        "cumulative_tempo_max": cumulative_max,
-        "cumulative_tempo_hard_max": hard_max,
-        "segment_tempo_max": segment_tempo_max,
-        "max_raw_duration_factor": global_speed * segment_tempo_max,
-    }
-
 def log(msg):
     print(f"[video-recap] {msg}", flush=True)
 
@@ -297,18 +278,6 @@ def file_fingerprint(path, chunk_size=1024 * 1024):
     digest = h.hexdigest()
     _FILE_FINGERPRINT_MEMO[key] = digest
     return digest
-def video_fingerprint(video_path):
-    """Full video content fingerprint used as the root pipeline asset print."""
-    return file_fingerprint(video_path)
-
-def step_cache_key(video_path, step_name, params_fingerprint=""):
-    """Build a cache key from video content, step name and step parameters."""
-    params_digest = params_fingerprint
-    if not isinstance(params_digest, str):
-        params_digest = stable_hash(params_digest)
-    payload = f"{video_fingerprint(video_path)}_{step_name}_{params_digest}"
-    return hashlib.md5(payload.encode("utf-8")).hexdigest()
-
 def _retry_after_seconds(value, fallback):
     """Parse Retry-After seconds or HTTP-date; return fallback on malformed input."""
     if not value:

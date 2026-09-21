@@ -24,11 +24,8 @@ export TTS_PROVIDER=fish-audio
 export FISH_API_KEY=***
 export FISH_TTS_REFERENCE_ID=<voice-model-id>  # 可选；覆盖内置“娱乐扒妹”音色
 
-# 或显式选择自托管 HTTP TTS 端点（index-tts 协议，JSON→WAV）；值只保留在本地环境
+# 或显式选择自托管 index-tts 端点，配置见 references/index-tts.md
 export TTS_PROVIDER=index-tts
-export INDEX_TTS_ENDPOINT=http://127.0.0.1:<port>/tts
-export INDEX_TTS_VOICE=<authorized-voice-name>
-export INDEX_TTS_CACHE_REVISION=<operator-deployment-revision>  # 可选
 ```
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
@@ -76,16 +73,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
   当前路径不会继续冒充本轮成功；成功元数据通过同目录临时文件原子替换。
 - `auto` 优先使用已配置的 MiMo，MiMo key 缺失且设置了 `FISH_API_KEY` 时使用 Fish Audio；需要可复现的 provider 选择时显式传 `--tts-provider`。
 - 自托管 index-tts 端点只能由 `--tts-provider index-tts` 或 `TTS_PROVIDER=index-tts` 显式选择，`auto`
-  永不兜底选择它；缺 `INDEX_TTS_ENDPOINT` 或 `INDEX_TTS_VOICE` 时在缓存/请求前失败。endpoint
-  只接受无 userinfo/query/fragment 的 HTTP(S) URL，且请求禁止重定向，避免把批准文本转发至其他主机。
-- IndexTTS 请求体固定为 `{"voice": voice, "text": spoken_text}`。当前段 schema 的可选 `emotion`
-  以及额外 style、非默认 rate/pitch 控制会显式失败，不会静默忽略。原始合成使用 provider 默认速度，
-  不按标点、长度或位置自动计算 rate；这不等于下游放置阶段的端到端 tempo 锁。
-- IndexTTS receipt 记录“请求的 voice”、返回原始 WAV SHA-256 与处理后 WAV SHA-256。它只证明
-  请求参数和收到的字节，不是该声线的声学验证。若归一化改变字节且未另存 raw WAV，receipt
-  明确标记 raw 不可由哈希重建；缓存命中必须复用匹配 sidecar 中的 receipt，不能现场补造。
-  操作员可在部署或声线实现变化后提升 `INDEX_TTS_CACHE_REVISION` 使旧缓存失效；未配置时不声称
-  已记录或可重建服务端模型版本。
+  永不兜底选择它。协议、请求体、receipt 语义与缓存失效规则见 `references/index-tts.md`。
 - Fish Audio 直接请求 WAV；默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），`FISH_TTS_REFERENCE_ID` 可覆盖。模型、音色 ID、API URL、动态语速或归一化设置变化时会重新生成缓存。当前免费模型无 SLA，受 Fair Use 和官方免费期限约束。
 - `--voice-ref` 仅用于 full/cut 解说克隆，切换到 `mimo-v2.5-tts-voiceclone`。仅在确需新合成时惰性规范化一次；
 - dub voiceclone 原始 WAV 也会用模型、提示、台词和参考音频指纹缓存；匹配重跑不再重复请求或计费，`dub_manifest.json` 逐行记录 `tts_cache=hit|miss`；
@@ -102,5 +90,4 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
   创意删改，不代表已完成直接听审、音色锁定或发音质量验收。
 - 不混流、不压低原声、不渲染字幕。
 - 不分析视频，也不选择时间点；只为输入稿件中的既定分段配音。
-- Fish Audio 路径不接受本地 `--voice-ref`；使用已创建的 `FISH_TTS_REFERENCE_ID` 选择音色。
-- IndexTTS 同样不接受 `--voice-ref`/`--mimo-voice`，也不声称已做人耳听审或音色身份验证。
+- Fish Audio 与 IndexTTS 路径都不接受本地 `--voice-ref`；前者用已创建的 `FISH_TTS_REFERENCE_ID` 选择音色。

@@ -30,7 +30,6 @@ from lib import (  # noqa: E402
     get_video_duration,
     is_mimo_token_plan_key,
     normalize_api_url,
-    step_cache_key,
 )
 from understanding_brief import _research_context  # noqa: E402
 from vlm import (  # noqa: E402
@@ -234,12 +233,6 @@ def test_content_fingerprint_cache_keys_ignore_path_and_mtime(tmp_path):
     second.write_bytes(first.read_bytes())
 
     assert file_fingerprint(first) == file_fingerprint(second)
-    assert step_cache_key(first, "vlm", {"model": "x"}) == step_cache_key(
-        second, "vlm", {"model": "x"}
-    )
-    assert step_cache_key(first, "vlm", {"model": "x"}) != step_cache_key(
-        first, "vlm", {"model": "y"}
-    )
 
 
 def test_content_fingerprint_detects_middle_only_changes(tmp_path):

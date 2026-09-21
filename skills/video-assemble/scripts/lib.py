@@ -2,7 +2,6 @@
 import math
 import os
 import subprocess
-from pathlib import Path
 
 
 # ── 配置 ──────────────────────────────────────────────────────────────
@@ -135,8 +134,6 @@ if isinstance(_EXISTING_CONFIG_REF, dict):
     _EXISTING_CONFIG_REF.clear()
     _EXISTING_CONFIG_REF.update(CONFIG)
     CONFIG = _EXISTING_CONFIG_REF
-
-SCRIPT_DIR = Path(__file__).parent
 
 def narration_tempo_budget(tts_rate_offset=0.0):
     """Return the canonical tempo budget shared by voiceover and assemble.

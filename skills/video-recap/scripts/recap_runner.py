@@ -235,15 +235,18 @@ def _rebuild_understanding_brief(source_record, source_work_dir, args):
     )
 
 
-def _reject_stale_multi_manifest(work_dir, videos, args, source_records):
-    mismatches = _multi_manifest_mismatches(work_dir, videos, args, source_records)
+def _reject_stale(mismatches, label):
     if mismatches:
         details = "\n  - ".join(mismatches)
         raise SystemExit(
-            "work_dir 与当前多视频 recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
+            f"work_dir 与当前{label}recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
             "请使用新的 --work-dir，或删除旧产物后重新运行 Phase A。\n"
             f"  - {details}"
         )
+
+
+def _reject_stale_multi_manifest(work_dir, videos, args, source_records):
+    _reject_stale(_multi_manifest_mismatches(work_dir, videos, args, source_records), "多视频 ")
 
 
 def _run_multi_cut(videos, work_dir, args):
@@ -558,14 +561,7 @@ def _execute_pipeline(args, videos):
         )
 
     def _reject_stale_manifest():
-        mismatches = _manifest_mismatches(work_dir, video, args)
-        if mismatches:
-            details = "\n  - ".join(mismatches)
-            raise SystemExit(
-                "work_dir 与当前 recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
-                "请使用新的 --work-dir，或删除旧产物后重新运行 Phase A。\n"
-                f"  - {details}"
-            )
+        _reject_stale(_manifest_mismatches(work_dir, video, args), " ")
 
     if args.edit_mode == "dub":
         # Dub mode: EN→ZH translation-dub in the original cloned voice (replaces speech, not

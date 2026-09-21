@@ -56,6 +56,6 @@ Agent 会自动完成理解、方案、剪辑、写稿、配音和合成，不�
 
 ## 相关
 
-- 多轨时间线和剪映导出的完整规格：[`skills/video-recap/references/timeline-and-jianying.md`](../skills/video-recap/references/timeline-and-jianying.md)
+- 多轨时间线和剪映导出的完整规格：[`docs/timeline-and-jianying.md`](timeline-and-jianying.md)
 - 站点指南：https://zenstory.ai/video-recap/capcut-draft ，https://zenstory.ai/video-recap/video-to-narration
 - 仓库地址：https://github.com/zenstory-ai/video-recap-skills（原 `worldwonderer/video-recap-skills`，旧链接自动跳转）

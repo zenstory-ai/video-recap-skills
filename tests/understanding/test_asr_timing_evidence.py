@@ -16,6 +16,7 @@ SCRIPTS = (
 sys.path.insert(0, str(SCRIPTS))
 
 import asr  # noqa: E402
+from lib import file_fingerprint  # noqa: E402
 import understanding_brief  # noqa: E402
 from agent_brief import build_agent_brief  # noqa: E402
 from asr_timing_evidence import (  # noqa: E402
@@ -243,7 +244,7 @@ def _valid_available_evidence(tmp_path, observed=HELLO, final=HELLO):
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"RIFF-audio")
     (tmp_path / "audio.wav.meta.json").write_text(
-        json.dumps({"source_video_fingerprint": asr.file_fingerprint(video)}),
+        json.dumps({"source_video_fingerprint": file_fingerprint(video)}),
         encoding="utf-8",
     )
     result_path = tmp_path / "asr_result.json"
@@ -334,7 +335,7 @@ def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
     ).read_text(encoding="utf-8")
     assert "ASR timing evidence" in text
     assert "AVAILABLE_COARSE" in text
-    assert asr.file_fingerprint(evidence_path) in text
+    assert file_fingerprint(evidence_path) in text
     assert "word alignment: NOT_PERFORMED" in text
     assert "ASR [start–end] times + Quiet windows below as safe cut points" not in text
     assert "direct listening" in text
@@ -364,5 +365,5 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
     )
     text = (tmp_path / "agent_narration_brief.md").read_text(encoding="utf-8")
     assert "MISSING_OR_STALE" in text
-    assert asr.file_fingerprint(evidence_path) in text
+    assert file_fingerprint(evidence_path) in text
     assert "must not be treated as verified dialogue boundaries" in text

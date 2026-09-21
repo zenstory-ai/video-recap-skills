@@ -22,8 +22,6 @@ MIMO_TOKEN_PLAN_API_URLS = {
     "ams": "https://token-plan-ams.xiaomimimo.com/v1",
 }
 DEFAULT_MIMO_MODEL = "mimo-v2.5"          # VLM / chat (vision understanding)
-DEFAULT_MIMO_ASR_MODEL = "mimo-v2.5-asr"  # speech-to-text
-DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts"  # text-to-speech
 
 
 def normalize_api_url(raw_url):
@@ -149,24 +147,6 @@ CONFIG = {
     "edit_mode": os.environ.get("EDIT_MODE", "full"),  # full | cut
     "target_duration": os.environ.get("TARGET_DURATION", ""),  # cut 模式目标成片时长，如 10m
 }
-
-def narration_tempo_budget(tts_rate_offset=0.0, *, config=None):
-    """Return the canonical tempo budget shared by voiceover and assemble."""
-    cfg = config or CONFIG
-    global_speed = max(0.01, float(cfg.get("narration_speed", 1.0) or 1.0))
-    rate_factor = max(0.01, 1.0 + float(tts_rate_offset or 0.0))
-    cumulative_max = max(1.0, float(cfg.get("narration_cumulative_tempo_max", 1.35) or 1.35))
-    hard_max = max(cumulative_max, float(cfg.get("narration_cumulative_tempo_hard_max", 1.40) or 1.40))
-    legacy_segment_cap = max(1.0, float(cfg.get("tts_segment_tempo_max", 1.20) or 1.20))
-    segment_tempo_max = max(1.0, min(legacy_segment_cap, cumulative_max / (global_speed * rate_factor)))
-    return {
-        "global_narration_speed": global_speed,
-        "tts_rate_factor": rate_factor,
-        "cumulative_tempo_max": cumulative_max,
-        "cumulative_tempo_hard_max": hard_max,
-        "segment_tempo_max": segment_tempo_max,
-        "max_raw_duration_factor": global_speed * segment_tempo_max,
-    }
 
 def log(msg):
     print(f"[video-recap] {msg}", flush=True)
