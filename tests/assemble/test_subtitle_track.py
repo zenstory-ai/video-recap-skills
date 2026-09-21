@@ -158,7 +158,8 @@ def test_legacy_digest_keys_in_bindings_are_ignored():
     loaded = _load(track)
 
     assert loaded["metadata"]["bindings"] == {
-        "picture": {"path": PICTURE_PATH, "edit_plan": EDIT_PLAN},
+        "picture": {"path": str(Path(PICTURE_PATH).resolve()),
+                    "edit_plan": str(Path(EDIT_PLAN).resolve())},
         "audio": dict(AUDIO_FACTS),
     }
 

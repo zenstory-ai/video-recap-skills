@@ -503,8 +503,9 @@ def test_recap_manifest_identity_is_size_and_mtime(tmp_path):
     assert material_lib.file_identity(video) == {
         "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
     }
-    os.utime(video, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
-    assert material_lib.file_identity(video)["mtime_ns"] == stat.st_mtime_ns + 1
+    bumped = stat.st_mtime_ns + 1_000_000  # 1 ms: above NTFS's 100 ns tick on Windows CI
+    os.utime(video, ns=(stat.st_atime_ns, bumped))
+    assert material_lib.file_identity(video)["mtime_ns"] == bumped
 
 
 def test_recap_phase_b_rejects_work_dir_from_different_source(monkeypatch, tmp_path):

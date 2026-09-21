@@ -485,13 +485,18 @@ def _audio_cache_matches(audio_path, video_path):
         expected = file_identity(video_path)
     except OSError:
         return False
-    return isinstance(meta, dict) and meta.get("source_video_identity") == expected
+    return (
+        isinstance(meta, dict)
+        and meta.get("source_video") == str(Path(video_path).resolve())
+        and meta.get("source_video_identity") == expected
+    )
 
 
 def _write_audio_meta(work_dir, video_path):
     _audio_meta_path(work_dir).write_text(
         json.dumps({
             "schema_version": 1,
+            "source_video": str(Path(video_path).resolve()),
             "source_video_identity": file_identity(video_path),
             "audio": "audio.wav",
         }, ensure_ascii=False, indent=2),
