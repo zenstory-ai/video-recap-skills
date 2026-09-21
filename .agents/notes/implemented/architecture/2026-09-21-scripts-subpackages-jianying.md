@@ -41,6 +41,10 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
   video-assemble 的 4 个 `subtitle_*.py` 改为 `scripts/subtitles/{core,render,track,track_binding}.py`，
   `references/subtitle-track.md` 的脚本路径同步改为 `scripts/subtitles/track.py`。
   合同测试对 markdown 里带 `scripts/` 前缀的脚本路径也做本地解析。
+- 第三批：video-voiceover 的两个第三方 TTS 供应商 `fish_audio.py`、`index_tts.py` 改为 `scripts/providers/{fish_audio,index_tts}.py`；
+  `tts_audio.py`（WAV 归一化，供应商无关）与入口 `voiceover.py`、`dub.py` 留在顶层。
+  video-recap 的 `recap_cli.py` 同时把 38 个旗标按 argparse argument group 分组
+  （核心流程 / 声音策略 / 本地采用三件套 / QC 与导出 / 素材库 / dub / 自检），`--help` 即分组清单，行为不变。
 
 ## Verification
 
