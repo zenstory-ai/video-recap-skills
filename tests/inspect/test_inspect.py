@@ -79,6 +79,21 @@ def test_state_source_from_assembly_manifest_when_no_run_manifest(tmp_path):
     assert state["source_video"]["origin"] == "assembly_manifest.json"
 
 
+def test_state_source_from_cut_meta_when_no_manifests(tmp_path):
+    """video-cut's sidecar records {source_path: fingerprint}; a single entry is the source."""
+    (tmp_path / "edited_source.mp4.meta.json").write_text(json.dumps({
+        "schema_version": 2,
+        "source_fingerprints": {"/videos/ep1.mp4": "c" * 64},
+        "edited_source_fingerprint": "d" * 64,
+    }), encoding="utf-8")
+    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    assert state["source_video"] == {
+        "path": "/videos/ep1.mp4",
+        "fingerprint": "c" * 64,
+        "origin": "edited_source.mp4.meta.json",
+    }
+
+
 def test_state_source_unknown_when_nothing_records_it(tmp_path):
     """No manifest anywhere → source reported unknown, no crash."""
     state = recap_inspect.cmd_state(tmp_path, compact=True)

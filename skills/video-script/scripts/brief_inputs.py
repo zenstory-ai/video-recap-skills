@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 from lib import CONFIG, file_fingerprint, stable_hash
-from brief_context import _clean_asr_prompt_fingerprint, _consolidation_model
+from brief_context import _consolidation_model
 
 # Shared with consolidate.py, which this byte-identical copy cannot import (the sibling
 # skill ships no consolidate.py). Keep both literals in sync.
@@ -27,7 +27,7 @@ def _load_clean_asr(work_dir, asr_result):
     """Return consolidate.py's cleaned ASR segments, or None to fall back to raw asr_result.
 
     Accepted only when the file is at least as fresh as asr_result.json, its provenance
-    (source_md5 / model / prompt_md5) matches, and every segment keeps its original span
+    (source_md5 / model) matches, and every segment keeps its original span
     within _ASR_SPAN_TOL."""
     if not asr_result:
         return None
@@ -50,11 +50,9 @@ def _load_clean_asr(work_dir, asr_result):
         return None
     if not isinstance(payload, dict):
         return None
-    provenance = {
-        "source_md5": source_md5,
-        "model": _consolidation_model(),
-        "prompt_md5": _clean_asr_prompt_fingerprint(),
-    }
+    # prompt_md5 is the producer's own cache key; do not re-derive it here (a drifted
+    # copy of the prompt silently rejected every asr_clean.json once before).
+    provenance = {"source_md5": source_md5, "model": _consolidation_model()}
     if not payload.items() >= provenance.items():
         return None
     segments = payload.get("segments")

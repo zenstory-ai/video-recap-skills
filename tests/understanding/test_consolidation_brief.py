@@ -19,9 +19,7 @@ from lib import CONFIG  # noqa: E402
 from agent_brief import build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
 from brief_context import (  # noqa: E402
-    _clean_asr_prompt_fingerprint,
     _format_consolidation,
-    _index_prompt_fingerprint,
     _load_consolidation,
 )
 from brief_inputs import (  # noqa: E402
@@ -50,7 +48,7 @@ def _write_index_with_meta(work_dir, index, scenes=SCENES, **meta_overrides):
         "source_md5": _md5(work_dir / "vlm_analysis.json"),
         "scene_count": len(scenes),
         "model": CONFIG.get("vlm_model", ""),
-        "prompt_md5": _index_prompt_fingerprint(),
+        "prompt_md5": "producer-owned-cache-key",
         **meta_overrides,
     }
     (work_dir / "understanding_index.json.meta.json").write_text(
@@ -70,7 +68,7 @@ def _write_clean_asr(work_dir, **overrides):
     payload = {
         "source_md5": _md5(work_dir / "asr_result.json"),
         "model": CONFIG.get("vlm_model", ""),
-        "prompt_md5": _clean_asr_prompt_fingerprint(),
+        "prompt_md5": "producer-owned-cache-key",
         "segments": [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。CLEANED"}],
         **overrides,
     }
@@ -306,10 +304,9 @@ def test_clean_asr_accepted_when_fresh_provenance_timing_ok(tmp_path):
     [
         {"source_md5": "deadbeef"},
         {"model": "old-model"},
-        {"prompt_md5": "deadbeef"},
         {"segments": [{"start": 99.0, "end": 100.0, "text": "x"}]},
     ],
-    ids=["source_md5", "model", "prompt_md5", "mistimed_span"],
+    ids=["source_md5", "model", "mistimed_span"],
 )
 def test_clean_asr_rejected_on_bad_provenance_or_mistiming(tmp_path, overrides):
     _write_clean_asr(tmp_path, **overrides)
@@ -368,11 +365,12 @@ def test_brief_ignores_stale_mimo_overview_when_disabled_or_chunk_mismatch(
     assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
 
 
-def test_index_prompt_fingerprint_tracks_consolidate_source_of_truth():
-    """The provenance fingerprint must hash the exact prompt consolidate stamps into
-    understanding_index.json.meta.json, or every index is silently rejected (PR #58)."""
-    import consolidate
-
-    assert _index_prompt_fingerprint() == consolidate._prompt_fingerprint(
-        consolidate.INDEX_PROMPT
-    )
+def test_prompt_md5_is_producer_owned_and_never_rejects_a_fresh_index(tmp_path):
+    """consolidate.py stamps prompt_md5 for its own cache; the brief must not re-derive it.
+    A literal copy of the prompt drifted once and silently rejected every index (PR #58)
+    and later every asr_clean.json."""
+    index = {"characters": [{"name": "甲"}], "relationships": [], "plot_points": [], "entities": []}
+    _write_index_with_meta(tmp_path, index, prompt_md5="some-other-prompt-version")
+    assert _load_consolidation(tmp_path, SCENES) == index
+    _write_clean_asr(tmp_path, prompt_md5="some-other-prompt-version")
+    assert _load_clean_asr(tmp_path, ASR) is not None

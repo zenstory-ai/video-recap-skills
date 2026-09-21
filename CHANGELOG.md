@@ -49,6 +49,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- **brief 永远拒收 `asr_clean.json` / 曾拒收 `understanding_index.json`。** `brief_context.py` 手抄的清洗 prompt 与 `consolidate.py` 漂移后指纹永不匹配；消费方不再重算生产方的 `prompt_md5`，只核对 `source_md5` 与 `model`。
+- **`recap_inspect.py state` 单源 cut 的来源总是 `unknown`。** 它读取的 `source_video_fingerprint` 从未被 video-cut 写出；改读 sidecar 实际记录的 `source_fingerprints`。
+- **显式混音路径的 `assembly_manifest.json` 被第二次写入覆盖为 `audio_mix_binding: null`。** 删除 try 块外重复的 manifest 构建，最终 MP4 也少哈希四次。
 - `timeline.json` 的旁白起点改为向下取整到 1e-4 秒网格，序列化后不再截掉已放置音频的首个采样。
 - 已放置的旁白 WAV 若为 IEEE float 格式（Python `wave` 不支持），改用 ffprobe 读取时长，不再在装配和一致性检查时报错。
 

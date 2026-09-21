@@ -1220,7 +1220,7 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
             .md5((tmp_path / "asr_result.json").read_bytes())
             .hexdigest(),
             "model": brief_context._consolidation_model(),
-            "prompt_md5": brief_context._clean_asr_prompt_fingerprint(),
+            "prompt_md5": "producer-owned-cache-key",
         },
     )
 

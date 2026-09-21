@@ -113,12 +113,15 @@ def _discover_source(work_dir):
             "fingerprint": data.get("source_video_fingerprint"),
             "origin": "assembly_manifest.json",
         }
-    # 3. edited_source.mp4.meta.json — single-source cut; fingerprint only, no path.
+    # 3. edited_source.mp4.meta.json — video-cut records {source_path: fingerprint};
+    #    a single-source cut has exactly one entry.
     data = _load_optional(work_dir / "edited_source.mp4.meta.json")
-    if data is not None and data.get("source_video_fingerprint"):
+    fingerprints = data.get("source_fingerprints") if isinstance(data, dict) else None
+    if isinstance(fingerprints, dict) and len(fingerprints) == 1:
+        (path, fingerprint), = fingerprints.items()
         return {
-            "path": None,
-            "fingerprint": data["source_video_fingerprint"],
+            "path": path,
+            "fingerprint": fingerprint,
             "origin": "edited_source.mp4.meta.json",
         }
     return {"path": None, "fingerprint": None, "origin": "unknown"}

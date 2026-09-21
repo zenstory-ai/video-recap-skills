@@ -601,16 +601,6 @@ def main():
             if (stat.st_dev, stat.st_ino) == owned_alias:
                 final_output.unlink()
         raise
-    manifest = assembly_contract._assembly_manifest_payload(
-        args.video, tts_segments, work_dir, output_path,
-        tts_meta_path=tts_meta,
-        narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
-        final_output=final_output,
-        settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
-        audio_mode=args.audio_mode,
-        audio_stream_index=args.audio_stream_index,
-    )
-    assembly_contract._write_assembly_manifest(work_dir, manifest)
     lib.log(f"组装完成: {final_output}")
 
     # OPTIONAL, decoupled: export a 剪映 draft from the timeline (lazy import; never
