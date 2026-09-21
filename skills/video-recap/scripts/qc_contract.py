@@ -6,7 +6,6 @@ pipeline, or attempt automatic fixes.
 """
 from __future__ import annotations
 
-import hashlib
 import re
 from pathlib import Path
 from typing import Any
@@ -32,7 +31,6 @@ ARTIFACTS = frozenset({"final_qc.json", "golden_eval.json", "mimo_qc.json", "pre
 
 DETERMINISTIC_CATEGORIES = frozenset({
     "missing_artifact",
-    "stale_fingerprint",
     "duration",
     "stream",
     "subtitle",
@@ -107,7 +105,6 @@ _REQUIRED_FINDING_FIELDS = frozenset({
     "evidence",
     "sample_policy",
     "model_used",
-    "artifact_fingerprints",
     "next_action",
     # Helper fields kept for current rule semantics and compatibility.
     "category",
@@ -132,15 +129,6 @@ class QCContractError(ValueError):
     """Raised when a QC report or finding violates the shared contract."""
 
 
-def artifact_fingerprint(path: str | Path) -> str:
-    """Return a stable sha256 hex digest for an artifact file."""
-    h = hashlib.sha256()
-    with Path(path).open("rb") as f:
-        for chunk in iter(lambda: f.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def build_finding(
     *,
     stage: str,
@@ -155,7 +143,6 @@ def build_finding(
     rule_id: str | None = None,
     decision_reason: str | None = None,
     model_used: str | None = None,
-    artifact_fingerprints: Mapping[str, Any] | None = None,
     next_action: str | None = None,
     deterministic: bool | None = None,
     blocking: bool | None = None,
@@ -181,8 +168,6 @@ def build_finding(
         decision_reason = message
     if model_used is None:
         model_used = "local_deterministic"
-    if artifact_fingerprints is None:
-        artifact_fingerprints = {}
     if next_action is None:
         next_action = "manual_review"
     if isinstance(sample_policy, str):
@@ -200,7 +185,6 @@ def build_finding(
     if evidence is None:
         evidence = {}
     evidence = redact_secrets(evidence)
-    artifact_fingerprints = redact_secrets(artifact_fingerprints)
     objective_corroboration = redact_secrets(objective_corroboration or {})
 
     is_non_deterministic = (not deterministic) or category in NON_DETERMINISTIC_CATEGORIES
@@ -226,7 +210,6 @@ def build_finding(
         "evidence": dict(evidence),
         "sample_policy": dict(sample_policy),
         "model_used": model_used,
-        "artifact_fingerprints": dict(artifact_fingerprints),
         "next_action": next_action,
         "category": category,
         "code": code,
@@ -324,8 +307,6 @@ def _validate_finding(finding: Mapping[str, Any]) -> None:
         raise QCContractError("source must be an object")
     if finding["evidence"] is None or not isinstance(finding["evidence"], Mapping):
         raise QCContractError("evidence must be an object")
-    if finding["artifact_fingerprints"] is None or not isinstance(finding["artifact_fingerprints"], Mapping):
-        raise QCContractError("artifact_fingerprints must be an object")
     if finding["objective_corroboration"] is None or not isinstance(finding["objective_corroboration"], Mapping):
         raise QCContractError("objective_corroboration must be an object")
     for field in ("finding_id", "rule_id", "decision_reason", "model_used", "next_action"):

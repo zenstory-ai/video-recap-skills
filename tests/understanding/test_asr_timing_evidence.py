@@ -16,6 +16,7 @@ SCRIPTS = (
 sys.path.insert(0, str(SCRIPTS))
 
 import asr  # noqa: E402
+from lib import file_identity  # noqa: E402
 import understanding_brief  # noqa: E402
 from agent_brief import build_agent_brief  # noqa: E402
 from asr_timing_evidence import (  # noqa: E402
@@ -66,20 +67,24 @@ def test_no_key_is_explicit_unavailability_not_silence(monkeypatch, tmp_path):
     assert json.loads((tmp_path / "asr_result.json").read_text()) == []
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "UNAVAILABLE_NO_KEY"
-    assert evidence["source_video_fingerprint"]
-    assert evidence["asr_result_fingerprint"]
-    assert evidence["audio_fingerprint"] is None
+    assert evidence["source_video"] == file_identity(video)
+    assert evidence["asr_result"] == file_identity(tmp_path / "asr_result.json")
+    assert evidence["audio"] is None
     assert evidence["precision"]["word_alignment"] == "NOT_PERFORMED"
     assert evidence["precision"]["dialogue_boundaries"] == "NOT_VERIFIED"
     assert evidence["precision"]["empty_text_meaning"] == "UNKNOWN_NOT_PROVEN_SILENCE"
 
 
 def test_no_duration_binds_extracted_audio_and_is_not_reusable(monkeypatch, tmp_path):
-    """Duration 0 writes an empty, evidence-bound result that never becomes a cache hit."""
+    """An unreadable duration writes an empty, evidence-bound result that never becomes a cache hit."""
     video = _video(tmp_path)
+
+    def no_duration(_path):
+        raise RuntimeError("ffprobe failed")
+
     monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "test-key")
     monkeypatch.setattr(asr, "run_cmd", _successful_extract())
-    monkeypatch.setattr(asr, "get_video_duration", lambda _path: 0.0)
+    monkeypatch.setattr(asr, "get_video_duration", no_duration)
     monkeypatch.setattr(
         asr, "_run_asr", lambda _path: pytest.fail("no transcription at zero duration")
     )
@@ -88,7 +93,7 @@ def test_no_duration_binds_extracted_audio_and_is_not_reusable(monkeypatch, tmp_
     assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == []
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "UNAVAILABLE_NO_DURATION"
-    assert evidence["audio_fingerprint"]
+    assert evidence["audio"] == file_identity(tmp_path / "audio.wav")
     assert validate_asr_timing_evidence(
         tmp_path / EVIDENCE_FILENAME, video, tmp_path / "asr_result.json"
     )
@@ -122,7 +127,7 @@ def test_audio_extraction_failure_writes_failure_evidence_and_no_partial_audio(
     assert not (tmp_path / "asr_result.json").exists()
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "FAILED_AUDIO_EXTRACTION"
-    assert evidence["asr_result_fingerprint"] is None
+    assert evidence["asr_result"] is None
     assert not (tmp_path / "audio.wav").exists()
     assert not (tmp_path / "audio.wav.meta.json").exists()
 
@@ -161,6 +166,7 @@ def test_glossary_keeps_observed_and_post_glossary_text(monkeypatch, tmp_path):
     assert window["post_glossary_text"] == "她叫叶轻眉"
     assert window["glossary_modified"] is True
     assert window["text_availability"] == "AVAILABLE"
+    assert _read_evidence(tmp_path)["glossary"] == {"names": ["叶轻眉"], "name_count": 1}
 
 
 def test_empty_provider_text_is_unknown_not_proven_silence_and_not_cached(
@@ -212,7 +218,7 @@ def test_explicit_skip_sidecar_is_result_bound(tmp_path):
     write_asr_timing_evidence(tmp_path, video, "EXPLICITLY_SKIPPED", final_segments=[])
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "EXPLICITLY_SKIPPED"
-    assert evidence["asr_result_fingerprint"]
+    assert evidence["asr_result"] == file_identity(result_path)
     assert validate_asr_timing_evidence(
         tmp_path / EVIDENCE_FILENAME, video, result_path
     )
@@ -243,7 +249,7 @@ def _valid_available_evidence(tmp_path, observed=HELLO, final=HELLO):
     audio = tmp_path / "audio.wav"
     audio.write_bytes(b"RIFF-audio")
     (tmp_path / "audio.wav.meta.json").write_text(
-        json.dumps({"source_video_fingerprint": asr.file_fingerprint(video)}),
+        json.dumps({"source_video_identity": file_identity(video)}),
         encoding="utf-8",
     )
     result_path = tmp_path / "asr_result.json"
@@ -296,12 +302,12 @@ def test_glossary_change_invalidates_fresh_corrected_cache(tmp_path):
     [
         lambda p: p.update({"schema_version": True}),
         lambda p: p.update({"extra": "not allowed"}),
-        lambda p: p.update({"source_video_fingerprint": True}),
-        lambda p: p.update({"asr_result_fingerprint": "tampered"}),
-        lambda p: p["glossary"].update({"policy_version": True}),
+        lambda p: p.update({"source_video": True}),
+        lambda p: p.update({"asr_result": {"size": 1, "mtime_ns": 1}}),
+        lambda p: p["glossary"].update({"name_count": 99}),
         lambda p: p["windows"][0].update({"start": True}),
         lambda p: p.update({"status": "EMPTY_UNKNOWN"}),
-        lambda p: p.update({"audio_fingerprint": None}),
+        lambda p: p.update({"audio": None}),
         lambda p: p["windows"][0].update(
             {"observed_text": "different", "glossary_modified": False}
         ),
@@ -321,7 +327,7 @@ def test_strict_sidecar_schema_and_status_consistency(tmp_path, mutate):
 def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
     monkeypatch, tmp_path
 ):
-    video, _result_path, evidence_path = _valid_available_evidence(tmp_path)
+    video, _result_path, _evidence_path = _valid_available_evidence(tmp_path)
     monkeypatch.setitem(asr.CONFIG, "edit_mode", "cut")
     text = build_agent_brief(
         [{"scene_id": 0, "start": 0.0, "end": 2.0, "description": "scene"}],
@@ -334,7 +340,6 @@ def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
     ).read_text(encoding="utf-8")
     assert "ASR timing evidence" in text
     assert "AVAILABLE_COARSE" in text
-    assert asr.file_fingerprint(evidence_path) in text
     assert "word alignment: NOT_PERFORMED" in text
     assert "ASR [start–end] times + Quiet windows below as safe cut points" not in text
     assert "direct listening" in text
@@ -343,12 +348,12 @@ def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
 def test_brief_only_validates_stale_sidecar_and_warns_without_network(
     monkeypatch, tmp_path
 ):
-    video, result_path, evidence_path = _valid_available_evidence(tmp_path)
+    video, result_path, _evidence_path = _valid_available_evidence(tmp_path)
     result_path.write_text(
         json.dumps([{"start": 0.0, "end": 1.0, "text": "changed"}]),
         encoding="utf-8",
     )
-    (tmp_path / "scenes.json").write_text(
+    (tmp_path / "vlm_analysis.json").write_text(
         json.dumps(
             [{"scene_id": 0, "start": 0.0, "end": 2.0, "description": "scene"}]
         ),
@@ -364,5 +369,4 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
     )
     text = (tmp_path / "agent_narration_brief.md").read_text(encoding="utf-8")
     assert "MISSING_OR_STALE" in text
-    assert asr.file_fingerprint(evidence_path) in text
     assert "must not be treated as verified dialogue boundaries" in text

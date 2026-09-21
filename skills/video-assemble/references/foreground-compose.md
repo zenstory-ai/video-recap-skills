@@ -14,8 +14,8 @@ python3 scripts/compose_foreground.py foreground_plan.json \
 ```
 
 The output directory must not exist. A normal run publishes `foreground.mp4` only
-after staged media, all current input identities, frame clock, canvas/color metadata,
-AAC decoder/packets/PTS/side data, and a full audio/video decode pass verification.
+after the staged media's frame clock, canvas/color metadata, AAC decoder/packets/PTS/
+side data, and a full audio/video decode pass verification.
 A failure retains `foreground_run.json` and available logs but removes staged/final
 media. `--plan-only` validates the complete plan and inputs and writes only
 `foreground_run.json`; it does not render media or update any current pointer.
@@ -26,24 +26,22 @@ media. `--plan-only` validates the complete plan and inputs and writes only
 {
   "artifact": "foreground_compose_plan",
   "schema_version": 1,
-  "base": {"path": "/local/base.mp4", "sha256": "..."},
+  "base": {"path": "/local/base.mp4"},
   "video": {"fps": "30/1", "width": 1280, "height": 720, "total_frames": 300},
   "foreground": {
     "directory": "/local/foreground_sequence",
     "pattern": "frame_%06d.png",
     "start_frame": 0,
-    "end_frame": 270,
-    "ordered_sha256": "..."
+    "end_frame": 270
   },
   "endcard": {
     "kind": "sequence",
     "directory": "/local/endcard_sequence",
     "pattern": "frame_%06d.png",
     "start_frame": 270,
-    "end_frame": 300,
-    "ordered_sha256": "..."
+    "end_frame": 300
   },
-  "producer_receipt": {"path": "/local/producer_receipt.json", "sha256": "..."}
+  "producer_receipt": {"path": "/local/producer_receipt.json"}
 }
 ```
 
@@ -53,7 +51,6 @@ media. `--plan-only` validates the complete plan and inputs and writes only
 {
   "kind": "still",
   "path": "/local/endcard.png",
-  "sha256": "...",
   "start_frame": 270,
   "end_frame": 300
 }
@@ -83,19 +80,9 @@ that full base frame count. Bounds are half-open.
 The only accepted filename pattern is the literal `frame_%06d.png`. The directory
 must contain exactly the expected contiguous entries—no missing or extra files. Every
 actual image must probe as PNG, `rgba`, and the exact declared full canvas. Repeated
-files and symlinks are allowed so transparent holds need not duplicate storage.
-
-Generate an ordered digest with the same-skill helper:
-
-```python
-from compose_foreground import ordered_sequence_digest
-
-digest = ordered_sequence_digest(directory, "frame_%06d.png", 0, frame_count)
-```
-
-The digest is SHA256 over canonical JSON entries containing each local frame number
-and the resolved file-content SHA256 in order. It therefore binds repeated/symlinked
-content deterministically without binding symlink target path spelling.
+files and symlinks are allowed so transparent holds need not duplicate storage. The
+run report records each sequence's directory and validated `frame_count`. Legacy
+`sha256` / `ordered_sha256` keys in a plan are ignored.
 
 ## Base and output invariants
 
@@ -114,12 +101,13 @@ report records that encoder, preset, CRF, pixel format, color contract, and audi
 mode explicitly. H.264 CRF encoding is lossy: preserved transparent regions are
 visually checked against tolerances, not claimed pixel-identical to decoded base
 pixels. The compositor does not use `-r`, `-shortest`, or `-t`. Audio is mapped from
-base `a:0` with `-c:a copy`; output verification requires exact decoder identity,
-packet payloads, count, PTS/DTS/duration/size, and side data.
+base `a:0` with `-c:a copy`; output verification requires matching decoder
+parameters, packet count, payload bytes, PTS/DTS/duration/size, and side data.
 
 ## Provenance and review boundary
 
-The producer receipt is a current hash-bound caller artifact. Its declarations may
+The producer receipt is a caller artifact that must exist when the plan is read.
+Its declarations may
 describe roles or content decisions such as title/note/brand, `dialogues=[]`, or
 hidden markers. Core records those declarations as `DECLARED_NOT_CHECKED`; it does
 not infer semantic truth from pixels or claim that dialogue/subtitle duplication is

@@ -4,7 +4,7 @@ import json
 
 from pathlib import Path
 
-from lib import CONFIG, log
+from lib import CONFIG, log, load_background_research
 from asr_timing_evidence import asr_evidence_summary_for_brief
 
 
@@ -36,14 +36,8 @@ def _research_context(work_dir):
     and read scenes with plot knowledge instead of labelling everyone "黑衣男子".
     Returns "" when no usable research file is present, so behaviour is unchanged.
     """
-    path = Path(work_dir) / "background_research.json"
-    if not path.exists():
-        return ""
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError):
-        return ""
-    if not isinstance(data, dict):
+    data = load_background_research(work_dir)
+    if not data:
         return ""
     parts = []
     for key in ("synopsis", "episode_context", "worldbuilding"):
@@ -125,38 +119,16 @@ def _load_understanding_artifacts_for_brief(work_dir):
     Material-library restores are allowed to reuse expensive analysis artifacts,
     but cut pass 2 must still rebuild `agent_narration_brief.md` against the
     rendered OUTPUT timeline. This helper deliberately performs no extraction,
-    ASR, VLM, or external API calls; it only reads already-present JSON.
+    ASR, VLM, or external API calls; it only reads already-present JSON. An absent
+    artifact contributes [] (the brief documents the thin substrate); a corrupt one raises.
     """
     work_dir = Path(work_dir)
-    scenes = []
-    for name in ("vlm_analysis.json", "scenes.json"):
+
+    def _own(name):
         path = work_dir / name
-        if not path.exists():
-            continue
-        try:
-            data = _load_json(path)
-        except (OSError, ValueError, TypeError):
-            continue
-        if isinstance(data, list):
-            scenes = data
-            break
-    asr_result = []
-    if (work_dir / "asr_result.json").exists():
-        try:
-            data = _load_json(work_dir / "asr_result.json")
-        except (OSError, ValueError, TypeError):
-            data = []
-        if isinstance(data, list):
-            asr_result = data
-    silence_periods = []
-    if (work_dir / "silence_periods.json").exists():
-        try:
-            data = _load_json(work_dir / "silence_periods.json")
-        except (OSError, ValueError, TypeError):
-            data = []
-        if isinstance(data, list):
-            silence_periods = data
-    return scenes, asr_result, silence_periods
+        return _load_json(path) if path.exists() else []
+
+    return _own("vlm_analysis.json"), _own("asr_result.json"), _own("silence_periods.json")
 
 
 def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
@@ -167,7 +139,7 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
     if not (Path(work_dir) / "speech_boundary_anchors.json").exists():
         detect_speech_boundary_anchors(work_dir, asr_result)
     overview_path = Path(work_dir) / "mimo_video_overview.json"
-    if CONFIG.get("mimo_video_overview", False):
+    if CONFIG["mimo_video_overview"]:
         scenes = _merge_overview_into_scenes(scenes, overview_path)
 
     source_storyboard = None
@@ -194,7 +166,7 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
         video_duration,
         work_dir,
         args.style,
-        mimo_overview_enabled=CONFIG.get("mimo_video_overview", False),
+        mimo_overview_enabled=CONFIG["mimo_video_overview"],
         mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )

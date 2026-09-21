@@ -66,7 +66,7 @@ def _mock_run_cmd_makes_output(monkeypatch):
 
     monkeypatch.setattr("storyboard.run_cmd", fake_run_cmd)
     monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
-    monkeypatch.setattr("storyboard.get_video_duration_safe", lambda v: 30.0)
+    monkeypatch.setattr("storyboard.get_video_duration", lambda v: 30.0)
     return calls
 
 
@@ -239,7 +239,7 @@ def _cached_source_storyboard(monkeypatch, tmp_path):
     scenes_json = tmp_path / "scenes.json"
     scenes_json.write_text(json.dumps(scenes), encoding="utf-8")
     video = tmp_path / "video.mp4"
-    video.write_bytes(b"fake-video-bytes")  # real file so the cache meta can fingerprint it
+    video.write_bytes(b"fake-video-bytes")  # real file so the cache meta can record its identity
 
     builds = {"n": 0}
     real_build = storyboard.build_source_storyboard
@@ -261,7 +261,7 @@ def _cached_source_storyboard(monkeypatch, tmp_path):
 def test_cache_reuses_identical_inputs_and_rebuilds_on_fps_or_frame_change(
     monkeypatch, tmp_path
 ):
-    """fps sits in the cache key on its own (belt) and the frames manifest is fingerprinted
+    """fps sits in the cache key on its own (belt) and the frames manifest identity is in it too
     (suspenders): each change alone must rebuild, identical inputs must not."""
     generate, builds = _cached_source_storyboard(monkeypatch, tmp_path)
 
@@ -275,14 +275,14 @@ def test_cache_reuses_identical_inputs_and_rebuilds_on_fps_or_frame_change(
     generate()
     assert builds["n"] == 2, "fps in the cache key must invalidate even when frames are unchanged"
 
-    # re-stage frames at the (now current) fps; only the manifest fingerprint changes
+    # re-stage frames at the (now current) fps; only the manifest identity changes
     _stage_frames(tmp_path, [0, 3, 6, 9, 12, 15], fps=3.0)
     generate()
     assert builds["n"] == 3, "frames-manifest change must invalidate the storyboard cache"
 
 
 def test_cache_hit_corrupt_sidecar_rebuilds_without_traceback(monkeypatch, tmp_path):
-    """A fingerprint-matching but CORRUPT cached sidecar must not raise out of the cache-hit
+    """A meta-matching but CORRUPT cached artifact must not raise out of the cache-hit
     read (advisory invariant); it degrades to a rebuild."""
     generate, _builds = _cached_source_storyboard(monkeypatch, tmp_path)
 

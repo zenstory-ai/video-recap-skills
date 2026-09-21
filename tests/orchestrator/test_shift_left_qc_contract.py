@@ -146,17 +146,6 @@ def test_qc_contract_redacts_metadata_keys_values_and_urls():
     assert report["metadata"]["api_key"] == qc.REDACTED
 
 
-def test_artifact_fingerprint_stable(tmp_path):
-    artifact = tmp_path / "final_qc.json"
-    artifact.write_text(json.dumps({"ok": True}, sort_keys=True), encoding="utf-8")
-
-    first = qc.artifact_fingerprint(artifact)
-    second = qc.artifact_fingerprint(artifact)
-
-    assert first == second
-    assert len(first) == 64
-
-
 def test_pre_cut_null_timecode_source_span_valid():
     finding = qc.build_finding(
         id="pc1",
@@ -256,7 +245,6 @@ def test_canonical_required_fields_include_runtime_decision_fields():
     finding = _deterministic_blocker(
         finding_id="canonical-1",
         model_used="local_rules_v1",
-        artifact_fingerprints={"output.mp4": "0" * 64},
         next_action="regenerate_output",
     )
     assert finding["finding_id"] == "canonical-1"
@@ -264,10 +252,9 @@ def test_canonical_required_fields_include_runtime_decision_fields():
     assert finding["rule_id"] == "missing_final_mp4"
     assert finding["decision_reason"] == "final mp4 is missing"
     assert finding["model_used"] == "local_rules_v1"
-    assert finding["artifact_fingerprints"] == {"output.mp4": "0" * 64}
     assert finding["next_action"] == "regenerate_output"
 
-    for required in ("model_used", "artifact_fingerprints", "next_action"):
+    for required in ("model_used", "next_action"):
         bad = dict(finding)
         bad.pop(required)
         with pytest.raises(qc.QCContractError, match="finding missing required fields"):
@@ -298,7 +285,6 @@ def test_mimo_qc_artifact_attaches_to_actual_stage_not_stage_value():
         source={"artifact": "mimo_qc.json"},
         evidence={"summary": "subjective model review"},
         model_used="mimo-qc-offline-fixture",
-        artifact_fingerprints={"mimo_qc.json": "fixture"},
         next_action="human_review",
     )
 

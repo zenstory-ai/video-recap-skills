@@ -10,6 +10,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **第二轮去防御：消费方不再重验生产方契约。** 沿用 0.5.0 的"在边界校验一次，之后信任契约"：`validate.py` 不再复刻 `narration_lint` 的形状检查（lint 补上有限值与时间顺序检查，`invalid_approved_shape` 改为常规 lint 错误码）；review/brief 对自建 bundle、review、clip_plan_validated 直接取字段；assemble 对 tts_meta / assembly_qc / timeline 直接取字段，剪映 builder 不再重检 contract 已保证的字段，CLI 组合检查只在 API 层做一次；recap 的 final_qc / recap_review / recap_inspect / mimo_qc 不再为不存在的产物形态兜底；understanding 的 `get_video_duration` 在 ffprobe 失败时抛错而不是返回 0.0，损坏的自产 JSON 一律抛错而不是当作"缺失"或"缓存未命中"；voiceover dub 的 ffmpeg 失败、畸形 ASR 响应、损坏缓存 sidecar 不再被吞成空行或静默重合成。`CONFIG.get(key, default)` 对已声明的键改为 `CONFIG[key]`，删除过期默认值。SKILL.md 去掉跨技能复述的免责与禁令，共享规则只在拥有它的技能里写一次。
+- **skill 层瘦身。** SKILL.md 去掉跨技能重复的创作模式定义、密集切点规则和 TTS 供应商细节，各自只在拥有它的技能里写一次；recap 的参数清单改为指向 `--help`。长段落下沉到 `video-voiceover/references/index-tts.md`、`video-assemble/references/packaging.md`、`source-score.md` 与 `video-cut/references/shot-review.md`。`timeline-and-jianying.md` 移到 `docs/`，`env-inventory-v1.json` 移到 `tests/orchestrator/`。
+
 ### Removed
 
 - `video-understanding/references/data-schema.md` 只保留本技能产出的产物（vlm、asr、asr_timing_evidence、asr_writing_chunks、silence、timeline_fusion、deslop_qc_requirements）与输入 `background_research.json`；narration / clip_plan / style_card / deslop_qc 等段落改由 video-recap 的完整契约与创作简报说明，减少约 135 行重复。
@@ -19,7 +24,7 @@ All notable changes to this project are documented here.
 
 - **video-cut `clip_plan.required_evidence`。** Agent 声明必保源片刻（节点、来源、原片秒、轨道、先后关系），工具在句界/画面吸附之后、渲染之前核对；缺段、错序或无效声明写入 `clip_plan_validated.json.qc.required_evidence` 并阻断，缓存复用同样重检。
 - **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
-- **公共环境变量清单。** `skills/video-recap/references/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
+- **公共环境变量清单。** `tests/orchestrator/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。
 - **video-cut `--review-shots`。** 扫描实际渲染文件内部的短镜与密集切点（只召回、不修复），结果写入 `shot_review.json` 并绑定计划/源/成片指纹；`--shot-roi` 可按实测画窗扫描。短镜阈值按实测帧率推导，不再固定 24 帧。
 - **ASR 时序证据 sidecar。** `asr_timing_evidence.json` 记录来源指纹、可用性状态与词级对齐是否执行，词表修正与原始转写分列，粗窗不再被当作精字幕；brief 显示经验证的状态与指纹，缺失或陈旧时显示 `MISSING_OR_STALE`。
 - **自托管 TTS 端点。** `--tts-provider index-tts` 通过 `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` 接入 index-tts 协议的 JSON→WAV 服务；端点只以 sha256 落盘，拒绝带凭证的 URL 与重定向，`doctor` 离线校验配置而不探测连通性。每段 TTS 缓存与结果记录 provider receipt 与处理后 WAV 的 sha256。
@@ -45,6 +50,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- **brief 永远拒收 `asr_clean.json` / 曾拒收 `understanding_index.json`。** `brief_context.py` 手抄的清洗 prompt 与 `consolidate.py` 漂移后指纹永不匹配；消费方不再重算生产方的 `prompt_md5`，只核对 `source_md5` 与 `model`。
+- **`recap_inspect.py state` 单源 cut 的来源总是 `unknown`。** 它读取的 `source_video_fingerprint` 从未被 video-cut 写出；改读 sidecar 实际记录的 `source_fingerprints`。
+- **显式混音路径的 `assembly_manifest.json` 被第二次写入覆盖为 `audio_mix_binding: null`。** 删除 try 块外重复的 manifest 构建，最终 MP4 也少哈希四次。
 - `timeline.json` 的旁白起点改为向下取整到 1e-4 秒网格，序列化后不再截掉已放置音频的首个采样。
 - 已放置的旁白 WAV 若为 IEEE float 格式（Python `wave` 不支持），改用 ffprobe 读取时长，不再在装配和一致性检查时报错。
 

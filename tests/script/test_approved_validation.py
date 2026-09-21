@@ -9,7 +9,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
 )
 import validate as narration_validate
-from lib import CONFIG, stable_hash
+from lib import CONFIG, file_identity
 
 
 def _run_validate(monkeypatch, work_dir, mode="full", *extra, preserve=True):
@@ -53,7 +53,9 @@ def _write_output_evidence(work_dir):
             {
                 "schema_version": 2,
                 "timeline": "cut_output",
-                "clip_plan_fingerprint": stable_hash(plan),
+                "clip_plan_identity": file_identity(
+                    work_dir / "clip_plan_validated.json"
+                ),
                 "sentence_anchors": [],
                 "speech_spans": [],
                 "quiet_windows": [{"start": 0, "end": 10}],
@@ -158,45 +160,48 @@ def test_cut_output_preserves_fields_and_derives_only_ownership(monkeypatch, tmp
 
 
 _BAD_SHAPES = [
-    {"start": 0, "end": 1, "narration": 7},
-    {"start": 0, "end": 1, "narration": "   "},
-    {"start": True, "end": 1, "narration": "文本。"},
-    {"start": 0, "end": "1", "narration": "文本。"},
-    {"start": 0, "end": float("nan"), "narration": "文本。"},
-    {"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": True},
-    {"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": 1.5},
-    {"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": -1},
+    ({"start": 0, "end": 1, "narration": 7}, "invalid_narration"),
+    ({"start": 0, "end": 1, "narration": "   "}, "empty_narration"),
+    ({"start": True, "end": 1, "narration": "文本。"}, "invalid_time"),
+    ({"start": 0, "end": "1", "narration": "文本。"}, "invalid_time"),
+    ({"start": 0, "end": float("nan"), "narration": "文本。"}, "invalid_time"),
+    ({"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": True}, "invalid_pause"),
+    ({"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": 1.5}, "invalid_pause"),
+    ({"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": -1}, "invalid_pause"),
 ]
 
 
 @pytest.mark.parametrize(
-    "segments, match",
-    [pytest.param([segment], "approved narration", id="bad_shape") for segment in _BAD_SHAPES]
+    "segments, code",
+    [pytest.param([segment], code, id=f"bad_shape_{code}") for segment, code in _BAD_SHAPES]
     + [
         pytest.param(
             [
                 {"start": 5, "end": 6, "narration": "第二段。"},
                 {"start": 0, "end": 1, "narration": "第一段。"},
             ],
-            "chronological order",
+            "out_of_order",
             id="out_of_order",
         ),
         pytest.param(
             [{"start": 5, "end": 5, "narration": "零长段。"}],
-            "end must be greater than start",
+            "invalid_time_range",
             id="zero_length_segment",
         ),
     ],
 )
 def test_strict_input_failures_leave_narration_byte_identical(
-    monkeypatch, tmp_path, segments, match
+    monkeypatch, tmp_path, segments, code
 ):
     path, raw = _write_narration(tmp_path, segments, indent=1)
 
-    with pytest.raises(SystemExit, match=match):
+    with pytest.raises(ValueError, match=code):
         _run_validate(monkeypatch, tmp_path)
 
     assert path.read_text(encoding="utf-8") == raw
+    lint = _read_json(tmp_path / "narration_lint.json")
+    assert lint["ok"] is False
+    assert code in {item["code"] for item in lint["errors"]}
 
 
 def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path):
@@ -235,9 +240,9 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
     current = _read_json(tmp_path / "narration_lint.json")
     assert set(current) == set(stale)
     assert current["ok"] is False
-    assert current["error_count"] == 1
-    assert current["errors"][0]["code"] == "invalid_approved_shape"
-    assert current["metrics"] == {"input_fingerprint": stable_hash(invalid)}
+    assert current["error_count"] == len(current["errors"]) >= 1
+    assert current["errors"][0]["code"] == "invalid_narration"
+    assert current["metrics"] == {}
 
 
 def test_full_derives_quiet_ownership_without_changing_other_approved_fields(
@@ -362,3 +367,20 @@ def test_cut_output_retry_clears_failure_and_keeps_duration_tolerance(monkeypatc
     assert current["ok"] is True
     assert current["errors"] == [] and current["error_count"] == 0
     assert _approved_fields(_read_json(path)[0]) == narration[0]
+
+
+def test_chronological_order_is_only_required_by_the_approved_text_policy(tmp_path):
+    """Lint sorts segments for its timing checks; only --preserve-approved-text rejects
+    input that is not already in order (the approved timeline must stay byte-identical)."""
+    from narration_lint import lint_narration
+
+    unsorted = [
+        {"start": 5.0, "end": 6.0, "narration": "第二段。"},
+        {"start": 0.0, "end": 1.0, "narration": "第一段。"},
+    ]
+    relaxed = lint_narration(unsorted, [], mode="full", work_dir=tmp_path)
+    assert "out_of_order" not in {item["code"] for item in relaxed["errors"]}
+    strict = lint_narration(
+        unsorted, [], mode="full", work_dir=tmp_path, require_chronological=True
+    )
+    assert "out_of_order" in {item["code"] for item in strict["errors"]}

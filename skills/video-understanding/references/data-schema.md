@@ -46,20 +46,19 @@
 
 ## asr_timing_evidence.json
 
-ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构。它用内容指纹绑定源视频、
-`audio.wav`（存在时）和 `asr_result.json`，并明确当前精度边界：
+ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构。它记录自己描述的是哪一份源视频、
+`audio.wav`（存在时）和 `asr_result.json`（各自的 `size` + `mtime_ns`），并明确当前精度边界：
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "status": "AVAILABLE_COARSE",
-  "source_video_fingerprint": "...",
-  "audio_fingerprint": "...",
-  "asr_result_fingerprint": "...",
+  "source_video": {"size": 123456, "mtime_ns": 1700000000000000000},
+  "audio": {"size": 2048, "mtime_ns": 1700000001000000000},
+  "asr_result": {"size": 512, "mtime_ns": 1700000002000000000},
   "glossary": {
-    "policy_version": 1,
-    "names_sha256": "...",
-    "name_count": 3
+    "names": ["叶轻眉"],
+    "name_count": 1
   },
   "precision": {
     "window_timing": "COARSE_SEGMENT_WINDOWS",
@@ -82,10 +81,11 @@ ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构�
 `status` 可为 `AVAILABLE_COARSE`、`EXPLICITLY_SKIPPED`、`UNAVAILABLE_NO_KEY`、
 `UNAVAILABLE_NO_DURATION`、`FAILED_AUDIO_EXTRACTION`、`FAILED_PROVIDER`、`EMPTY_UNKNOWN`
 或 `LEGACY_UNVERIFIED`。`LEGACY_UNVERIFIED` 标记没有旧 sidecar 的兼容缓存，可离线复用但
-`observed_text`/`glossary_modified` 为 `null`，且始终保持 legacy 身份；非 legacy sidecar 绑定
-经排序归一化的人名/别名集合与修正规则版本，损坏或绑定不匹配会使 ASR 缓存失效。
+`observed_text`/`glossary_modified` 为 `null`，且始终保持 legacy 身份；非 legacy sidecar 记录
+当时参与修正的人名/别名列表（`glossary.names`），人名表变化或所描述的文件被重写（size/mtime 不再
+一致）都会使 ASR 缓存失效。
 `UNAVAILABLE_NO_DURATION` 与 `EMPTY_UNKNOWN` 是可重试的不可用结果，不作为缓存命中；写作
-brief 会校验 sidecar 并打印当前状态和 sidecar 指纹，缺失或绑定不匹配显示 `MISSING_OR_STALE`。
+brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一致时显示 `MISSING_OR_STALE`。
 
 ## asr_writing_chunks.json
 

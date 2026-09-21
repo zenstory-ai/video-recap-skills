@@ -14,6 +14,7 @@ import narration_audio  # noqa: E402
 from audio_mix import _seg_place_window  # noqa: E402
 from lib import CONFIG  # noqa: E402
 from subtitle_core import _subtitle_entries  # noqa: E402
+from tts_fixtures import tts_segment
 
 
 def _build_timed_narration(*args, **kwargs):
@@ -46,14 +47,14 @@ def test_resample_failure_degrades_instead_of_raising(monkeypatch, tmp_path):
 
     monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
 
-    segment = {
-        "index": 0,
-        "start": 0.0,
-        "end": 2.0,
-        "narration": "需要重采样的解说。",
-        "audio_path": str(wav),
-        "audio_duration": 0.8,
-    }
+    segment = tts_segment(
+        index=0,
+        start=0.0,
+        end=2.0,
+        narration="需要重采样的解说。",
+        audio_path=str(wav),
+        audio_duration=0.8,
+    )
 
     out = tmp_path / "out.wav"
     # Must fail cleanly instead of leaving a reusable silent narration track.
@@ -67,14 +68,14 @@ def test_resample_failure_degrades_instead_of_raising(monkeypatch, tmp_path):
 
 def test_missing_wav_skip_sets_zero_width_window(monkeypatch, tmp_path):
     """Bug 7: a missing-wav skip sets actual_place_start==end so it is dropped."""
-    segment = {
-        "index": 0,
-        "start": 1.0,
-        "end": 3.0,
-        "narration": "音频丢失的解说。",
-        "audio_path": str(tmp_path / "does_not_exist.wav"),
-        "audio_duration": 0.8,
-    }
+    segment = tts_segment(
+        index=0,
+        start=1.0,
+        end=3.0,
+        narration="音频丢失的解说。",
+        audio_path=str(tmp_path / "does_not_exist.wav"),
+        audio_duration=0.8,
+    )
 
     out = tmp_path / "out.wav"
     with pytest.raises(RuntimeError, match="全部 1 段解说均被跳过"):
@@ -99,14 +100,14 @@ def test_noncanonical_wav_is_resampled_and_placed(monkeypatch, tmp_path):
     Unlike its siblings this drives the real resample, so it needs a real ffmpeg."""
     wav = _write_wav(tmp_path / "stereo.wav", sample_rate=44100, duration=0.8, channels=2)
 
-    segment = {
-        "index": 0,
-        "start": 1.0,
-        "end": 3.0,
-        "narration": "格式错误的解说。",
-        "audio_path": str(wav),
-        "audio_duration": 0.8,
-    }
+    segment = tts_segment(
+        index=0,
+        start=1.0,
+        end=3.0,
+        narration="格式错误的解说。",
+        audio_path=str(wav),
+        audio_duration=0.8,
+    )
 
     out = tmp_path / "out.wav"
     _build_timed_narration([segment], out, 4.0, tmp_path)
@@ -126,22 +127,22 @@ def test_partial_skip_does_not_log_all_skipped_warning(monkeypatch, tmp_path):
 
     good = _write_wav(tmp_path / "good.wav", sample_rate=44100, duration=0.8)
     segments = [
-        {
-            "index": 0,
-            "start": 0.0,
-            "end": 2.0,
-            "narration": "正常解说。",
-            "audio_path": str(good),
-            "audio_duration": 0.8,
-        },
-        {
-            "index": 1,
-            "start": 2.0,
-            "end": 4.0,
-            "narration": "缺失解说。",
-            "audio_path": str(tmp_path / "missing.wav"),
-            "audio_duration": 0.8,
-        },
+        tts_segment(
+            index=0,
+            start=0.0,
+            end=2.0,
+            narration="正常解说。",
+            audio_path=str(good),
+            audio_duration=0.8,
+        ),
+        tts_segment(
+            index=1,
+            start=2.0,
+            end=4.0,
+            narration="缺失解说。",
+            audio_path=str(tmp_path / "missing.wav"),
+            audio_duration=0.8,
+        ),
     ]
 
     out = tmp_path / "out.wav"
@@ -164,8 +165,8 @@ def test_run_tightening_packs_within_run_and_respects_boundary(monkeypatch, tmp_
     w = _write_wav(tmp_path / "a.wav", duration=0.8)
 
     def seg(i, start, end):
-        return {"index": i, "start": start, "end": end, "narration": f"句{i}。",
-                "audio_path": str(w), "audio_duration": 0.8}
+        return tts_segment(index=i, start=start, end=end, narration=f"句{i}。",
+                audio_path=str(w), audio_duration=0.8)
 
     # run 1: beats 0,1,2 in wide 4s slots but authored contiguous (gap 0) -> pack tight to the front.
     # run 2: beat 3 after a 3s authored gap (> run_gap) -> new run, anchored to its authored start.
@@ -187,8 +188,8 @@ def test_run_tightening_off_keeps_slot_placement(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "fade_ms", 0)
     w = _write_wav(tmp_path / "a.wav", duration=0.8)
     segments = [
-        {"index": 0, "start": 0.0, "end": 4.0, "narration": "句0。", "audio_path": str(w), "audio_duration": 0.8},
-        {"index": 1, "start": 4.0, "end": 8.0, "narration": "句1。", "audio_path": str(w), "audio_duration": 0.8},
+        tts_segment(index=0, start=0.0, end=4.0, narration="句0。", audio_path=str(w), audio_duration=0.8),
+        tts_segment(index=1, start=4.0, end=8.0, narration="句1。", audio_path=str(w), audio_duration=0.8),
     ]
     _build_timed_narration(segments, tmp_path / "out.wav", 30.0, tmp_path)
     # beat 1 stays anchored near its authored 4.0s slot, not packed right after beat 0
@@ -207,8 +208,8 @@ def test_run_tightening_drift_cap_keeps_narration_near_picture(monkeypatch, tmp_
     w = _write_wav(tmp_path / "a.wav", duration=0.8)
     # one long contiguous run authored across a wide span (5s slots); without the cap, the last
     # beat would pack to ~3s; with the 2s cap it must stay within 2s of its authored 20s start.
-    segments = [{"index": i, "start": i * 5.0, "end": i * 5.0 + 5.0, "narration": f"句{i}。",
-                 "audio_path": str(w), "audio_duration": 0.8} for i in range(5)]
+    segments = [tts_segment(index=i, start=i * 5.0, end=i * 5.0 + 5.0, narration=f"句{i}。",
+                 audio_path=str(w), audio_duration=0.8) for i in range(5)]
     _build_timed_narration(segments, tmp_path / "out.wav", 40.0, tmp_path)
     assert segments[4]["actual_place_start"] >= 5.0 * 4 - 2.0 - 0.01      # within max_pull of authored 20s
     # The good segment was actually placed (non-zero-width window).

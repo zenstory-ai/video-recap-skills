@@ -3,8 +3,6 @@
 from fractions import Fraction
 import math
 
-SUBTITLE_RENDER_VERSION = 9
-SUBTITLE_TEXT_NORMALIZE_VERSION = 1
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 ASSEMBLY_QC = "assembly_qc.json"
 VISUAL_QC = "visual_qc.json"
@@ -50,14 +48,4 @@ _CLIP_CONTIGUITY_TOLERANCE = 1.5 * _TIMELINE_TIME_GRID_SECONDS
 _MAX_ORIGINAL_READ_CPS = 9.0
 _AUTO_ORIGINAL_READ_CPS = 6.0
 
-_VISUAL_DELIVERY_FORBIDDEN_KEYS = {
-    "video_encode_passes",
-    "reencode_reason",
-    "audio_sample_rate",
-    "final_compat_notes",
-    "double_encode",
-    "delivery_compatibility",
-    "loudness_mode",
-    "loudnorm_measurement",
-}
 _SUPPORTED_VISUAL_OVERLAY_TYPES = {"top_title", "inline_label_or_callout"}

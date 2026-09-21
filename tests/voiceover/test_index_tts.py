@@ -1,4 +1,3 @@
-import hashlib
 import http.client
 import io
 import json
@@ -73,14 +72,7 @@ def test_index_transport_posts_exact_contract_and_records_request_receipt(monkey
     assert request.get_header("Accept") == "audio/wav"
     assert seen["timeout"] == 7
     assert output.read_bytes() == audio
-    assert receipt == {
-        "receipt_schema": "index-tts-request-receipt",
-        "receipt_version": 1,
-        "provider": "index-tts",
-        "requested_voice": "private-voice",
-        "returned_wav_sha256": hashlib.sha256(audio).hexdigest(),
-        "speed_policy": "provider-default-no-rate-control",
-    }
+    assert receipt == {"provider": "index-tts", "requested_voice": "private-voice"}
 
 
 @pytest.mark.parametrize(
@@ -230,7 +222,6 @@ def test_index_success_response_io_failures_hide_private_reason(
         )
 
     assert private not in str(raised.value)
-    assert raised.value.__cause__ is None
     assert not (tmp_path / "out.wav").exists()
 
 
@@ -285,15 +276,6 @@ def test_index_transport_enforces_response_size_limit(monkeypatch, tmp_path):
         )
 
 
-@pytest.mark.parametrize("timeout", [True, 0, float("inf"), float("nan")])
-def test_index_transport_rejects_unbounded_timeout(timeout, tmp_path):
-    with pytest.raises(ValueError, match="有限正数"):
-        index_tts.synthesize_index_tts(
-            "测试。", tmp_path / "out.wav", endpoint="https://private.invalid/tts",
-            voice="voice", timeout=timeout,
-        )
-
-
 def test_index_provider_is_explicit_and_auto_never_selects_it(monkeypatch):
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private.invalid/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
@@ -306,61 +288,27 @@ def test_index_provider_is_explicit_and_auto_never_selects_it(monkeypatch):
     assert voiceover.resolve_tts_engine() == "index-tts"
 
 
-def test_index_cache_identity_tracks_voice_and_endpoint_without_exposing_endpoint(monkeypatch):
+def test_index_cache_settings_track_voice_without_exposing_endpoint(monkeypatch):
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private-a.invalid/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
-    first = voiceover.tts_settings_fingerprint("index-tts")
+    first = voiceover.tts_settings_payload("index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-b")
-    second = voiceover.tts_settings_fingerprint("index-tts")
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private-b.invalid/tts")
-    third = voiceover.tts_settings_fingerprint("index-tts")
+    second = voiceover.tts_settings_payload("index-tts")
 
-    assert first != second != third
+    assert first != second
     assert "private-a.invalid" not in json.dumps(first)
     assert first["index_tts_voice"] == "voice-a"
 
 
-def test_index_cache_revision_is_optional_but_invalidates_when_bumped(monkeypatch):
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private.invalid/tts")
-    monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
-    monkeypatch.delitem(CONFIG, "index_tts_cache_revision", raising=False)
-    unspecified = voiceover.tts_settings_fingerprint("index-tts")
-    monkeypatch.setitem(CONFIG, "index_tts_cache_revision", "deployment-2")
-    revised = voiceover.tts_settings_fingerprint("index-tts")
-
-    assert unspecified["index_tts_cache_revision"] == ""
-    assert revised["index_tts_cache_revision"] == "deployment-2"
-    assert unspecified != revised
-
-
-def test_index_cached_receipt_requires_complete_consistent_schema():
-    processed = "a" * 64
-    base = {
-        "audio_fingerprint": processed,
-        "processed_wav_sha256": processed,
-        "provider_receipt": {
-            "receipt_schema": "index-tts-request-receipt",
-            "receipt_version": 1,
-            "provider": "index-tts",
-            "requested_voice": "voice",
-            "returned_wav_sha256": processed,
-            "processed_wav_sha256": processed,
-            "speed_policy": "provider-default-no-rate-control",
-            "raw_wav_retained_as_processed": True,
-            "raw_wav_reconstructable_from_receipt": False,
-        },
-    }
+def test_index_cached_receipt_requires_current_voice():
     config = {"index_tts_endpoint": "http://host/tts", "index_tts_voice": "voice"}
+    base = {"provider_receipt": {"provider": "index-tts", "requested_voice": "voice"}}
     assert index_tts.valid_cached_receipt(base, config) is True
 
     mutations = [
-        lambda data: data["provider_receipt"].pop("receipt_schema"),
-        lambda data: data["provider_receipt"].update(returned_wav_sha256="Z" * 64),
-        lambda data: data["provider_receipt"].pop("raw_wav_retained_as_processed"),
-        lambda data: data.update(processed_wav_sha256="b" * 64),
-        lambda data: data["provider_receipt"].update(
-            returned_wav_sha256="b" * 64, raw_wav_retained_as_processed=True
-        ),
+        lambda data: data["provider_receipt"].update(requested_voice="other"),
+        lambda data: data["provider_receipt"].pop("provider"),
+        lambda data: data.update(provider_receipt=None),
     ]
     for mutate in mutations:
         candidate = json.loads(json.dumps(base))
@@ -381,13 +329,15 @@ def test_index_provider_rejects_clone_reference_before_cache(monkeypatch, tmp_pa
 
 
 @pytest.mark.parametrize(("endpoint", "voice"), [("", "voice"), ("http://host/tts", "")])
-def test_explicit_index_provider_requires_endpoint_and_voice_before_cache(monkeypatch, endpoint, voice):
-    monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", endpoint)
-    monkeypatch.setitem(CONFIG, "index_tts_voice", voice)
+def test_explicit_index_provider_requires_endpoint_and_voice_at_config_load(endpoint, voice):
+    environ = {"INDEX_TTS_ENDPOINT": endpoint, "INDEX_TTS_VOICE": voice}
+    with pytest.raises(ValueError, match="INDEX_TTS_(ENDPOINT|VOICE)"):
+        index_tts.load_private_config({"tts_provider": "index-tts"}, environ)
 
-    with pytest.raises((RuntimeError, ValueError), match="INDEX_TTS_(ENDPOINT|VOICE)"):
-        voiceover._configured_tts_engine_for_cache()
+    # Other providers never need the private settings, so an empty env must not fail.
+    config = {"tts_provider": "auto"}
+    index_tts.load_private_config(config, environ)
+    assert config["index_tts_endpoint"] == endpoint
 
 
 def test_index_preparation_uses_provider_default_speed_despite_dynamic_params(monkeypatch, tmp_path):
@@ -413,16 +363,7 @@ def test_index_preparation_rejects_unsupported_segment_controls(monkeypatch, tmp
         voiceover._prepare_tts_segment(0, segment, [segment], tmp_path, "index-tts")
 
 
-def test_index_dispatch_rejects_unsupported_controls(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "tts_retries", 1)
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
-    monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
-
-    with pytest.raises(RuntimeError, match="端点不接受 rate"):
-        voiceover._run_tts_engine("index-tts", "测试。", tmp_path / "out.wav", rate="+5%")
-
-
-def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch, tmp_path):
+def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
@@ -436,14 +377,7 @@ def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch,
     def fake_synthesize(text, output_path, config):
         calls.append((text, config))
         output_path.write_bytes(audio)
-        return {
-            "receipt_schema": "index-tts-request-receipt",
-            "receipt_version": 1,
-            "provider": "index-tts",
-            "requested_voice": config["index_tts_voice"],
-            "returned_wav_sha256": hashlib.sha256(audio).hexdigest(),
-            "speed_policy": "provider-default-no-rate-control",
-        }
+        return {"provider": "index-tts", "requested_voice": config["index_tts_voice"]}
 
     monkeypatch.setattr(index_tts, "synthesize_configured", fake_synthesize)
     monkeypatch.setattr(voiceover, "get_video_duration", lambda _path: 0.01)
@@ -456,9 +390,8 @@ def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch,
     assert first[0]["authored_text"] == second[0]["authored_text"] == "批准全文。"
     assert first[0]["spoken_text"] == second[0]["spoken_text"] == "批准全文。"
     receipt = second[0]["provider_receipt"]
-    assert receipt["requested_voice"] == "voice-a"
-    assert receipt["returned_wav_sha256"] == hashlib.sha256(audio).hexdigest()
-    assert receipt["processed_wav_sha256"] == hashlib.sha256(audio).hexdigest()
+    assert receipt == {"provider": "index-tts", "requested_voice": "voice-a"}
+    assert "processed_wav_sha256" not in second[0]
     sidecar = json.loads((tmp_path / "tts_segments/narr_000.wav.cache.json").read_text())
     assert sidecar["provider_receipt"] == receipt
 

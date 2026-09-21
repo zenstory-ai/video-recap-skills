@@ -108,7 +108,7 @@ def _write_stale_lint_pass(work):
 def _assert_validation_replaced_stale_pass(work, expected_code):
     lint = json.loads((work / "narration_lint.json").read_text(encoding="utf-8"))
     assert lint["ok"] is False
-    assert lint["error_count"] == 1
+    assert lint["error_count"] == len(lint["errors"]) >= 1
     assert lint["errors"][0]["code"] == expected_code
     assert "stale" not in lint["metrics"]
 
@@ -160,7 +160,7 @@ def test_recap_full_validate_failure_stops_before_review_tts_and_assemble(
         recap.main()
 
     assert calls == [("video-script", "validate.py")]
-    _assert_validation_replaced_stale_pass(work, "invalid_approved_shape")
+    _assert_validation_replaced_stale_pass(work, "invalid_narration")
 
 
 def test_recap_single_cut_validate_failure_stops_before_review_tts_and_assemble(
@@ -495,16 +495,17 @@ def test_recap_strict_cut_output_review_forwards_strict_evidence(monkeypatch, tm
     assert "--strict-evidence" in review_args
 
 
-def test_recap_manifest_fingerprint_detects_middle_only_source_changes(tmp_path):
-    first = tmp_path / "a.mp4"
-    second = tmp_path / "b.mp4"
-    first.write_bytes(b"A" * 70000 + b"middle-one" + b"Z" * 70000)
-    second.write_bytes(b"A" * 70000 + b"middle-two" + b"Z" * 70000)
+def test_recap_manifest_identity_is_size_and_mtime(tmp_path):
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"A" * 10)
+    stat = video.stat()
 
-    assert first.stat().st_size == second.stat().st_size
-    assert material_lib.file_fingerprint(first) != material_lib.file_fingerprint(
-        second
-    )
+    assert material_lib.file_identity(video) == {
+        "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+    }
+    bumped = stat.st_mtime_ns + 1_000_000  # 1 ms: above NTFS's 100 ns tick on Windows CI
+    os.utime(video, ns=(stat.st_atime_ns, bumped))
+    assert material_lib.file_identity(video)["mtime_ns"] == bumped
 
 
 def test_recap_phase_b_rejects_work_dir_from_different_source(monkeypatch, tmp_path):
@@ -879,10 +880,12 @@ def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
 
 def test_cut_narration_stale_guard_logic():
     """Any clip_plan change while a cut narration is present makes that narration stale."""
-    assert recap_timeline._cut_narration_is_stale(None, "cp1") is False
-    base = {"clip_plan_fingerprint": "cp1"}
-    assert recap_timeline._cut_narration_is_stale(base, "cp1") is False
-    assert recap_timeline._cut_narration_is_stale(base, "cp2") is True
+    cp1 = {"size": 10, "mtime_ns": 1}
+    cp2 = {"size": 10, "mtime_ns": 2}
+    assert recap_timeline._cut_narration_is_stale(None, cp1) is False
+    base = {"clip_plan_identity": cp1}
+    assert recap_timeline._cut_narration_is_stale(base, dict(cp1)) is False
+    assert recap_timeline._cut_narration_is_stale(base, cp2) is True
 
 
 def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
@@ -895,7 +898,7 @@ def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
         rendered=False,
     )
     recap_timeline._write_phase_ledger(
-        work, clip_plan_fingerprint="OLD_DIFFERENT_FP", edited_source_rendered=True
+        work, clip_plan_identity={"size": 0, "mtime_ns": 0}, edited_source_rendered=True
     )
 
     def fake_run(skill, script, *cli_args):
@@ -939,7 +942,7 @@ def _review_writes_nothing(work):
         pytest.param(
             _review_writes_nothing,
             True,
-            "missing or invalid narration_review.json",
+            "missing narration_review.json",
             id="stale-artifact-not-reused",
         ),
     ],
@@ -1003,45 +1006,17 @@ def test_review_status_does_not_gate_on_bare_model_verdict(tmp_path):
     assert status["ok"] is False and status["errors"] == 1
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {"findings": {}},
-        {"findings": [None]},
-        {"findings": [{}]},
-    ],
-)
-def test_review_status_reports_malformed_review_artifacts(tmp_path, payload):
-    (tmp_path / "narration_review.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
+def test_review_status_missing_artifact_is_reported_not_raised(tmp_path):
+    """Absent review = the stage did not produce one (fail-open review); a review that
+    video-script DID write is read by contract (findings normalised by review_response),
+    so a malformed one is a broken upstream artifact and raises."""
     assert recap_review.review_result_status(tmp_path) == {
         "ok": False,
-        "reason": "missing or invalid narration_review.json",
+        "reason": "missing narration_review.json",
     }
-
-
-def test_advisory_review_does_not_block_on_malformed_artifact(tmp_path):
-    def fake_run(*_args):
-        (tmp_path / "narration_review.json").write_text("{}", encoding="utf-8")
-
-    args = manifest_args(review_narration=True)
-
-    assert recap_review.run_narration_review(tmp_path, args, run=fake_run) is True
-
-
-def test_strict_review_blocks_on_malformed_artifact(tmp_path):
-    def fake_run(*_args):
-        (tmp_path / "narration_review.json").write_text(
-            json.dumps({"findings": "invalid"}), encoding="utf-8"
-        )
-
-    args = manifest_args(review_narration=True, require_narration_review=True)
-
-    with pytest.raises(SystemExit, match="missing or invalid narration_review.json"):
-        recap_review.run_narration_review(tmp_path, args, run=fake_run)
+    (tmp_path / "narration_review.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(KeyError):
+        recap_review.review_result_status(tmp_path)
 
 
 def test_recap_rejects_multi_video_non_cut(monkeypatch, tmp_path):
@@ -1320,8 +1295,8 @@ def _save_seed_material(tmp_path, video, args, brief):
         lib,
         seed,
         video,
-        material_lib.file_fingerprint(video),
-        recap_runtime._material_settings_fingerprint(args),
+        material_lib.file_identity(video),
+        recap_runtime._analysis_settings(args),
     )
     return lib
 
@@ -1455,9 +1430,9 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
                         "confidence": "high",
                     },
                     {
-                        "time": "2.5",
-                        "pause_start": "invalid",
-                        "text_tail": "畸形停顿时间。",
+                        "time": 2.5,
+                        "pause_start": 2.5,
+                        "text_tail": "停顿与句末重合。",
                         "confidence": "medium",
                     },
                 ]
@@ -1478,7 +1453,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
             "source_id": "src_a",
             "source_name": "a.mp4",
             "source_path": str(tmp_path / "a.mp4"),
-            "source_video_fingerprint": "a" * 64,
+            "source_video_identity": {"size": 1, "mtime_ns": 1},
             "source_work_dir": "sources/src_a",
             "material_id": "mat-a",
         }

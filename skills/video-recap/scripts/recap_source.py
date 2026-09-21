@@ -1,10 +1,7 @@
 """Validate recap audio ownership without importing another skill."""
 
-import hashlib
 import json
 from pathlib import Path
-
-import materials
 
 
 AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
@@ -36,11 +33,11 @@ _LOCAL_ADOPTION_CONFLICTS = _TTS_OPTIONS | frozenset({
 
 
 def uses_narration(args):
-    return getattr(args, "audio_mode", "narration") == "narration"
+    return args.audio_mode == "narration"
 
 
 def uses_local_adoption(args):
-    return all(getattr(args, field, None) is not None for field, _ in _LOCAL_ADOPTION_OPTIONS)
+    return all(getattr(args, field) is not None for field, _ in _LOCAL_ADOPTION_OPTIONS)
 
 
 def needs_voiceover(args):
@@ -49,15 +46,12 @@ def needs_voiceover(args):
 
 def audio_binding(args):
     binding = {
-        "mode": getattr(args, "audio_mode", "narration"),
-        "selected_stream_index": getattr(args, "audio_stream_index", 0),
+        "mode": args.audio_mode,
+        "selected_stream_index": args.audio_stream_index,
     }
     if uses_local_adoption(args):
         binding["local_adoption"] = {
-            field: {
-                "path": str(Path(getattr(args, field)).resolve()),
-                "sha256": materials.file_fingerprint(getattr(args, field)),
-            }
+            field: {"path": str(Path(getattr(args, field)).resolve())}
             for field, _ in _LOCAL_ADOPTION_OPTIONS
         }
     return binding
@@ -72,7 +66,7 @@ def _resolve_local_file(parser, value, option):
 
 def validate_local_adoption(parser, args):
     """Validate and resolve the assembly-only local adoption boundary."""
-    supplied = [getattr(args, field, None) is not None for field, _ in _LOCAL_ADOPTION_OPTIONS]
+    supplied = [getattr(args, field) is not None for field, _ in _LOCAL_ADOPTION_OPTIONS]
     if any(supplied) and not all(supplied):
         parser.error("--tts-meta, --narration-adoption and --audio-mix-adoption are all-or-none")
     if not all(supplied):
@@ -85,8 +79,7 @@ def validate_local_adoption(parser, args):
         parser.error("local audio adoption requires exactly one input video")
     if args.work_dir is None:
         parser.error("local audio adoption requires explicit --work-dir")
-    explicit = set(getattr(args, "_explicit_options", ()))
-    conflicts = sorted(explicit.intersection(_LOCAL_ADOPTION_CONFLICTS))
+    conflicts = sorted(set(args._explicit_options).intersection(_LOCAL_ADOPTION_CONFLICTS))
     if conflicts:
         parser.error("local audio adoption cannot use: " + ", ".join(conflicts))
     for field, option in _LOCAL_ADOPTION_OPTIONS:
@@ -117,7 +110,7 @@ def validate_local_adoption(parser, args):
 
 
 def load_local_assembly_evidence(work_dir):
-    """Load the assembler's minimal parent-verifiable identity references."""
+    """Load the assembler's binding records for the adopted local bundle."""
     work_dir = Path(work_dir)
     try:
         return {
@@ -132,23 +125,26 @@ def load_local_assembly_evidence(work_dir):
         raise SystemExit("assembler did not publish readable local adoption evidence") from exc
 
 
+def _same_file(declared, expected):
+    return Path(declared).resolve() == Path(expected).resolve()
+
+
 def verify_local_assembly_evidence(evidence, manifest):
-    """Cross-check only the adoption and picture identities owned by recap."""
+    """The child bindings must reference the same adoption files and picture recap ran with."""
     try:
         local = manifest["audio"]["local_adoption"]
         narration = evidence["narration"]
         mix = evidence["mix"]
         matches = (
-            narration["adoption"]["sha256"] == local["narration_adoption"]["sha256"]
-            and narration["adoption"]["tts_meta"]["sha256"]
-            == local["tts_meta"]["sha256"]
-            and mix["adoption"]["sha256"] == local["audio_mix_adoption"]["sha256"]
-            and mix["picture"]["sha256"] == manifest["source_video_fingerprint"]
+            _same_file(narration["adoption"]["path"], local["narration_adoption"]["path"])
+            and _same_file(narration["adoption"]["tts_meta"]["path"], local["tts_meta"]["path"])
+            and _same_file(mix["adoption"]["path"], local["audio_mix_adoption"]["path"])
+            and _same_file(mix["picture"]["path"], manifest["source_video"])
         )
     except (KeyError, TypeError):
         matches = False
     if not matches:
-        raise SystemExit("assembler bindings do not match the sealed local adoption manifest")
+        raise SystemExit("assembler bindings do not match the local adoption manifest")
 
 
 def owned_local_delivery(evidence):
@@ -164,20 +160,12 @@ def owned_local_delivery(evidence):
             Path(evidence["narration"]["final_output"]["path"]).resolve(),
             Path(evidence["mix"]["final_output"]["path"]).resolve(),
         ]
-        hashes = {
-            evidence["narration"]["final_output"]["sha256"],
-            evidence["mix"]["final_output"]["sha256"],
-        }
     except (KeyError, TypeError):
         return None
-    if declared != [expected, expected] or len(hashes) != 1 or not expected.is_file():
-        return None
-    with expected.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if hashes != {digest}:
+    if declared != [expected, expected] or not expected.is_file():
         return None
     stat = expected.stat()
-    return {"path": expected, "sha256": digest, "device": stat.st_dev, "inode": stat.st_ino}
+    return {"path": expected, "device": stat.st_dev, "inode": stat.st_ino}
 
 
 def remove_owned_local_delivery(token):
@@ -187,10 +175,7 @@ def remove_owned_local_delivery(token):
     if not path.is_file():
         return
     stat = path.stat()
-    with path.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if (stat.st_dev, stat.st_ino) == (token["device"], token["inode"]) \
-            and digest == token["sha256"]:
+    if (stat.st_dev, stat.st_ino) == (token["device"], token["inode"]):
         path.unlink()
 
 
@@ -211,24 +196,22 @@ def reject_unbound_narration_workdir(work_dir, args):
 def validate_audio_routing(parser, args):
     """Reject combinations the current pipeline cannot execute truthfully."""
     validate_local_adoption(parser, args)
-    mode = getattr(args, "audio_mode", "narration")
-    stream = getattr(args, "audio_stream_index", 0)
-    if isinstance(stream, bool) or not isinstance(stream, int) or stream < 0:
+    mode = args.audio_mode
+    stream = args.audio_stream_index
+    if stream < 0:
         parser.error("--audio-stream-index must be a non-negative integer")
     if args.edit_mode == "dub" and mode != "narration":
         parser.error("--edit-mode dub cannot be combined with a non-narration --audio-mode")
-    if args.tts_provider == "index-tts":
-        if args.mimo_tts_voice or args.voice_ref:
-            parser.error("--tts-provider index-tts cannot use MiMo voice or --voice-ref")
-        if args.edit_mode == "dub":
-            parser.error("--edit-mode dub does not support --tts-provider index-tts")
+    # index-tts + MiMo voice/--voice-ref is rejected once, in recap_runner.main, after the
+    # ambient VOICE_REF/MIMO_TTS_VOICE have been folded in.
+    if args.tts_provider == "index-tts" and args.edit_mode == "dub":
+        parser.error("--edit-mode dub does not support --tts-provider index-tts")
     if mode == "narration":
         if stream != 0:
             parser.error("narration currently requires --audio-stream-index 0")
         return
 
-    explicit = set(getattr(args, "_explicit_options", ()))
-    conflicts = sorted(explicit.intersection(_TTS_OPTIONS))
+    conflicts = sorted(set(args._explicit_options).intersection(_TTS_OPTIONS))
     if conflicts:
         detail = ", ".join(conflicts)
         parser.error(f"--audio-mode {mode} cannot use TTS/strict narration options: {detail}")
@@ -244,8 +227,8 @@ def validate_audio_routing(parser, args):
 
 
 def extend_assemble_args(cli_args, args):
-    mode = getattr(args, "audio_mode", "narration")
-    stream = getattr(args, "audio_stream_index", 0)
+    mode = args.audio_mode
+    stream = args.audio_stream_index
     if mode != "narration":
         cli_args += ["--audio-mode", mode]
     if stream != 0:
@@ -254,10 +237,7 @@ def extend_assemble_args(cli_args, args):
 
 
 def reject_unsupported_subtitle_track(work_dir, args):
-    if (
-        getattr(args, "audio_mode", "narration") == "source-mix"
-        and (Path(work_dir) / "subtitle_track.json").exists()
-    ):
+    if args.audio_mode == "source-mix" and (Path(work_dir) / "subtitle_track.json").exists():
         raise SystemExit(
             "source-mix 当前不能绑定显式 subtitle_track.json；请使用新的 work_dir，"
             "或选择 adopted-packet-copy"

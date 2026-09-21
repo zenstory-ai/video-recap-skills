@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-INVENTORY = REPO / "skills/video-recap/references/env-inventory-v1.json"
+INVENTORY = Path(__file__).resolve().parent / "env-inventory-v1.json"
 
 CREDENTIAL_MARKERS = ("KEY", "SECRET", "PASSWORD")
 ENV_READERS = {"env_bool", "_env_bool", "env_int", "_optional_env_int", "env_float", "env_str"}
@@ -57,7 +57,7 @@ def test_public_env_contract_classifies_all_literal_reads_and_no_credentials():
         assert not any(marker in name for marker in CREDENTIAL_MARKERS), name
         assert not name.endswith("_TOKEN"), name
     assert "MIMO_TOKEN_PLAN_CLUSTER" in contract
-    assert {"REVIEW_NARRATION", "REQUIRE_NARRATION_REVIEW", "INDEX_TTS_CACHE_REVISION"} <= set(contract)
+    assert {"REVIEW_NARRATION", "REQUIRE_NARRATION_REVIEW"} <= set(contract)
 
     trees = _skill_script_trees()
     assert len(trees) >= 6

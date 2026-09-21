@@ -1,4 +1,3 @@
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -8,6 +7,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
 
 import consolidate  # noqa: E402
+from lib import file_identity  # noqa: E402
 
 
 def _fake(content):
@@ -108,10 +108,10 @@ def test_consolidate_index_writes_artifacts(monkeypatch, tmp_path):
     assert idx["characters"][0]["name"] == "张三"
     assert (tmp_path / "understanding_index.json").exists()
     meta = json.loads((tmp_path / "understanding_index.json.meta.json").read_text(encoding="utf-8"))
-    assert meta["source_md5"]
+    assert meta["source"] == file_identity(tmp_path / "vlm_analysis.json")
     assert meta["scene_count"] == 1
     assert meta["model"] == consolidate.CONFIG.get("vlm_model", "")
-    assert meta["prompt_md5"] == consolidate._prompt_fingerprint(consolidate.INDEX_PROMPT)
+    assert meta["prompt"] == consolidate.INDEX_PROMPT
     md = (tmp_path / "understanding_index.md").read_text(encoding="utf-8")
     assert "张三" in md and "匕首" in md
 
@@ -121,9 +121,9 @@ def test_consolidate_transcript_writes_provenance_and_preserves_spans(monkeypatc
     _write_json(tmp_path, "asr_result.json", asr)
     monkeypatch.setattr("consolidate.api_call", lambda payload: _fake('{"segments":[{"i":0,"text":"你给我站住！"}]}'))
     out = consolidate.consolidate_transcript(tmp_path)
-    assert out["source_md5"] == hashlib.md5((tmp_path / "asr_result.json").read_bytes()).hexdigest()
+    assert out["source"] == file_identity(tmp_path / "asr_result.json")
     assert out["model"] == consolidate.CONFIG.get("vlm_model", "")
-    assert out["prompt_md5"] == consolidate._prompt_fingerprint(consolidate.CLEAN_PROMPT)
+    assert out["prompt"] == consolidate.CLEAN_PROMPT
     assert out["postprocess_version"] == consolidate.ASR_CLEAN_POSTPROCESS_VERSION
     assert out["segments"][0]["start"] == 0.0 and out["segments"][0]["end"] == 5.0
     assert out["segments"][0]["text"] == "你给我站住！"
@@ -159,10 +159,10 @@ def _unlink_meta(tmp_path):
     (tmp_path / "understanding_index.json.meta.json").unlink()
 
 
-def _drop_prompt_md5(tmp_path):
+def _drop_prompt(tmp_path):
     meta_path = tmp_path / "understanding_index.json.meta.json"
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.pop("prompt_md5")
+    meta.pop("prompt")
     meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
 
@@ -184,13 +184,13 @@ def _change_asr_clean(tmp_path):
 
 @pytest.mark.parametrize(
     "invalidate",
-    [_unlink_meta, _drop_prompt_md5, _change_vlm, _change_research, _change_asr, _change_asr_clean],
+    [_unlink_meta, _drop_prompt, _change_vlm, _change_research, _change_asr, _change_asr_clean],
     ids=lambda fn: fn.__name__.strip("_"),
 )
 def test_consolidate_index_is_idempotent_until_provenance_or_inputs_change(
     monkeypatch, tmp_path, invalidate
 ):
-    """A fresh index skips the API; losing provenance or changing any input byte recomputes."""
+    """A fresh index skips the API; losing provenance or rewriting any input recomputes."""
     _write_json(tmp_path, "vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 5, "description": "first"}])
     _write_json(tmp_path, "asr_result.json", [{"start": 0, "end": 1, "text": "第一版"}])
     _write_json(tmp_path, "asr_clean.json", {"segments": [{"start": 0, "end": 1, "text": "第一版"}]})
@@ -205,7 +205,9 @@ def test_consolidate_index_is_idempotent_until_provenance_or_inputs_change(
     assert calls["n"] == 1
     assert first["characters"][0]["name"] == "第1次"
     meta = json.loads((tmp_path / "understanding_index.json.meta.json").read_text(encoding="utf-8"))
-    assert meta["schema_version"] == 2 and meta["asr_md5"] and meta["research_md5"]
+    assert meta["schema_version"] == 2
+    assert meta["inputs"]["asr_result"] == file_identity(tmp_path / "asr_result.json")
+    assert meta["inputs"]["background_research"] == file_identity(tmp_path / "background_research.json")
 
     invalidate(tmp_path)
     second = consolidate.consolidate_index(tmp_path)

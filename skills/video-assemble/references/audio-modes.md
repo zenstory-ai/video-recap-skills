@@ -35,16 +35,15 @@ zero-based audio ordinal used by FFmpeg's `0:a:N` selector.
   normalize, limit, resample, change tempo, or add silence.
 - It deliberately omits `-t` and `-shortest`, preserving AAC priming and tail
   packets. After rendering, the output is probed and compared with the input:
-  ordered packet payload hashes, count, size, and PTS/DTS/duration converted to
-  rational time must match. Packet side data also must match, including AAC
-  skip-sample/discard-padding values and their reason fields.
+  decoder parameters, packet count, total payload bytes, the packet-clock span,
+  and every packet's size and PTS/DTS/duration converted to rational time must
+  match. Packet side data also must match, including AAC skip-sample/
+  discard-padding values and their reason fields.
 - QC/manifest evidence records selected stream, absolute stream index, codec,
-  time base, sample rate, channels/layout, codec extradata hash, aggregate
-  payload hash, packet details, and actual operation flags. AAC without a
-  verifiable decoder extradata hash is rejected. A declaration alone is not
-  accepted as proof.
+  time base, sample rate, channels/layout, packet count, payload bytes, packet
+  details, and actual operation flags.
 
-Adopted-copy settings fingerprints exclude narration/mix/loudness defaults, so
+The adopted-copy settings payload excludes narration/mix/loudness defaults, so
 irrelevant ambient settings do not invalidate a frozen-audio render. Video
 filters and video re-encoding remain allowed; packet verification must still
 pass afterward.
@@ -53,8 +52,8 @@ These modes do not create a commercial quality profile, automatic speech
 alignment, listening approval, or release approval. An explicit subtitle track
 is only a version/media-bound timing declaration; its evidence labels and
 `NOT_CHECKED` acoustic/listening status remain authoritative.
-Packet and decoder identity proves preservation of encoded audio semantics; it
-does not prove perceptual quality or that a person listened to the result.
+Matching packets and decoder parameters show the encoded audio was copied; they
+do not prove perceptual quality or that a person listened to the result.
 
 `timeline.json` represents either non-narration mode as one complete clip from
 the current input video and records the selected stream. Adopted copy uses gain

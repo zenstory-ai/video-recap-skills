@@ -9,10 +9,10 @@ import materials as material_lib
 from recap_cli import TTS_PROVIDERS, parse_args
 from recap_review import run_narration_review
 from recap_runtime import (
+    _analysis_settings,
     _build_multi_source_records,
     _coerce_videos,
     _entry,
-    _material_settings_fingerprint,
     _optional_env_int,
     _preflight_burn_subtitles,
     _probe_display_height_or_raise,
@@ -33,7 +33,6 @@ from recap_stage_qc import (
     _write_shift_left_stage_qc,
 )
 from recap_source import (
-    audio_binding,
     begin_local_adoption_qc,
     begin_non_narration_qc,
     extend_assemble_args,
@@ -51,7 +50,6 @@ from recap_source import (
 from recap_timeline import (
     _continuation_command,
     _cut_narration_is_stale,
-    _file_md5,
     _manifest_mismatches,
     _material_library_dir,
     _materials_enabled,
@@ -84,7 +82,7 @@ def _voiceover_args(work_dir, narration_path, args):
         result += ["--voice-ref", args.voice_ref]
     if args.allow_partial_tts:
         result.append("--allow-partial-tts")
-    if getattr(args, "preserve_approved_text", False):
+    if args.preserve_approved_text:
         result.append("--preserve-approved-text")
     return result
 
@@ -95,7 +93,7 @@ def _approved_validation_args(args):
 
 def _finish_recap(work_dir, final_output, args):
     final_qc_result = _write_final_qc_reports(work_dir, final_output)
-    if getattr(args, "require_final_qc", False):
+    if args.require_final_qc:
         _require_final_qc(final_qc_result, work_dir)
     print(f"[video-recap] ✅ 完成: {final_output}")
     _print_final_qc_pointer(final_qc_result)
@@ -105,11 +103,6 @@ def _run_local_adoption(video, work_dir, args):
     """Run the strict local bundle directly through the authoritative assembler."""
     work_dir.mkdir(parents=True, exist_ok=False)
     manifest = _write_run_manifest(work_dir, video, args)
-    def assert_manifest_inputs_current():
-        if material_lib.file_fingerprint(video) != manifest["source_video_fingerprint"]:
-            raise SystemExit("local adoption picture changed after run manifest was sealed")
-        if audio_binding(args) != manifest["audio"]:
-            raise SystemExit("local adoption audio bundle changed after run manifest was sealed")
     def record_failure(exc):
         failed = {**manifest, "local_adoption_run": {
             "status": "FAILED", "error_type": type(exc).__name__,
@@ -138,11 +131,9 @@ def _run_local_adoption(video, work_dir, args):
         ]
     owned_delivery = None
     try:
-        assert_manifest_inputs_current()
         _run("video-assemble", "assemble.py", *assemble_args)
         evidence = load_local_assembly_evidence(work_dir)
         owned_delivery = owned_local_delivery(evidence)
-        assert_manifest_inputs_current()
         verify_local_assembly_evidence(evidence, manifest)
     except BaseException as exc:
         remove_owned_local_delivery(owned_delivery)
@@ -161,16 +152,18 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
     """Run video-understanding for one source, or restore it from the material library."""
     source_work_dir = Path(source_work_dir)
     source_work_dir.mkdir(parents=True, exist_ok=True)
-    source_fp = source_record["source_video_fingerprint"]
-    settings_fp = source_record["settings_fingerprint"]
+    source_path = source_record["source_path"]
+    source_identity = source_record["source_video_identity"]
+    settings = source_record["settings"]
     lib_dir = _material_library_dir(args)
     restored = False
     if _materials_enabled(args):
         result = material_lib.restore_material(
             lib_dir,
             source_work_dir,
-            source_fingerprint=source_fp,
-            settings_fp=settings_fp,
+            source_path=source_path,
+            source_identity=source_identity,
+            settings=settings,
         )
         restored = result["restored"]
         if restored:
@@ -194,9 +187,9 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
         meta = material_lib.save_material(
             lib_dir,
             source_work_dir,
-            source_record["source_path"],
-            source_fp,
-            settings_fp,
+            source_path,
+            source_identity,
+            settings,
             source_id=source_record["source_id"],
             material_id=source_record["material_id"],
         )
@@ -210,14 +203,14 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
 
 def _single_source_record(video, args):
     """Identity + settings for the one source of a single-video run."""
-    fp = material_lib.file_fingerprint(video)
+    identity = material_lib.file_identity(video)
     return {
-        "source_id": material_lib.source_id_from_fingerprint(fp),
+        "source_id": material_lib.source_id_for(video),
         "source_path": str(video),
         "source_name": video.name,
-        "source_video_fingerprint": fp,
-        "settings_fingerprint": _material_settings_fingerprint(args),
-        "material_id": material_lib.material_id_for(video, fp),
+        "source_video_identity": identity,
+        "settings": _analysis_settings(args),
+        "material_id": material_lib.material_id_for(video, identity),
     }
 
 
@@ -235,15 +228,18 @@ def _rebuild_understanding_brief(source_record, source_work_dir, args):
     )
 
 
-def _reject_stale_multi_manifest(work_dir, videos, args, source_records):
-    mismatches = _multi_manifest_mismatches(work_dir, videos, args, source_records)
+def _reject_stale(mismatches, label):
     if mismatches:
         details = "\n  - ".join(mismatches)
         raise SystemExit(
-            "work_dir 与当前多视频 recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
+            f"work_dir 与当前{label}recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
             "请使用新的 --work-dir，或删除旧产物后重新运行 Phase A。\n"
             f"  - {details}"
         )
+
+
+def _reject_stale_multi_manifest(work_dir, videos, args, source_records):
+    _reject_stale(_multi_manifest_mismatches(work_dir, videos, args, source_records), "多视频 ")
 
 
 def _run_multi_cut(videos, work_dir, args):
@@ -282,7 +278,7 @@ def _run_multi_cut(videos, work_dir, args):
         return
 
     _reject_stale_multi_manifest(work_dir, videos, args, source_records)
-    cp_fp = _file_md5(clip_plan_json)
+    cp_identity = material_lib.file_identity(clip_plan_json)
     crender = [
         str(videos[0]),
         "--work-dir",
@@ -304,7 +300,7 @@ def _run_multi_cut(videos, work_dir, args):
             )
             _write_phase_ledger(
                 work_dir,
-                clip_plan_fingerprint=cp_fp,
+                clip_plan_identity=cp_identity,
                 edited_source_rendered=True,
                 multi_source=True,
             )
@@ -318,15 +314,14 @@ def _run_multi_cut(videos, work_dir, args):
                 ),
             )
             return
-        if _cut_narration_is_stale(_read_phase_ledger(work_dir), cp_fp):
+        if _cut_narration_is_stale(_read_phase_ledger(work_dir), cp_identity):
             raise SystemExit(
                 "clip_plan.json 已改变，但 narration.json 仍是对旧剪辑写的，会与剪后画面对不上。"
                 "请删除 narration.json，重跑后按新成片重新写解说。"
             )
         _write_phase_ledger(
             work_dir,
-            clip_plan_fingerprint=cp_fp,
-            narration_fingerprint=_file_md5(narration_json),
+            clip_plan_identity=cp_identity,
             narration_written=True,
             multi_source=True,
         )
@@ -395,8 +390,12 @@ def _run_multi_cut(videos, work_dir, args):
 def main():
     ap, args = parse_args()
 
-    if getattr(args, "require_final_qc", False) and args.edit_mode == "dub":
+    if args.require_final_qc and args.edit_mode == "dub":
         ap.error("--require-final-qc is only supported in full/cut modes, not dub")
+    # argparse `choices` does not cover the TTS_PROVIDER env default; source-owned audio and
+    # local adoption never synthesise, so an ambient provider is irrelevant there.
+    if (args.doctor or needs_voiceover(args)) and args.tts_provider not in TTS_PROVIDERS:
+        ap.error("TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS))
 
     if args.doctor:
         if any(
@@ -404,10 +403,6 @@ def main():
             for field in ("tts_meta", "narration_adoption", "audio_mix_adoption")
         ):
             ap.error("--doctor cannot be combined with local adoption inputs")
-        if args.tts_provider not in TTS_PROVIDERS:
-            ap.error(
-                "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
-            )
         doctor_args = []
         if args.tts_provider != "auto":
             doctor_args += ["--tts-provider", args.tts_provider]
@@ -418,14 +413,6 @@ def main():
     }:
         ap.error(
             "MIMO_QC/--mimo-qc must be one of: off, pre-assemble, post-render, both"
-        )
-    if (
-        not uses_local_adoption(args)
-        and uses_narration(args)
-        and args.tts_provider not in TTS_PROVIDERS
-    ):
-        ap.error(
-            "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
         )
     if not args.video:
         ap.error("video is required (unless --doctor)")
@@ -558,14 +545,7 @@ def _execute_pipeline(args, videos):
         )
 
     def _reject_stale_manifest():
-        mismatches = _manifest_mismatches(work_dir, video, args)
-        if mismatches:
-            details = "\n  - ".join(mismatches)
-            raise SystemExit(
-                "work_dir 与当前 recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
-                "请使用新的 --work-dir，或删除旧产物后重新运行 Phase A。\n"
-                f"  - {details}"
-            )
+        _reject_stale(_manifest_mismatches(work_dir, video, args), " ")
 
     if args.edit_mode == "dub":
         # Dub mode: EN→ZH translation-dub in the original cloned voice (replaces speech, not
@@ -652,7 +632,7 @@ def _execute_pipeline(args, videos):
         _reject_stale_manifest()
         if not uses_narration(args):
             begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
-        cp_fp = _file_md5(clip_plan_json)
+        cp_identity = material_lib.file_identity(clip_plan_json)
         # Render the cut from clip_plan (narration is authored later, in OUTPUT time).
         crender = [str(video), "--work-dir", str(work_dir)]
         if args.target_duration:
@@ -666,7 +646,7 @@ def _execute_pipeline(args, videos):
             # PASS 2: rebuild the brief (now an OUTPUT-timeline variant) and pause for narration.
             _rebuild_output_brief()
             _write_phase_ledger(
-                work_dir, clip_plan_fingerprint=cp_fp, edited_source_rendered=True
+                work_dir, clip_plan_identity=cp_identity, edited_source_rendered=True
             )
             _pause(
                 f"{narration_json}（用成片 OUTPUT 时间轴写解说，对着 {edited_source}）",
@@ -677,7 +657,7 @@ def _execute_pipeline(args, videos):
             )
             return
         if uses_narration(args) and _cut_narration_is_stale(
-            _read_phase_ledger(work_dir), cp_fp
+            _read_phase_ledger(work_dir), cp_identity
         ):
             raise SystemExit(
                 "clip_plan.json 已改变，但 narration.json 仍是对旧剪辑写的，会与剪后画面对不上。"
@@ -686,8 +666,7 @@ def _execute_pipeline(args, videos):
         if uses_narration(args):
             _write_phase_ledger(
                 work_dir,
-                clip_plan_fingerprint=cp_fp,
-                narration_fingerprint=_file_md5(narration_json),
+                clip_plan_identity=cp_identity,
                 narration_written=True,
             )
             output_duration = _read_video_duration_or_raise(edited_source)
@@ -700,7 +679,7 @@ def _execute_pipeline(args, videos):
         else:
             _write_phase_ledger(
                 work_dir,
-                clip_plan_fingerprint=cp_fp,
+                clip_plan_identity=cp_identity,
                 edited_source_rendered=True,
                 audio_mode=args.audio_mode,
                 audio_stream_index=args.audio_stream_index,

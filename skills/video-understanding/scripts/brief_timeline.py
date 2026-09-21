@@ -5,7 +5,7 @@ import math
 import re
 from pathlib import Path
 
-from lib import CONFIG, stable_hash
+from lib import CONFIG, file_identity
 
 
 def _parse_target_seconds(value):
@@ -104,8 +104,9 @@ def _load_cut_output_spans_for_brief(work_dir, *, required=False):
         return fail("missing clip_plan_validated.json")
     plan = json.loads(validated_path.read_text(encoding="utf-8"))
     raw_path = work_dir / "clip_plan.json"
-    if raw_path.exists() and plan["raw_plan_fingerprint"] != stable_hash(
-        json.loads(raw_path.read_text(encoding="utf-8"))
+    if (
+        raw_path.exists()
+        and validated_path.stat().st_mtime_ns < raw_path.stat().st_mtime_ns
     ):
         return fail("stale clip_plan_validated.json")
     spans = []
@@ -250,9 +251,7 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
         "artifact": "speech_boundary_anchors_output.json",
         "timeline": "cut_output",
         "source_artifact": "speech_boundary_anchors.json",
-        "clip_plan_fingerprint": stable_hash(
-            json.loads((work_dir / "clip_plan_validated.json").read_text(encoding="utf-8"))
-        ),
+        "clip_plan_identity": file_identity(work_dir / "clip_plan_validated.json"),
         "sentence_anchors": sorted(remapped, key=lambda item: item["time"]),
         "speech_spans": _remap_segments_to_output_for_brief(speech_rows, spans),
         "quiet_windows": _remap_segments_to_output_for_brief(quiet_rows, spans),

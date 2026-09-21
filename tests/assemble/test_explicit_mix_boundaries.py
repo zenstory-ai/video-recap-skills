@@ -11,12 +11,11 @@ import sys
 
 import pytest
 
-from test_narration_adoption import _adoption, _sha256
+from test_narration_adoption import _adoption
 
 SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
-import audio_mix_binding  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import source_score  # noqa: E402
 
@@ -79,8 +78,7 @@ def adopted_case(tmp_path, monkeypatch):
         'source_segments': [],
         'source_silence': [{'output_start_sample': 0, 'output_end_sample': 96000,
                             'role': 'silence'}],
-        'score': {'kind': 'frozen', 'path': str(score), 'sha256': _sha256(score),
-                  'audio_stream': 0},
+        'score': {'kind': 'frozen', 'path': str(score), 'audio_stream': 0},
     }))
     source_score.prepare_source_score(plan, tmp_path / 'bed')
     prepared = tmp_path / 'bed/prepared_bed_receipt.json'
@@ -106,19 +104,16 @@ def adopted_case(tmp_path, monkeypatch):
             'index': i, 'start': start/48000, 'end': start/48000+duration,
             'narration': 'a', 'spoken_text': 'a', 'audio_path': str(path),
             'audio_duration': duration, 'pause_after_ms': 0, 'overlaps_speech': False,
-            'tts_rate_offset': 0.0, 'processed_wav_sha256': _sha256(path),
+            'tts_rate_offset': 0.0,
         })
     narration, meta = _adoption(tmp_path, segments)
     adoption = tmp_path / 'mix-adoption.json'
     document = {
         'artifact': 'audio_mix_adoption', 'schema_version': 1,
-        'picture_sha256': _sha256(picture),
-        'prepared_receipt': {'path': str(prepared), 'sha256': _sha256(prepared)},
-        'narration_adoption_sha256': _sha256(narration),
+        'prepared_receipt': {'path': str(prepared)},
         'format': {'sample_rate': 48000, 'channels': 2, 'total_samples': 96000},
-        'segments': [{'index': i, 'processed_wav_sha256': _sha256(path),
-                      'output_start_sample': start, 'gain': gain}
-                     for i, (path, start, gain) in enumerate(zip(files, starts, gains))],
+        'segments': [{'index': i, 'output_start_sample': start, 'gain': gain}
+                     for i, (start, gain) in enumerate(zip(starts, gains))],
         'master_gain_db': -3.0,
     }
     adoption.write_text(json.dumps(document))
@@ -164,8 +159,9 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     assert len(bus) == len(expected_bus)
     assert max(abs(a-b) for a, b in zip(bus, expected_bus)) < 1e-7
     assert binding['narration_bus']['consumption_status'] == 'CONSUMED_BY_EXPLICIT_MIX'
-    assert mix['voice_bus']['sha256'] == _sha256(binding['narration_bus']['path'])
-    assert mix['narration_input_binding']['sha256'] == _sha256(work/'narration_input_binding.json')
+    assert mix['voice_bus']['path'] == binding['narration_bus']['path']
+    assert mix['narration_input_binding'] == {
+        'path': str((work/'narration_input_binding.json').resolve()), 'status': 'FINALIZED'}
     master = pcm(mix['master']['path'])
     master_gain = 10**(-3/20)
     assert max(abs(a-b*master_gain) for a, b in zip(master, expected_bus)) < 1e-7
@@ -184,47 +180,16 @@ def test_integer_mono_is_converted_to_float_before_equal_power_pan(adopted_case,
     integer_voice = tmp_path / 'mono_s16.wav'
     run('ffmpeg', '-v', 'error', '-i', adopted_case['files'][2],
         '-c:a', 'pcm_s16le', integer_voice)
-    digest = _sha256(integer_voice)
     adopted_case['files'][2] = integer_voice
-    adopted_case['segments'][2].update(
-        audio_path=str(integer_voice), processed_wav_sha256=digest,
-    )
+    adopted_case['segments'][2].update(audio_path=str(integer_voice))
     narration, meta = _adoption(tmp_path, adopted_case['segments'])
     adopted_case.update(narration=narration, meta=meta)
-    document = adopted_case['document']
-    document['narration_adoption_sha256'] = _sha256(narration)
-    document['segments'][2]['processed_wav_sha256'] = digest
-    adopted_case['adoption'].write_text(json.dumps(document))
     _, work, _ = render(adopted_case, tmp_path)
     binding = json.loads((work/'narration_input_binding.json').read_text())
     converted = pcm(binding['segments'][2]['placed']['path'])
     independent = pcm(integer_voice)
     assert len(converted) == len(independent)
     assert max(abs(a-b) for a, b in zip(converted, independent)) < 1e-6
-
-
-def test_premaster_cannot_be_reidentified_after_master_consumes_it(
-    adopted_case, tmp_path, monkeypatch,
-):
-    actual_run = audio_mix_binding._run
-    changed = []
-
-    def run_then_mutate(command, work_dir, label):
-        actual_run(command, work_dir, label)
-        if label == 'master':
-            premaster = Path(work_dir)/'premaster.wav'
-            replacement = Path(work_dir)/'changed-premaster.wav'
-            run('ffmpeg', '-v', 'error', '-i', premaster, '-af', 'volume=0.5',
-                '-c:a', 'pcm_f32le', replacement)
-            replacement.replace(premaster)
-            changed.append(True)
-
-    monkeypatch.setattr(audio_mix_binding, '_run', run_then_mutate)
-    with pytest.raises((ValueError, RuntimeError)):
-        render(adopted_case, tmp_path)
-    assert changed
-    for filename in ['output.mp4', 'narration_input_binding.json', 'audio_mix_binding.json']:
-        assert not (tmp_path/'render'/filename).exists()
 
 
 def test_explicit_mix_allows_requested_reencode_without_changing_frame_clock(
@@ -241,13 +206,12 @@ def test_explicit_mix_allows_requested_reencode_without_changing_frame_clock(
 
 
 @pytest.mark.parametrize('mutation', [
-    lambda d: d.update(picture_sha256='0'*64),
     lambda d: d['format'].update(total_samples=95000),
-    lambda d: d['prepared_receipt'].update(sha256='0'*64),
+    lambda d: d['prepared_receipt'].update(path='/nonexistent/prepared_bed_receipt.json'),
     lambda d: d['segments'][1].update(output_start_sample=13000),
     lambda d: d['segments'][2].update(output_start_sample=95000),
 ])
-def test_bad_adopted_identity_or_sample_window_never_publishes(adopted_case, tmp_path, mutation):
+def test_bad_adopted_receipt_or_sample_window_never_publishes(adopted_case, tmp_path, mutation):
     document = copy.deepcopy(adopted_case['document'])
     mutation(document)
     adopted_case['adoption'].write_text(json.dumps(document))

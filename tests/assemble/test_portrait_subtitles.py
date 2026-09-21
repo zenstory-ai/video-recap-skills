@@ -66,7 +66,8 @@ def test_env_pinned_playres_disables_canvas_scaling(monkeypatch):
 
 
 def test_generate_ass_writes_canvas_driven_playres(tmp_path):
-    segs = [{"narration": "竖屏解说测试文本", "actual_place_start": 1.0, "actual_place_end": 4.0}]
+    segs = [{"narration": "竖屏解说测试文本", "spoken_text": "竖屏解说测试文本",
+             "actual_place_start": 1.0, "actual_place_end": 4.0}]
     _generate_ass(segs, tmp_path, 4.0, {"width": 1080, "height": 1920})
     ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
     assert "PlayResX: 1080" in ass

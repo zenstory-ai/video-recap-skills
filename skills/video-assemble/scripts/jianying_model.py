@@ -1,6 +1,5 @@
 """Thin internal model used at the JianYing adapter boundary."""
 
-import os
 from dataclasses import dataclass, field
 from collections.abc import Callable
 
@@ -62,13 +61,6 @@ class DraftBuildContext:
             resource_packages=timeline.get("resource_packages", {}),
             style_presets=timeline.get("style_presets", {}),
         )
-
-    def media_duration(self, path, fallback_us):
-        """(duration_us, width, height) probed from the file; images and missing files fall back."""
-        if os.path.exists(path):
-            duration_us, width, height = self.probe(path)
-            return duration_us or fallback_us, width, height
-        return fallback_us, 0, 0
 
     def add_segment(self, kind, base_name, start_us, duration_us, segment):
         allocated = self.track_allocator.allocate(kind, base_name, start_us, duration_us)

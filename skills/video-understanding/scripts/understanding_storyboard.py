@@ -2,14 +2,15 @@
 
 from pathlib import Path
 
-from lib import CONFIG, log, file_fingerprint
+from lib import CONFIG, log
 
 
 from storyboard import build_source_storyboard, build_edited_storyboard
 
 
 from understanding_cache import (
-    _artifact_fingerprint,
+    _artifact_identity,
+    _video_input,
     _frames_manifest_path,
     _load_json,
     _stage_cache_valid,
@@ -19,8 +20,8 @@ from understanding_cache import (
 
 def _storyboard_sample_policy():
     return {
-        "max_tiles": CONFIG.get("storyboard_max_tiles", 30),
-        "columns": CONFIG.get("storyboard_columns", 6),
+        "max_tiles": CONFIG["storyboard_max_tiles"],
+        "columns": CONFIG["storyboard_columns"],
     }
 
 
@@ -31,9 +32,11 @@ def _edited_storyboard_meta(clip_plan_validated_json, frames_manifest_path):
     return {
         "schema_version": 1,
         "stage": "edited_storyboard",
-        "clip_plan_validated_fp": _artifact_fingerprint(clip_plan_validated_json),
+        "inputs": {
+            "clip_plan_validated": _artifact_identity(clip_plan_validated_json),
+            "frames_manifest": _artifact_identity(frames_manifest_path),
+        },
         "fps": float(CONFIG.get("fps") or 0),
-        "frames_manifest_fp": _artifact_fingerprint(frames_manifest_path),
         "sample_policy": _storyboard_sample_policy(),
     }
 
@@ -44,10 +47,10 @@ def _generate_source_storyboard(
     """Generate (or reuse cached) the source storyboard. Advisory: returns dict|None, never raises.
 
     Cached via _write_stage_meta/_stage_cache_valid on storyboard/source_storyboard.json; the
-    meta includes fps + the frames-manifest fp so an fps-change resume rebuilds (Principle 5).
+    meta includes fps + the frames-manifest identity so an fps-change resume rebuilds (Principle 5).
     If frames/ is absent (cache hit skipped extraction / cleaned) → skip + log; pipeline continues.
     """
-    if not CONFIG.get("storyboard", True):
+    if not CONFIG["storyboard"]:
         return None
     frames_dir = Path(work_dir) / "frames"
     if not frames_dir.is_dir() or not any(frames_dir.glob("frame_*.jpg")):
@@ -57,10 +60,12 @@ def _generate_source_storyboard(
     meta = {
         "schema_version": 1,
         "stage": "source_storyboard",
-        "video_fp": file_fingerprint(video_path),
+        "inputs": {
+            "video": _video_input(video_path),
+            "scenes": _artifact_identity(scenes_json),
+            "frames_manifest": _artifact_identity(_frames_manifest_path(work_dir)),
+        },
         "fps": float(CONFIG.get("fps") or 0),
-        "scenes_fp": _artifact_fingerprint(scenes_json),
-        "frames_manifest_fp": _artifact_fingerprint(_frames_manifest_path(work_dir)),
         "sample_policy": _storyboard_sample_policy(),
     }
     if not force and _stage_cache_valid(json_path, meta):
@@ -73,7 +78,7 @@ def _generate_source_storyboard(
         else:
             log("storyboard 跳过 source（缓存匹配）")
             return cached
-    result = build_source_storyboard(work_dir, video_path, scenes, CONFIG.get("fps"))
+    result = build_source_storyboard(work_dir, video_path, scenes, CONFIG["fps"])
     if result is not None and json_path.exists():
         _write_stage_meta(json_path, meta)
     return result
@@ -84,7 +89,7 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
     file-presence (NOT on edit_mode — recap.py forwards --edit-mode cut in BOTH passes, so the
     validated plan presence is the only reliable pass2 signal). Advisory: returns dict|None.
     """
-    if not CONFIG.get("storyboard", True):
+    if not CONFIG["storyboard"]:
         return None
     clip_plan_validated_json = Path(work_dir) / "clip_plan_validated.json"
     if not clip_plan_validated_json.exists():
@@ -113,7 +118,7 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
         log("storyboard 跳过 edited：clip_plan_validated.json 无法解析")
         return None
     result = build_edited_storyboard(
-        work_dir, source_video_path, clip_plan_validated, CONFIG.get("fps")
+        work_dir, source_video_path, clip_plan_validated, CONFIG["fps"]
     )
     if result is not None and json_path.exists():
         _write_stage_meta(json_path, meta)

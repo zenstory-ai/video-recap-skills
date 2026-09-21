@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from test_narration_adoption import (
-    _adoption, _segment, _sha256, _tone,
+    _adoption, _segment, _tone,
     render_media as _render_media,
 )
 
@@ -31,78 +31,30 @@ def _render(source, segments, work, adoption, meta):
     )
 
 
-@pytest.mark.parametrize("asset", ["narration.wav", "_placed_0000.wav", "_rs_0.wav"])
-@pytest.mark.parametrize("when", ["before", "after"])
-def test_actual_consumed_and_provenance_bytes_are_sealed(
-    render_media, tmp_path, monkeypatch, asset, when
-):
-    source, work = render_media
-    raw = _tone(tmp_path / "raw.wav")
-    audio = tmp_path / "needs-conversion.wav"
-    subprocess.run([
-        "ffmpeg", "-v", "error", "-i", str(raw), "-ar", "48000", "-ac", "2",
-        "-c:a", "pcm_f32le", str(audio),
-    ], check=True, capture_output=True)
-    segments = [_segment(audio)]
-    adoption, meta = _adoption(tmp_path, segments)
-    run = assemble.lib.run_cmd
-    changed = []
-
-    def mutate():
-        target = work / asset
-        assert target.is_file()
-        target.write_bytes(target.read_bytes() + b"post-seal mutation")
-        changed.append(str(target))
-
-    def intercepted(cmd, *args, **kwargs):
-        final_render = str(cmd[-1]).endswith(".mp4") and "-c:a" in cmd
-        if final_render and when == "before":
-            mutate()
-        result = run(cmd, *args, **kwargs)
-        if final_render and when == "after":
-            mutate()
-        return result
-
-    monkeypatch.setattr(assemble.lib, "run_cmd", intercepted)
-    with pytest.raises((ValueError, RuntimeError), match="(?i)(changed|identity|hash|seal)"):
-        _render(source, segments, work, adoption, meta)
-    assert changed, "test must reach the real final-render seam"
-    assert not (work / "output.mp4").exists()
-    assert not (work / narration_binding.FILENAME).exists()
-
-
-def test_partial_declared_hash_coverage_is_not_promoted(tmp_path):
-    audio = _tone(tmp_path / "raw.wav")
-    segments = [_segment(audio), {**_segment(audio, with_hash=False), "index": 1}]
-    with pytest.raises(ValueError, match="(?i)(hash|coverage|all)"):
-        narration_binding.prepare_binding(segments, tmp_path / "work")
-    assert not (tmp_path / "work/.narration_input_snapshots").exists()
-
-
 @pytest.mark.parametrize("field,value", [
     ("artifact", "something_else"), ("schema_version", 999),
     ("status", "PREPARING"), ("identity_status", "APPROVED_BY_MAGIC"),
+    ("final_output", {"path": "/nonexistent/output.mp4"}),
 ])
-def test_binding_fingerprint_rejects_invalid_report_even_when_output_hash_matches(
-    tmp_path, field, value
-):
+def test_binding_record_rejects_invalid_report(tmp_path, field, value):
     output = tmp_path / "output.mp4"
     output.write_bytes(b"actual final bytes")
     report = {
         "artifact": "narration_input_binding", "schema_version": 1,
         "status": "FINALIZED", "identity_status": "BOUND_TO_ADOPTION",
-        "final_output": {"path": str(output), "sha256": _sha256(output)},
+        "adoption": {"tempo_policy": narration_binding.TEMPO_POLICY},
+        "final_output": {"path": str(output)},
+    }
+    assert narration_binding.binding_record(tmp_path) is None
+    (tmp_path / narration_binding.FILENAME).write_text(json.dumps(report))
+    assert narration_binding.binding_record(tmp_path) == {
+        "path": str((tmp_path / narration_binding.FILENAME).resolve()),
+        "identity_status": "BOUND_TO_ADOPTION",
+        "tempo_policy": narration_binding.TEMPO_POLICY,
     }
     report[field] = value
     (tmp_path / narration_binding.FILENAME).write_text(json.dumps(report))
-    assert narration_binding.binding_fingerprint(tmp_path) is None
-
-
-def test_receipt_without_expected_provider_does_not_claim_a_match(tmp_path):
-    audio = _tone(tmp_path / "voice.wav")
-    segment = _segment(audio, receipt={"provider": "any-unbound-provider"})
-    context = narration_binding.prepare_binding([segment], tmp_path / "work")
-    assert context["segments"][0]["request_evidence"] != "RECEIPT_MATCHED"
+    assert narration_binding.binding_record(tmp_path) is None
 
 
 def test_blocking_qc_never_observes_a_published_strict_output(
@@ -150,7 +102,7 @@ def test_settings_record_adopted_not_ignored_ambient_speed(render_media, tmp_pat
     segments = [_segment(_tone(tmp_path / "voice.wav"))]
     adoption, meta = _adoption(tmp_path, segments)
     _render(source, segments, work, adoption, meta)
-    settings = assembly_settings.assembly_settings_fingerprint(work)
+    settings = assembly_settings.assembly_settings_payload(work)
     assert settings["narration_timing"]["narration_speed"] == 1.0
 
 
@@ -179,7 +131,7 @@ def test_copied_skill_strict_cli_runs_with_isolated_python(render_media, tmp_pat
     report = json.loads((work / narration_binding.FILENAME).read_text())
     output = Path(report["final_output"]["path"])
     assert report["identity_status"] == "BOUND_TO_ADOPTION"
-    assert output.is_file() and _sha256(output) == report["final_output"]["sha256"]
+    assert output.is_file() and output.stat().st_size > 0
     assert report["adoption"]["tempo_policy"]["global_atempo"] == 1.0
 
 

@@ -1,42 +1,33 @@
-"""Render-affecting settings fingerprint for cache/resume decisions."""
+"""Render-affecting settings payload recorded in the manifest and compared by resume logic."""
 
 from pathlib import Path
 
-from artifacts import _artifact_fingerprint
-from assemble_constants import (
-    SUBTITLE_RENDER_VERSION,
-    SUBTITLE_TEXT_NORMALIZE_VERSION,
-    VISUAL_OVERLAYS,
-)
+from artifacts import _artifact_identity
+from assemble_constants import VISUAL_OVERLAYS
 from audio_mix import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitle_core import _subtitle_style_config
-from narration_binding import binding_fingerprint
-from audio_mix_binding import binding_fingerprint as audio_mix_binding_fingerprint
-
-AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
+from narration_binding import binding_record
+from audio_mix_binding import binding_record as audio_mix_binding_record
 
 
-def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
-    """Settings that affect the rendered video, used by pipeline resume cache. When work_dir is
-    given, a user_subtitles presence flag is included so dropping in a user-subtitle file rebuilds
-    the cached subtitles."""
+def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
+    """Settings that affect the rendered video, as a plain nested dict compared with ``==`` by
+    pipeline resume logic. When work_dir is given, a user_subtitles presence flag and the
+    ``{size, mtime_ns}`` identity of the overlay/subtitle-track inputs are included so dropping
+    in or rewriting one of those files rebuilds the cached subtitles."""
     burn_subtitles = CONFIG["burn_subtitles"]
     mask_policy = _source_subtitle_mask_policy(work_dir)
     mask_source_subtitles = mask_policy["active"]
-    overlay_fingerprint = (
-        _artifact_fingerprint(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
+    overlay_identity = (
+        _artifact_identity(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
     )
-    subtitle_track_fingerprint = (
-        _artifact_fingerprint(Path(work_dir) / "subtitle_track.json")
+    subtitle_track_identity = (
+        _artifact_identity(Path(work_dir) / "subtitle_track.json")
         if work_dir is not None else None
     )
-    if audio_mode not in AUDIO_MODES:
-        raise ValueError(f"unsupported audio mode: {audio_mode}")
-    fingerprint = {
-        "version": SUBTITLE_RENDER_VERSION,
-        "subtitle_text_normalize": SUBTITLE_TEXT_NORMALIZE_VERSION,
+    settings = {
         "user_subtitles": _has_user_subtitles(work_dir),
         "burn_subtitles": burn_subtitles,
         "force_video_reencode": CONFIG["force_video_reencode"],
@@ -66,8 +57,8 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
             "subtitle_y_bot": CONFIG["subtitle_y_bot"],
             "visual_overlays": {
                 "artifact": VISUAL_OVERLAYS,
-                "present": overlay_fingerprint is not None,
-                "fingerprint": overlay_fingerprint,
+                "present": overlay_identity is not None,
+                "identity": overlay_identity,
             },
         },
         "audio": {
@@ -76,19 +67,19 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
         },
     }
     explicit_mix = (
-        audio_mix_binding_fingerprint(work_dir)
+        audio_mix_binding_record(work_dir)
         if work_dir is not None and audio_mode == "narration" else None
     )
     if explicit_mix:
-        fingerprint["audio"]["path"] = "explicit_adopted_full_sound"
-        fingerprint["audio_mix_binding"] = explicit_mix
+        settings["audio"]["path"] = "explicit_adopted_full_sound"
+        settings["audio_mix_binding"] = explicit_mix
     if audio_mode == "narration":
-        narration_binding = binding_fingerprint(work_dir) if work_dir else None
-        fingerprint["narration_input_binding"] = narration_binding
+        narration_binding = binding_record(work_dir) if work_dir else None
+        settings["narration_input_binding"] = narration_binding
         adopted_tempo = (
             narration_binding.get("tempo_policy") if narration_binding else None
         )
-        fingerprint["narration_timing"] = {
+        settings["narration_timing"] = {
             "delay_seconds": 0.0 if explicit_mix else CONFIG["narration_delay_seconds"],
             "tail_pad_seconds": 0.0 if explicit_mix else CONFIG["narration_tail_pad_seconds"],
             "fade_ms": 0 if explicit_mix else CONFIG["fade_ms"],
@@ -107,13 +98,13 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
             ),
         }
         if explicit_mix and adopted_tempo:
-            fingerprint["narration_timing"]["narration_cumulative_tempo_max"] = \
+            settings["narration_timing"]["narration_cumulative_tempo_max"] = \
                 adopted_tempo["cumulative_tempo_max"]
-            fingerprint["narration_timing"]["narration_cumulative_tempo_hard_max"] = \
+            settings["narration_timing"]["narration_cumulative_tempo_hard_max"] = \
                 adopted_tempo["cumulative_tempo_hard_max"]
     if audio_mode in {"narration", "source-mix"} and not explicit_mix:
         # adopted-packet-copy never decodes or mixes, so mix settings cannot change it.
-        fingerprint["audio_mix"] = {
+        settings["audio_mix"] = {
             "ducking_mode": CONFIG["ducking_mode"],
             "duck_fade_seconds": CONFIG["duck_fade_seconds"],
             "duck_bridge_seconds": CONFIG["duck_bridge_seconds"],
@@ -135,11 +126,11 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
             "bgm_ducking_volume": CONFIG["bgm_ducking_volume"],
         }
     if burn_subtitles:
-        fingerprint["subtitle_renderer"] = "ass"
-        fingerprint["subtitle_style"] = _subtitle_style_config()
-    if subtitle_track_fingerprint is not None:
-        fingerprint["subtitle_track"] = {
+        settings["subtitle_renderer"] = "ass"
+        settings["subtitle_style"] = _subtitle_style_config()
+    if subtitle_track_identity is not None:
+        settings["subtitle_track"] = {
             "artifact": "subtitle_track.json",
-            "fingerprint": subtitle_track_fingerprint,
+            "identity": subtitle_track_identity,
         }
-    return fingerprint
+    return settings

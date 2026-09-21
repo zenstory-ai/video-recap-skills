@@ -63,10 +63,11 @@ def _sample_timeline():
             "timeline_end": 4.0,
             "text": "第一句",
             "overlaps_speech": True,
+            "gain": 1.0,
         }
     ]
-    bgm = {"source_path": "/bgm.mp3", "volume": 0.18, "ducking_volume": 0.1}
-    ducking = {"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25}
+    bgm = {"source_path": "/bgm.mp3", "volume": 0.18, "ducking_volume": 0.1, "fade": 0.25}
+    ducking = {"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25, "bridge": 0.5}
     return build_timeline(canvas, 15.0, video, narr, bgm=bgm, ducking=ducking)
 
 
@@ -92,6 +93,7 @@ def test_exporter_uses_timeline_display_subtitles_not_raw_narration_text():
                 "timeline_end": 5.0,
                 "text": "旁白原文。",
                 "overlaps_speech": True,
+                "gain": 1.0,
             }
         ],
         subtitle_segments=[
@@ -356,6 +358,8 @@ def test_exporter_handles_timeline_without_bgm():
                 "timeline_start": 0.0,
                 "timeline_end": 2.0,
                 "text": "x",
+                "overlaps_speech": True,
+                "gain": 1.0,
             }
         ],
         bgm=None,

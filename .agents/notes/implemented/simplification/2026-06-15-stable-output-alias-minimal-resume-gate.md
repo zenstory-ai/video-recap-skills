@@ -1,6 +1,6 @@
 # Agent Note: 成片固定别名原地覆盖，续跑门禁只证明源视频字节与设置
 
-Status: implemented
+Status: implemented（其中“按内容指纹判定”部分已被 [[2026-09-20-no-content-hashing]] 翻转：现改为 size/mtime_ns 与设置字典相等）
 
 ## Problem
 

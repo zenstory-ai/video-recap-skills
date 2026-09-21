@@ -1,40 +1,29 @@
-"""Shared strict-input helpers for the identity-bound assemble modules.
+"""Shared strict-input helpers for the explicit-input assemble modules.
 
 Every helper here fails closed with ``ValueError`` on malformed input and never
-guesses: a hash must be lowercase SHA256, a path must be a local file, a JSON
-document must parse, a rational must be canonical ``N/D``. ``run_logged`` and
-``probe_json`` wrap the external tools so each caller logs the same evidence.
+guesses: a path must be a local file, a JSON document must parse, a rational must
+be canonical ``N/D``. ``run_logged`` and ``probe_json`` wrap the external tools so
+each caller logs the same evidence.
 """
 
 from fractions import Fraction
-import hashlib
 import json
 import math
 from pathlib import Path
-import re
 import subprocess
-
-
-SHA256_RE = re.compile(r"[a-f0-9]{64}")
-
-
-def sha256_file(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(4 * 1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
-
-
-def require_digest(value, label):
-    if not isinstance(value, str) or not SHA256_RE.fullmatch(value):
-        raise ValueError(f"{label} must be a lowercase SHA256")
-    return value
 
 
 def require_fields(value, required, label):
     if not isinstance(value, dict) or set(value) != set(required):
         raise ValueError(f"{label} requires exactly fields {required}")
+
+
+def without_digests(value, label):
+    """Drop the ``sha256`` / ``*_sha256`` keys older caller JSON declared; they are ignored."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    return {key: item for key, item in value.items()
+            if key != "sha256" and not key.endswith("_sha256")}
 
 
 def require_integer(value, label, minimum=0):
@@ -59,15 +48,11 @@ def require_local_path(path, label):
     return resolved
 
 
-def require_asset(path, digest, label):
-    """Resolve a declared {path, sha256} pair; return (resolved_path, digest)."""
-    if not isinstance(path, str) or not path or "://" in path:
-        raise ValueError(f"{label} requires a local path")
-    expected = require_digest(digest, f"{label} sha256")
-    resolved = Path(path).resolve()
-    if not resolved.is_file() or sha256_file(resolved) != expected:
-        raise ValueError(f"{label} identity mismatch or file missing")
-    return resolved, expected
+def require_declared_path(value, label):
+    """Resolve a caller ``{"path": ...}`` declaration to an existing local file."""
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object with a path")
+    return require_local_path(value.get("path"), label)
 
 
 def read_json_bytes(path, label):
@@ -85,11 +70,6 @@ def write_json_atomic(path, value):
     temporary = path.with_suffix(".writing.json")
     temporary.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     temporary.replace(path)
-
-
-def assert_sha256(path, expected, label):
-    if sha256_file(path) != expected:
-        raise ValueError(f"{label} changed or has the wrong identity")
 
 
 def canonical_fraction(value, label):

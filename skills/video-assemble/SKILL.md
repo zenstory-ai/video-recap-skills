@@ -34,10 +34,10 @@ description: >
 
 - `<video>`：源视频；cut 模式下为 `edited_source.mp4`。
 - `work_dir/tts_meta.json`：默认 `narration` 模式必需；配音阶段写出的 `{segments: [...]}`。每段包含 `audio_path`、时间、`pause_after_ms`、`overlaps_speech` 和用于混音/字幕的位置。显式 `source-mix` / `adopted-packet-copy` 模式不读取它。
-- 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、WAV 指纹、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与证据边界见 `references/narration-adoption.md`。
+- 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与记录边界见 `references/narration-adoption.md`。
 - 已采用的完整声音底轨与逐段配音可再传 `--audio-mix-adoption`；严格格式、48 kHz 声道矩阵和双 binding 事务见 `references/explicit-audio-mix.md`。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
 ## 4. 运行命令
 
@@ -58,9 +58,9 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - `subtitles.srt`：旁白字幕；烧录时另有 `subtitles.ass`。
 - `timeline.json`：后端无关的多轨模型，包含视频、原声、旁白、BGM、字幕和 ducking 自动化。
 - `_placed_*.wav`：实际写入主混音的完整逐段旁白 PCM；时间线与剪映只引用这些文件。
-- `narration_input_binding.json`：旁白输入、转换、实际放置、旁白总轨和最终音轨的消费证据。区分旧输入未核、指纹匹配但未经独立采用、与采用决定绑定；不等于声线鉴定或听审。
-- `audio_mix_binding.json`：显式完整声音分支的画面、底轨、48 kHz 配音、premaster、固定 master gain、最终 PCM/AAC 与另一 binding 的单向身份链。
-- `assembly_manifest.json`：输入来源、cut 来源指纹、渲染设置与最终输出路径。
+- `narration_input_binding.json`：旁白输入、转换、实际放置、旁白总轨和最终音轨的消费记录（路径、PCM 参数、packet 计数）。区分未采用与已绑定采用决定两种状态；不等于声线鉴定或听审。
+- `audio_mix_binding.json`：显式完整声音分支消费的画面时钟、底轨、48 kHz 配音放置、premaster、固定 master gain、最终 PCM/AAC 事实与 narration binding 路径的记录。
+- `assembly_manifest.json`：输入来源、cut 来源标识（路径、大小、mtime）、渲染设置与最终输出路径。
 - `assembly_qc.json`：旁白完整性、原声句末交接、时间线素材时长与交付质量的发布门禁。
 - 剪映草稿目录：仅 `--export-jianying` 时生成，包含 `draft_content.json`、`draft_info.json` 与 `draft_meta_info.json`。
 
@@ -88,43 +88,21 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 
 ### 按原片区间准备声音，而不是整体压低旧成片
 
-已有多段原声取舍和独立 BGM 决定时，先用
-`references/source-score.md` 的独立 `source_score.py` 操作，从原片声音流
-按精确帧区间重建原声轨、连续音乐轨及两者之和。原片完整解码一次再切样本，
-分别执行保留对白、低位原声和明确静音；渐变也必须显式给定。
-已处理的音乐轨走 `frozen`，不能再次偏移、调增益或加渐变。
-若采用的原声底轨本身已包含完整音乐决定且不再叠加配乐，使用严格的
-`score:{"kind":"none"}`；它生成真实全零 score，并保持 source 与 prepared
-的 canonical PCM payload 相同，不伪造静音音乐资产。
-
-这一步仅输出声音底轨和来源回执，不是最终视频。要与逐段已采用配音合成，
-必须再由调用方提供 `references/explicit-audio-mix.md` 的严格 adoption；不要将
-底轨塞入旧入口再自动 duck，也不要从含旧解说的成片取整条声音来冒充干净
-原声。保留旧入口兼容行为，并区分“底轨已验证”“配音已验证”和“完整混音已验证”。
+已有多段原声取舍和独立 BGM 决定时，先用 `references/source-score.md` 的独立
+`source_score.py` 从原片声音流按精确帧区间重建原声轨、音乐轨及两者之和；它只输出
+声音底轨和来源回执。要与逐段已采用配音合成，再由调用方提供 `references/explicit-audio-mix.md`
+的严格 adoption；不要将底轨塞入旧入口自动 duck，也不要从含旧解说的成片取整条声音冒充干净原声。
 
 ## 7. 字幕与可选包装
 
-先锁定画面、剪点、旁白和混音，再投入字幕动画或边框包装。字幕样式不能掩盖叙事、剪点或声音问题。
-
-普通交付优先使用现有 ASS 路径。只有用户需要更精细的逐 cue 排版、动画或透明图层时，才使用 Remotion 或其他代码渲染器作为**项目级可选实现**，不要把特定框架、字体、颜色或黄字写成核心依赖。推荐顺序：
-
-1. 输出无包装的锁定母版，确认音画内容不再变化。
-2. 从实际 TTS / 时间线生成 captions；TTS 块保持连续思路，字幕可以按阅读宽度拆 cue。
-3. 先抽检开头、亮背景、暗背景、人物近景和长字幕样帧，确定字号、安全区、描边、阴影及是否需要底板。
-4. 渲染完整透明字幕层，再 overlay 到锁定母版；合成后确认音轨未被意外改写。
-5. 完整播放实际最终文件，并复查字幕遮脸、跳字、断行、首尾帧和边界处残影。
-
-已有项目级渲染器能输出精确包装时，使用 `references/foreground-compose.md`
-将它生成的 RGBA 序列叠到锁定母版，而不是用通用白字黑框近似品牌样式。
-该操作保留实际帧钟和 AAC 包，不生成字体或文案；只有通过验证的新文件才写入新目录。
-片名卡有渐显或动画时须提供完整序列，不能冻结最后一张图代替。
-
-包装价值来自稳定、可读、与内容一致的排版，不来自效果数量。先建立统一字体、颜色、描边/阴影和轻量动效；底板、边框、花字与音效只有解决具体可读性或叙事任务时才加入。一个样帧好看不代表全片成立。
+先锁定画面、剪点、旁白和混音，再投入字幕动画或边框包装；字幕样式不能掩盖叙事、剪点或声音问题。
+普通交付优先使用现有 ASS 路径；只有用户需要逐 cue 排版、动画或透明图层时，才用项目级代码渲染器，
+并按 `references/foreground-compose.md` 把它生成的 RGBA 序列叠到锁定母版。包装顺序与样帧抽检清单见
+`references/packaging.md`。
 
 ## 8. 能力边界
 
-- 不生成旁白文字，也不合成 TTS。
-- 不重新转写视频，不擅自改变 Agent 的时间决定。
+- 不生成旁白文字，不合成 TTS，不重新转写视频。
 - 字幕烧录默认开启；关闭时不会重编码绘制字幕区域。
 
 显式输出轴字幕轨的独立合同、完整替换语义和当前边界见 `references/subtitle-track.md`。

@@ -420,7 +420,7 @@ When the title or plot is known, have the agent research first and write `backgr
 - [JianYing / CapCut draft export](https://zenstory.ai/video-recap/capcut-draft) — export independently from a real `timeline.json`
 - [JianYing draft export and cost](docs/capcut-jianying-draft-export.md) — in-repo document (Chinese): what is in the draft, and how self-hosting bills differ from SaaS
 - [Guohuo case runbook](examples/guohuo-60s/skill-runbook.md) · [decision chain from content lock to final](examples/guohuo-60s/iteration-notes.md) (both in Chinese)
-- Per-skill contracts in each `skills/<skill>/SKILL.md`; [data schema](skills/video-recap/references/data-schema.md) · [config playbook](skills/video-recap/references/config-playbook.md) · [multi-track timeline / JianYing export](skills/video-recap/references/timeline-and-jianying.md) · [creative editing playbook](skills/video-recap/references/creative-editing-playbook.md)
+- Per-skill contracts in each `skills/<skill>/SKILL.md`; [data schema](skills/video-recap/references/data-schema.md) · [config playbook](skills/video-recap/references/config-playbook.md) · [multi-track timeline / JianYing export](docs/timeline-and-jianying.md) · [creative editing playbook](skills/video-recap/references/creative-editing-playbook.md)
 
 ## Acknowledgements
 

@@ -25,7 +25,7 @@ description: >
 
 Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理解索引做机械校验；full 模式默认还会执行预算整理并计算旁白的原声重叠。已有批准稿应加 `--preserve-approved-text`，保留段落顺序、数量、时间、文本、停顿和扩展元数据，仅允许依据现有声音证据更新 `overlaps_speech`。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。本技能不从其他技能目录读取参考文件或辅助脚本；外部输入只来自显式路径与 `work_dir` 产物。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
 ### 1.1 创作控制模式
 
@@ -130,7 +130,7 @@ cut 模式先根据 `recap_story_plan.json` 与 `visual_audio_board.json` 写原
 beat_id | function | change | POV | preferred moment | 入点 | 出点
 ```
 
-片段顺序必须构成一条完整故事线，而不是无序高光。可使用 0–1 个 cold open，随后回到因果清楚的 setup → turn → escalation → payoff。片段长度服从具体时刻，不使用统一秒数模板；片尾必须保留完整台词或动作。对短时间内密集的 scene-change 候选，先区分原片切点与本次拼接点：原片无关短镜头整段删，相关短镜头扩展到完整动作/反应；本次拼接点优先移动边界、恢复同源连续运动或合并片段，尽量不制造人工闪切。
+片段顺序必须构成一条完整故事线，而不是无序高光。可使用 0–1 个 cold open，随后回到因果清楚的 setup → turn → escalation → payoff。片段长度服从具体时刻，不使用统一秒数模板；片尾必须保留完整台词或动作。密集 scene-change 候选的来源判断与处理规则由剪辑阶段定义，写计划时遵循同一规则，不制造人工闪切。
 
 ## 4. 撰写旁白
 
@@ -247,8 +247,5 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full --preserve-approve
 
 ## 7. 能力边界
 
-- 不运行 ASR / VLM；只消费视频理解索引。
-- 不合成 TTS，也不渲染视频。
+- 不运行 ASR / VLM，不合成 TTS，不渲染视频；只消费视频理解索引。
 - 平台研究仅用于明确的宣发任务；不替代当前片内事实，也不默认改变解说和剪辑。
-- `review.py` 不改写 `narration.json`；是否采用严格门禁由调用方决定。
-- `validate.py --preserve-approved-text` 不会截短、丢弃、合并、重排或改写批准稿；未加该参数时保留原有预算整理行为。

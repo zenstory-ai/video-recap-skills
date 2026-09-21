@@ -8,7 +8,6 @@ import json  # noqa: E402
 import pytest  # noqa: E402
 
 import assembly_settings  # noqa: E402
-from assemble_constants import SUBTITLE_TEXT_NORMALIZE_VERSION  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import source_subtitles  # noqa: E402
 import subtitle_core  # noqa: E402
@@ -50,12 +49,16 @@ def test_plan_clip_spans_from_validated_plan(tmp_path):
 
 
 def test_plan_clip_spans_ignore_stale_validated_plan(tmp_path):
+    import os
+
     raw = {"clips": [{"start": 40.0, "end": 45.0}]}
     (tmp_path / "clip_plan.json").write_text(json.dumps(raw), encoding="utf-8")
     (tmp_path / "clip_plan_validated.json").write_text(json.dumps({
-        "raw_plan_fingerprint": "stale",
         "clips": [{"source_start": 0.0, "source_end": 10.0, "output_start": 0.0, "output_end": 10.0}],
     }), encoding="utf-8")
+    # The raw plan was rewritten after validation, so the validated copy is stale.
+    os.utime(tmp_path / "clip_plan_validated.json", (1_000, 1_000))
+    os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
 
     spans = source_subtitles._plan_clip_spans(tmp_path)
 
@@ -182,7 +185,7 @@ def test_combined_entries_sorted_no_overlap_with_narration(monkeypatch, tmp_path
     (tmp_path / "asr_result.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "原声"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说词内容",
-             "start": 5.0, "end": 8.0}]
+             "spoken_text": "解说词内容", "start": 5.0, "end": 8.0}]
     combined = source_subtitles._combined_subtitle_entries(segs, tmp_path, 10.0)
     assert combined[0]["start"] < 5.0  # original gap entry sorts first
     for e in combined:
@@ -195,7 +198,7 @@ def test_generate_ass_includes_original_gap_subtitles(monkeypatch, tmp_path):
     (tmp_path / "asr_result.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "原声台词"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说",
-             "start": 5.0, "end": 8.0}]
+             "spoken_text": "解说", "start": 5.0, "end": 8.0}]
     subtitle_render._generate_ass(segs, tmp_path, 10.0, {"width": 1280, "height": 720})
     ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
     assert "原声台词" in ass and "解说" in ass
@@ -293,7 +296,8 @@ def test_normalize_subtitle_text_collapses_em_dashes():
 def test_generated_srt_and_ass_normalize_em_dashes(monkeypatch, tmp_path):
     # narration text with a dash is normalized in BOTH generated srt and ass burned text
     segs = [{"actual_place_start": 1.0, "actual_place_end": 4.0,
-             "narration": "我回来了——这一次", "start": 1.0, "end": 4.0}]
+             "narration": "我回来了——这一次", "spoken_text": "我回来了——这一次",
+             "start": 1.0, "end": 4.0}]
     subtitle_render._generate_srt(segs, tmp_path, 4.0)
     subtitle_render._generate_ass(segs, tmp_path, 4.0, {"width": 1280, "height": 720})
     srt = (tmp_path / "subtitles.srt").read_text(encoding="utf-8")
@@ -309,16 +313,11 @@ def test_original_gap_text_normalizes_em_dashes(monkeypatch, tmp_path):
     (tmp_path / "original_subtitles.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "活着——让我看看"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说",
-             "start": 5.0, "end": 8.0}]
+             "spoken_text": "解说", "start": 5.0, "end": 8.0}]
     subtitle_render._generate_ass(segs, tmp_path, 10.0, {"width": 1280, "height": 720})
     ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
     assert "——" not in ass and "—" not in ass
     assert "活着，让我看看" in ass
-
-
-def test_fingerprint_includes_subtitle_text_normalize_version():
-    fp = assembly_settings.assembly_settings_fingerprint()
-    assert fp["subtitle_text_normalize"] == SUBTITLE_TEXT_NORMALIZE_VERSION
 
 
 # --- R1: user-provided subtitle file as override primary ----------------------
@@ -389,12 +388,12 @@ def test_user_subtitles_absent_returns_none(tmp_path):
     assert source_subtitles._load_user_original_subtitles(tmp_path) is None
 
 
-def test_fingerprint_user_subtitles_flag(tmp_path):
-    assert assembly_settings.assembly_settings_fingerprint(tmp_path)["user_subtitles"] is False
+def test_settings_payload_user_subtitles_flag(tmp_path):
+    assert assembly_settings.assembly_settings_payload(tmp_path)["user_subtitles"] is False
     (tmp_path / "user_subtitles.json").write_text("[]", encoding="utf-8")
-    assert assembly_settings.assembly_settings_fingerprint(tmp_path)["user_subtitles"] is True
+    assert assembly_settings.assembly_settings_payload(tmp_path)["user_subtitles"] is True
     # no work_dir → flag is constant False (back-compat for no-arg callers)
-    assert assembly_settings.assembly_settings_fingerprint()["user_subtitles"] is False
+    assert assembly_settings.assembly_settings_payload()["user_subtitles"] is False
 
 
 # --- R2: precise interval-clip path -------------------------------------------

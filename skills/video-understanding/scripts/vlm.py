@@ -13,7 +13,7 @@ from extract import (
     parse_frame_number,
 )
 from lib import CONFIG
-from lib import log, api_call, load_prompt, mimo_video_api_call, run_cmd, file_fingerprint, stable_hash
+from lib import log, api_call, load_prompt, mimo_video_api_call, run_cmd, file_identity
 
 # ── Step 4: VLM 视觉分析 ─────────────────────────────────────────────
 
@@ -55,8 +55,8 @@ def _parse_vlm_depth_response(raw_text):
 def _max_frames_for_duration(duration):
     """Frames the VLM sees for one scene: ~1 per `vlm_seconds_per_frame`, floor 3, capped by
     `vlm_max_frames`. Replaces the old hard cap of 6 that starved long/merged scenes."""
-    spf = float(CONFIG.get("vlm_seconds_per_frame", 4.0) or 4.0)
-    ceiling = int(CONFIG.get("vlm_max_frames", 16) or 16)
+    spf = float(CONFIG["vlm_seconds_per_frame"])
+    ceiling = int(CONFIG["vlm_max_frames"])
     return max(3, min(ceiling, round(max(0.0, float(duration)) / spf)))
 
 
@@ -64,24 +64,33 @@ def _vlm_scene_cache_path(work_dir):
     return Path(work_dir) / "vlm_scene_cache.json"
 
 
-def _load_vlm_scene_cache(work_dir):
-    """Per-scene VLM resume cache (scene_key -> analysis). Tolerant: {} if absent/corrupt."""
+def _load_vlm_scene_cache(work_dir, settings):
+    """Per-scene VLM resume cache (scene_key -> analysis) written under `settings`.
+
+    Tolerant: {} if absent/corrupt, and {} when the stored request settings differ, so a
+    partial-failure cache is never resumed after an output-affecting setting changed."""
     path = _vlm_scene_cache_path(work_dir)
     if not path.exists():
         return {}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
     except (OSError, ValueError):
         return {}
+    if not isinstance(data, dict) or data.get("settings") != settings:
+        return {}
+    scenes = data.get("scenes")
+    return scenes if isinstance(scenes, dict) else {}
 
 
-def _flush_vlm_scene_cache(work_dir, cache):
+def _flush_vlm_scene_cache(work_dir, settings, cache):
     """Persist the resume cache atomically (temp + rename) so an abort/crash never corrupts it."""
     path = _vlm_scene_cache_path(work_dir)
     try:
         tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(cache, ensure_ascii=False), encoding="utf-8")
+        tmp.write_text(
+            json.dumps({"settings": settings, "scenes": cache}, ensure_ascii=False),
+            encoding="utf-8",
+        )
         tmp.replace(path)
     except OSError as exc:
         log(f"VLM 场景缓存写入失败（忽略）: {exc}")
@@ -114,7 +123,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     if not vlm_prompt:
         vlm_prompt = "仔细观察这些视频帧。分两部分输出：\n【描述】不超过80字，描述画面中正在发生什么。\n【深层分析】不超过120字，分析角色情绪、关系动态、潜台词。"
 
-    ctx = CONFIG.get("context_info", "")
+    ctx = CONFIG["context_info"]
     if ctx:
         vlm_prompt = f"已知信息：{ctx}\n\n{vlm_prompt}"
 
@@ -132,7 +141,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     # 相邻场景才会复用同一帧，容量取「并发数 × 单场景最大帧数」就够，再多也命中不了。
     b64_capacity = max(
         8,
-        int(CONFIG.get("vlm_max_frames", 16) or 16) * max(1, int(CONFIG.get("vlm_workers", 4) or 4)),
+        int(CONFIG["vlm_max_frames"]) * int(CONFIG["vlm_workers"]),
     )
     b64_cache = OrderedDict()
     b64_lock = Lock()
@@ -184,7 +193,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
         payload = {
             "model": CONFIG["vlm_model"],
             "messages": [{"role": "user", "content": content_parts}],
-            "max_tokens": int(CONFIG.get("vlm_max_tokens", 1500) or 1500),
+            "max_tokens": int(CONFIG["vlm_max_tokens"]),
         }
 
         log(f"VLM 分析场景 {i+1}/{len(scenes)} ({len(scene_frames)} 帧)...")
@@ -208,7 +217,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
                 payload = {
                     "model": CONFIG["vlm_model"],
                     "messages": [{"role": "user", "content": retry_parts}],
-                    "max_tokens": int(CONFIG.get("vlm_max_tokens", 1500) or 1500),
+                    "max_tokens": int(CONFIG["vlm_max_tokens"]),
                 }
 
         if not raw_response.strip():
@@ -230,29 +239,34 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
         return i, result
 
     # 断点续传：逐场景持久化分析结果，避免少数场景失败（多为 429 限流）时整批画面理解全部作废。
-    cache = _load_vlm_scene_cache(work_dir) if resume else {}
-    prompt_fp = stable_hash(vlm_prompt)
+    # The resume cache is valid only under the SAME output-affecting settings the outer stage
+    # gate tracks (understanding_cache._vlm_cache_payload). vlm_prompt already folds in
+    # context_info (and background_research). The request/endpoint settings below are NOT in
+    # vlm_prompt, so they are stored explicitly — otherwise a partial-failure cache reused after
+    # flipping e.g. mimo_disable_thinking would yield a stale/mixed analysis.
+    cache_settings = {
+        "vlm_prompt": vlm_prompt,
+        "vlm_model": CONFIG.get("vlm_model"),
+        "vlm_max_tokens": CONFIG.get("vlm_max_tokens"),
+        "vlm_seconds_per_frame": CONFIG.get("vlm_seconds_per_frame"),
+        "vlm_max_frames": CONFIG.get("vlm_max_frames"),
+        "fps": round(float(fps), 3),
+        "frame_time_convention": FRAME_TIME_CONVENTION_VERSION,
+        "api_url": CONFIG.get("api_url"),
+        "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
+        "mimo_media_resolution": CONFIG.get("mimo_media_resolution"),
+    }
+    cache = _load_vlm_scene_cache(work_dir, cache_settings) if resume else {}
 
     def _scene_cache_key(i, scene):
-        # Must invalidate on the SAME output-affecting settings the outer stage gate tracks
-        # (understand.py:_vlm_cache_payload). prompt_fp already covers vlm_prompt + context_info
-        # (which folds in background_research). The three below change the request/endpoint but
-        # are NOT in vlm_prompt, so they must be keyed explicitly — otherwise a partial-failure
-        # cache reused after flipping e.g. mimo_disable_thinking yields a stale/mixed analysis.
         return "|".join(str(x) for x in (
             i, round(float(scene["start"]), 3), round(float(scene["end"]), 3),
-            CONFIG.get("vlm_model"), prompt_fp, CONFIG.get("vlm_max_tokens"),
-            CONFIG.get("vlm_seconds_per_frame"), CONFIG.get("vlm_max_frames"),
-            round(float(fps), 3), FRAME_TIME_CONVENTION_VERSION,
-            CONFIG.get("api_url"), CONFIG.get("mimo_disable_thinking", True),
-            CONFIG.get("mimo_media_resolution"),
         ))
 
     analyses = [None] * len(scenes)
     todo = []
     for i, s in enumerate(scenes):
-        cached = cache.get(_scene_cache_key(i, s))
-        analyses[i] = cached if isinstance(cached, dict) else None
+        analyses[i] = cache.get(_scene_cache_key(i, s))
         if analyses[i] is None:
             todo.append(i)
     if todo and len(todo) < len(scenes):
@@ -282,7 +296,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
                         cache[_scene_cache_key(idx, scenes[idx])] = result
                         pending += 1
                         if pending >= flush_every:
-                            _flush_vlm_scene_cache(work_dir, cache)
+                            _flush_vlm_scene_cache(work_dir, cache_settings, cache)
                             pending = 0
                     except Exception as e:  # noqa: BLE001 - 单个场景失败不能拖垮其余已完成的
                         log(f"VLM 场景 {i+1} 分析失败: {e}")
@@ -290,10 +304,10 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
             finally:
                 # 无论正常结束、失败还是中断，都把这一轮已完成的场景落盘。
                 if pending:
-                    _flush_vlm_scene_cache(work_dir, cache)
+                    _flush_vlm_scene_cache(work_dir, cache_settings, cache)
         return failures
 
-    base_workers = min(len(todo) or 1, int(CONFIG.get("vlm_workers", 4) or 4))
+    base_workers = min(len(todo) or 1, int(CONFIG["vlm_workers"]))
     log(f"VLM 并行分析 {len(todo)} 个场景 (workers={base_workers})...")
     failures = _run_pass(todo, base_workers)
     if failures:
@@ -323,7 +337,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
 
 def _video_data_url(video_path):
     """Return a MiMo-compatible data URL for a local video chunk, or None when too large."""
-    max_bytes = int(float(CONFIG.get("mimo_video_base64_max_mb", 45.0)) * 1024 * 1024)
+    max_bytes = int(float(CONFIG["mimo_video_base64_max_mb"]) * 1024 * 1024)
     encoded_size = int(video_path.stat().st_size * 4 / 3) + 128
     if encoded_size > max_bytes:
         log(
@@ -342,18 +356,15 @@ def _mimo_video_chunks(scenes):
     if not scenes:
         raise RuntimeError("MiMo 视频分片理解需要 scenes；请先运行 ffmpeg scene/scdet 场景检测")
 
-    max_seconds = float(CONFIG.get("mimo_video_chunk_max_seconds", 20.0) or 20.0)
-    min_seconds = float(CONFIG.get("mimo_video_chunk_min_seconds", 1.0) or 1.0)
+    max_seconds = float(CONFIG["mimo_video_chunk_max_seconds"])
+    min_seconds = float(CONFIG["mimo_video_chunk_min_seconds"])
     chunks = []
     for scene_index, scene in enumerate(scenes):
-        try:
-            start = float(scene.get("start", 0.0))
-            end = float(scene.get("end", start))
-        except (TypeError, ValueError, AttributeError):
-            continue
+        start = float(scene["start"])
+        end = float(scene["end"])
         if end <= start:
             continue
-        scene_id = scene.get("scene_id", scene_index) if isinstance(scene, dict) else scene_index
+        scene_id = scene.get("scene_id", scene_index)
         cursor = start
         while cursor < end:
             chunk_end = min(end, cursor + max_seconds)
@@ -376,7 +387,7 @@ def _extract_video_chunk(video_path, chunk, output_path):
     """Cut one scene-based chunk into a compact local MP4 for MiMo video_url data URL."""
     start = float(chunk["start"])
     duration = max(0.1, float(chunk["end"]) - start)
-    fps = float(CONFIG.get("mimo_video_fps", 2.0) or 2.0)
+    fps = float(CONFIG["mimo_video_fps"])
     cmd = [
         "ffmpeg", "-y",
         "-ss", f"{start:.3f}",
@@ -392,7 +403,7 @@ def _extract_video_chunk(video_path, chunk, output_path):
         "-movflags", "+faststart",
         str(output_path),
     ]
-    result = run_cmd(cmd, timeout=CONFIG.get("mimo_video_chunk_timeout", 180))
+    result = run_cmd(cmd, timeout=CONFIG["mimo_video_chunk_timeout"])
     if result.returncode != 0:
         raise RuntimeError(f"MiMo 视频分片裁剪失败: {result.stderr[-500:]}")
     return output_path
@@ -402,7 +413,7 @@ def _mimo_chunk_prompt(chunk):
     return (
         f"这是原视频 {chunk['start']:.1f}s-{chunk['end']:.1f}s 的场景分片，"
         f"scene_id={chunk['scene_id']}。"
-        f"{CONFIG.get('mimo_video_prompt', '请用中文概括这个视频分片。')}"
+        f"{CONFIG['mimo_video_prompt']}"
     )
 
 
@@ -411,7 +422,7 @@ def _mimo_video_model():
     return CONFIG.get("mimo_video_model") or CONFIG.get("mimo_model") or CONFIG["vlm_model"]
 
 
-def mimo_video_settings_fingerprint():
+def mimo_video_settings():
     """Return non-secret MiMo video-overview settings that affect generated content."""
     return {
         "model": _mimo_video_model(),
@@ -434,19 +445,9 @@ def _mimo_chunk_cache_key(chunk):
     )
 
 
-def _mimo_cached_chunks_fingerprint(done):
-    return stable_hash(done)
-
-
-def _mimo_overview_payload_fingerprint(overview):
-    payload = dict(overview)
-    payload.pop("overview_fingerprint", None)
-    return stable_hash(payload)
-
-
 def _mimo_partial_provenance(video_path, scenes):
     return {
-        "source_video_fingerprint": file_fingerprint(video_path),
+        "source_video_identity": file_identity(video_path),
         "chunks": [_mimo_chunk_cache_key(chunk) for chunk in _mimo_video_chunks(scenes)],
     }
 
@@ -465,7 +466,7 @@ def _load_mimo_partial(partial_path, video_path=None, scenes=None):
         return {}
     if not isinstance(partial, dict):
         return {}
-    if partial.get("settings") != mimo_video_settings_fingerprint():
+    if partial.get("settings") != mimo_video_settings():
         return {}
     if video_path is not None or scenes is not None:
         try:
@@ -474,20 +475,14 @@ def _load_mimo_partial(partial_path, video_path=None, scenes=None):
         except (OSError, RuntimeError, TypeError, ValueError):
             return {}
     done = partial.get("chunks")
-    if not isinstance(done, dict):
-        return {}
-    recorded = partial.get("chunks_fingerprint")
-    if not recorded or recorded != _mimo_cached_chunks_fingerprint(done):
-        return {}
-    return done
+    return done if isinstance(done, dict) else {}
 
 
 def _save_mimo_partial(partial_path, done, video_path=None, scenes=None):
     """Persist completed chunk results incrementally so paid chunks survive a mid-loop failure."""
     payload = {
-        "settings": mimo_video_settings_fingerprint(),
+        "settings": mimo_video_settings(),
         "chunks": done,
-        "chunks_fingerprint": _mimo_cached_chunks_fingerprint(done),
     }
     if video_path is not None or scenes is not None:
         payload["provenance"] = _mimo_partial_provenance(video_path, scenes)
@@ -507,7 +502,7 @@ def _mimo_chunks_match(cached_chunks, expected_chunks):
 
 def mimo_video_overview_cache_fresh(overview_path, video_path, scenes):
     """Return True only when the final MiMo overview matches current inputs/settings."""
-    overview_path = Path(overview_path) if not hasattr(overview_path, "read_text") else overview_path
+    overview_path = Path(overview_path)
     if not overview_path.exists():
         return False
     try:
@@ -516,24 +511,16 @@ def mimo_video_overview_cache_fresh(overview_path, video_path, scenes):
         return False
     if not isinstance(overview, dict) or overview.get("input") != "scene_chunks":
         return False
-    if overview.get("settings") != mimo_video_settings_fingerprint():
-        return False
-    overview_fingerprint = overview.get("overview_fingerprint")
-    if not overview_fingerprint or overview_fingerprint != _mimo_overview_payload_fingerprint(overview):
-        return False
-    recorded = overview.get("chunks_fingerprint")
-    if not recorded:
+    if overview.get("settings") != mimo_video_settings():
         return False
     chunks = overview.get("chunks")
     if not isinstance(chunks, list) or not all(
         isinstance(chunk, dict) and _is_mimo_chunk_usable(chunk.get("content"))
         for chunk in chunks
     ):
-        return False
-    if recorded != _mimo_cached_chunks_fingerprint(chunks):
-        return False
+        return False  # a moderation-rejected chunk is retried, never served from cache
     try:
-        if overview.get("source_video_fingerprint") != file_fingerprint(video_path):
+        if overview.get("source_video_identity") != file_identity(video_path):
             return False
         expected_chunks = _mimo_video_chunks(scenes)
     except (OSError, RuntimeError, TypeError, ValueError):
@@ -550,8 +537,8 @@ def _analyze_mimo_video_chunk(chunk_path, chunk):
         {
             "type": "video_url",
             "video_url": {"url": video_url},
-            "fps": CONFIG.get("mimo_video_fps", 2.0),
-            "media_resolution": CONFIG.get("mimo_media_resolution", "default"),
+            "fps": CONFIG["mimo_video_fps"],
+            "media_resolution": CONFIG["mimo_media_resolution"],
         },
         {"type": "text", "text": _mimo_chunk_prompt(chunk)},
     ]
@@ -596,9 +583,9 @@ def _is_mimo_chunk_usable(content):
 
 def analyze_video_overview(video_path, work_dir, scenes=None):
     """Use MiMo video understanding over local ffmpeg scene chunks."""
-    if not CONFIG.get("mimo_video_overview", False):
+    if not CONFIG["mimo_video_overview"]:
         return None
-    if not CONFIG.get("mimo_video_api_key"):
+    if not CONFIG["mimo_video_api_key"]:
         log("MiMo 视频概览已启用，但未设置 MIMO_VIDEO_API_KEY/MIMO_API_KEY，跳过")
         return None
 
@@ -613,20 +600,16 @@ def analyze_video_overview(video_path, work_dir, scenes=None):
     log(f"MiMo 视频理解：按 ffmpeg scene 分片分析 {len(chunks)} 段...")
     chunk_results = []
     unusable_chunks = []
-    removed_stale_cache = False
     for chunk in chunks:
         cache_key = _mimo_chunk_cache_key(chunk)
         cached = done.get(cache_key)
-        if cached is not None:
-            if _is_mimo_chunk_usable(cached.get("content")):
-                log(
-                    f"  MiMo 分片 {chunk['chunk_id'] + 1}/{len(chunks)}: "
-                    f"{chunk['start']:.1f}-{chunk['end']:.1f}s（命中增量缓存，跳过）"
-                )
-                chunk_results.append(cached)
-                continue
-            done.pop(cache_key, None)
-            removed_stale_cache = True
+        if cached is not None:  # the partial only ever stores usable chunks
+            log(
+                f"  MiMo 分片 {chunk['chunk_id'] + 1}/{len(chunks)}: "
+                f"{chunk['start']:.1f}-{chunk['end']:.1f}s（命中增量缓存，跳过）"
+            )
+            chunk_results.append(cached)
+            continue
         chunk_path = chunks_dir / (
             f"chunk_{chunk['chunk_id']:03d}_scene_{chunk['scene_id']}_"
             f"{chunk['start']:.2f}-{chunk['end']:.2f}.mp4"
@@ -637,7 +620,7 @@ def analyze_video_overview(video_path, work_dir, scenes=None):
             f"{chunk['start']:.1f}-{chunk['end']:.1f}s"
         )
         chunk_result = _analyze_mimo_video_chunk(chunk_path, chunk)
-        if _is_mimo_chunk_usable(chunk_result.get("content")):
+        if _is_mimo_chunk_usable(chunk_result["content"]):
             chunk_results.append(chunk_result)
             done[cache_key] = chunk_result
             _save_mimo_partial(partial_path, done, video_path, scenes)
@@ -645,15 +628,9 @@ def analyze_video_overview(video_path, work_dir, scenes=None):
             unusable_chunks.append(chunk)
             log(f"  MiMo 分片 {chunk['chunk_id'] + 1}: 未返回有效内容，保留为待重试")
 
-    if removed_stale_cache:
-        _save_mimo_partial(partial_path, done, video_path, scenes)
-
     if not chunk_results:
         log(f"MiMo 视频概览：{len(chunks)} 段均无有效内容（疑似被内容审核拦截），跳过概览")
-        try:
-            partial_path.unlink()
-        except OSError:
-            pass
+        partial_path.unlink(missing_ok=True)
         return None
 
     if unusable_chunks:
@@ -680,23 +657,18 @@ def analyze_video_overview(video_path, work_dir, scenes=None):
         "content": content,
         "chunks": chunk_results,
         "chunk_count": len(chunk_results),
-        "fps": CONFIG.get("mimo_video_fps", 2.0),
-        "media_resolution": CONFIG.get("mimo_media_resolution", "default"),
+        "fps": CONFIG["mimo_video_fps"],
+        "media_resolution": CONFIG["mimo_media_resolution"],
         "input": "scene_chunks",
         "partial": bool(unusable_chunks),
         "unusable_chunk_count": len(unusable_chunks),
-        "source_video_fingerprint": file_fingerprint(video_path),
-        "chunk_max_seconds": CONFIG.get("mimo_video_chunk_max_seconds", 20.0),
-        "settings": mimo_video_settings_fingerprint(),
-        "chunks_fingerprint": _mimo_cached_chunks_fingerprint(chunk_results),
+        "source_video_identity": file_identity(video_path),
+        "chunk_max_seconds": CONFIG["mimo_video_chunk_max_seconds"],
+        "settings": mimo_video_settings(),
     }
-    overview["overview_fingerprint"] = _mimo_overview_payload_fingerprint(overview)
     overview_path = work_dir / "mimo_video_overview.json"
     overview_path.write_text(json.dumps(overview, ensure_ascii=False, indent=2), encoding="utf-8")
     # 所有分片完成后清理增量缓存，保持 work_dir 仅有规范产物
-    try:
-        partial_path.unlink()
-    except OSError:
-        pass
+    partial_path.unlink(missing_ok=True)
     log(f"MiMo 分片视频概览完成: {overview_path}")
     return overview

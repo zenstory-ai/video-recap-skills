@@ -7,7 +7,6 @@ from evidence_bundle import (
     coverage_policy_v1,
     filter_evidence_by_ranges,
     render_evidence_bundle,
-    validate_public_evidence_contract,
 )
 from review_grounding import remap_grounding_to_output_timeline
 from review_response import (
@@ -34,7 +33,6 @@ __all__ = [
     "remap_grounding_to_output_timeline",
     "render_evidence_bundle",
     "review_narration",
-    "validate_public_evidence_contract",
     "write_grounding_qc",
 ]
 

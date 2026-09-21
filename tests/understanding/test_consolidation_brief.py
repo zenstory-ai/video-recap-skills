@@ -1,4 +1,3 @@
-import hashlib
 import json
 import sys
 from pathlib import Path
@@ -15,13 +14,11 @@ sys.path.insert(
     ),
 )
 
-from lib import CONFIG  # noqa: E402
+from lib import CONFIG, file_identity  # noqa: E402
 from agent_brief import build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
 from brief_context import (  # noqa: E402
-    _clean_asr_prompt_fingerprint,
     _format_consolidation,
-    _index_prompt_fingerprint,
     _load_consolidation,
 )
 from brief_inputs import (  # noqa: E402
@@ -36,10 +33,6 @@ SILENCE = [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}]
 INDEX_HEADING = "Understanding index (from consolidate.py)"
 
 
-def _md5(path):
-    return hashlib.md5(Path(path).read_bytes()).hexdigest()
-
-
 def _write_index_with_meta(work_dir, index, scenes=SCENES, **meta_overrides):
     (work_dir / "vlm_analysis.json").write_text(json.dumps(scenes), encoding="utf-8")
     (work_dir / "understanding_index.json").write_text(
@@ -47,10 +40,9 @@ def _write_index_with_meta(work_dir, index, scenes=SCENES, **meta_overrides):
     )
     meta = {
         "schema_version": 1,
-        "source_md5": _md5(work_dir / "vlm_analysis.json"),
+        "source": file_identity(work_dir / "vlm_analysis.json"),
         "scene_count": len(scenes),
         "model": CONFIG.get("vlm_model", ""),
-        "prompt_md5": _index_prompt_fingerprint(),
         **meta_overrides,
     }
     (work_dir / "understanding_index.json.meta.json").write_text(
@@ -68,9 +60,8 @@ def _write_clean_asr(work_dir, **overrides):
     """asr_clean.json with fresh provenance for the ASR fixture; overrides break one field."""
     (work_dir / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
     payload = {
-        "source_md5": _md5(work_dir / "asr_result.json"),
+        "source": file_identity(work_dir / "asr_result.json"),
         "model": CONFIG.get("vlm_model", ""),
-        "prompt_md5": _clean_asr_prompt_fingerprint(),
         "segments": [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。CLEANED"}],
         **overrides,
     }
@@ -278,13 +269,15 @@ STALE_INDEX = {
 @pytest.mark.parametrize(
     "spoil",
     [
-        lambda mp, tmp: _write_index_with_meta(tmp, STALE_INDEX, source_md5="deadbeef"),
+        lambda mp, tmp: _write_index_with_meta(
+            tmp, STALE_INDEX, source={"size": 0, "mtime_ns": 0}
+        ),
         lambda mp, tmp: (
             _write_index_with_meta(tmp, STALE_INDEX),
             mp.setitem(CONFIG, "vlm_model", "different-model"),
         ),
     ],
-    ids=["vlm_source_md5", "model"],
+    ids=["vlm_source_identity", "model"],
 )
 def test_brief_rejects_index_with_stale_provenance(monkeypatch, tmp_path, spoil):
     spoil(monkeypatch, tmp_path)
@@ -304,12 +297,11 @@ def test_clean_asr_accepted_when_fresh_provenance_timing_ok(tmp_path):
 @pytest.mark.parametrize(
     "overrides",
     [
-        {"source_md5": "deadbeef"},
+        {"source": {"size": 0, "mtime_ns": 0}},
         {"model": "old-model"},
-        {"prompt_md5": "deadbeef"},
         {"segments": [{"start": 99.0, "end": 100.0, "text": "x"}]},
     ],
-    ids=["source_md5", "model", "prompt_md5", "mistimed_span"],
+    ids=["source_identity", "model", "mistimed_span"],
 )
 def test_clean_asr_rejected_on_bad_provenance_or_mistiming(tmp_path, overrides):
     _write_clean_asr(tmp_path, **overrides)
@@ -368,11 +360,10 @@ def test_brief_ignores_stale_mimo_overview_when_disabled_or_chunk_mismatch(
     assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
 
 
-def test_index_prompt_fingerprint_tracks_consolidate_source_of_truth():
-    """The provenance fingerprint must hash the exact prompt consolidate stamps into
-    understanding_index.json.meta.json, or every index is silently rejected (PR #58)."""
-    import consolidate
-
-    assert _index_prompt_fingerprint() == consolidate._prompt_fingerprint(
-        consolidate.INDEX_PROMPT
-    )
+def test_producer_only_meta_keys_never_reject_a_fresh_index(tmp_path):
+    """Producer-private sidecar keys are ignored; the brief only checks source/model."""
+    index = {"characters": [{"name": "甲"}], "relationships": [], "plot_points": [], "entities": []}
+    _write_index_with_meta(tmp_path, index, producer_cache_key="opaque")
+    assert _load_consolidation(tmp_path, SCENES) == index
+    _write_clean_asr(tmp_path, producer_cache_key="opaque")
+    assert _load_clean_asr(tmp_path, ASR) is not None

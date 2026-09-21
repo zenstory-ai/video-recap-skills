@@ -6,7 +6,7 @@ probing, no new deps, no cross-skill import). A missing artifact is the legitima
 "that stage has not run yet" state and is reported as such.
 
 Two subcommands:
-  state     summarize the work_dir: source video + fingerprint, full|cut mode, which stage
+  state     summarize the work_dir: source video, full|cut mode, which stage
             artifacts are present vs missing, which file is the NEXT pause the pipeline waits
             on, stale-manifest risk, and storyboard path(s) if present.
   clip-map  read clip_plan_validated.json and map a queried window between the OUTPUT and
@@ -14,8 +14,8 @@ Two subcommands:
             (output = clip.output_start + (src - clip.source_start), clamped to the clip),
             reimplemented locally. Flags cross-clip boundaries and cut-out gaps.
 
-Output: markdown by default; --json for machine-readable; --compact (default ON) truncates
-long free text — pass --full to keep it.
+Output: markdown by default; --json for machine-readable; long free text is truncated
+unless --full is passed.
 """
 import argparse
 import json
@@ -73,14 +73,12 @@ def _truncate(text, compact):
 
 
 def _load_optional(path):
-    """The artifact's JSON, or None when the stage that writes it has not run yet."""
+    """The artifact's JSON, or None when the stage that writes it has not run yet.
+
+    A present-but-corrupt artifact raises: every file probed here is written by this
+    pipeline or a sibling skill under its documented contract."""
     path = Path(path)
-    if not path.exists():
-        return None
-    try:
-        return load_json(path)
-    except (OSError, ValueError):
-        return None
+    return load_json(path) if path.exists() else None
 
 
 def _fmt_seconds(value):
@@ -92,94 +90,36 @@ def _fmt_seconds(value):
 
 # --- source video discovery --------------------------------------------------
 def _discover_source(work_dir):
-    """Find the source video path + fingerprint by reading recap artifacts, most authoritative
-    first. Returns {path, fingerprint, origin} with None values + origin="unknown" when
-    nothing records it."""
+    """Find the source video path by reading recap artifacts, most authoritative first.
+    Returns {path, origin} with path=None + origin="unknown" when nothing records it."""
     work_dir = Path(work_dir)
     # 1. recap_run_manifest.json — canonical: written before the first pause with both fields.
     #    A multi-source manifest carries `sources` instead of `source_video`.
     data = _load_optional(work_dir / "recap_run_manifest.json")
-    if isinstance(data, dict) and data.get("source_video"):
-        return {
-            "path": data["source_video"],
-            "fingerprint": data.get("source_video_fingerprint"),
-            "origin": "recap_run_manifest.json",
-        }
+    if data is not None and data.get("source_video"):
+        return {"path": data["source_video"], "origin": "recap_run_manifest.json"}
     # 2. assembly_manifest.json — late stage; carries input_video (+ source_video in cut mode).
     data = _load_optional(work_dir / "assembly_manifest.json")
-    if isinstance(data, dict) and (data.get("source_video") or data.get("input_video")):
+    if data is not None:
         return {
             "path": data.get("source_video") or data["input_video"],
-            "fingerprint": data.get("source_video_fingerprint"),
             "origin": "assembly_manifest.json",
         }
-    # 3. edited_source.mp4.meta.json — single-source cut; fingerprint only, no path.
+    # 3. edited_source.mp4.meta.json — video-cut records sources: {path: {size, mtime_ns}};
+    #    a single-source cut has exactly one entry.
     data = _load_optional(work_dir / "edited_source.mp4.meta.json")
-    if data is not None and data.get("source_video_fingerprint"):
-        return {
-            "path": None,
-            "fingerprint": data["source_video_fingerprint"],
-            "origin": "edited_source.mp4.meta.json",
-        }
-    return {"path": None, "fingerprint": None, "origin": "unknown"}
+    sources = data.get("sources") if isinstance(data, dict) else None
+    if isinstance(sources, dict) and len(sources) == 1:
+        (path,) = sources
+        return {"path": path, "origin": "edited_source.mp4.meta.json"}
+    return {"path": None, "origin": "unknown"}
 
 
 def _discover_multi_source(work_dir):
     data = _load_optional(Path(work_dir) / "multi_source_manifest.json")
-    if not isinstance(data, dict) or not isinstance(data.get("sources"), list):
+    if data is None:
         return None
-    return {
-        "schema_version": data.get("schema_version", 1),
-        "sources": [source for source in data["sources"] if isinstance(source, dict)],
-    }
-
-
-def _clip_entries(plan):
-    if isinstance(plan, dict):
-        entries = plan.get("clips")
-    elif isinstance(plan, list):
-        entries = plan
-    else:
-        return None
-    return entries if isinstance(entries, list) else None
-
-
-def _normalize_clips(entries):
-    """Normalize current and historical validated plans for the advisory mapper."""
-    clips, cursor = [], 0.0
-    for index, raw in enumerate(entries):
-        if not isinstance(raw, dict):
-            continue
-        try:
-            source_start = float(raw.get("source_start", raw.get("start")))
-            source_end = float(raw.get("source_end", raw.get("end")))
-        except (TypeError, ValueError):
-            continue
-        if source_end <= source_start:
-            continue
-        output_start = raw.get("output_start")
-        output_end = raw.get("output_end")
-        if output_start is None or output_end is None:
-            output_start, output_end = cursor, cursor + source_end - source_start
-        else:
-            try:
-                output_start, output_end = float(output_start), float(output_end)
-            except (TypeError, ValueError):
-                continue
-        cursor = output_end
-        clips.append(
-            {
-                "clip_id": raw.get("clip_id", index),
-                "source_id": raw.get("source_id"),
-                "source_path": raw.get("source_path"),
-                "source_start": source_start,
-                "source_end": source_end,
-                "output_start": output_start,
-                "output_end": output_end,
-                "reason": str(raw.get("reason", raw.get("note", ""))).strip(),
-            }
-        )
-    return clips
+    return {"schema_version": data["schema_version"], "sources": data["sources"]}
 
 
 # --- forward affine map --------------------------------------------------------
@@ -236,8 +176,7 @@ def _next_pause(work_dir, mode):
 
 
 def _stale_manifest_note(work_dir, mode):
-    """Advisory stale-manifest risks read purely from file presence (no fingerprint recompute —
-    that would need the source bytes). Surfaces the two desync traps recap.py guards: a cut
+    """Advisory stale-manifest risks read purely from file presence. Surfaces the two desync traps recap.py guards: a cut
     narration without the phase ledger that ties it to a clip_plan, and a missing run manifest."""
     notes = []
     if not _present(work_dir, "recap_run_manifest.json"):
@@ -286,10 +225,6 @@ def cmd_state(work_dir, compact=None):
     }
 
 
-def _short_fingerprint(fp):
-    return f"{fp[:12]}…" if fp else "unknown"
-
-
 def _render_state_md(state, compact):
     if "error" in state:
         return state["error"]
@@ -298,17 +233,13 @@ def _render_state_md(state, compact):
         lines.append(f"状态来源（write-side manifest）: {', '.join(state['forward_state_files'])}")
     lines.append(f"模式: **{state['mode']}**")
     src = state["source_video"]
-    lines.append(
-        f"源视频: {_truncate(src['path'] or 'unknown', compact)}  "
-        f"(fp {_short_fingerprint(src['fingerprint'])}, 来源 {src['origin']})"
-    )
+    lines.append(f"源视频: {_truncate(src['path'] or 'unknown', compact)}  (来源 {src['origin']})")
     if state["multi_source"]:
         lines.append("多源素材:")
         for s in state["multi_source"]["sources"]:
             lines.append(
                 f"  - {s['source_id']}: {_truncate(s['source_path'], compact)} "
-                f"(fp {_short_fingerprint(s['source_video_fingerprint'])}, "
-                f"work_dir {s['source_work_dir']}, material {s['material_id']})"
+                f"(work_dir {s['source_work_dir']}, material {s['material_id']})"
             )
     lines.append("")
 
@@ -350,14 +281,10 @@ def cmd_clip_map(work_dir, output_start, output_end, source_start, source_end, c
     if not validated.exists():
         return {"error": "clip_plan_validated.json 不存在：这不是 cut 运行，或剪辑计划尚未被 cut.py 校验。"
                          "（full 模式没有源↔输出映射；cut 模式请先跑 video-cut。）"}
-    try:
-        plan = load_json(validated)
-    except (OSError, ValueError):
-        return {"error": "clip_plan_validated.json 不是合法 JSON（可能写坏了）"}
-    entries = _clip_entries(plan)
-    if entries is None:
-        return {"error": "clip_plan_validated.json 结构异常：需要 clips 数组。"}
-    clips = _normalize_clips(entries)
+    # video-cut writes {"clips": [{clip_id, source_start, source_end, output_start,
+    # output_end, duration, reason}]} (cut_contract); source_id/source_path only for
+    # multi-source cuts.
+    clips = load_json(validated)["clips"]
     if not clips:
         return {"error": "clip_plan_validated.json 没有有效的 clip。"}
 
@@ -390,7 +317,7 @@ def _segment(clip, *, source, output, compact):
         "source_path": clip.get("source_path"),
         "output": output,
         "source": source,
-        "reason": _truncate(clip.get("reason"), compact),
+        "reason": _truncate(clip["reason"], compact),
     }
 
 
@@ -497,11 +424,8 @@ def main(argv=None):
         description="Advisory read-only inspection of a video-recap work_dir (pure JSON).")
     parser.add_argument("--work-dir", required=True, help="recap work_dir to inspect")
     parser.add_argument("--json", action="store_true", help="machine-readable JSON output")
-    compact = parser.add_mutually_exclusive_group()
-    compact.add_argument("--compact", dest="compact", action="store_true", default=True,
-                         help="truncate long free text to keep agent context small (default ON)")
-    compact.add_argument("--full", dest="compact", action="store_false",
-                         help="do not truncate long free text")
+    parser.add_argument("--full", dest="compact", action="store_false", default=True,
+                        help="do not truncate long free text (truncated by default)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("state", help="summarize work_dir + the next pause the pipeline is waiting on")

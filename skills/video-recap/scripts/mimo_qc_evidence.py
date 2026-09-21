@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,14 +47,6 @@ _OPTIONAL_VISUAL_METADATA = (
 )
 
 
-def _stable_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _fingerprint_value(value: Any) -> str:
-    return hashlib.sha256(_stable_json(value).encode("utf-8")).hexdigest()
-
-
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -75,7 +66,7 @@ def _summarize(
 ) -> Any:
     """Keep request/report evidence bounded while retaining useful structure."""
     if depth >= 4:
-        return {"type": type(value).__name__, "fingerprint": _fingerprint_value(value)}
+        return {"type": type(value).__name__, "omitted": True}
     if isinstance(value, Mapping):
         out = {
             str(key): _summarize(
@@ -110,11 +101,12 @@ def _collect_file(work_dir: Path, name: str) -> dict[str, Any] | None:
         kind, summary = "json", _summarize(_load_json(path))
     else:
         kind, summary = "text", _summarize(_read_text_sample(path))
+    stat = path.stat()
     return {
         "path": name,
         "kind": kind,
-        "bytes": path.stat().st_size,
-        "fingerprint": qc_contract.artifact_fingerprint(path),
+        "bytes": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
         "summary": summary,
     }
 
@@ -128,21 +120,12 @@ def _collect_multi_source_asr(work_dir: Path) -> dict[str, Any]:
     manifest_path = work_dir / "multi_source_manifest.json"
     if not manifest_path.is_file():
         return {}
-    root = work_dir.resolve(strict=False)
     collected = {}
     for source in _load_json(manifest_path)["sources"]:
-        relative_dir = source["source_work_dir"]
-        source_dir = (root / relative_dir).resolve(strict=False)
-        if not source_dir.is_relative_to(root):
-            continue
-        name = _first_existing(source_dir, _SOURCE_ASR_ARTIFACTS)
+        relative_dir = source["source_work_dir"]  # recap writes sources/<source_id>
+        name = _first_existing(work_dir / relative_dir, _SOURCE_ASR_ARTIFACTS)
         if name is not None:
-            evidence_path = (source_dir / name).resolve(strict=False)
-            if not evidence_path.is_relative_to(root):
-                continue
-            collected[source["source_id"]] = _collect_file(
-                root, str(evidence_path.relative_to(root))
-            )
+            collected[source["source_id"]] = _collect_file(work_dir, f"{relative_dir}/{name}")
     return collected
 
 
@@ -151,55 +134,38 @@ def _resolve_candidate(work_dir: Path, candidate: str | Path) -> Path:
     return path if path.is_absolute() else work_dir / path
 
 
-def _final_output_candidates(
+def _final_output_path(
     work_dir: Path, final_output: str | Path | None
-) -> list[tuple[Path, str]]:
-    raw: list[str | Path] = []
-    if final_output:
-        raw.append(final_output)
-    manifest_path = work_dir / "assembly_manifest.json"
-    if manifest_path.is_file():
-        raw.append(_load_json(manifest_path)["final_output"])
-    raw.extend(("output.mp4", "recap.mp4", "final.mp4"))
-    seen: set[str] = set()
-    result = []
-    for item in raw:
-        path = _resolve_candidate(work_dir, item)
-        key = str(path.resolve(strict=False))
-        if key not in seen:
-            seen.add(key)
-            result.append((path, str(item)))
-    return result
+) -> tuple[Path, str] | None:
+    """(path, display) of the final output: the caller's, else assembly_manifest.final_output
+    (video-assemble always writes it); None before the assembler has run."""
+    if final_output is None:
+        manifest_path = work_dir / "assembly_manifest.json"
+        if not manifest_path.is_file():
+            return None
+        final_output = _load_json(manifest_path)["final_output"]
+    return _resolve_candidate(work_dir, final_output), str(final_output)
 
 
 def _final_output_metadata(
     work_dir: Path, final_output: str | Path | None = None
 ) -> dict[str, Any]:
-    outputs = []
-    for path, display in _final_output_candidates(work_dir, final_output):
-        item: dict[str, Any] = {"path": display, "exists": path.is_file()}
-        if item["exists"]:
-            item.update(
-                {
-                    "bytes": path.stat().st_size,
-                    "fingerprint": qc_contract.artifact_fingerprint(path),
-                }
-            )
-        outputs.append(item)
-    return {"candidates": outputs}
+    resolved = _final_output_path(work_dir, final_output)
+    if resolved is None:
+        return {"candidates": []}
+    path, display = resolved
+    item: dict[str, Any] = {"path": display, "exists": path.is_file()}
+    if item["exists"]:
+        stat = path.stat()
+        item.update({"bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns})
+    return {"candidates": [item]}
 
 
 def _existing_final_output(
     work_dir: Path, final_output: str | Path | None
 ) -> Path | None:
-    return next(
-        (
-            path
-            for path, _display in _final_output_candidates(work_dir, final_output)
-            if path.is_file()
-        ),
-        None,
-    )
+    resolved = _final_output_path(work_dir, final_output)
+    return resolved[0] if resolved is not None and resolved[0].is_file() else None
 
 
 def collect_evidence(
@@ -243,7 +209,6 @@ def collect_evidence(
     }
     if not evidence["source_asr"]:
         evidence["source_asr"] = _collect_multi_source_asr(root)
-    evidence["fingerprint"] = _fingerprint_value(_cache_evidence(evidence))
     # The evidence goes into the MiMo request as well as the persisted report, so it is
     # redacted here, before either.
     return qc_contract.redact_secrets(evidence)
@@ -251,19 +216,21 @@ def collect_evidence(
 
 def _cache_file_group(group: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        name: {key: item[key] for key in ("kind", "bytes", "fingerprint")}
+        name: {key: item[key] for key in ("kind", "bytes", "mtime_ns")}
         for name, item in sorted(group.items())
     }
 
 
 def _cache_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    """The per-file identities ({kind, bytes, mtime_ns}) a cached stage report was built
+    from; work_dir is excluded so moving the directory is still a cache hit."""
     return {
         "artifacts": _cache_file_group(evidence["artifacts"]),
         "source_asr": _cache_file_group(evidence["source_asr"]),
         "generated_subtitles": _cache_file_group(evidence["generated_subtitles"]),
         "visual_metadata": _cache_file_group(evidence["visual_metadata"]),
         "final_output": [
-            {key: item[key] for key in ("exists", "bytes", "fingerprint") if key in item}
+            {key: item[key] for key in ("exists", "bytes", "mtime_ns") if key in item}
             for item in evidence["final_output"]["candidates"]
         ],
     }

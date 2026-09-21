@@ -1,13 +1,8 @@
 """Build the agent narration brief from validated local evidence."""
 
-import importlib.util
-
-
 from pathlib import Path
 
-from lib import CONFIG
-
-from lib import log
+from lib import CONFIG, log
 
 from agent_text import _chunk_asr_for_writing, _format_frame_facts
 from brief_context import (
@@ -41,20 +36,6 @@ from timeline_fusion import (
     _scene_asr_lines,
 )
 
-try:
-    from deslop_qc import analyze_deslop_qc
-except ModuleNotFoundError:
-    _deslop_qc_path = Path(__file__).with_name("deslop_qc.py")
-    _deslop_qc_spec = importlib.util.spec_from_file_location(
-        "deslop_qc", _deslop_qc_path
-    )
-    if _deslop_qc_spec is None or _deslop_qc_spec.loader is None:
-        raise
-    _deslop_qc_module = importlib.util.module_from_spec(_deslop_qc_spec)
-    _deslop_qc_spec.loader.exec_module(_deslop_qc_module)
-    analyze_deslop_qc = _deslop_qc_module.analyze_deslop_qc
-
-
 def build_agent_brief(
     scenes_analysis,
     asr_result,
@@ -74,12 +55,12 @@ def build_agent_brief(
     effective_rate = (
         CONFIG["speech_rate"]
         * CONFIG["speech_safety_margin"]
-        * float(CONFIG.get("narration_speed", 1.0) or 1.0)
+        * CONFIG["narration_speed"]
     )
-    breath_sec = CONFIG.get("breath_ms", 250) / 1000
-    target_pause_ms = CONFIG.get("breath_ms", 250)
-    edit_mode = CONFIG.get("edit_mode", "full")
-    target_duration = CONFIG.get("target_duration") or "(not set)"
+    breath_sec = CONFIG["breath_ms"] / 1000
+    target_pause_ms = CONFIG["breath_ms"]
+    edit_mode = CONFIG["edit_mode"]
+    target_duration = CONFIG["target_duration"] or "(not set)"
     # Cut mode sizes narration to the OUTPUT (the kept clips), not the full source.
     # In pass 2, prefer the actual validated edited_source duration; target_duration is
     # only a planning goal and can differ after clip snapping or under/over-selection.
@@ -89,20 +70,20 @@ def build_agent_brief(
         if spans:
             output_seconds = max(span["output_end"] for span in spans)
         else:
-            target_seconds = _parse_target_seconds(CONFIG.get("target_duration"))
+            target_seconds = _parse_target_seconds(CONFIG["target_duration"])
             if target_seconds:
                 output_seconds = min(video_duration, target_seconds)
     # A loose first-draft timing fallback, not a creative quota. The Agent's beat map and audio-owner
     # decisions determine the real count; this only prevents accidental per-sentence fragmentation.
-    cov_target = CONFIG.get("narration_coverage_target", 0.7)
-    block_seconds = CONFIG.get("narration_block_seconds", 9.0)
+    cov_target = CONFIG["narration_coverage_target"]
+    block_seconds = CONFIG["narration_block_seconds"]
     target_count = max(1, round(output_seconds * cov_target / block_seconds))
 
     has_story_context = (Path(work_dir) / "background_research.json").exists()
     substrate = assess_understanding_substrate(
         scenes_analysis, asr_result, has_story_context=has_story_context
     )
-    thin_substrate = substrate.get("level") in ("thin", "empty")
+    thin_substrate = substrate["level"] in ("thin", "empty")
     beat_count_phrase = (
         f"at most ~{target_count}" if thin_substrate else f"roughly {target_count}"
     )
@@ -133,8 +114,7 @@ def build_agent_brief(
     # Understanding validates evidence before calling; the standalone script skill
     # has no producer dependency and must not invent an available ASR status.
     if asr_evidence is None:
-        asr_evidence = {"status": "MISSING_OR_STALE", "evidence_fingerprint": None,
-                        "glossary_modifications": None}
+        asr_evidence = {"status": "MISSING_OR_STALE", "glossary_modifications": None}
 
     lines.extend(
         [
@@ -142,7 +122,6 @@ def build_agent_brief(
             "## ASR timing evidence",
             "",
             f"- Status: {asr_evidence['status']}",
-            f"- Evidence fingerprint: {asr_evidence['evidence_fingerprint'] or '(missing)'}",
             f"- Glossary modifications: {asr_evidence.get('glossary_modifications') or '(unverified)'}; details: asr_timing_evidence.json",
             "- Empty text: UNKNOWN_NOT_PROVEN_SILENCE; these windows locate a search region, not subtitle onsets.",
             "- Timing: coarse provider windows; word alignment: NOT_PERFORMED; dialogue boundaries: NOT_VERIFIED.",
@@ -182,7 +161,7 @@ def build_agent_brief(
     lines.extend(
         [
             f"- Default pause between beats: {target_pause_ms}ms",
-            f"- Context: {CONFIG.get('context_info') or '(none)'}",
+            f"- Context: {CONFIG['context_info'] or '(none)'}",
             "",
             "## Creative decisions before expression / packaging",
             "",

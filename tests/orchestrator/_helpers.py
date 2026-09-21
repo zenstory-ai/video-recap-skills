@@ -13,6 +13,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scri
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import materials  # noqa: E402
 import recap_runtime  # noqa: E402
 import recap_timeline  # noqa: E402
 
@@ -54,6 +55,11 @@ def manifest_args(**overrides):
         "material_library_dir": None,
         "use_materials": False,
         "save_materials": False,
+        "require_final_qc": False,
+        "tts_meta": None,
+        "narration_adoption": None,
+        "audio_mix_adoption": None,
+        "_explicit_options": frozenset(),
     }
     values.update(overrides)
     return Namespace(**values)
@@ -87,12 +93,24 @@ def write_cut_output(work, clips=None, **qc_overrides):
     )
 
 
+def write_review_output(work):
+    """Leave behind what review.py writes on success (review_runner writes both)."""
+    review = {"verdict": "PASS", "summary": "", "findings": []}
+    (work / "narration_review.json").write_text(json.dumps(review), encoding="utf-8")
+    (work / "narration_review.md").write_text("# review\n", encoding="utf-8")
+
+
+def write_voiceover_output(work):
+    """Leave behind what voiceover.py writes on success."""
+    (work / "tts_meta.json").write_text(json.dumps({"segments": []}), encoding="utf-8")
+
+
 def stub_child_run(work, final_output=None, calls=None, **handlers):
     """Build a recap_runner._run replacement.
 
-    Records ``(skill, script, argv)`` into ``calls``, writes what cut.py / assemble.py
-    leave behind, and lets a test override any script by its stem
-    (``review=lambda cli: ...``); a handler's return value is passed back to the runner.
+    Records ``(skill, script, argv)`` into ``calls``, writes what cut.py / review.py /
+    voiceover.py / assemble.py leave behind, and lets a test override any script by its
+    stem (``review=lambda cli: ...``); a handler's return value is passed back to the runner.
     """
 
     def fake_run(skill, script, *cli_args):
@@ -104,6 +122,10 @@ def stub_child_run(work, final_output=None, calls=None, **handlers):
             return handler(cli)
         if script == "cut.py":
             write_cut_output(work)
+        elif script == "review.py":
+            write_review_output(work)
+        elif script == "voiceover.py":
+            write_voiceover_output(work)
         elif script == "assemble.py":
             write_assemble_output(work, final_output)
         return None
@@ -134,7 +156,7 @@ def seed_cut_work(
     if rendered:
         recap_timeline._write_phase_ledger(
             work,
-            clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
+            clip_plan_identity=materials.file_identity(work / "clip_plan.json"),
             edited_source_rendered=True,
         )
     return video, work

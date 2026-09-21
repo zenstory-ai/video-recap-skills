@@ -45,11 +45,9 @@ def _write_shift_left_stage_qc(work_dir, stage, metadata, findings=None):
 
 
 def _tts_qc_metadata(work_dir):
+    """Called after video-voiceover exited 0, which always writes tts_meta.json."""
     work_dir = Path(work_dir)
-    metadata = {}
-    tts_meta = work_dir / "tts_meta.json"
-    if tts_meta.exists():
-        metadata["tts_meta"] = json.loads(tts_meta.read_text(encoding="utf-8"))
+    metadata = {"tts_meta": json.loads((work_dir / "tts_meta.json").read_text(encoding="utf-8"))}
     tts_dir = work_dir / "tts_segments"
     if tts_dir.is_dir():
         metadata["tts_segments"] = [
@@ -59,14 +57,12 @@ def _tts_qc_metadata(work_dir):
 
 
 def _post_render_qc_metadata(work_dir, final_output):
-    work_dir = Path(work_dir)
-    metadata = {"final_output": str(final_output)}
-    manifest = work_dir / ASSEMBLY_MANIFEST
-    if manifest.exists():
-        metadata["assembly_manifest"] = json.loads(
-            manifest.read_text(encoding="utf-8")
-        )
-    return metadata
+    """Called after video-assemble exited 0, which always writes assembly_manifest.json."""
+    manifest = Path(work_dir) / ASSEMBLY_MANIFEST
+    return {
+        "final_output": str(final_output),
+        "assembly_manifest": json.loads(manifest.read_text(encoding="utf-8")),
+    }
 
 
 def _write_final_qc_reports(work_dir, final_output):

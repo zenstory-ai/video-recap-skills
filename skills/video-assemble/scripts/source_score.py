@@ -3,8 +3,8 @@
 
 import argparse
 from fractions import Fraction
-import hashlib
 import json
+import os
 import math
 from pathlib import Path
 import re
@@ -13,8 +13,9 @@ import subprocess
 
 from assemble_constants import SUPPORTED_PICTURE_CODECS, frame_clock_samples
 from strict_inputs import (
-    canonical_fraction, probe_json, read_json_bytes, require_asset, require_fields,
-    require_integer, require_number, run_logged, sha256_file, write_json_atomic,
+    canonical_fraction, probe_json, read_json_bytes, require_declared_path, require_fields,
+    require_integer, require_local_path, require_number, run_logged, without_digests,
+    write_json_atomic,
 )
 
 
@@ -107,7 +108,7 @@ def _validate_fades(value, duration, curves, label):
 
 
 def load_plan(plan_path):
-    plan_path, raw, plan = read_json_bytes(plan_path, "source score plan")
+    plan_path, _, plan = read_json_bytes(plan_path, "source score plan")
     require_fields(plan, ["artifact", "schema_version", "output", "source_segments",
                    "source_silence", "score"], "source score plan")
     if plan["artifact"] != "source_score_plan" or type(plan["schema_version"]) is not int \
@@ -124,31 +125,31 @@ def load_plan(plan_path):
     picture_cache = {}
     ids = set()
     segment_fields = [
-        "id", "path", "sha256", "audio_stream", "source_fps", "source_start_frame",
+        "id", "path", "audio_stream", "source_fps", "source_start_frame",
         "source_end_frame", "output_start_sample", "gain", "fade_in_samples",
         "fade_out_samples", "fade_shape", "role",
     ]
     for value in plan["source_segments"]:
+        value = without_digests(value, "source segment")
         require_fields(value, segment_fields, "source segment")
         if not isinstance(value["id"], str) or not value["id"] or value["id"] in ids:
             raise ValueError("source segment id must be unique and non-empty")
         ids.add(value["id"])
         ordinal = require_integer(value["audio_stream"], "audio_stream")
-        path, digest = require_asset(value["path"], value["sha256"], "source")
+        path = require_declared_path(value, "source")
         fps = canonical_fraction(value["source_fps"], "source_fps")
         start = require_integer(value["source_start_frame"], "source_start_frame")
         end = require_integer(value["source_end_frame"], "source_end_frame", 1)
         if end <= start:
             raise ValueError("source frame interval must be non-empty")
-        key = (str(path), digest, ordinal)
+        key = (str(path), ordinal)
         if key not in asset_cache:
-            picture_key = (str(path), digest)
-            if picture_key not in picture_cache:
-                picture_cache[picture_key] = _probe_cfr(path)
-            picture = picture_cache[picture_key]
+            if str(path) not in picture_cache:
+                picture_cache[str(path)] = _probe_cfr(path)
+            picture = picture_cache[str(path)]
             audio = _probe_audio(path, ordinal)
-            asset_cache[key] = {"path": str(path), "sha256": digest,
-                                "audio_stream": ordinal, "picture": picture, "audio": audio}
+            asset_cache[key] = {"path": str(path), "audio_stream": ordinal,
+                                "picture": picture, "audio": audio}
         facts = asset_cache[key]
         if facts["picture"]["fps"] != str(fps) or end > facts["picture"]["frame_count"]:
             raise ValueError("declared source frame clock/range differs from actual CFR source")
@@ -162,7 +163,8 @@ def load_plan(plan_path):
         output_end = output_start + duration
         if output_end > total or value["role"] not in SOURCE_ROLES:
             raise ValueError("source output range or role is unsupported")
-        segments.append({**value, "path": str(path), "gain": require_number(value["gain"], "source gain", 0, 16),
+        segments.append({**value, "path": str(path),
+                         "gain": require_number(value["gain"], "source gain", 0, 16),
                          "source_start_sample": source_start_sample,
                          "source_end_sample": source_end_sample,
                          "output_end_sample": output_end, "fade_in_samples": fade_in,
@@ -189,31 +191,32 @@ def load_plan(plan_path):
     score = plan["score"]
     if not isinstance(score, dict) or score.get("kind") not in {"raw", "frozen", "none"}:
         raise ValueError("score kind must be raw, frozen, or none")
+    score = without_digests(score, "score")
     if score["kind"] == "raw":
-        require_fields(score, ["kind", "path", "sha256", "audio_stream", "source_offset_sample",
+        require_fields(score, ["kind", "path", "audio_stream", "source_offset_sample",
                         "gain", "fade_in_samples", "fade_out_samples", "fade_shape"], "raw score")
-        score_path, score_hash = require_asset(score["path"], score["sha256"], "raw score")
+        score_path = require_declared_path(score, "raw score")
         ordinal = require_integer(score["audio_stream"], "score audio_stream")
         offset = require_integer(score["source_offset_sample"], "score source_offset_sample")
         fade_in, fade_out = _validate_fades(score, total, FADE_SHAPES, "score")
-        score = {**score, "path": str(score_path), "sha256": score_hash,
+        score = {**score, "path": str(score_path),
                  "audio_stream": ordinal, "source_offset_sample": offset,
                  "gain": require_number(score["gain"], "score gain", 0, 16),
                  "fade_in_samples": fade_in, "fade_out_samples": fade_out,
                  "audio": _probe_audio(score_path, ordinal)}
     elif score["kind"] == "frozen":
-        require_fields(score, ["kind", "path", "sha256", "audio_stream"], "frozen score")
-        score_path, score_hash = require_asset(score["path"], score["sha256"], "frozen score")
+        require_fields(score, ["kind", "path", "audio_stream"], "frozen score")
+        score_path = require_declared_path(score, "frozen score")
         ordinal = require_integer(score["audio_stream"], "score audio_stream")
         if ordinal != 0:
             raise ValueError("frozen WAV supports only a:0")
         pcm = _probe_pcm(score_path)
         if pcm["samples"] != total:
             raise ValueError("frozen score must exactly match total_samples")
-        score = {**score, "path": str(score_path), "sha256": score_hash, "pcm": pcm}
+        score = {**score, "path": str(score_path), "pcm": pcm}
     else:
         require_fields(score, ["kind"], "none score")
-    return {"plan_path": plan_path, "plan_sha256": hashlib.sha256(raw).hexdigest(),
+    return {"plan_path": plan_path,
             "output": {**plan["output"], "codec": CODEC}, "source_segments": segments,
             "source_silence": silence, "source_assets": list(asset_cache.values()),
             "score": score}
@@ -250,33 +253,6 @@ def _fade_filters(duration, fade_in, fade_out, curve):
         return []
     gain = "*".join(f"({factor})" for factor in factors)
     return [f"aeval=val(0)*({gain})|val(1)*({gain}):c=same"]
-
-
-def _assert_current(plan):
-    if sha256_file(plan["plan_path"]) != plan["plan_sha256"]:
-        raise ValueError("source score plan changed during operation")
-    for asset in plan["source_assets"]:
-        if sha256_file(asset["path"]) != asset["sha256"]:
-            raise ValueError("source audio asset changed during operation")
-    score = plan["score"]
-    if score["kind"] != "none" and sha256_file(score["path"]) != score["sha256"]:
-        raise ValueError("score asset changed during operation")
-
-
-def _assert_identity(path, identity, label):
-    if sha256_file(path) != identity["sha256"]:
-        raise ValueError(f"{label} changed after its identity was sealed")
-
-
-def _assert_intermediates_current(plan, decoded, score_decode, staged, identities):
-    for asset in plan["source_assets"]:
-        key = (asset["path"], asset["sha256"], asset["audio_stream"])
-        _assert_identity(decoded[key], asset["canonical_pcm"], "decoded source audio")
-    if score_decode is not None:
-        _assert_identity(score_decode, plan["score"]["canonical_decode"],
-                         "decoded raw score")
-    for name, identity in identities.items():
-        _assert_identity(staged[name], identity, name)
 
 
 def _render_source(plan, decoded, output, directory):
@@ -352,35 +328,22 @@ def _astats(path):
     return {"finite": True, "peak": 0.0 if peak_db == -math.inf else 10 ** (peak_db / 20)}
 
 
-def _output_identity(path):
-    initial_hash = sha256_file(path)
-    pcm = _probe_pcm(path)
-    stats = _astats(path)
-    result = subprocess.run(
-        ["ffmpeg", "-nostdin", "-v", "error", "-i", str(path), "-map", "0:a:0",
-         "-c:a", CODEC, "-f", "hash", "-hash", "sha256", "-"],
-        capture_output=True, text=True, timeout=3600,
-    )
-    match = re.fullmatch(r"SHA256=([a-f0-9]{64})\s*", result.stdout)
-    if result.returncode or not match:
-        raise ValueError("canonical PCM payload hash failed")
-    if sha256_file(path) != initial_hash:
-        raise ValueError("audio changed while its identity was being measured")
-    return {"path": str(path), "sha256": initial_hash,
-            "pcm_payload_sha256": match.group(1), "pcm": pcm, **stats}
+def _output_facts(path):
+    """PCM format, sample count, size and peak/finiteness of one 48 kHz stereo float WAV."""
+    return {"path": str(path), "bytes": os.stat(path).st_size, "pcm": _probe_pcm(path),
+            **_astats(path)}
 
 
 def validate_prepared_receipt(reference, expected_format):
     """Validate one completed prepared-bed receipt and its three current PCM stems."""
-    require_fields(reference, ["path", "sha256"], "prepared receipt reference")
+    require_fields(without_digests(reference, "prepared receipt reference"), ["path"],
+                   "prepared receipt reference")
     require_fields(expected_format, ["sample_rate", "channels", "total_samples"],
             "expected prepared format")
     if expected_format["sample_rate"] != RATE or expected_format["channels"] != CHANNELS:
         raise ValueError("prepared format must be 48 kHz stereo")
     require_integer(expected_format["total_samples"], "prepared total_samples", 1)
-    receipt_path, receipt_hash = require_asset(
-        reference["path"], reference["sha256"], "prepared receipt"
-    )
+    receipt_path = require_declared_path(reference, "prepared receipt")
     receipt = read_json_bytes(receipt_path, "prepared receipt")[2]
     if not isinstance(receipt, dict) or receipt.get("artifact") != "prepared_bed_receipt" \
             or receipt.get("schema_version") != 1 or receipt.get("status") != "PREPARED":
@@ -397,22 +360,20 @@ def validate_prepared_receipt(reference, expected_format):
     for name, declared in outputs.items():
         if not isinstance(declared, dict):
             raise ValueError(f"prepared receipt {name} identity is invalid")
-        path, expected_hash = require_asset(declared.get("path"), declared.get("sha256"), name)
+        path = require_local_path(declared.get("path"), name)
         stream = _probe_audio(path, 0)
         if stream["codec_name"] != CODEC or stream["sample_rate"] != str(RATE) or \
                 stream["channels"] != CHANNELS or \
                 (stream["start_time"] not in (None, "N/A") and
                  Fraction(stream["start_time"]) != 0):
             raise ValueError(f"{name} must be zero-origin 48 kHz stereo float PCM")
-        actual = _output_identity(path)
-        if actual["sha256"] != expected_hash or actual["pcm"]["codec_name"] != CODEC \
+        actual = _output_facts(path)
+        if actual["pcm"]["codec_name"] != CODEC \
                 or actual["pcm"]["samples"] != expected_format["total_samples"]:
             raise ValueError(f"{name} does not match the required full PCM format")
-        if declared.get("pcm_payload_sha256") != actual["pcm_payload_sha256"]:
-            raise ValueError(f"{name} canonical PCM payload differs from receipt")
         prepared[name] = actual
     return {
-        "reference": {"path": str(receipt_path), "sha256": receipt_hash},
+        "reference": {"path": str(receipt_path)},
         "format": dict(expected_format), "outputs": prepared, "receipt": receipt,
     }
 
@@ -426,15 +387,14 @@ def prepare_source_score(plan_path, output_dir):
     receipt_path = directory / "prepared_bed_receipt.json"
     try:
         plan = load_plan(plan_path)
-        _assert_current(plan)
         decoded = {}
         for index, asset in enumerate(plan["source_assets"]):
-            key = (asset["path"], asset["sha256"], asset["audio_stream"])
+            key = (asset["path"], asset["audio_stream"])
             path = directory / f".source_{index:03d}.decoded.wav"
             _run(_decode_command(asset["path"], asset["audio_stream"], path),
                  directory, f"decode_source_{index:03d}")
             decoded[key] = path
-            asset["canonical_pcm"] = _output_identity(path)
+            asset["canonical_pcm"] = _output_facts(path)
             required = max(
                 segment["source_end_sample"] for segment in plan["source_segments"]
                 if tuple(segment["asset_key"]) == key
@@ -446,19 +406,16 @@ def prepare_source_score(plan_path, output_dir):
             score_decode = directory / ".score.decoded.wav"
             _run(_decode_command(plan["score"]["path"], plan["score"]["audio_stream"],
                                  score_decode), directory, "decode_score")
-            plan["score"]["canonical_decode"] = _output_identity(score_decode)
+            plan["score"]["canonical_decode"] = _output_facts(score_decode)
             if plan["score"]["canonical_decode"]["pcm"]["samples"] < \
                     plan["score"]["source_offset_sample"] + plan["output"]["total_samples"]:
                 raise ValueError("raw score is too short for continuous offset window")
-        _assert_current(plan)
         _render_source(plan, decoded, staged["source_bed.wav"], directory)
-        _assert_intermediates_current(plan, decoded, score_decode, staged, {})
         _render_score(plan, score_decode, staged["score_bed.wav"], directory)
-        sealed = {
-            "source_bed.wav": _output_identity(staged["source_bed.wav"]),
-            "score_bed.wav": _output_identity(staged["score_bed.wav"]),
+        rendered = {
+            "source_bed.wav": _output_facts(staged["source_bed.wav"]),
+            "score_bed.wav": _output_facts(staged["score_bed.wav"]),
         }
-        _assert_intermediates_current(plan, decoded, score_decode, staged, sealed)
         if plan["score"]["kind"] == "none":
             shutil.copyfile(staged["source_bed.wav"], staged["prepared_bed.wav"])
         else:
@@ -471,28 +428,24 @@ def prepare_source_score(plan_path, output_dir):
                 "-c:a", CODEC, str(staged["prepared_bed.wav"]),
             ]
             _run(command, directory, "prepare")
-        _assert_current(plan)
-        _assert_intermediates_current(plan, decoded, score_decode, staged, sealed)
-        outputs = {**sealed, "prepared_bed.wav": _output_identity(staged["prepared_bed.wav"])}
+        outputs = {**rendered, "prepared_bed.wav": _output_facts(staged["prepared_bed.wav"])}
         if any(value["pcm"]["samples"] != plan["output"]["total_samples"]
                for value in outputs.values()):
             raise ValueError("prepared bed sample counts differ from plan")
-        if plan["score"]["kind"] == "none" and \
-                outputs["prepared_bed.wav"]["pcm_payload_sha256"] != \
-                outputs["source_bed.wav"]["pcm_payload_sha256"]:
-            raise ValueError("none score must preserve source PCM payload exactly")
+        if plan["score"]["kind"] == "none" and (
+                outputs["prepared_bed.wav"]["bytes"] != outputs["source_bed.wav"]["bytes"]
+                or outputs["prepared_bed.wav"]["pcm"] != outputs["source_bed.wav"]["pcm"]):
+            raise ValueError("none score must preserve the source bed exactly")
         outputs["prepared_bed.wav"]["headroom_policy"] = "FLOAT_PRESERVED_NO_MASTER"
         receipt = {
             "artifact": "prepared_bed_receipt", "schema_version": 1, "status": "PREPARED",
-            "plan": {"path": str(plan["plan_path"]), "sha256": plan["plan_sha256"]},
+            "plan": {"path": str(plan["plan_path"])},
             "format": plan["output"], "source_assets": plan["source_assets"],
             "source_segments": [{key: value for key, value in item.items() if key != "asset_key"}
                                 for item in plan["source_segments"]],
             "source_silence": plan["source_silence"], "score": plan["score"],
             "outputs": outputs, "direct_listening": "NOT_CHECKED", "release_approved": False,
         }
-        _assert_current(plan)
-        _assert_intermediates_current(plan, decoded, score_decode, staged, outputs)
         for name, path in staged.items():
             path.rename(finals[name])
             receipt["outputs"][name]["path"] = str(finals[name])

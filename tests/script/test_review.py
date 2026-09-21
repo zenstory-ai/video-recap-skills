@@ -5,12 +5,11 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
 )
 import json
+import os
 import pytest
 
 import review
 import review_runner
-import review_response
-from lib import stable_hash
 
 OK_RESPONSE = '{"verdict":"OK","summary":"ok","findings":[]}'
 
@@ -261,12 +260,13 @@ def test_review_narration_cut_output_requires_fresh_validated_clip_spans(
     assert out.get("warnings")
 
     stale = {
-        "raw_plan_fingerprint": "stale",
         "clips": [
             {"source_start": 10, "source_end": 20, "output_start": 0, "output_end": 10}
         ],
     }
     _write_json(tmp_path / "clip_plan_validated.json", stale)
+    os.utime(tmp_path / "clip_plan_validated.json", ns=(1_000_000_000, 1_000_000_000))
+    os.utime(tmp_path / "clip_plan.json", ns=(2_000_000_000, 2_000_000_000))
     with pytest.raises(SystemExit, match="clip_plan_validated"):
         review.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
 
@@ -291,9 +291,9 @@ def test_review_narration_cut_output_uses_remapped_grounding(monkeypatch, tmp_pa
     _write_json(
         tmp_path / "clip_plan_validated.json",
         {
-            "raw_plan_fingerprint": stable_hash(raw_plan),
             "clips": [
                 {
+                    "clip_id": 0,
                     "source_start": 10,
                     "source_end": 20,
                     "output_start": 0,
@@ -355,9 +355,9 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
     _write_json(
         tmp_path / "clip_plan_validated.json",
         {
-            "raw_plan_fingerprint": stable_hash(raw_plan),
             "clips": [
                 {
+                    "clip_id": 0,
                     "source_id": "src_a",
                     "source_start": 0,
                     "source_end": 5,
@@ -365,6 +365,7 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
                     "output_end": 5,
                 },
                 {
+                    "clip_id": 1,
                     "source_id": "src_b",
                     "source_start": 0,
                     "source_end": 5,
@@ -645,17 +646,6 @@ def test_parse_review_downgrades_user_context_assertions_to_context_only():
     assert "user_context-only" in assertion["risk"]
 
 
-def test_bundle_fingerprint_failure_propagates():
-    bundle = {"schema_version": 1, "clock": "source", "items": [], "context_items": []}
-    bundle["coverage"] = bundle
-
-    with pytest.raises(ValueError, match="Circular reference detected"):
-        review_response._bundle_fingerprint(bundle)
-    with pytest.raises(ValueError, match="Circular reference detected"):
-        review_response._chunk_evidence_bundle(bundle)
-    assert "metadata" not in bundle
-
-
 def test_public_grounding_seams_are_api_free(tmp_path):
     narration = [{"start": 1, "end": 3, "narration": "测试。"}]
     vlm = [
@@ -676,11 +666,10 @@ def test_public_grounding_seams_are_api_free(tmp_path):
     filtered = review.filter_evidence_by_ranges(vlm, asr, ranges)
     assert [item["source"] for item in filtered["items"]] == ["visual", "asr"]
 
-    assert review.validate_public_evidence_contract(bundle)["valid"] is True
     assert review.build_review_coverage_metadata(bundle)["scene_count"] == 1
     assert "门口对峙" in review.render_evidence_bundle(bundle)
 
-    qc = review.build_grounding_qc(tmp_path, {"findings": []}, bundle)
+    qc = review.build_grounding_qc(tmp_path, review.parse_review_response("{}"), bundle)
     assert qc["verdict"] == "pass"
     review.write_grounding_qc(tmp_path, qc)
     assert (

@@ -16,20 +16,17 @@ sys.path.insert(
     ),
 )
 
-from lib import CONFIG  # noqa: E402
+from lib import CONFIG, file_identity  # noqa: E402
 from vlm import (  # noqa: E402
     _is_mimo_chunk_usable,
     _load_mimo_partial,
-    _mimo_cached_chunks_fingerprint,
     _mimo_chunk_cache_key,
-    _mimo_overview_payload_fingerprint,
     _parse_vlm_depth_response,
     _save_mimo_partial,
     analyze_scenes,
     analyze_video_overview,
-    file_fingerprint,
     mimo_video_overview_cache_fresh,
-    mimo_video_settings_fingerprint,
+    mimo_video_settings,
 )
 
 
@@ -135,7 +132,7 @@ def test_vlm_resume_cache_persists_on_failure_and_resumes(monkeypatch, tmp_path)
     with pytest.raises(RuntimeError, match="断点续传"):
         analyze_scenes(THREE_SCENES, frames, tmp_path)
     cache = json.loads((tmp_path / "vlm_scene_cache.json").read_text(encoding="utf-8"))
-    assert len(cache) == 2  # the two scenes that succeeded are cached for resume
+    assert len(cache["scenes"]) == 2  # the two scenes that succeeded are cached for resume
 
     state["fail_mid"] = False
     calls_before = state["calls"]
@@ -155,7 +152,8 @@ def test_vlm_resume_cache_invalidates_on_request_setting_flip(monkeypatch, tmp_p
 
     with pytest.raises(RuntimeError, match="断点续传"):
         analyze_scenes(THREE_SCENES, frames, tmp_path)
-    assert len(json.loads((tmp_path / "vlm_scene_cache.json").read_text(encoding="utf-8"))) == 2
+    cache = json.loads((tmp_path / "vlm_scene_cache.json").read_text(encoding="utf-8"))
+    assert len(cache["scenes"]) == 2
 
     state["fail_mid"] = False
     monkeypatch.setitem(CONFIG, "mimo_disable_thinking", False)
@@ -304,13 +302,6 @@ def _settings_change(monkeypatch, partial_path, video):
     return video, ONE_CHUNK_SCENES
 
 
-def _payload_mutation(monkeypatch, partial_path, video):
-    payload = json.loads(partial_path.read_text(encoding="utf-8"))
-    payload["chunks"][_mimo_chunk_cache_key(ONE_CHUNK)]["content"] = "tampered but non-empty"
-    partial_path.write_text(json.dumps(payload), encoding="utf-8")
-    return video, ONE_CHUNK_SCENES
-
-
 def _source_video_mismatch(monkeypatch, partial_path, video):
     other = video.with_name("new.mp4")
     other.write_bytes(b"new-video")
@@ -323,11 +314,11 @@ def _scene_plan_mismatch(monkeypatch, partial_path, video):
 
 @pytest.mark.parametrize(
     "drift",
-    [_settings_change, _payload_mutation, _source_video_mismatch, _scene_plan_mismatch],
+    [_settings_change, _source_video_mismatch, _scene_plan_mismatch],
     ids=lambda fn: fn.__name__.strip("_"),
 )
 def test_partial_cache_rejects_drifted_provenance(monkeypatch, tmp_path, drift):
-    """Paid chunks are reused only for the same settings, bytes, source video and scene plan."""
+    """Paid chunks are reused only for the same settings, source video and scene plan."""
     video = _overview_setup(monkeypatch, tmp_path)
     partial_path, _done = _saved_partial(tmp_path, video)
 
@@ -373,7 +364,7 @@ def test_failed_chunk_preserves_completed_chunks_and_resume_skips(monkeypatch, t
     assert analyzed == [2]
     assert overview["input"] == "scene_chunks"
     assert overview["chunk_count"] == 3
-    assert overview["settings"] == mimo_video_settings_fingerprint()
+    assert overview["settings"] == mimo_video_settings()
     assert [c["chunk_id"] for c in overview["chunks"]] == [0, 1, 2]
     assert (tmp_path / "mimo_video_overview.json").exists()
     assert not partial_path.exists()
@@ -391,24 +382,6 @@ def _fresh_final_overview(monkeypatch, tmp_path):
     overview_path = tmp_path / "mimo_video_overview.json"
     assert mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
     return video, overview_path
-
-
-def test_final_overview_cache_rejects_payload_mutation(monkeypatch, tmp_path):
-    """The final MiMo overview skip path must reject byte/content edits to cached chunks."""
-    video, overview_path = _fresh_final_overview(monkeypatch, tmp_path)
-
-    payload = json.loads(overview_path.read_text(encoding="utf-8"))
-    payload["chunks"][0]["content"] = "tampered but non-empty"
-    overview_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-
-    payload["chunks_fingerprint"] = _mimo_cached_chunks_fingerprint(payload["chunks"])
-    overview_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-
-    payload["overview_fingerprint"] = _mimo_overview_payload_fingerprint(payload)
-    overview_path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-    assert mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
 
 
 def test_final_overview_cache_invalidates_on_settings_source_or_chunks(monkeypatch, tmp_path):
@@ -448,10 +421,8 @@ def test_final_overview_cache_rejects_unusable_cached_chunk(monkeypatch, tmp_pat
         "input": "scene_chunks",
         "content": "有效\n(MiMo 未返回内容)",
         "chunks": chunks,
-        "chunks_fingerprint": _mimo_cached_chunks_fingerprint(chunks),
-        "overview_fingerprint": "stale",
-        "source_video_fingerprint": file_fingerprint(video),
-        "settings": mimo_video_settings_fingerprint(),
+        "source_video_identity": file_identity(video),
+        "settings": mimo_video_settings(),
     }), encoding="utf-8")
 
     assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)

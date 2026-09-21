@@ -1,11 +1,10 @@
 """Load and format research, consolidation, and substrate context."""
 
-import hashlib
 import json
 import re
 from pathlib import Path
 
-from lib import CONFIG
+from lib import CONFIG, file_identity
 
 
 def _load_background_research(work_dir):
@@ -243,36 +242,9 @@ def _consolidation_model():
     return CONFIG["vlm_model"]
 
 
-def _clean_asr_prompt_fingerprint():
-    # Keep this literal in sync with consolidate.CLEAN_PROMPT without importing it;
-    # brief.py and narration.py must remain byte-identical cross-skill copies.
-    prompt = """你在清洗中文视频的 ASR 逐段转写。对【每一段】做：补标点、修明显同音/错别字、（能判断时）在句首轻标说话人，让长段连读文本变成清晰可读的句子。
-铁律：
-- 不要合并或拆分段落，输出段数必须与输入完全一致，顺序一致。
-- 不要改时间，不要输出 start/end（时间由程序保留）。
-- 只清洗 text，不要增删事实、不要脑补画面。
-只返回 JSON：{"segments":[{"i":0,"text":"清洗后的文本","speaker":"可选说话人"}, ...]}，i 为输入段的下标。"""
-    return hashlib.md5(prompt.encode("utf-8")).hexdigest()
-
-
-def _index_prompt_fingerprint():
-    prompt = """你在根据逐场景画面分析、ASR对白、background_research术语表，为一个视频建立【全局理解索引】，供后续写解说词时保持人物/关系/主线一致。
-规则：
-- visual/asr 是当前视频事实证据；每个人物、关系、剧情节点、物件尽量给 evidence_ids。
-- background_research 只能用于人名/别名/术语/身份消歧，默认 support=context_only；不能把后续剧情或未出现关系升级为当前画面事实。
-- ASR 中出现但画面描述未命名的人名，应进入 characters[*].asr_mentions。
-只返回 JSON：
-{"characters":[{"name":"角色名或外观指代","description":"身份/特征","aliases":[],"visual_descriptions":[],"asr_mentions":[],"research_role":"","evidence_ids":[],"confidence":"high|medium|low"}],
- "relationships":[{"a":"角色","b":"角色","relation":"关系","evidence_ids":[],"support":"direct|indirect|context_only"}],
- "plot_points":[{"time":"00:00","text":"按时间顺序的关键剧情节点","evidence_ids":[]}],
- "entities":[{"name":"重要物件/地点/线索","evidence_ids":[]}],
- "research_glossary":[{"name":"名字/术语","aliases":[],"role":"说明","support":"context_only"}]}"""
-    return hashlib.md5(prompt.encode("utf-8")).hexdigest()
-
-
 def _load_consolidation(work_dir, scenes_analysis):
     """Load consolidate.py's understanding_index.json only when its provenance matches
-    the current vlm_analysis.json, model and index prompt ({} otherwise)."""
+    the current vlm_analysis.json and model ({} otherwise)."""
     work_dir = Path(work_dir)
     path = work_dir / "understanding_index.json"
     meta_path = work_dir / "understanding_index.json.meta.json"
@@ -280,17 +252,14 @@ def _load_consolidation(work_dir, scenes_analysis):
         return {}
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        source_md5 = hashlib.md5(
-            (work_dir / "vlm_analysis.json").read_bytes()
-        ).hexdigest()
+        source = file_identity(work_dir / "vlm_analysis.json")
     except (OSError, json.JSONDecodeError):
         return {}
     if not isinstance(meta, dict):
         return {}
     expected = {
-        "source_md5": source_md5,
+        "source": source,
         "model": _consolidation_model(),
-        "prompt_md5": _index_prompt_fingerprint(),
     }
     if scenes_analysis:
         expected["scene_count"] = len(scenes_analysis)

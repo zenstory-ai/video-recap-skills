@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from lib import CONFIG
-from lib import log, run_cmd, get_video_duration, file_fingerprint
+from lib import log, run_cmd, get_video_duration, file_identity
 
 # ── Step 2: 场景检测 ──────────────────────────────────────────────────
 
@@ -48,10 +48,10 @@ def detect_scenes(video_path, work_dir, threshold=None):
 
     # 先过滤黑/白帧过渡场景，再合并短场景
     # （合并会保留短场景的 start，若黑场被并入长场景，单点采样会误删整段，故顺序在前）
-    if CONFIG.get("scene_junk_filter", True):
+    if CONFIG["scene_junk_filter"]:
         scenes = _filter_junk_scenes(scenes, video_path)
     # 合并短场景（< 3s 合并到相邻场景）
-    scenes = _merge_short_scenes(scenes, min_duration=CONFIG.get("scene_merge_min", 4.0))
+    scenes = _merge_short_scenes(scenes, min_duration=CONFIG["scene_merge_min"])
 
     # 保存
     scenes_file = work_dir / "scenes.json"
@@ -115,9 +115,9 @@ def _sample_frame_luma(video_path, timestamp, sample_size=64):
 
 def _is_junk_scene(video_path, timestamp, threshold_dark=None, threshold_bright=None):
     """Return True for near-black or near-white scene-start frames."""
-    threshold_dark = CONFIG.get("scene_junk_dark_luma", 8.0) if threshold_dark is None else threshold_dark
-    threshold_bright = CONFIG.get("scene_junk_bright_luma", 245.0) if threshold_bright is None else threshold_bright
-    pixel_ratio = min(1.0, max(0.0, float(CONFIG.get("scene_junk_pixel_ratio", 0.995))))
+    threshold_dark = CONFIG["scene_junk_dark_luma"] if threshold_dark is None else threshold_dark
+    threshold_bright = CONFIG["scene_junk_bright_luma"] if threshold_bright is None else threshold_bright
+    pixel_ratio = min(1.0, float(CONFIG["scene_junk_pixel_ratio"]))
     try:
         lumas = _sample_frame_luma(video_path, timestamp)
     except Exception as exc:
@@ -157,7 +157,7 @@ def _filter_junk_scenes(scenes, video_path):
     # 每个探点都是一次 ffmpeg 进程（seek + 解一帧），一部 30 分钟片有几百个场景，串行下来
     # 光进程启动就要几十秒。按场景并行：每个 worker 内部仍然短路，所以既保留了「多数场景只
     # 探一次」，又把进程启动开销摊平。判定逻辑与探点完全不变。
-    workers = max(1, int(CONFIG.get("scene_junk_workers", 8) or 8))
+    workers = int(CONFIG["scene_junk_workers"])
     with ThreadPoolExecutor(max_workers=min(workers, len(scenes))) as executor:
         verdicts = list(executor.map(lambda s: _scene_is_junk(s, video_path), scenes))
     filtered = []
@@ -203,7 +203,7 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
     Coarse grid ASR (large synthetic windows from chunking) must not turn every quiet
     window into speech. The return value is (annotated_periods, qc). Inputs are copied.
     """
-    out = [dict(p) for p in (periods or []) if isinstance(p, dict)]
+    out = [dict(p) for p in (periods or [])]
     qc = {"coarse_asr_windows": 0, "low_confidence_speech_flags": 0, "asr_granularity": "none"}
     for qp in out:
         qp.setdefault("speech_overlap_ratio", 0.0)
@@ -216,20 +216,15 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
 
     valid_segments = []
     for seg in asr_result:
-        if not isinstance(seg, dict):
-            continue
-        try:
-            ss, se = float(seg.get("start", 0)), float(seg.get("end", 0))
-        except (TypeError, ValueError):
-            continue
+        ss, se = float(seg["start"]), float(seg["end"])
         if se > ss:
             valid_segments.append((ss, se))
     asr_coverage = sum(se - ss for ss, se in valid_segments)
     avg_seg_dur = asr_coverage / len(valid_segments) if valid_segments else 0
     if video_duration is None:
-        ends = [float(p.get("end", 0) or 0) for p in out] + [se for _, se in valid_segments]
+        ends = [float(p["end"]) for p in out] + [se for _, se in valid_segments]
         video_duration = max(ends or [0.0])
-    configured = float(configured_segment_seconds if configured_segment_seconds is not None else (CONFIG.get("asr_segment_seconds", 30) or 30))
+    configured = float(configured_segment_seconds if configured_segment_seconds is not None else CONFIG["asr_segment_seconds"])
     coarse_asr = (
         (len(valid_segments) <= 5 and asr_coverage > float(video_duration) * 0.8) or
         asr_coverage > float(video_duration) * 1.5 or
@@ -243,7 +238,7 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
         overlap_seconds = 0.0
         for ss, se in valid_segments:
             overlap_seconds += max(0.0, min(float(qp["end"]), se) - max(float(qp["start"]), ss))
-        ratio = overlap_seconds / max(0.001, float(qp.get("duration", 0.0) or 0.0))
+        ratio = overlap_seconds / max(0.001, float(qp["duration"]))
         qp["asr_overlap_seconds"] = round(overlap_seconds, 3)
         qp["speech_overlap_ratio"] = round(ratio, 4)
         qp["asr_granularity"] = granularity
@@ -333,7 +328,7 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
                             "duration": round(total_dur - dur_start, 2)})
 
     # 合并相邻静音段（间隔 < merge_gap 的合并为一个大窗口）
-    merge_gap = CONFIG.get("silence_merge_gap", 0.5)
+    merge_gap = CONFIG["silence_merge_gap"]
     merged = []
     for rp in sorted(raw_periods, key=lambda x: x["start"]):
         if merged and rp["start"] - merged[-1]["end"] < merge_gap:
@@ -352,7 +347,7 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
         periods,
         asr_result,
         video_duration=get_video_duration(str(audio_path)) if asr_result else None,
-        configured_segment_seconds=CONFIG.get("asr_segment_seconds", 30),
+        configured_segment_seconds=CONFIG["asr_segment_seconds"],
     )
 
     (work_dir / "silence_periods.qc.json").write_text(
@@ -368,12 +363,6 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
     return periods
 
 
-def _asr_segments(asr_result):
-    if isinstance(asr_result, dict):
-        asr_result = asr_result.get("segments", [])
-    return [item for item in (asr_result or []) if isinstance(item, dict)]
-
-
 def detect_speech_boundary_anchors(work_dir, asr_result):
     """Write sentence-end entry anchors by aligning ASR punctuation to short pauses.
 
@@ -385,14 +374,14 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
     work_dir = Path(work_dir)
     audio_path = work_dir / "audio.wav"
     out_path = work_dir / "speech_boundary_anchors.json"
-    segments = _asr_segments(asr_result)
+    segments = list(asr_result or [])
     report = {
         "schema_version": 1,
         "artifact": "speech_boundary_anchors.json",
         "status": "completed",
         "detector": {
-            "noise_threshold": CONFIG.get("source_boundary_noise_threshold", "-18dB"),
-            "min_pause_seconds": float(CONFIG.get("source_boundary_min_pause", 0.12)),
+            "noise_threshold": CONFIG["source_boundary_noise_threshold"],
+            "min_pause_seconds": float(CONFIG["source_boundary_min_pause"]),
             "alignment": "terminal_punctuation_to_nearest_acoustic_pause",
         },
         "sentence_anchors": [],
@@ -408,8 +397,8 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
         "ffmpeg", "-hide_banner", "-nostats", "-i", str(audio_path),
         "-af", (
             "silencedetect="
-            f"noise={CONFIG.get('source_boundary_noise_threshold', '-18dB')}:"
-            f"d={float(CONFIG.get('source_boundary_min_pause', 0.12))}"
+            f"noise={CONFIG['source_boundary_noise_threshold']}:"
+            f"d={float(CONFIG['source_boundary_min_pause'])}"
         ),
         "-f", "null", "-",
     ], timeout=120)
@@ -434,16 +423,13 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
         })
     report["acoustic_pauses"] = pauses
 
-    max_error = float(CONFIG.get("source_boundary_max_alignment_error", 2.1))
+    max_error = float(CONFIG["source_boundary_max_alignment_error"])
     used = set()
     anchors = []
     for asr_index, segment in enumerate(segments):
-        try:
-            seg_start = float(segment.get("start"))
-            seg_end = float(segment.get("end"))
-        except (TypeError, ValueError):
-            continue
-        text = str(segment.get("text") or "").strip()
+        seg_start = float(segment["start"])
+        seg_end = float(segment["end"])
+        text = segment["text"].strip()
         if seg_end <= seg_start or not text:
             continue
         last_midpoint = seg_start - 1e-6
@@ -496,17 +482,22 @@ def _audio_cache_matches(audio_path, video_path):
     except (OSError, ValueError, TypeError):
         return False
     try:
-        expected = file_fingerprint(video_path)
+        expected = file_identity(video_path)
     except OSError:
         return False
-    return meta.get("source_video_fingerprint") == expected
+    return (
+        isinstance(meta, dict)
+        and meta.get("source_video") == str(Path(video_path).resolve())
+        and meta.get("source_video_identity") == expected
+    )
 
 
 def _write_audio_meta(work_dir, video_path):
     _audio_meta_path(work_dir).write_text(
         json.dumps({
             "schema_version": 1,
-            "source_video_fingerprint": file_fingerprint(video_path),
+            "source_video": str(Path(video_path).resolve()),
+            "source_video_identity": file_identity(video_path),
             "audio": "audio.wav",
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",

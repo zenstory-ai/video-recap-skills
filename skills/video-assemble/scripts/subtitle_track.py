@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import math
-import re
 from collections.abc import Mapping
 from decimal import Decimal
 from fractions import Fraction
@@ -17,7 +16,8 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+# Digest keys older tracks declared; they are ignored, never a reason to fail.
+_LEGACY_BINDING_KEYS = frozenset({"sha256", "edit_sha256"})
 _EVIDENCE_KINDS = frozenset(
     {
         "human_verified",
@@ -70,10 +70,8 @@ def _nonempty_string(value, path):
     return value
 
 
-def _sha256(value, path):
-    if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
-        _fail(path, "must be a lowercase 64-hex sha256 digest")
-    return value
+def _local_path(value, path):
+    return str(Path(_nonempty_string(value, path)).resolve())
 
 
 def _seconds_fraction(value, path):
@@ -114,47 +112,43 @@ def _load_document(path_or_mapping):
 
 def _validate_picture_binding(binding, expected):
     binding = _strict_fields(
-        binding, required={"sha256"}, optional={"edit_sha256"}, path="bindings.picture"
+        binding, required={"path"}, optional={"edit_plan"} | _LEGACY_BINDING_KEYS,
+        path="bindings.picture",
     )
     expected = _mapping(expected, "expected_picture_identity")
-    picture_sha = _sha256(binding["sha256"], "bindings.picture.sha256")
-    expected_sha = _sha256(expected.get("sha256"), "expected_picture_identity.sha256")
-    if picture_sha != expected_sha:
-        _fail("bindings.picture.sha256", "picture identity does not match current picture")
+    picture_path = _local_path(binding["path"], "bindings.picture.path")
+    expected_path = _local_path(expected.get("path"), "expected_picture_identity.path")
+    if picture_path != expected_path:
+        _fail("bindings.picture.path", "picture path does not match current picture")
 
-    edit_sha = binding.get("edit_sha256")
-    if edit_sha is not None:
-        edit_sha = _sha256(edit_sha, "bindings.picture.edit_sha256")
-        if "edit_sha256" not in expected:
-            _fail("expected_picture_identity.edit_sha256", "edit identity is required by track")
-        expected_edit = _sha256(
-            expected["edit_sha256"], "expected_picture_identity.edit_sha256"
-        )
-        if edit_sha != expected_edit:
-            _fail("bindings.picture.edit_sha256", "edit identity does not match current edit")
-    return {"sha256": picture_sha, **({"edit_sha256": edit_sha} if edit_sha else {})}
+    edit_plan = binding.get("edit_plan")
+    if edit_plan is not None:
+        edit_plan = _local_path(edit_plan, "bindings.picture.edit_plan")
+        if "edit_plan" not in expected:
+            _fail("expected_picture_identity.edit_plan", "edit plan is required by track")
+        expected_edit = _local_path(expected["edit_plan"], "expected_picture_identity.edit_plan")
+        if edit_plan != expected_edit:
+            _fail("bindings.picture.edit_plan", "edit plan does not match current edit")
+    return {"path": picture_path, **({"edit_plan": edit_plan} if edit_plan else {})}
+
+
+_AUDIO_BINDING_FACTS = ("selected_stream", "sample_rate", "packet_count")
 
 
 def _validate_audio_binding(binding, expected):
     binding = _strict_fields(
-        binding,
-        required={"sha256", "selected_stream"},
+        binding, required=set(_AUDIO_BINDING_FACTS), optional=_LEGACY_BINDING_KEYS,
         path="bindings.audio",
     )
     expected = _mapping(expected, "expected_audio_identity")
-    audio_sha = _sha256(binding["sha256"], "bindings.audio.sha256")
-    expected_sha = _sha256(expected.get("sha256"), "expected_audio_identity.sha256")
-    if audio_sha != expected_sha:
-        _fail("bindings.audio.sha256", "audio identity does not match adopted audio")
-    stream = _integer(binding["selected_stream"], "bindings.audio.selected_stream", minimum=0)
-    expected_stream = _integer(
-        expected.get("selected_stream"),
-        "expected_audio_identity.selected_stream",
-        minimum=0,
-    )
-    if stream != expected_stream:
-        _fail("bindings.audio.selected_stream", "selected_stream does not match adopted audio")
-    return {"sha256": audio_sha, "selected_stream": stream}
+    result = {}
+    for key in _AUDIO_BINDING_FACTS:
+        declared = _integer(binding[key], f"bindings.audio.{key}", minimum=0)
+        actual = _integer(expected.get(key), f"expected_audio_identity.{key}", minimum=0)
+        if declared != actual:
+            _fail(f"bindings.audio.{key}", f"{key} does not match adopted audio")
+        result[key] = declared
+    return result
 
 
 def _validate_evidence(value, cue_path):
@@ -208,9 +202,10 @@ def load_subtitle_track(
 ):
     """Validate schema v1 and return metadata plus second-based render entries.
 
-    Identity arguments are current facts supplied independently by the caller;
-    declarations inside the track are never accepted as proof of their own
-    freshness. Cue boundaries and text are validated, not split or corrected.
+    Identity arguments are current facts (paths, stream index, sample rate,
+    packet count) supplied independently by the caller; declarations inside the
+    track are compared against them, never accepted on their own. Cue boundaries
+    and text are validated, not split or corrected.
     """
 
     if not isinstance(reject_legacy_estimate, bool):

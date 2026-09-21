@@ -102,17 +102,16 @@ def test_review_pointer_prints_verdict(tmp_path, capsys):
     assert "error 1" in out
 
 
-def test_review_pointer_silent_when_absent(tmp_path, capsys):
-    recap_timeline._print_narration_review_pointer(tmp_path)
+def test_review_pointer_silent_when_review_did_not_run(tmp_path, capsys):
+    """review_ran=False (disabled/failed) prints nothing, even with stale artifacts around."""
+    (tmp_path / "narration_review.md").write_text("# stale", encoding="utf-8")
+    recap_timeline._print_narration_review_pointer(tmp_path, review_ran=False)
     assert capsys.readouterr().out == ""
 
 
-@pytest.mark.parametrize("review_json", [None, "{ not json"], ids=["absent", "malformed"])
-def test_review_pointer_degrades_to_plain_path_without_usable_json(
-    tmp_path, capsys, review_json
-):
+def test_review_pointer_reads_the_review_by_contract_when_it_ran(tmp_path):
+    """review_ran=True means video-script wrote narration_review.json; a corrupt one raises."""
     (tmp_path / "narration_review.md").write_text("# review", encoding="utf-8")
-    if review_json is not None:
-        (tmp_path / "narration_review.json").write_text(review_json, encoding="utf-8")
-    recap_timeline._print_narration_review_pointer(tmp_path)
-    assert "narration_review.md" in capsys.readouterr().out  # no traceback
+    (tmp_path / "narration_review.json").write_text("{ not json", encoding="utf-8")
+    with pytest.raises(ValueError):
+        recap_timeline._print_narration_review_pointer(tmp_path)

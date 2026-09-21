@@ -1,14 +1,12 @@
 """Own understanding-stage cache keys, provenance, and statuses."""
 
-import hashlib
-
 import json
 
 from pathlib import Path
 
 from asr_timing_evidence import EVIDENCE_FILENAME, validate_asr_timing_evidence
 from extract import FRAME_TIME_CONVENTION_VERSION
-from lib import CONFIG, log, file_fingerprint, load_prompt
+from lib import CONFIG, log, file_identity, load_prompt
 
 
 from vlm import (
@@ -35,14 +33,23 @@ def _load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _artifact_fingerprint(path):
+def _video_input(video_path):
+    """The source video as a cache input: resolved path plus {size, mtime_ns}, so two
+    different files written in the same timestamp tick never share a stage output."""
+    return {"path": str(Path(video_path).resolve()), **file_identity(video_path)}
+
+
+def _artifact_identity(path):
+    """{size, mtime_ns} of an input artifact, or None when it does not exist."""
     path = Path(path)
-    return file_fingerprint(path) if path.exists() else None
+    return file_identity(path) if path.exists() else None
 
 
 def _stage_cache_valid(artifact_path, expected_meta):
+    """A stage output is reusable when it exists, is non-empty, its sidecar equals the
+    expected inputs/settings dict, and the output itself is the one the sidecar recorded."""
     artifact_path = Path(artifact_path)
-    if not artifact_path.exists():
+    if not artifact_path.exists() or artifact_path.stat().st_size == 0:
         return False
     meta_path = _artifact_meta_path(artifact_path)
     if not meta_path.exists():
@@ -51,18 +58,17 @@ def _stage_cache_valid(artifact_path, expected_meta):
         meta = _load_json(meta_path)
     except (OSError, ValueError, TypeError):
         return False
-    recorded = meta.get("artifact_fingerprint") if isinstance(meta, dict) else None
-    if not recorded or recorded != _artifact_fingerprint(artifact_path):
+    if not isinstance(meta, dict) or meta.get("artifact") != file_identity(artifact_path):
         return False
     expected = dict(expected_meta)
-    expected["artifact_fingerprint"] = recorded
+    expected["artifact"] = meta["artifact"]
     return meta == expected
 
 
 def _write_stage_meta(artifact_path, meta):
     meta_path = _artifact_meta_path(artifact_path)
     payload = dict(meta)
-    payload["artifact_fingerprint"] = _artifact_fingerprint(artifact_path)
+    payload["artifact"] = _artifact_identity(artifact_path)
     meta_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -94,7 +100,7 @@ def _write_mimo_overview_status(
         "mimo_video_overview.status.json",
         {
             "stage": "mimo_video_overview",
-            "enabled": bool(CONFIG.get("mimo_video_overview", False))
+            "enabled": bool(CONFIG["mimo_video_overview"])
             if enabled is None
             else bool(enabled),
             "status": status,
@@ -117,23 +123,19 @@ def _merge_overview_into_scenes(scenes, overview_path):
     `frame_facts` is untouched, `assess_understanding_substrate` (which grades on frame_facts +
     ASR) cannot regress; richer descriptions can only help.
     """
-    overview = _load_json(overview_path) if Path(overview_path).exists() else None
-    if not isinstance(overview, dict):
+    if not Path(overview_path).exists():
         return scenes
+    overview = _load_json(overview_path)
     by_scene = {}
-    for chunk in overview.get("chunks") or []:
-        if not isinstance(chunk, dict):
-            continue
-        content = str(chunk.get("content", "")).strip()
-        if content and _is_mimo_chunk_usable(content):
-            by_scene.setdefault(chunk.get("scene_id"), []).append(content)
+    for chunk in overview["chunks"]:
+        content = chunk["content"].strip()
+        if _is_mimo_chunk_usable(content):
+            by_scene.setdefault(chunk["scene_id"], []).append(content)
     if not by_scene:
         return scenes
     enriched = 0
-    for scene in scenes or []:
-        if not isinstance(scene, dict):
-            continue
-        contents = by_scene.get(scene.get("scene_id"))
+    for scene in scenes:
+        contents = by_scene.get(scene["scene_id"])
         if not contents:
             continue
         scene.setdefault("frame_description", scene.get("description", ""))
@@ -185,7 +187,7 @@ def _scene_cache_payload(video_path):
     return {
         "schema_version": 1,
         "stage": "scenes",
-        "source_video_fingerprint": file_fingerprint(video_path),
+        "inputs": {"video": _video_input(video_path)},
         "settings": {
             "scene_threshold": CONFIG.get("scene_threshold"),
             "scene_junk_filter": CONFIG.get("scene_junk_filter"),
@@ -201,7 +203,7 @@ def _asr_cache_payload(video_path, *, skip_asr=False):
     return {
         "schema_version": 1,
         "stage": "asr",
-        "source_video_fingerprint": file_fingerprint(video_path),
+        "inputs": {"video": _video_input(video_path)},
         "settings": {
             "skip_asr": bool(skip_asr),
             "mimo_asr_api_key_present": bool(CONFIG.get("mimo_asr_api_key")),
@@ -238,8 +240,10 @@ def _silence_cache_payload(video_path, asr_json):
     return {
         "schema_version": 1,
         "stage": "silence",
-        "source_video_fingerprint": file_fingerprint(video_path),
-        "asr_result_fingerprint": _artifact_fingerprint(asr_json),
+        "inputs": {
+            "video": _video_input(video_path),
+            "asr_result": _artifact_identity(asr_json),
+        },
         "asr_meta": _load_json(_artifact_meta_path(asr_json))
         if _artifact_meta_path(asr_json).exists()
         else None,
@@ -259,7 +263,8 @@ def _silence_cache_payload(video_path, asr_json):
     }
 
 
-def _vlm_prompt_fingerprint():
+def _vlm_prompt_payload():
+    """The exact prompt/context text the VLM stage sends; compared by equality."""
     prompt = load_prompt("VLM_DEPTH_PROMPT")
     if not prompt:
         prompt = (
@@ -270,33 +275,28 @@ def _vlm_prompt_fingerprint():
     context = CONFIG.get("context_info", "")
     if context:
         prompt = f"已知信息：{context}\n\n{prompt}"
-    return {
-        "prompt_text_fingerprint": _text_fingerprint(prompt),
-        "context_info_fingerprint": _text_fingerprint(context),
-    }
-
-
-def _text_fingerprint(value):
-    return hashlib.md5(str(value or "").encode("utf-8")).hexdigest()
+    return {"prompt_text": prompt, "context_info": context}
 
 
 def _vlm_cache_payload(video_path, work_dir, scenes_json, frames):
     return {
         "schema_version": 1,
         "stage": "vlm",
-        "source_video_fingerprint": file_fingerprint(video_path),
-        "scenes_fingerprint": _artifact_fingerprint(scenes_json),
+        "inputs": {
+            "video": _video_input(video_path),
+            "scenes": _artifact_identity(scenes_json),
+            "background_research": _artifact_identity(
+                Path(work_dir) / "background_research.json"
+            ),
+        },
         "frames": _frame_cache_payload(video_path, CONFIG.get("fps"), frames),
-        "prompt": _vlm_prompt_fingerprint(),
+        "prompt": _vlm_prompt_payload(),
         "settings": {
             "fps": CONFIG.get("fps"),
             "vlm_model": CONFIG.get("vlm_model"),
             "api_url": CONFIG.get("api_url"),
             "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
             "mimo_media_resolution": CONFIG.get("mimo_media_resolution"),
-            "background_research_fingerprint": _artifact_fingerprint(
-                Path(work_dir) / "background_research.json"
-            ),
         },
     }
 
@@ -311,13 +311,10 @@ def _frame_cache_payload(video_path, fps, frames):
         # v2: frame number→time is (n-1)/fps, not n/fps. Bumping invalidates frames/VLM
         # artifacts produced under the old off-by-one so they are recomputed, not reused.
         "schema_version": FRAME_TIME_CONVENTION_VERSION,
-        "source_video_fingerprint": file_fingerprint(video_path),
+        "inputs": {"video": _video_input(video_path)},
         "fps": float(fps),
         "frame_count": len(frames),
         "frames": frame_names,
-        "frame_fingerprints": {
-            name: file_fingerprint(frame) for name, frame in zip(frame_names, frames)
-        },
     }
 
 

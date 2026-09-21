@@ -83,9 +83,10 @@ def windowed_volume_keyframes(keyframes, seg_start_s, seg_end_s, default_gain, n
 
 
 def clip_from_segment(segment):
-    scale = segment.get("scale") if isinstance(segment.get("scale"), dict) else {}
-    position = segment.get("position") if isinstance(segment.get("position"), dict) else {}
-    flip = segment.get("flip") if isinstance(segment.get("flip"), dict) else {}
+    """Map optional authoring transforms (validated as objects by the timeline contract)."""
+    scale = segment.get("scale", {})
+    position = segment.get("position", {})
+    flip = segment.get("flip", {})
     return {
         "alpha": round(float(segment.get("opacity", 1.0)), 4),
         "flip": {
@@ -237,17 +238,12 @@ RESOURCE_TRACKS = {
 
 
 def _resource_material(segment, kind, new_id):
-    raw = segment.get("material")
+    """The contract guarantees exactly one of material / resource_config (resolved package)."""
     config = segment.get("resource_config")
-    if raw is not None and config is not None:
-        raise ValueError(f"{kind} segment must use either material or resource_config, not both")
-    if config is not None:
-        if not isinstance(config, dict):
-            raise ValueError(f"{kind} resource_config must be an object")
-        raw = config.get("main_config")
-        if not isinstance(raw, dict):
-            raise ValueError(f"{kind} resource_config.main_config must be an object")
-        raw = deepcopy(raw)
+    if config is None:
+        raw = deepcopy(segment["material"])
+    else:
+        raw = deepcopy(config["main_config"])
         resource_id = config.get("resource_id")
         if resource_id is not None:
             raw.setdefault("resource_id", resource_id)
@@ -257,10 +253,6 @@ def _resource_material(segment, kind, new_id):
         if kind == "sticker" and cover_img:
             raw["icon_url"] = cover_img
             raw["preview_cover_url"] = cover_img
-    elif not isinstance(raw, dict):
-        raise ValueError(f"{kind} segment requires material or resource_config")
-    else:
-        raw = deepcopy(raw)
     raw["id"] = new_id()
     return raw
 
@@ -269,7 +261,7 @@ def build_resource_track(ctx, timeline_track):
     kind = timeline_track["kind"]
     materials_key = RESOURCE_TRACKS[kind]
     track_name = timeline_track.get("name", kind)
-    for item in timeline_track.get("segments", []):
+    for item in timeline_track["segments"]:
         ts, te = float(item["timeline_start"]), float(item["timeline_end"])
         duration_us = us(te - ts)
         authored_item = item
@@ -295,8 +287,6 @@ def build_resource_track(ctx, timeline_track):
             ctx.materials["effects"].extend(subordinate_effects)
         seg = base_segment(material["id"], us(ts), duration_us, 1.0, [], ctx.new_id)
         speed_value = float(item.get("speed", 1.0))
-        if speed_value <= 0:
-            raise ValueError(f"{kind} segment speed must be greater than 0")
         seg["source_timerange"] = timerange(0, round(duration_us * speed_value))
         seg["track_render_index"] = 0
         seg["extra_material_refs"] = []
@@ -310,8 +300,6 @@ def build_resource_track(ctx, timeline_track):
 
 
 def _attachment_material(spec, kind, new_id):
-    if not isinstance(spec, dict):
-        raise ValueError(f"video {kind} must be an object")
     material = deepcopy(spec)
     config = material.pop("main_config", None)
     resources = material.pop("resources", None)
@@ -400,18 +388,14 @@ def _track_object(ctx, name, track_type, segments, flag):
 
 def build_compound_video(ctx, clip, material, foreground_segment, track_name, ts, te):
     """Build duo-video's nested green-screen/compound draft structure."""
-    background_spec = clip.get("green_background")
-    chroma_spec = _resolve_attachment_spec(ctx, clip.get("chroma"), "chroma")
-    if not isinstance(background_spec, dict) or not isinstance(chroma_spec, dict):
-        raise ValueError("compound green-screen clips require green_background and chroma objects")
+    background_spec = clip["green_background"]
+    chroma_spec = _resolve_attachment_spec(ctx, clip["chroma"], "chroma")
 
     duration_us = us(te - ts)
-    full_material_duration_us = int(material.get("duration") or duration_us)
+    full_material_duration_us = material["duration"]
     outer_source_timerange = deepcopy(foreground_segment["source_timerange"])
     outer_target_timerange = deepcopy(foreground_segment["target_timerange"])
-    background_path = background_spec.get("source_path")
-    if not isinstance(background_path, str) or not background_path:
-        raise ValueError("green_background.source_path must be a non-empty string")
+    background_path = background_spec["source_path"]
 
     background_id = ctx.new_id()
     background = template("video")
@@ -495,20 +479,21 @@ def build_compound_video(ctx, clip, material, foreground_segment, track_name, ts
 
 def build_video_track(ctx, timeline_track):
     track_name = timeline_track.get("name", "video")
-    for clip in timeline_track.get("clips", []):
+    for clip in timeline_track["clips"]:
         ts, te = float(clip["timeline_start"]), float(clip["timeline_end"])
         ss, se = float(clip["source_start"]), float(clip["source_end"])
         path = clip["source_path"]
         speed_value = float(clip.get("speed", 1.0))
-        if speed_value <= 0:
-            raise ValueError("video clip speed must be greater than 0")
         reverse = bool(clip.get("reverse", False))
         if reverse:
-            reverse_path = clip.get("reverse_path")
-            if not isinstance(reverse_path, str) or not reverse_path:
+            # The contract allows omitting reverse_path so export_timeline_to_jianying
+            # can generate it; building directly from such a clip is an authoring error.
+            if "reverse_path" not in clip:
                 raise ValueError("reverse video clips require a local reverse_path")
-            path = reverse_path
-        src_dur_us, width, height = ctx.media_duration(path, us(se))
+            path = clip["reverse_path"]
+        src_dur_us, width, height = ctx.probe(path)
+        if src_dur_us <= 0:
+            raise ValueError(f"JianYing video source has no probed duration: {path}")
         mat_id = ctx.new_id()
         material = template("video")
         material.update({
@@ -546,17 +531,17 @@ def build_video_track(ctx, timeline_track):
 def build_audio_track(ctx, timeline_track):
     role = timeline_track.get("role", timeline_track.get("name", "audio"))
     track_name = timeline_track.get("name", role)
-    for segment in timeline_track.get("segments", []):
+    for segment in timeline_track["segments"]:
         ts, te = float(segment["timeline_start"]), float(segment["timeline_end"])
         path = segment["source_path"]
-        mat_dur_us, _width, _height = ctx.media_duration(path, us(te - ts))
+        mat_dur_us, _width, _height = ctx.probe(path)
+        if mat_dur_us <= 0:
+            raise ValueError(f"JianYing audio source has no probed duration: {path}")
         want_us = us(te - ts)
         speed_value = float(segment.get("speed", 1.0))
-        if speed_value <= 0:
-            raise ValueError("audio segment speed must be greater than 0")
         place_us = want_us
         required_source_us = int(round(want_us * speed_value))
-        if mat_dur_us and required_source_us > mat_dur_us:
+        if required_source_us > mat_dur_us:
             if role == "bgm" and timeline_track.get("loop"):
                 place_us = want_us
             else:
@@ -569,14 +554,14 @@ def build_audio_track(ctx, timeline_track):
         mat_id = ctx.new_id()
         material = template("audio")
         material.update({
-            "duration": int(mat_dur_us or want_us),
+            "duration": int(mat_dur_us),
             "id": mat_id,
             "path": path,
         })
         ctx.materials["audios"].append(material)
         keyframes = volume_keyframes(segment.get("volume_keyframes"), ts, ctx.new_id)
         volume = segment.get("gain", 1.0) if not keyframes else 1.0
-        if role == "bgm" and timeline_track.get("loop") and mat_dur_us and required_source_us > mat_dur_us:
+        if role == "bgm" and timeline_track.get("loop") and required_source_us > mat_dur_us:
             cursor = 0
             while cursor < want_us:
                 piece = min(int(mat_dur_us / speed_value), want_us - cursor)
@@ -613,9 +598,9 @@ def build_audio_track(ctx, timeline_track):
 def build_text_track(ctx, timeline_track):
     track_name = timeline_track.get("name", "text")
     track_kind = "subtitle" if track_name == "subtitle" else "text"
-    for segment in timeline_track.get("segments", []):
+    for segment in timeline_track["segments"]:
         ts, te = float(segment["timeline_start"]), float(segment["timeline_end"])
-        text = segment.get("text", "")
+        text = segment["text"]
         mat_id = ctx.new_id()
         authored_style = dict(ctx.style_presets.get(str(segment.get("style_id")), {}))
         authored_style.update(segment.get("style") or {})
@@ -691,11 +676,11 @@ def build_text_track(ctx, timeline_track):
 def build_image_track(ctx, timeline_track):
     """Build local image overlays as JianYing photo materials on video tracks."""
     track_name = timeline_track.get("name", "image")
-    for segment in timeline_track.get("segments", []):
+    for segment in timeline_track["segments"]:
         ts, te = float(segment["timeline_start"]), float(segment["timeline_end"])
         duration_us = us(te - ts)
         path = segment["source_path"]
-        _ignored_duration, width, height = ctx.media_duration(path, duration_us)
+        _still_image_duration, width, height = ctx.probe(path)
         mat_id = ctx.new_id()
         material = template("video")
         material.update({
@@ -710,8 +695,6 @@ def build_image_track(ctx, timeline_track):
         ctx.materials["videos"].append(material)
         seg = base_segment(mat_id, us(ts), duration_us, 1.0, [], ctx.new_id)
         speed_value = float(segment.get("speed", 1.0))
-        if speed_value <= 0:
-            raise ValueError("image segment speed must be greater than 0")
         seg["source_timerange"] = timerange(0, round(duration_us * speed_value))
         seg["clip"] = clip_from_segment(segment)
         seg["speed"] = speed_value
@@ -727,8 +710,8 @@ def build_image_track(ctx, timeline_track):
 
 
 def build_timeline_track(ctx, timeline_track):
-    kind = timeline_track.get("kind")
-    if kind in ("audio", "text") and not timeline_track.get("segments"):
+    kind = timeline_track["kind"]
+    if kind in ("audio", "text") and not timeline_track["segments"]:
         return
     if kind == "video":
         build_video_track(ctx, timeline_track)

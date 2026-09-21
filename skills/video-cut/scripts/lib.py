@@ -56,6 +56,12 @@ CONFIG = {
 }
 
 
+def file_identity(path):
+    """{size, mtime_ns} — the cache identity of an input file (no content read)."""
+    st = os.stat(os.fspath(path))
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
 def run_cmd(cmd, **kwargs):
     """Run a command list and return the CompletedProcess (stdout/stderr captured)."""
     display = " ".join(

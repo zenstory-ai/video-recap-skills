@@ -1,9 +1,9 @@
 """Fail-closed approved narration policy and current-metadata lifecycle helpers."""
 
-import hashlib
 import json
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -84,15 +84,18 @@ def enforce_duration(index, segment, authored_text, spoken_text, audio_duration,
 
 
 def archive_current_meta(meta_path):
-    """Atomically move a current meta file into content-addressed history."""
+    """Atomically move a current meta file into timestamp-named history."""
     path = Path(meta_path)
     if not path.is_file():
         return None
-    content = path.read_bytes()
-    digest = hashlib.sha256(content).hexdigest()
     history_dir = path.parent / "tts_meta.history"
     history_dir.mkdir(exist_ok=True)
-    archived = history_dir / f"{digest}.json"
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+    archived = history_dir / f"{stamp}.json"
+    counter = 0
+    while archived.exists():
+        counter += 1
+        archived = history_dir / f"{stamp}-{counter}.json"
     os.replace(path, archived)
     return archived
 

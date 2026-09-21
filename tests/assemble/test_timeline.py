@@ -42,6 +42,7 @@ def test_build_timeline_uses_explicit_subtitle_segments_for_text_track():
                 "timeline_end": 2.0,
                 "text": "他说完了。",
                 "overlaps_speech": True,
+                "gain": 1.0,
             }
         ],
         subtitle_segments=[
@@ -81,7 +82,7 @@ def test_build_timeline_subtitle_segments_skip_invalid_entries():
     ]
 
 
-def test_build_timeline_v2_normalizes_local_image_overlays():
+def test_build_timeline_v2_passes_local_image_overlays_through():
     tl = build_timeline(
         {"width": 1280, "height": 720, "fps": 30},
         5.0,
@@ -98,12 +99,7 @@ def test_build_timeline_v2_normalizes_local_image_overlays():
                 "position": {"x": 0.2, "y": -0.3},
                 "flip": {"horizontal": True},
             },
-            {"source_path": "", "timeline_start": 0, "timeline_end": 2},
-            {"source_path": "/bad.png", "timeline_start": 3, "timeline_end": 2},
-            {"source_path": "/missing-time.png", "timeline_start": 1},
-            {"source_path": "/malformed.png", "timeline_start": "soon", "timeline_end": 2},
-            {"source_path": "/before.png", "timeline_start": -3, "timeline_end": -1},
-            {"source_path": "/after.png", "timeline_start": 6, "timeline_end": 8},
+            {"source_path": "/plain.png", "timeline_start": 4, "timeline_end": 5},
         ],
     )
 
@@ -114,45 +110,25 @@ def test_build_timeline_v2_normalizes_local_image_overlays():
             "timeline_start": 1.0,
             "timeline_end": 4.0,
             "opacity": 0.8,
-            "rotation_degrees": 12.0,
+            "rotation_degrees": 12,
             "scale": {"x": 0.5, "y": 0.6},
             "position": {"x": 0.2, "y": -0.3},
-            "flip": {"horizontal": True, "vertical": False},
-        }
+            "flip": {"horizontal": True},
+        },
+        {"source_path": "/plain.png", "timeline_start": 4.0, "timeline_end": 5.0},
     ]
 
 
-def test_build_timeline_clips_image_overlays_to_output_range():
-    tl = build_timeline(
-        {"width": 1280, "height": 720, "fps": 30},
-        5.0,
-        [],
-        [],
-        image_segments=[
-            {
-                "source_path": "/full-card.png",
-                "timeline_start": -1,
-                "timeline_end": 7,
-                "opacity": 2,
-                "scale": "invalid",
-                "position": None,
-                "flip": [],
-            }
-        ],
-    )
-
-    assert _track(tl, "image", "image")["segments"] == [
-        {
-            "source_path": "/full-card.png",
-            "timeline_start": 0.0,
-            "timeline_end": 5.0,
-            "opacity": 1.0,
-            "rotation_degrees": 0.0,
-            "scale": {"x": 1.0, "y": 1.0},
-            "position": {"x": 0.0, "y": 0.0},
-            "flip": {"horizontal": False, "vertical": False},
-        }
-    ]
+def test_build_timeline_rejects_malformed_image_overlay():
+    # No consumer-side tolerance: a segment without its span is an authoring error.
+    with pytest.raises(KeyError):
+        build_timeline(
+            {"width": 1280, "height": 720, "fps": 30},
+            5.0,
+            [],
+            [],
+            image_segments=[{"source_path": "/missing-time.png", "timeline_start": 1}],
+        )
 
 
 def test_build_timeline_preserves_jianying_authoring_extensions():
@@ -351,10 +327,11 @@ def test_build_timeline_has_all_tracks():
             "timeline_end": 4.0,
             "text": "hello",
             "overlaps_speech": True,
+            "gain": 1.0,
         }
     ]
-    bgm = {"source_path": "/bgm.mp3", "volume": 0.18, "ducking_volume": 0.1}
-    ducking = {"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25}
+    bgm = {"source_path": "/bgm.mp3", "volume": 0.18, "ducking_volume": 0.1, "fade": 0.25}
+    ducking = {"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25, "bridge": 0.5}
     tl = build_timeline(canvas, 10.0, video, narr, bgm=bgm, ducking=ducking)
 
     kinds = [t["kind"] for t in tl["tracks"]]
@@ -387,6 +364,8 @@ def test_build_timeline_without_ducking_is_flat():
                 "timeline_start": 0.0,
                 "timeline_end": 2.0,
                 "text": "t",
+                "overlaps_speech": True,
+                "gain": 1.0,
             }
         ],
         bgm=None,
@@ -436,6 +415,8 @@ def test_timeline_round_trips(tmp_path):
                 "timeline_start": 0.5,
                 "timeline_end": 2.0,
                 "text": "x",
+                "overlaps_speech": True,
+                "gain": 1.0,
             }
         ],
     )
@@ -465,9 +446,10 @@ def test_build_timeline_uses_quiet_ducking_gain_for_quiet_segments():
                 "timeline_end": 4.0,
                 "text": "quiet",
                 "overlaps_speech": False,
+                "gain": 1.0,
             }
         ],
-        ducking={"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25},
+        ducking={"idle": 0.85, "speech": 0.2, "quiet": 0.12, "fade": 0.25, "bridge": 0.5},
     )
 
     keyframes = tl["tracks"][0]["clips"][0]["audio"]["volume_keyframes"]

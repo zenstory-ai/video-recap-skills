@@ -15,7 +15,6 @@ written into scenes/ASR/VLM/summary JSON.
 """
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import re
@@ -68,80 +67,11 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-_FILE_FINGERPRINT_MEMO = {}
-
-
-def _file_identity(path):
-    """(device, inode, size, mtime_ns) — changes whenever the bytes could have changed."""
+def file_identity(path: str | Path) -> dict:
+    """``{size, mtime_ns}`` of a file: the identity recap records and compares for a source
+    video or adopted artifact. A file rewritten in place gets a new mtime_ns."""
     st = os.stat(os.fspath(path))
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
-
-
-def file_fingerprint(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
-    """Return a full-content fingerprint for cache-correct identity checks.
-
-    The digest covers CONTENT only — never the path or mtime — so a copied video or
-    artifact is still recognised as the same asset, while any byte change invalidates
-    the cache even if timestamps, size, head, or tail bytes are misleading.
-
-    Identity metadata is used ONLY to memoize within a single process. One understanding
-    run fingerprints the same source video 8-10 times and the whole extracted frame set
-    2-3 times; on a 40-minute video at fps=1 that is gigabytes of redundant reads before
-    any real work starts. A file rewritten in place gets a new (size, mtime_ns) and is
-    re-hashed, so the memo can never serve a stale digest.
-    """
-    key = _file_identity(path)
-    memoized = _FILE_FINGERPRINT_MEMO.get(key)
-    if memoized is not None:
-        return memoized
-    h = hashlib.sha256()
-    with open(os.fspath(path), "rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    digest = h.hexdigest()
-    _FILE_FINGERPRINT_MEMO[key] = digest
-    return digest
-
-
-def stable_json_dumps(value) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-
-
-def settings_fingerprint(settings) -> str:
-    return hashlib.sha256(stable_json_dumps(settings).encode("utf-8")).hexdigest()
-
-
-def source_id_from_fingerprint(fingerprint: str) -> str:
-    return f"src_{fingerprint[:12]}"
-
-
-def assign_source_ids(sources: list[dict]) -> list[dict]:
-    """Assign deterministic source_id values to manifest source records.
-
-    Base id is ``src_<sha256[:12]>``. When the same fingerprint appears more than
-    once in one project, the first keeps the base id and later distinct paths get
-    ``_<pathhash6>`` suffixes. Input order does not affect the id for unique
-    fingerprints, and duplicate suffixes are derived from resolved path text.
-    """
-    seen: dict[str, set[str]] = {}
-    assigned = []
-    for raw in sources:
-        item = dict(raw)
-        fp = item["source_video_fingerprint"]
-        base = source_id_from_fingerprint(fp)
-        path = str(Path(item["source_path"]).resolve())
-        used = seen.setdefault(fp, set())
-        sid = base
-        if used:
-            sid = f"{base}_{hashlib.sha256(path.encode('utf-8')).hexdigest()[:6]}"
-        # Avoid accidental path-hash collisions within one manifest.
-        while sid in used:
-            sid = f"{base}_{hashlib.sha256((path + sid).encode('utf-8')).hexdigest()[:6]}"
-        used.add(sid)
-        item["source_id"] = sid
-        item["source_path"] = path
-        assigned.append(item)
-    return assigned
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 
 
 def _slug(text: str, max_len: int = 48) -> str:
@@ -150,8 +80,43 @@ def _slug(text: str, max_len: int = 48) -> str:
     return (raw or "material")[:max_len].strip("-._") or "material"
 
 
-def material_id_for(source_path: str | Path, source_fingerprint: str) -> str:
-    return f"{_slug(str(source_path))}-{source_fingerprint[:12]}"
+def _id_stem(source_path: str | Path, max_len: int = 32) -> str:
+    raw = re.sub(r"[^a-z0-9]+", "-", Path(source_path).stem.lower()).strip("-")
+    return (raw or "source")[:max_len].strip("-") or "source"
+
+
+def source_id_for(source_path: str | Path) -> str:
+    """``src_<stem>_<size>``: readable, stable across runs, and distinct for a different cut
+    of the same title (the size changes)."""
+    return f"src_{_id_stem(source_path)}_{os.stat(os.fspath(source_path)).st_size}"
+
+
+def assign_source_ids(sources: list[dict]) -> list[dict]:
+    """Assign deterministic source_id values to manifest source records.
+
+    Base id is ``source_id_for(source_path)``. When two records in one project share a
+    base id, the first keeps it and later ones get ``_2``, ``_3``… suffixes in input order.
+    """
+    used: set[str] = set()
+    assigned = []
+    for raw in sources:
+        item = dict(raw)
+        path = str(Path(item["source_path"]).resolve())
+        base = source_id_for(path)
+        sid = base
+        suffix = 2
+        while sid in used:
+            sid = f"{base}_{suffix}"
+            suffix += 1
+        used.add(sid)
+        item["source_id"] = sid
+        item["source_path"] = path
+        assigned.append(item)
+    return assigned
+
+
+def material_id_for(source_path: str | Path, source_identity: dict) -> str:
+    return f"{_slug(str(source_path))}-{source_identity['size']}"
 
 
 def material_dir(library_dir: str | Path, material_id: str) -> Path:
@@ -199,13 +164,12 @@ def summarize_work_dir(work_dir: str | Path, *, source_name: str = "") -> dict:
     tags = []
     index_path = work / "understanding_index.json"
     if index_path.exists():
+        # consolidate.py writes {characters, relationships, plot_points, entities,
+        # research_glossary} and no prose summary. The list ITEMS are MiMo output that
+        # consolidate only list-checks, so their shape is still tolerated here.
         index = load_json(index_path)
-        for key in ("summary", "story_summary", "overall_summary", "one_sentence"):
-            if index.get(key):
-                summary = _redact_text(str(index[key]))[:600]
-                break
-        for key in ("characters", "entities", "keywords", "tags"):
-            for item in index.get(key, [])[:12]:
+        for key in ("characters", "entities"):
+            for item in index[key][:12]:
                 text = item.get("name", "") if isinstance(item, dict) else item
                 tags.append(_redact_text(str(text))[:80])
     for name, label in (("scenes.json", "scenes"), ("asr_result.json", "asr")):
@@ -229,8 +193,8 @@ def write_material_md(path: Path, metadata: dict, summary: str, tags: list[str])
 
 - material_id: `{metadata['material_id']}`
 - source: `{metadata['source_path']}`
-- source_fingerprint: `{metadata['source_video_fingerprint']}`
-- settings_fingerprint: `{metadata['settings_fingerprint']}`
+- source_identity: `{json.dumps(metadata['source_video_identity'], sort_keys=True)}`
+- settings: `{json.dumps(metadata['settings'], ensure_ascii=False, sort_keys=True)}`
 - updated_at: `{metadata['updated_at']}`
 - tags: {tags_text}
 
@@ -254,8 +218,11 @@ def _read_material_metadata(path: Path) -> dict | None:
 def _material_cache_entry(path: Path) -> dict | None:
     data = _read_material_metadata(path)
     if not data or not all(data.get(key) for key in (
-        "source_video_fingerprint", "settings_fingerprint", "updated_at", "material_id",
+        "source_path", "updated_at", "material_id",
     )) or not isinstance(data.get("artifacts"), list):
+        return None
+    if not isinstance(data.get("source_video_identity"), dict) \
+            or not isinstance(data.get("settings"), dict):
         return None
     return data
 
@@ -264,8 +231,8 @@ def save_material(
     library_dir: str | Path,
     work_dir: str | Path,
     source_path: str | Path,
-    source_fingerprint: str,
-    settings_fp: str,
+    source_identity: dict,
+    settings: dict,
     *,
     duration: float | None = None,
     source_id: str | None = None,
@@ -274,7 +241,7 @@ def save_material(
 ) -> dict:
     """Persist small reusable analysis artifacts into the filesystem library."""
     lib = Path(library_dir)
-    mid = material_id or material_id_for(source_path, source_fingerprint)
+    mid = material_id or material_id_for(source_path, source_identity)
     dest = material_dir(lib, mid)
     artifacts_dir = dest / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
@@ -291,7 +258,7 @@ def save_material(
     for src in sources:
         dst = artifacts_dir / src.name
         copy_artifact_redacted(src, dst)
-        copied.append({"name": src.name, "path": f"artifacts/{src.name}", "sha256": file_fingerprint(dst)})
+        copied.append({"name": src.name, "path": f"artifacts/{src.name}", "bytes": dst.stat().st_size})
 
     meta_path = dest / "material.json"
     previous = _read_material_metadata(meta_path)
@@ -306,9 +273,9 @@ def save_material(
         "source_id": source_id,
         "source_name": source_path.name,
         "source_path": str(source_path),
-        "source_video_fingerprint": source_fingerprint,
+        "source_video_identity": dict(source_identity),
         "duration": duration,
-        "settings_fingerprint": settings_fp,
+        "settings": dict(settings),
         "artifacts": copied,
         "created_at": created_at,
         "updated_at": now,
@@ -322,8 +289,7 @@ def save_material(
         "material_id": mid,
         "source_name": metadata["source_name"],
         "source_path": metadata["source_path"],
-        "source_video_fingerprint": source_fingerprint,
-        "settings_fingerprint": settings_fp,
+        "source_video_identity": dict(source_identity),
         "summary": summary_info["summary"],
         "tags": summary_info["tags"],
         "material_dir": str(dest),
@@ -335,14 +301,22 @@ def save_material(
     return metadata
 
 
-def find_material_by_fingerprint(library_dir: str | Path, source_fingerprint: str) -> dict | None:
+def find_material_by_source(
+    library_dir: str | Path, source_path: str | Path, source_identity: dict
+) -> dict | None:
+    """The newest material saved for this exact source file (resolved path + identity)."""
     root = Path(library_dir) / "materials"
     if not root.exists():
         return None
+    resolved = str(Path(source_path).resolve())
     candidates = []
     for meta_path in root.glob("*/material.json"):
         data = _material_cache_entry(meta_path)
-        if data is not None and data["source_video_fingerprint"] == source_fingerprint:
+        if (
+            data is not None
+            and data["source_path"] == resolved
+            and data["source_video_identity"] == source_identity
+        ):
             data["material_dir"] = str(meta_path.parent)
             candidates.append(data)
     if not candidates:
@@ -357,13 +331,14 @@ def restore_material(
     library_dir: str | Path,
     work_dir: str | Path,
     *,
-    source_fingerprint: str,
-    settings_fp: str,
+    source_path: str | Path,
+    source_identity: dict,
+    settings: dict,
     material_id: str | None = None,
     overwrite: bool = True,
     prune_stale_allowed: bool = True,
 ) -> dict:
-    """Restore allowed artifacts when fingerprint/settings match.
+    """Restore allowed artifacts when source path, identity and settings all match.
 
     Returns a status dict and never partially restores on mismatch.
 
@@ -382,13 +357,14 @@ def restore_material(
             return {"restored": False, "reason": "material missing or invalid"}
         meta["material_dir"] = str(meta_path.parent)
     else:
-        meta = find_material_by_fingerprint(lib, source_fingerprint)
+        meta = find_material_by_source(lib, source_path, source_identity)
         if meta is None:
             return {"restored": False, "reason": "material not found"}
-    if meta["source_video_fingerprint"] != source_fingerprint:
-        return {"restored": False, "reason": "source fingerprint mismatch", "material_id": meta["material_id"]}
-    if meta["settings_fingerprint"] != settings_fp:
-        return {"restored": False, "reason": "settings fingerprint mismatch", "material_id": meta["material_id"]}
+    if meta["source_path"] != str(Path(source_path).resolve()) \
+            or meta["source_video_identity"] != source_identity:
+        return {"restored": False, "reason": "source identity mismatch", "material_id": meta["material_id"]}
+    if meta["settings"] != settings:
+        return {"restored": False, "reason": "settings mismatch", "material_id": meta["material_id"]}
 
     src_dir = Path(meta["material_dir"]) / "artifacts"
     if not src_dir.exists():
@@ -397,11 +373,7 @@ def restore_material(
     dest.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".material_restore_", dir=str(dest)) as tmp_name:
         tmp = Path(tmp_name)
-        staged = [
-            artifact["name"]
-            for artifact in meta["artifacts"]
-            if isinstance(artifact, dict) and artifact.get("name") in ALLOWED_ARTIFACTS
-        ]
+        staged = [artifact["name"] for artifact in meta["artifacts"]]  # save_material's own list
         if not staged or any(not (src_dir / name).is_file() for name in staged):
             return {"restored": False, "reason": "material artifacts missing", "material_id": meta["material_id"]}
         for name in staged:

@@ -22,12 +22,12 @@ import subtitle_track_binding
 import timeline_emit
 import visual_render
 import lib
-from assembly_settings import assembly_settings_fingerprint
+from assembly_settings import assembly_settings_payload
 from audio_mix import final_loudnorm_filter
 
 __all__ = [
     "assemble_video",
-    "assembly_settings_fingerprint",
+    "assembly_settings_payload",
     "final_loudnorm_filter",
     "main",
 ]
@@ -55,6 +55,8 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         raise RuntimeError("narration 当前不支持非零 audio_stream_index")
     if audio_mode == "source-mix" and tts_segments:
         raise RuntimeError("source-mix 与 TTS 解说不兼容")
+    if audio_mode != "narration" and tts_meta_path is not None:
+        raise RuntimeError(f"tts_meta 与 audio_mode {audio_mode} 不兼容")
     bgm_path = lib.CONFIG["bgm_path"]
     has_bgm = bool(bgm_path) and os.path.exists(bgm_path)
     if audio_mode == "source-mix" and bgm_path and not has_bgm:
@@ -362,17 +364,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
                 "-t", str(video_duration), str(output_path)]
     try:
-        if binding:
-            narration_binding.assert_current(binding)
-        if explicit_mix is not None:
-            audio_mix_binding.assert_current(explicit_mix)
         result = lib.run_cmd(cmd)
         if result.returncode != 0:
             raise RuntimeError(f"视频组装失败: {result.stderr}")
-        if binding:
-            narration_binding.assert_current(binding)
-        if explicit_mix is not None:
-            audio_mix_binding.assert_current(explicit_mix)
     finally:
         # 清理临时 filter 脚本（无论 ffmpeg 是否成功）
         if fc_script is not None:
@@ -469,10 +463,12 @@ def main():
     ap.add_argument("--export-jianying", action="store_true",
                     help="also export an OPTIONAL 剪映/JianYing draft from timeline.json after rendering")
     ap.add_argument("--jianying-out", default=None, help="parent dir for the 剪映 draft (default: work-dir)")
-    ap.add_argument("--jianying-bundle-media", action="store_true",
-                    help="copy media into the 剪映 draft folder (default on; portable/self-contained)")
-    ap.add_argument("--jianying-no-bundle-media", action="store_true",
-                    help="do NOT copy media into the draft — reference in place (only if 剪映 can read those paths; macOS 剪映 usually cannot)")
+    bundle_group = ap.add_mutually_exclusive_group()
+    bundle_group.add_argument("--jianying-bundle-media", dest="jianying_bundle_media", action="store_true",
+                              help="copy media into the 剪映 draft folder (default on; portable/self-contained)")
+    bundle_group.add_argument("--jianying-no-bundle-media", dest="jianying_bundle_media", action="store_false",
+                              help="do NOT copy media into the draft — reference in place (only if 剪映 can read those paths; macOS 剪映 usually cannot)")
+    ap.set_defaults(jianying_bundle_media=None)
     args = ap.parse_args()
     work_dir = Path(args.work_dir)
     if args.burn_subtitles is not None:
@@ -506,54 +502,30 @@ def main():
         lib.CONFIG["source_video_explicit"] = False
     if args.export_jianying:
         lib.CONFIG["export_jianying"] = True
-    if args.jianying_bundle_media:
-        lib.CONFIG["jianying_bundle_media"] = True
-    if args.jianying_no_bundle_media:
-        lib.CONFIG["jianying_bundle_media"] = False
+    if args.jianying_bundle_media is not None:
+        lib.CONFIG["jianying_bundle_media"] = args.jianying_bundle_media
     render_preflight._preflight_burn_subtitles()  # fail before the render if burn-in is on but ffmpeg lacks libass
-    if args.audio_stream_index < 0:
-        ap.error("--audio-stream-index must be non-negative")
-    if args.audio_mode != "narration" and args.tts_meta is not None:
-        ap.error(f"--tts-meta is incompatible with --audio-mode {args.audio_mode}")
-    if args.audio_mode != "narration" and args.narration_adoption is not None:
-        ap.error(f"--narration-adoption is incompatible with --audio-mode {args.audio_mode}")
-    if args.narration_adoption is not None and args.tts_meta is None:
-        ap.error("--narration-adoption requires explicit --tts-meta")
-    if args.audio_mix_adoption is not None and (
-        args.audio_mode != "narration" or args.narration_adoption is None
-        or args.tts_meta is None
-    ):
-        ap.error("--audio-mix-adoption requires narration mode, --narration-adoption and --tts-meta")
-    tts_meta = None
+    # Argument combinations are validated once, by assemble_video.
+    tts_meta = Path(args.tts_meta) if args.tts_meta else None
     tts_segments = []
     if args.audio_mode == "narration":
-        tts_meta = Path(args.tts_meta) if args.tts_meta else work_dir / "tts_meta.json"
+        tts_meta = tts_meta or work_dir / "tts_meta.json"
         tts_segments = json.loads(tts_meta.read_text(encoding="utf-8"))["segments"]
     stem = args.recap_stem or Path(args.video).stem
     base = Path(args.output_dir) if args.output_dir else work_dir.parent
     final_output = assembly_contract._resolve_final_output(base, stem)
-    if args.audio_mix_adoption is not None:
-        audio_mix_binding.load_adoption(
-            args.audio_mix_adoption, input_video=args.video,
-            narration_adoption_path=args.narration_adoption, tts_segments=tts_segments,
-        )
-        if final_output.exists():
-            ap.error("explicit audio mix requires a new final delivery path")
+    if args.audio_mix_adoption is not None and final_output.exists():
+        ap.error("explicit audio mix requires a new final delivery path")
     delivery_stage = None
     owned_alias = None
     output_path = work_dir / "output.mp4"
     try:
-        if (args.audio_mode == "narration" and args.audio_stream_index == 0
-                and args.narration_adoption is None and args.audio_mix_adoption is None):
-            # Preserve the legacy CLI-to-API call shape for isolated skill consumers.
-            assemble_video(args.video, tts_segments, work_dir, output_path)
-        else:
-            assemble_video(
-                args.video, tts_segments, work_dir, output_path,
-                audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
-                narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
-                audio_mix_adoption_path=args.audio_mix_adoption,
-            )
+        assemble_video(
+            args.video, tts_segments, work_dir, output_path,
+            audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
+            narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
+            audio_mix_adoption_path=args.audio_mix_adoption,
+        )
         assembly_qc = artifacts._load_work_json(work_dir, constants.ASSEMBLY_QC)
         if assembly_qc["blocking"]:
             codes = ", ".join(assembly_qc["blocking_codes"])
@@ -588,7 +560,7 @@ def main():
             narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
             audio_mix_binding=_current_audio_mix_binding(work_dir, args.audio_mode),
             final_output=final_output,
-            settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
+            settings_payload=assembly_settings.assembly_settings_payload,
             audio_mode=args.audio_mode,
             audio_stream_index=args.audio_stream_index,
         )
@@ -601,16 +573,6 @@ def main():
             if (stat.st_dev, stat.st_ino) == owned_alias:
                 final_output.unlink()
         raise
-    manifest = assembly_contract._assembly_manifest_payload(
-        args.video, tts_segments, work_dir, output_path,
-        tts_meta_path=tts_meta,
-        narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
-        final_output=final_output,
-        settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
-        audio_mode=args.audio_mode,
-        audio_stream_index=args.audio_stream_index,
-    )
-    assembly_contract._write_assembly_manifest(work_dir, manifest)
     lib.log(f"组装完成: {final_output}")
 
     # OPTIONAL, decoupled: export a 剪映 draft from the timeline (lazy import; never

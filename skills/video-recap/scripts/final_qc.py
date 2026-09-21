@@ -40,10 +40,6 @@ def _load_fixture(value: Any) -> Any:
     return load_json(value)
 
 
-def fingerprint_file(path: Path) -> str | None:
-    return qc_contract.artifact_fingerprint(path) if path.is_file() else None
-
-
 def _resolve_in_work_dir(work_dir: Path, path: str | Path) -> Path:
     p = Path(path)
     return p if p.is_absolute() else work_dir / p
@@ -57,28 +53,21 @@ def _read_json_mapping(path: Path) -> Mapping[str, Any] | None:
     return data if isinstance(data, Mapping) else None
 
 
-def _candidate_final_outputs(work_dir: Path, final_output: str | Path | None) -> list[Path]:
-    candidates: list[Path] = []
-    if final_output is not None:
-        candidates.append(_resolve_in_work_dir(work_dir, final_output))
-    manifest_path = work_dir / "assembly_manifest.json"
-    if manifest_path.exists():
-        manifest = _read_json_mapping(manifest_path)
-        manifest_output = manifest.get("final_output") if manifest else None
-        if isinstance(manifest_output, str) and manifest_output:
-            candidates.append(_resolve_in_work_dir(work_dir, manifest_output))
-    candidates += [work_dir / name for name in ("output.mp4", "recap.mp4", "final.mp4")]
-    return list(dict.fromkeys(candidates))
+def _final_output_path(work_dir: Path, final_output: str | Path | None) -> Path | None:
+    """The rendered final output: the caller's path, else assembly_manifest.final_output
+    (video-assemble always writes it; output.mp4 is only the assembler's intermediate).
+    None when neither exists yet, which the report surfaces as a missing final output."""
+    if final_output is None:
+        manifest = work_dir / "assembly_manifest.json"
+        if not manifest.is_file():
+            return None
+        final_output = load_json(manifest)["final_output"]
+    return _resolve_in_work_dir(work_dir, final_output)
 
 
-def _select_final_output(work_dir: Path, final_output: str | Path | None) -> Path:
-    candidates = _candidate_final_outputs(work_dir, final_output)
-    if final_output is not None:
-        return candidates[0]
-    return next((path for path in candidates if path.is_file() and path.stat().st_size > 0), candidates[0])
-
-
-def _file_metadata(path: Path, work_dir: Path) -> dict[str, Any]:
+def _file_metadata(path: Path | None, work_dir: Path) -> dict[str, Any]:
+    if path is None:
+        return {"path": "(assembly_manifest.json missing)", "exists": False, "bytes": 0}
     try:
         display = path.relative_to(work_dir).as_posix()
     except ValueError:  # final outputs normally live next to work_dir, not inside it
@@ -88,7 +77,6 @@ def _file_metadata(path: Path, work_dir: Path) -> dict[str, Any]:
         "path": display,
         "exists": exists,
         "bytes": path.stat().st_size if exists else 0,
-        "fingerprint": fingerprint_file(path),
     }
 
 
@@ -107,13 +95,9 @@ def _artifact_summary(work_dir: Path, name: str) -> dict[str, Any]:
     return meta
 
 
-def _artifact_fingerprints(*paths: Path) -> dict[str, str]:
-    return {path.name: fp for path in paths if (fp := fingerprint_file(path))}
-
-
 def _finding(*, finding_id: str, code: str, message: str, category: str = "schema_invalid",
              stage: str = POST_RENDER_STAGE, source: Mapping[str, Any] | None = None,
-             evidence: Mapping[str, Any] | None = None, fingerprints: Mapping[str, Any] | None = None,
+             evidence: Mapping[str, Any] | None = None,
              next_action: str = "manual_review") -> dict[str, Any]:
     return qc_contract.build_finding(
         finding_id=finding_id,
@@ -128,7 +112,6 @@ def _finding(*, finding_id: str, code: str, message: str, category: str = "schem
         blocking=True,
         source=source,
         evidence=evidence,
-        artifact_fingerprints=fingerprints,
         next_action=next_action,
         model_used="local_deterministic_final_qc_v1",
     )
@@ -235,7 +218,7 @@ def _probe_fps(video_stream: Mapping[str, Any] | None) -> tuple[float | None, st
     ])
 
 
-def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[str, Any], fingerprints: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
     source = {"artifact": final_meta["path"]}
     video_stream = _first_video_stream(probe)
@@ -247,7 +230,6 @@ def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[st
             category="stream",
             source=source,
             evidence={"streams": probe.get("streams")},
-            fingerprints=fingerprints,
             next_action="rerender_final_output_with_video_stream",
         ))
 
@@ -260,7 +242,6 @@ def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[st
             category="duration",
             source=source,
             evidence={"duration": raw},
-            fingerprints=fingerprints,
             next_action="rerender_final_output_with_valid_duration",
         ))
 
@@ -272,7 +253,6 @@ def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[st
             category="stream",
             source=source,
             evidence={"video_stream": video_stream},
-            fingerprints=fingerprints,
             next_action="rerender_final_output_with_video_codec",
         ))
 
@@ -285,7 +265,6 @@ def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[st
             category="stream",
             source=source,
             evidence={"fps": raw, "video_stream": video_stream},
-            fingerprints=fingerprints,
             next_action="rerender_final_output_with_valid_fps",
         ))
     return findings
@@ -297,35 +276,13 @@ def _upstream_blockers(work_dir: Path, artifact_name: str) -> list[dict[str, Any
     if not path.exists():
         return []
     data = _read_json_mapping(path)
-    fp = fingerprint_file(path)
-    invalid = data is None
-    codes = data.get("blocking_codes") if data is not None else None
-    if not invalid and codes is None:
-        findings = data.get("findings")
-        invalid = not isinstance(findings, list) or any(
-            not isinstance(finding, Mapping)
-            or not isinstance(finding.get("blocking"), bool)
-            or not isinstance(finding.get("code"), str)
-            or not finding["code"]
-            for finding in findings or []
-        )
-        if not invalid:
-            codes = [finding["code"] for finding in findings if finding["blocking"]]
-    elif isinstance(codes, str):
-        codes = [codes]
-    elif not invalid and (
-        not isinstance(codes, list)
-        or any(not isinstance(code, str) or not code for code in codes)
-    ):
-        invalid = True
-    if invalid:
+    if data is None:  # unreadable upstream QC is itself a deterministic blocker
         return [_finding(
             finding_id=f"final-qc-invalid-upstream-{artifact_name}",
             code=f"upstream_{artifact_name.replace('.', '_')}_schema_invalid",
             message=f"{artifact_name} is not a valid deterministic QC report",
             source={"artifact": artifact_name},
             evidence={"schema_invalid": True},
-            fingerprints={artifact_name: fp},
             next_action="regenerate_upstream_qc",
         )]
     return [
@@ -334,18 +291,17 @@ def _upstream_blockers(work_dir: Path, artifact_name: str) -> list[dict[str, Any
             code=f"upstream_{artifact_name.replace('.', '_')}_{code}",
             message=f"{artifact_name} reported {code}",
             source={"artifact": artifact_name},
-            evidence={"upstream_code": code, "upstream_verdict": data.get("verdict")},
-            fingerprints={artifact_name: fp},
+            evidence={"upstream_code": code, "upstream_verdict": data["verdict"]},
             next_action="fix_upstream_qc_blocker",
         )
-        for idx, code in enumerate(codes)
+        for idx, code in enumerate(data["blocking_codes"])
     ]
 
 
 def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = None,
                      probe_fixture: Any = None, probe_runner: ProbeRunner | None = None) -> dict[str, Any]:
     root = Path(work_dir)
-    selected = _select_final_output(root, final_output)
+    selected = _final_output_path(root, final_output)
     probe = probe_error = None
     final_meta = _file_metadata(selected, root)
     if final_meta["exists"] and final_meta["bytes"] > 0:
@@ -353,7 +309,6 @@ def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = 
     return {
         "work_dir": str(root),
         "final_output": final_meta,
-        "final_output_candidates": [_file_metadata(p, root) for p in _candidate_final_outputs(root, final_output)],
         "artifacts": {name: _artifact_summary(root, name) for name in _COLLECT_ARTIFACTS},
         "probe": probe,
         "probe_error": probe_error,
@@ -366,11 +321,10 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
                    probe_fixture: Any = None, probe_runner: ProbeRunner | None = None,
                    decode_runner: Callable[[Path], tuple[bool | None, str | None]] | None = None) -> dict[str, Any]:
     root = Path(work_dir)
-    selected = _select_final_output(root, final_output)
+    selected = _final_output_path(root, final_output)
     metadata = collect_metadata(root, final_output=final_output, probe_fixture=probe_fixture, probe_runner=probe_runner)
     final_meta = metadata["final_output"]
     findings: list[dict[str, Any]] = []
-    fps = _artifact_fingerprints(selected)
     if not final_meta["exists"]:
         findings.append(_finding(
             finding_id="final-qc-missing-final-output",
@@ -379,7 +333,6 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
             category="missing_artifact",
             source={"artifact": str(final_output) if final_output else "final_output"},
             evidence={"final_output": final_meta},
-            fingerprints=fps,
             next_action="render_final_output",
         ))
     elif final_meta["bytes"] == 0:
@@ -390,7 +343,6 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
             category="missing_artifact",
             source={"artifact": final_meta["path"]},
             evidence={"final_output": final_meta},
-            fingerprints=fps,
             next_action="rerender_final_output",
         ))
     elif metadata["probe_error"] is not None:
@@ -401,11 +353,10 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
             category="stream",
             source={"artifact": final_meta["path"]},
             evidence=metadata["probe_error"],
-            fingerprints=fps,
             next_action="inspect_or_rerender_final_output",
         ))
     else:
-        probe_findings = _probe_contract_findings(metadata["probe"], final_meta=final_meta, fingerprints=fps)
+        probe_findings = _probe_contract_findings(metadata["probe"], final_meta=final_meta)
         findings.extend(probe_findings)
         # Header probing cannot see a container-valid but media-truncated/corrupt payload.
         # A cheap tail decode catches it; skip for offline fixtures and when ffmpeg is absent
@@ -420,8 +371,7 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
                     category="stream",
                     source={"artifact": final_meta["path"]},
                     evidence={"decode_error": decode_detail},
-                    fingerprints=fps,
-                    next_action="rerender_final_output",
+                            next_action="rerender_final_output",
                 ))
     for name in _UPSTREAM_QC_ARTIFACTS:
         findings.extend(_upstream_blockers(root, name))
@@ -445,12 +395,10 @@ def build_golden_eval(work_dir: str | Path, final_qc_report: Mapping[str, Any] |
     root = Path(work_dir)
     final_report = _load_or_build_final_qc(root, final_qc_report)
     fixture = _load_fixture(golden_fixture) if golden_fixture is not None else {}
-    final_fp = fingerprint_file(root / FINAL_QC_ARTIFACT)
     metadata = {
         "work_dir": str(root),
         "fixture": fixture,
         "final_qc": {key: final_report[key] for key in ("ok", "blocker_count", "artifact", "stage")},
-        "final_qc_fingerprint": final_fp,
         "auto_repair": False,
     }
     findings: list[dict[str, Any]] = []
@@ -464,7 +412,6 @@ def build_golden_eval(work_dir: str | Path, final_qc_report: Mapping[str, Any] |
             category="schema_invalid",
             source={"artifact": FINAL_QC_ARTIFACT},
             evidence={"expected": expected_ok, "actual": final_report["ok"]},
-            fingerprints={FINAL_QC_ARTIFACT: final_fp} if final_fp else {},
             next_action="fix_final_qc_blockers",
         ))
     final_meta = final_report["metadata"]["final_output"]

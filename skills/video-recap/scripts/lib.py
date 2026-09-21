@@ -113,7 +113,7 @@ CONFIG = {
     "api_url": normalize_api_url(_raw_api_url),
     "api_url_source": "env" if os.environ.get("MIMO_API_URL") else "default",
     "api_key": _mimo_api_key,
-    "api_key_source": "MIMO_API_KEY",
+    "api_env_var": "MIMO_API_KEY",
     # Read through a COPY of CONFIG by mimo_qc_evidence._effective_config /
     # safe_mimo_config, which is why neither a `CONFIG.get(...)` grep nor live-dict
     # instrumentation sees them. They drive the QC model fallback chain and the
@@ -145,7 +145,7 @@ CONFIG = {
         os.environ.get("MIMO_ASR_API_URL") or os.environ.get("MIMO_API_URL")
     ) else "default",
     "mimo_asr_api_key": _mimo_asr_api_key,
-    "mimo_asr_api_key_source": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
+    "mimo_asr_env_var": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
     "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "mimo_video_model_source": "env" if (
         os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL")

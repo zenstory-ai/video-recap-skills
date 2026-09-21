@@ -82,7 +82,7 @@ def test_bad_clock_and_frame_indices_fail(pts, end, cuts):
 @pytest.mark.parametrize("threshold", [-0.1, 1.1, float("nan"), True])
 def test_invalid_threshold_fails_before_media_tools(tmp_path, threshold):
     with pytest.raises(ValueError, match="threshold"):
-        shot_review.scan_video(tmp_path / "absent.mp4", threshold=threshold)
+        shot_review.detect_scene_pts(tmp_path / "absent.mp4", threshold)
 
 
 def test_supplied_mapping_requires_matching_render_metadata(tmp_path):
@@ -108,22 +108,21 @@ def bound_fixture(tmp_path):
 
 
 @pytest.mark.parametrize("changed", ["video", "source", "plan", "render_settings"])
-def test_changed_bound_inputs_fail_including_same_mtime(tmp_path, changed):
+def test_changed_bound_inputs_fail(tmp_path, changed):
     video, source, plan, _ = bound_fixture(tmp_path)
     assert shot_review.load_bound_plan(video, plan)["total_duration"] == 10
     path = {"video": video, "source": source, "plan": plan,
             "render_settings": Path(str(video) + ".meta.json")}[changed]
-    if changed in {"source", "video"}:
-        import os
-        st = path.stat()
-        path.write_bytes(b"Z" * st.st_size)
-        os.utime(path, ns=(st.st_atime_ns, st.st_mtime_ns))
+    if changed == "video":
+        path.write_bytes(b"")
+    elif changed == "source":
+        path.write_bytes(b"Z" * (path.stat().st_size + 1))
     else:
         obj = json.loads(path.read_text())
         if changed == "plan":
             obj["clips"][0]["source_start"] = 9
         else:
-            obj["render_fingerprint"] = "stale"
+            obj["render_cache"]["clip_join_audio_fade_ms"] = -1
         path.write_text(json.dumps(obj))
     with pytest.raises(ValueError, match="binding"):
         shot_review.load_bound_plan(video, plan)
@@ -276,10 +275,8 @@ def test_real_ffmpeg_detects_short_runs_inside_one_continuous_file(tmp_path):
         "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24",
         "-s", "64x64", "-r", "24", "-i", "-", "-c:v", "ffv1", str(video),
     ], input=raw, check=True, capture_output=True)
-    before = shot_review.sha256_file(video)
     report = shot_review.scan_video(video, threshold=0.35)
     assert report["media"]["frame_count"] == 240
     assert [c["frame"] for c in report["candidates"]] == [48, 50, 100, 112, 180, 194]
     assert [s["frame_count"] for s in report["short_spans"]] == [2, 12, 14]
     assert report["scan_complete"] is True
-    assert shot_review.sha256_file(video) == before

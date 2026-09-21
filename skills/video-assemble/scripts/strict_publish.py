@@ -1,10 +1,10 @@
-"""Staged publish transaction for identity-bound (strict adoption) renders.
+"""Publish transaction for strict-adoption renders.
 
-An active narration binding renders to a hidden candidate file. The binding
-(and, for an explicit mix, the audio mix binding) is staged beside it, QC gates
-the candidate, and only then are the media file and its bindings published
-together. Any failure rolls back every published or staged piece, so a strict
-output never exists without the evidence that binds it.
+An active narration binding renders to a hidden candidate file. Its binding (and,
+for an explicit mix, the audio mix binding) is written, QC gates the candidate,
+the media file is published, and QC runs once more against the published path.
+Any failure removes the candidate, the published file and the bindings written
+by this render, so a strict output never exists without its consumed-input record.
 """
 
 from pathlib import Path
@@ -15,16 +15,16 @@ import narration_binding
 
 
 def current_narration_binding(work_dir, audio_mode):
-    """Read narration evidence only for the explicit narration render path."""
+    """Read the narration record only for the explicit narration render path."""
     if audio_mode != "narration":
         return None
-    return narration_binding.binding_fingerprint(work_dir)
+    return narration_binding.binding_record(work_dir)
 
 
 def current_audio_mix_binding(work_dir, audio_mode):
     if audio_mode != "narration":
         return None
-    return audio_mix_binding.binding_fingerprint(work_dir)
+    return audio_mix_binding.binding_record(work_dir)
 
 
 def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_wav,
@@ -33,44 +33,47 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
                    source_has_audio, video_duration, render_delivery, source_audio_status):
     """Gate the rendered candidate on assembly QC and publish it with its bindings.
 
-    Returns the final output path. Legacy (inactive binding) renders only write
-    their binding and QC; strict renders publish file and bindings atomically or
-    roll everything back.
+    Returns the final output path. Inactive-binding renders only write their
+    binding and QC; strict renders write bindings, publish, and re-run QC, or roll
+    everything back.
     """
     active = bool(binding and binding["active"])
-    staged_binding = None
-    staged_binding_fingerprint = None
-    binding_published = False
-    staged_mix_binding = None
-    staged_mix_fingerprint = None
-    mix_binding_published = False
+    work_dir = Path(work_dir)
+    binding_path = work_dir / narration_binding.FILENAME
+    mix_binding_path = work_dir / audio_mix_binding.FILENAME
+    binding_written = False
+    mix_binding_written = False
     try:
         if active:
-            # Strict adoption: render to a hidden candidate, stage the binding, gate on QC,
-            # then publish the file and the binding together or neither.
-            narration_binding.assert_current(binding)
-            report, staged_binding = narration_binding.stage_final_binding(
-                binding, tts_segments, narration_wav, render_output, published_output
+            report = narration_binding.finalize_binding(
+                binding, tts_segments,
+                (work_dir / "narration.wav" if explicit_mix is not None else narration_wav),
+                published_output, rendered_output=render_output,
             )
-            staged_binding_fingerprint = narration_binding.staged_binding_fingerprint(
-                report, staged_binding, Path(work_dir) / narration_binding.FILENAME
-            )
+            binding_written = True
+            if not binding_path.is_file():
+                raise RuntimeError("narration binding 未写入")
+            narration_record = narration_binding.record_of(report, binding_path)
+            mix_record = None
             if explicit_mix is not None:
-                mix_report, staged_mix_binding = audio_mix_binding.stage_final_binding(
-                    explicit_mix, staged_binding_fingerprint, render_output, published_output
+                audio_mix_binding.finalize_binding(
+                    explicit_mix, narration_record, render_output, published_output, work_dir
                 )
-                staged_mix_fingerprint = audio_mix_binding.staged_binding_fingerprint(
-                    mix_report, staged_mix_binding,
-                    Path(work_dir) / audio_mix_binding.FILENAME,
-                )
+                mix_binding_written = True
+                mix_record = {"path": str(mix_binding_path.resolve()), "status": "FINALIZED"}
         elif binding:
             narration_binding.finalize_binding(
                 binding, tts_segments, narration_wav, render_output
             )
+            narration_record = current_narration_binding(work_dir, audio_mode)
+            mix_record = None
+        else:
+            narration_record = current_narration_binding(work_dir, audio_mode)
+            mix_record = None
         assembly_qc = assembly_contract._build_assembly_qc(
             tts_segments,
             video_duration,
-            output_path=(published_output if active else render_output),
+            output_path=render_output,
             source_has_audio=source_has_audio,
             loudness_mode=loudness_mode,
             loudnorm_measurement=loudnorm_measurement,
@@ -78,11 +81,8 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
             audio_mode=audio_mode,
             audio_operations=audio_operations,
             adopted_audio=adopted_audio,
-            narration_input_binding=(
-                staged_binding_fingerprint if active
-                else current_narration_binding(work_dir, audio_mode)
-            ),
-            audio_mix_binding=staged_mix_fingerprint,
+            narration_input_binding=narration_record,
+            audio_mix_binding=mix_record,
             source_audio_status=source_audio_status,
             render_delivery=render_delivery,
         )
@@ -91,51 +91,14 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
             codes = ", ".join(assembly_qc["blocking_codes"])
             raise RuntimeError(f"身份约束渲染 QC 失败: {codes}")
         if active:
-            if explicit_mix is not None:
-                audio_mix_binding.assert_current(explicit_mix)
-            finalized_binding = narration_binding.finalize_binding(
-                binding, tts_segments,
-                (Path(work_dir) / "narration.wav" if explicit_mix is not None else narration_wav),
-                published_output,
-                staged_path=staged_binding,
-            )
-            staged_binding = None
-            binding_path = Path(work_dir) / narration_binding.FILENAME
-            binding_published = binding_path.is_file()
-            if not isinstance(finalized_binding, dict):
-                raise RuntimeError("active narration binding finalize 返回空结果")
-            if not binding_path.is_file():
-                raise RuntimeError("已发布 narration binding 未通过终态验证")
-            prepublish_binding = narration_binding.staged_binding_fingerprint(
-                report, binding_path, binding_path
-            )
-            if prepublish_binding["sha256"] != staged_binding_fingerprint["sha256"]:
-                raise RuntimeError("已发布 narration binding 身份不一致")
-            if explicit_mix is not None:
-                finalized_mix = audio_mix_binding.finalize_binding(staged_mix_binding, work_dir)
-                staged_mix_binding = None
-                mix_binding_published = (
-                    Path(work_dir) / audio_mix_binding.FILENAME
-                ).is_file()
-                if not isinstance(finalized_mix, dict):
-                    raise RuntimeError("active audio mix binding finalize 返回空结果")
-                published_mix_fingerprint = audio_mix_binding.staged_binding_fingerprint(
-                    finalized_mix, Path(work_dir) / audio_mix_binding.FILENAME,
-                    Path(work_dir) / audio_mix_binding.FILENAME,
-                )
-                if published_mix_fingerprint["sha256"] != staged_mix_fingerprint["sha256"]:
-                    raise RuntimeError("已发布 audio mix binding 身份不一致")
-                audio_mix_binding.assert_current(explicit_mix)
             render_output.rename(published_output)
             render_output = published_output
             current_binding = current_narration_binding(work_dir, audio_mode)
             if current_binding is None:
-                raise RuntimeError("已发布 narration binding 未通过终态验证")
+                raise RuntimeError("已发布 narration binding 未通过终态检查")
             current_mix_binding = current_audio_mix_binding(work_dir, audio_mode)
             if explicit_mix is not None and current_mix_binding is None:
-                raise RuntimeError("已发布 audio mix binding 未通过终态验证")
-            if explicit_mix is not None:
-                audio_mix_binding.assert_current(explicit_mix)
+                raise RuntimeError("已发布 audio mix binding 未通过终态检查")
             assembly_qc = assembly_contract._build_assembly_qc(
                 tts_segments, video_duration, output_path=render_output,
                 source_has_audio=source_has_audio,
@@ -159,13 +122,9 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
         if active:
             render_output.unlink(missing_ok=True)
             published_output.unlink(missing_ok=True)
-            if binding_published:
-                (Path(work_dir) / narration_binding.FILENAME).unlink(missing_ok=True)
-            if mix_binding_published:
-                (Path(work_dir) / audio_mix_binding.FILENAME).unlink(missing_ok=True)
-            if staged_binding is not None:
-                Path(staged_binding).unlink(missing_ok=True)
-            if staged_mix_binding is not None:
-                Path(staged_mix_binding).unlink(missing_ok=True)
+            if binding_written:
+                binding_path.unlink(missing_ok=True)
+            if mix_binding_written:
+                mix_binding_path.unlink(missing_ok=True)
         raise
     return render_output

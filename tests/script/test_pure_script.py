@@ -5,13 +5,14 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
 )
 import json
+import os
 import re
 import brief_context
 import brief_inputs
 import brief_timeline
 import validate as narration_validate
 import pytest
-from lib import CONFIG, env_float, stable_hash
+from lib import CONFIG, env_float, file_identity
 from agent_brief import build_agent_brief
 from agent_text import _post_dedup_narration, _text_char_count
 from brief_context import assess_understanding_substrate
@@ -39,7 +40,7 @@ def _write_output_evidence(
         {
             "schema_version": 2,
             "timeline": "cut_output",
-            "clip_plan_fingerprint": stable_hash(plan),
+            "clip_plan_identity": file_identity(work_dir / "clip_plan_validated.json"),
             "sentence_anchors": sentence_anchors,
             "speech_spans": speech_spans,
             "quiet_windows": quiet_windows,
@@ -882,12 +883,8 @@ def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
         "content": "这是 MiMo 对分片汇总的故事线概览。",
         "reasoning_content": "内部推理",
         "chunks": chunks,
-        "chunks_fingerprint": brief_inputs._mimo_cached_chunks_fingerprint(chunks),
-        "settings": brief_inputs._mimo_video_settings_fingerprint(),
+        "settings": brief_inputs._mimo_video_settings(),
     }
-    overview["overview_fingerprint"] = brief_inputs._mimo_overview_payload_fingerprint(
-        overview
-    )
     _write_json(tmp_path / "mimo_video_overview.json", overview)
     _set_brief_mode(monkeypatch, "full")
 
@@ -1104,24 +1101,20 @@ def test_build_agent_brief_rich_substrate_frames_density_as_guide_without_resear
     assert "Research the story FIRST" not in text  # rich + titled -> no nag
 
 
-def test_cut_validate_uses_validated_plan_only_when_raw_fingerprint_is_fresh(tmp_path):
+def test_cut_validate_uses_validated_plan_only_when_newer_than_raw(tmp_path):
     raw_payload = {"clips": [{"start": 40.0, "end": 50.0}]}
+    raw = tmp_path / "clip_plan.json"
     validated = tmp_path / "clip_plan_validated.json"
-    _write_json(tmp_path / "clip_plan.json", raw_payload)
-
+    _write_json(raw, raw_payload)
     _write_json(
-        validated, {"clips": [{"clip_id": 0, "source_start": 0.0, "source_end": 10.0}]}
+        validated, {"clips": [{"clip_id": 0, "source_start": 40.0, "source_end": 50.0}]}
     )
+    os.utime(raw, ns=(2_000_000_000, 2_000_000_000))
+    os.utime(validated, ns=(1_000_000_000, 1_000_000_000))
     stale = narration_validate._load_cut_clip_plan(tmp_path)
-    assert stale["clips"][0]["start"] == 40.0  # stale validated plan -> raw wins
+    assert stale["clips"][0]["start"] == 40.0  # validated older than raw -> raw wins
 
-    _write_json(
-        validated,
-        {
-            "raw_plan_fingerprint": stable_hash(raw_payload),
-            "clips": [{"clip_id": 0, "source_start": 40.0, "source_end": 50.0}],
-        },
-    )
+    os.utime(validated, ns=(2_000_000_000, 2_000_000_000))
     fresh = narration_validate._load_cut_clip_plan(tmp_path)
     assert fresh["clips"][0]["source_start"] == 40.0
 
@@ -1157,9 +1150,7 @@ def test_full_validation_rewrite_preserves_visual_overlays(tmp_path, monkeypatch
 
 def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
     validate_bounds = narration_validate._validate_output_timeline_bounds
-    validate_bounds(
-        [{"start": 0.0, "end": 9.95, "narration": "有效。"}], output_duration=10.0
-    )
+    validate_bounds([{"start": 0.0, "end": 9.95, "narration": "有效。"}], 10.0)
 
     bad = [
         {"start": -0.1, "end": 1.0, "narration": "负时间。"},
@@ -1167,15 +1158,13 @@ def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
         {"start": 10.1, "end": 11.0, "narration": "完全在外。"},
     ]
     with pytest.raises(SystemExit) as exc:
-        validate_bounds(bad, output_duration=10.0)
+        validate_bounds(bad, 10.0)
     msg = str(exc.value)
     assert "output_duration=10.000" in msg
     assert "segment 0" in msg and "segment 1" in msg and "segment 2" in msg
 
     with pytest.raises(SystemExit, match="finite and positive"):
-        validate_bounds([{"start": 0.0, "end": 1.0}], output_duration=float("nan"))
-    with pytest.raises(SystemExit, match="non-finite time"):
-        validate_bounds([{"start": float("nan"), "end": 1.0}], output_duration=10.0)
+        validate_bounds([{"start": 0.0, "end": 1.0}], float("nan"))
 
 
 def test_cut_output_mode_requires_output_duration(monkeypatch, tmp_path):
@@ -1194,7 +1183,6 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
     _write_json(
         tmp_path / "clip_plan_validated.json",
         {
-            "raw_plan_fingerprint": stable_hash(raw_plan),
             "clips": [
                 {
                     "source_start": 100.0,
@@ -1216,11 +1204,8 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
         tmp_path / "asr_clean.json",
         {
             "segments": [{"start": 101.0, "end": 105.0, "text": "清洗后一到五秒对白。"}],
-            "source_md5": __import__("hashlib")
-            .md5((tmp_path / "asr_result.json").read_bytes())
-            .hexdigest(),
+            "source": file_identity(tmp_path / "asr_result.json"),
             "model": brief_context._consolidation_model(),
-            "prompt_md5": brief_context._clean_asr_prompt_fingerprint(),
         },
     )
 

@@ -20,7 +20,6 @@ are implemented locally and no upstream executable code, resource package,
 adapter binary, or credential is included. See ACKNOWLEDGEMENTS / 致谢.
 """
 
-import copy
 import json
 import os
 import subprocess
@@ -43,46 +42,51 @@ def _default_id():
 
 
 def _probe_media(path):
-    """Return (duration_us, width, height) via ffprobe; zeros on any failure."""
-    try:
-        r = subprocess.run(
-            [
-                "ffprobe",
-                "-v",
-                "error",
-                "-of",
-                "json",
-                "-show_entries",
-                "format=duration:stream=width,height,codec_type",
-                str(path),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        data = json.loads(r.stdout or "{}")
-        dur_us = us(float(data.get("format", {}).get("duration") or 0))
-        width = height = 0
-        for stream in data.get("streams", []):
-            if stream.get("codec_type") == "video":
-                width, height = (
-                    int(stream.get("width") or 0),
-                    int(stream.get("height") or 0),
-                )
-                break
-        return dur_us, width, height
-    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
-        return 0, 0, 0
+    """Return (duration_us, width, height) via ffprobe.
+
+    A probe failure raises: a draft that silently carries a zero or guessed media
+    duration is worse than a failed optional export. Still images legitimately
+    report no duration (0).
+    """
+    result = subprocess.run(
+        [
+            "ffprobe",
+            "-v",
+            "error",
+            "-of",
+            "json",
+            "-show_entries",
+            "format=duration:stream=width,height,codec_type",
+            str(path),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode:
+        raise RuntimeError(f"ffprobe failed for JianYing media {path}: {result.stderr.strip()}")
+    data = json.loads(result.stdout)
+    duration = data["format"].get("duration")
+    width = height = 0
+    for stream in data.get("streams", []):
+        if stream.get("codec_type") == "video":
+            width, height = int(stream["width"]), int(stream["height"])
+            break
+    return (us(float(duration)) if duration is not None else 0), width, height
 
 
 def build_draft(timeline, new_id=None, probe=None):
     """Build the 剪映 draft_content dict and companion meta from a timeline."""
-    timeline = _normalize_timeline(timeline)
+    return _build_normalized_draft(_normalize_timeline(timeline), new_id, probe)
+
+
+def _build_normalized_draft(timeline, new_id=None, probe=None):
+    """`timeline` has already passed jianying_timeline_contract.normalize_timeline."""
     new_id = new_id or _default_id
     probe = probe or _probe_media
     ctx = _DraftBuildContext.from_timeline(timeline, new_id, probe)
 
-    for timeline_track in timeline.get("tracks", []):
+    for timeline_track in timeline["tracks"]:
         _build_timeline_track(ctx, timeline_track)
     ctx.finalize_tracks()
 
@@ -141,29 +145,20 @@ def _generate_reversed_media(source_path, output_path):
     )
 
 
-def _prepare_reverse_sources(timeline, temporary_dir):
-    prepared = copy.deepcopy(timeline)
+def _prepare_reverse_sources(clips, temporary_dir):
+    """Generate a reversed copy for each clip and record it as the clip's reverse_path."""
     generated = []
-    for track in prepared.get("tracks", []):
-        if not isinstance(track, dict) or track.get("kind") != "video":
-            continue
-        for clip in track.get("clips", []):
-            if (
-                not isinstance(clip, dict)
-                or not clip.get("reverse")
-                or clip.get("reverse_path")
-            ):
-                continue
-            source_path = clip.get("source_path")
-            if not isinstance(source_path, str) or not os.path.isfile(source_path):
-                raise ValueError(f"reverse source does not exist: {source_path}")
-            output_path = os.path.join(
-                temporary_dir, f"reversed-{uuid.uuid4().hex}.mp4"
-            )
-            _generate_reversed_media(source_path, output_path)
-            clip["reverse_path"] = output_path
-            generated.append(source_path)
-    return prepared, generated
+    for clip in clips:
+        source_path = clip["source_path"]
+        if not os.path.isfile(source_path):
+            raise ValueError(f"reverse source does not exist: {source_path}")
+        output_path = os.path.join(
+            temporary_dir, f"reversed-{uuid.uuid4().hex}.mp4"
+        )
+        _generate_reversed_media(source_path, output_path)
+        clip["reverse_path"] = output_path
+        generated.append(source_path)
+    return generated
 
 
 def export_timeline_to_jianying(
@@ -175,21 +170,19 @@ def export_timeline_to_jianying(
     portable. Pass bundle_media=False only when external absolute paths are
     intentionally required.
     """
-    needs_generated_reverse = any(
-        isinstance(track, dict)
-        and track.get("kind") == "video"
-        and any(
-            isinstance(clip, dict)
-            and clip.get("reverse")
-            and not clip.get("reverse_path")
-            for clip in track.get("clips", [])
-        )
-        for track in timeline.get("tracks", [])
-    )
-    if needs_generated_reverse and not bundle_media:
+    # Validate once at the boundary; everything below trusts the normalized copy.
+    timeline = _normalize_timeline(timeline)
+    reverse_clips = [
+        clip
+        for track in timeline["tracks"]
+        if track["kind"] == "video"
+        for clip in track["clips"]
+        if clip.get("reverse") and "reverse_path" not in clip
+    ]
+    if reverse_clips and not bundle_media:
         raise ValueError("automatic reverse generation requires media bundling")
-    if not needs_generated_reverse:
-        content, meta, notes = build_draft(timeline, new_id=new_id, probe=probe)
+    if not reverse_clips:
+        content, meta, notes = _build_normalized_draft(timeline, new_id=new_id, probe=probe)
         return _write_draft(
             content,
             meta,
@@ -203,8 +196,8 @@ def export_timeline_to_jianying(
     with tempfile.TemporaryDirectory(
         prefix="jianying-reverse-", dir=out_dir
     ) as temporary_dir:
-        prepared, generated = _prepare_reverse_sources(timeline, temporary_dir)
-        content, meta, notes = build_draft(prepared, new_id=new_id, probe=probe)
+        generated = _prepare_reverse_sources(reverse_clips, temporary_dir)
+        content, meta, notes = _build_normalized_draft(timeline, new_id=new_id, probe=probe)
         notes.extend(f"已生成倒放素材: {source}" for source in generated)
         return _write_draft(
             content,

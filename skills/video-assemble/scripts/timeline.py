@@ -54,15 +54,17 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
                  "timeline_start", "timeline_end"}] (cut mode: one per clip;
                  full mode: a single clip spanning the whole video).
     narration_segments: placed beats [{"source_path", "timeline_start",
-                 "timeline_end", "text", "overlaps_speech", "gain"?}]; a zero-width
+                 "timeline_end", "text", "overlaps_speech", "gain"}]; a zero-width
                  beat (an unplaced segment) is skipped.
     subtitle_segments: optional display-ready text cues [{"text", "timeline_start",
                  "timeline_end"}]. When present, this is authoritative for the
                  subtitle/text track; narration segment text remains raw editor metadata.
-    bgm: optional {"source_path", "volume", "ducking_volume"}.
-    ducking: {"idle", "speech", "quiet", "fade", "bridge"?} for the original-audio
+    bgm: optional {"source_path", "volume", "ducking_volume", "fade"}.
+    ducking: {"idle", "speech", "quiet", "fade", "bridge"} for the original-audio
              automation; None disables original ducking (flat original). `bridge` holds
-             the duck across inter-beat gaps shorter than it (defaults to 2*fade).
+             the duck across inter-beat gaps shorter than it.
+    image_segments: optional v2 local image overlays [{"source_path", "timeline_start",
+                 "timeline_end", ...authoring extensions}], passed through as authored.
     """
     placed = [
         s for s in narration_segments
@@ -77,7 +79,7 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
             restore_at = max(
                 hold_end, float(s.get("source_restore_at", hold_end + float(ducking["fade"])))
             )
-            level = float(ducking["speech" if s.get("overlaps_speech", True) else "quiet"])
+            level = float(ducking["speech" if s["overlaps_speech"] else "quiet"])
             duck_windows.append((float(s["timeline_start"]), hold_end, level, restore_at))
 
     # --- video track: each clip carries its original audio + ducking automation
@@ -88,7 +90,7 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
         if ducking is not None:
             audio["volume_keyframes"] = release_ducking_keyframes(
                 duck_windows, ducking["idle"], ducking["fade"], ts, te,
-                bridge=ducking.get("bridge"))
+                bridge=ducking["bridge"])
             audio["base_gain"] = round(float(ducking["idle"]), 4)
         else:
             audio["base_gain"] = 1.0
@@ -118,9 +120,9 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
             "source_path": s["source_path"],
             "timeline_start": _floor_time(s["timeline_start"], 4),
             "timeline_end": _ceil_time(s["timeline_end"], 4),
-            "gain": round(float(s.get("gain", 1.0)), 4),
-            "text": s.get("text", ""),
-            "overlaps_speech": bool(s.get("overlaps_speech", True)),
+            "gain": round(float(s["gain"]), 4),
+            "text": s["text"],
+            "overlaps_speech": bool(s["overlaps_speech"]),
         }
         for key in ("source_duck_end", "source_restore_at", "source_handoff_status", "source_entry_status"):
             if key in s:
@@ -133,12 +135,12 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
                        "segments": narr_segs})
 
     # --- bgm track (optional, looped, ducked under narration)
-    if bgm and bgm.get("source_path"):
-        base = float(bgm.get("volume", 0.18))
-        duck = float(bgm.get("ducking_volume", 0.10))
-        fade = float(bgm.get("fade", (ducking or {}).get("fade", 0.25)))
+    if bgm:
+        base = float(bgm["volume"])
+        duck = float(bgm["ducking_volume"])
+        fade = float(bgm["fade"])
         kfs = ducking_keyframes(windows, base, duck, fade, 0.0, duration_s,
-                                bridge=(ducking or {}).get("bridge"))
+                                bridge=ducking["bridge"] if ducking else None)
         tracks.append({
             "kind": "audio", "name": "bgm", "role": "bgm", "loop": True,
             "segments": [{
@@ -171,41 +173,17 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
     if text_segs:
         tracks.append({"kind": "text", "name": "subtitle", "segments": text_segs})
 
-    # --- local image overlays (optional, timeline schema v2)
+    # --- local image overlays (optional, timeline schema v2). Transform fields are
+    # optional authoring extensions; the JianYing exporter validates and defaults them.
     images = []
     for segment in image_segments:
-        if not isinstance(segment, dict) or not segment.get("source_path"):
-            continue
-        try:
-            ts = max(0.0, float(segment["timeline_start"]))
-            te = min(float(duration_s), float(segment["timeline_end"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-        if not math.isfinite(ts) or not math.isfinite(te) or te <= ts:
-            continue
-        scale = segment.get("scale") if isinstance(segment.get("scale"), dict) else {}
-        position = segment.get("position") if isinstance(segment.get("position"), dict) else {}
-        flip = segment.get("flip") if isinstance(segment.get("flip"), dict) else {}
         image = {
-            "source_path": str(segment["source_path"]),
-            "timeline_start": round(ts, 4),
-            "timeline_end": round(te, 4),
-            "opacity": round(max(0.0, min(1.0, float(segment.get("opacity", 1.0)))), 4),
-            "rotation_degrees": round(float(segment.get("rotation_degrees", 0.0)), 4),
-            "scale": {
-                "x": round(float(scale.get("x", 1.0)), 4),
-                "y": round(float(scale.get("y", 1.0)), 4),
-            },
-            "position": {
-                "x": round(float(position.get("x", 0.0)), 4),
-                "y": round(float(position.get("y", 0.0)), 4),
-            },
-            "flip": {
-                "horizontal": bool(flip.get("horizontal", False)),
-                "vertical": bool(flip.get("vertical", False)),
-            },
+            "source_path": segment["source_path"],
+            "timeline_start": round(float(segment["timeline_start"]), 4),
+            "timeline_end": round(float(segment["timeline_end"]), 4),
         }
-        for key in ("lut", "mask", "speed", "transition"):
+        for key in ("flip", "lut", "mask", "opacity", "position", "rotation_degrees",
+                    "scale", "speed", "transition"):
             if key in segment:
                 image[key] = deepcopy(segment[key])
         images.append(image)

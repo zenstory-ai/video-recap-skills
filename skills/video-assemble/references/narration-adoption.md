@@ -1,9 +1,8 @@
-# Narration adoption and input identity
+# Narration adoption and the consumed-input record
 
 Narration assembly accepts legacy `tts_meta.json`, but a current file by itself is
 not an adoption decision. Use an explicit adoption document when the selected spoken
-text, processed WAV bytes, requested provider/voice, and tempo policy must be bound
-to the actual final mix.
+text, requested provider/voice, and tempo policy must be bound to the actual final mix.
 
 ```bash
 python3 scripts/assemble.py input.mp4 --work-dir work \
@@ -20,12 +19,10 @@ python3 scripts/assemble.py input.mp4 --work-dir work \
 {
   "artifact": "narration_adoption",
   "schema_version": 1,
-  "tts_meta_sha256": "...",
   "segments": [
     {
       "index": 0,
       "spoken_text": "exact selected words",
-      "processed_wav_sha256": "...",
       "requested_provider": "caller-selected-provider",
       "requested_voice": "caller-selected-voice"
     }
@@ -49,68 +46,58 @@ ambient defaults such as a global 1.15 speed never override an adoption. With
 `bounded_segment_fit` false, an adopted segment that does not fit its authored window
 blocks without time trimming or bounded fit.
 
-The adoption must match the exact current `tts_meta.json` bytes. Its ordered segment
-indices, spoken text, and processed hashes must also match both the file's segment
-list and the in-memory list passed to `assemble_video`. The consumer never creates an
-adoption from metadata that it is about to consume.
+The adoption's ordered segment indices and spoken text must match both the segment
+list in the supplied `tts_meta.json` and the in-memory list passed to
+`assemble_video`; those two lists must be equal to each other. Unknown fields fail;
+legacy `tts_meta_sha256` / `processed_wav_sha256` keys are ignored. The consumer never
+creates an adoption from metadata that it is about to consume.
 
-## Validation and immutable consumption
+## Validation and snapshots
 
-Before probing/rendering media or writing assembly artifacts, every supplied
-`processed_wav_sha256` is checked against the actual `audio_path`. When present, a
-provider receipt's processed hash, provider, or requested voice must not contradict
-the adoption. A missing receipt is recorded as request evidence `UNKNOWN`; exact PCM
-adoption is not acoustic voice authentication.
-
-Processed-hash coverage is all-or-none. A list that hashes only some segments is
-rejected rather than promoting the whole list to a misleading hash-bound status.
-
-Identity-constrained inputs are copied to per-run snapshots only after all inputs
-validate. Original/adoption/tts-meta/snapshot hashes are checked after snapshotting.
-Every conversion, placed WAV, and the completed narration bus is then sealed with
-hash and PCM facts before final FFmpeg. Original/adoption/tts-meta/snapshot and sealed
-derived hashes are checked immediately before final FFmpeg and again after it. The
-original files are never modified. A post-preflight change to either original or
-derived render input fails the run instead of being mislabeled as bound.
+Every adopted `audio_path` must exist before any media is probed or rendered. The
+adopted inputs are then copied to per-run snapshots under
+`work/.narration_input_snapshots/`; the original files are never modified, and the
+render reads only the snapshots. Every conversion, placed WAV, and the completed
+narration bus is recorded with its path and probed PCM facts before the final FFmpeg
+command runs.
 
 On the legacy narration-mix path, Python's standard WAV reader cannot open every valid post-processed WAV encoding.
 Noncanonical input, including `pcm_f32le`, 48 kHz, or stereo WAV, is explicitly
 decoded by the existing FFmpeg executable to 44.1 kHz mono PCM16 before placement.
 The conversion path and actual PCM facts are recorded; the consumer does not claim
-that converted bytes equal the original bytes.
+that converted samples equal the original samples.
 
 The explicit full-sound path described in `explicit-audio-mix.md` deliberately does
-not use that 44.1 kHz mono conversion. It consumes the immutable snapshots directly as
-complete 48 kHz float placements, preserving native stereo channel identity.
+not use that 44.1 kHz mono conversion. It consumes the snapshots directly as complete
+48 kHz float placements, preserving native stereo channels.
 
-Identity-constrained video and binding report both use staging paths. QC runs against
-the still-unpublished final path. Only a nonblocking QC plus a complete, valid binding
-publishes both artifacts. Failure does not publish or overwrite final media/binding,
-and records the final output as absent rather than claiming a missing file was
-published. Non-final work or diagnostic artifacts may remain for investigation; this
-contract does not destructively erase them.
+An adopted render writes to a hidden candidate path. The binding is written, QC runs
+against the candidate, the candidate is renamed to the final path, and QC runs once
+more against the published file. A blocking QC removes the candidate and the binding
+instead of publishing; the run records the final output as absent rather than
+claiming a missing file was published. Non-final work or diagnostic artifacts may
+remain for investigation.
 
-## Binding report and evidence strength
+## Binding report
 
-After successful assembly, `work/narration_input_binding.json` binds:
+After successful assembly, `work/narration_input_binding.json` records:
 
-- original input path/hash and immutable snapshot path/hash;
-- any explicit conversion path/hash/PCM parameters;
-- each complete placed WAV path/hash/PCM parameters;
-- `narration.wav` path/hash/PCM parameters;
-- the renamed final output path/hash and actual encoded audio-stream identity;
-- the adoption and exact tempo policy when supplied.
+- original input path and snapshot path;
+- any explicit conversion path and PCM parameters;
+- each complete placed WAV path and PCM parameters;
+- `narration.wav` path and PCM parameters;
+- the final output path and its encoded audio-stream facts (decoder parameters,
+  packet count, payload bytes, start time, duration);
+- the adoption path, its `tts_meta` path, and the exact tempo policy when supplied.
 
-The report uses one of three identity statuses:
+The report uses one of two identity statuses:
 
-- `LEGACY_UNVERIFIED`: no processed hashes were supplied;
-- `DECLARED_HASH_BOUND_UNADOPTED`: supplied hashes matched actual bytes, but no
-  explicit current adoption selected provider/voice/text;
-- `BOUND_TO_ADOPTION`: exact metadata, input bytes, selection, and tempo policy were
-  bound through the final mix.
+- `UNADOPTED`: no adoption was supplied; the legacy inputs were consumed as given;
+- `BOUND_TO_ADOPTION`: the adoption's selection and tempo policy were carried
+  through the final mix.
 
-`BOUND_TO_ADOPTION` proves consumption identity, not provider truth, acoustic speaker
-identity, direct listening, naturalness, or release approval. The report keeps voice
-authentication and direct listening `NOT_CHECKED`. QC, manifest, and settings records
-reference only a binding whose final output path/hash is still current; source-mix
-and adopted-packet-copy modes do not reuse narration binding evidence.
+`BOUND_TO_ADOPTION` records what was consumed, not provider truth, acoustic speaker
+identity, direct listening, naturalness, or release approval; voice authentication
+and direct listening stay `NOT_CHECKED`. QC, manifest, and settings records reference
+a binding only while its recorded final output path still exists; source-mix and
+adopted-packet-copy modes do not reuse narration binding evidence.

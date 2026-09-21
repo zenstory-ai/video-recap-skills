@@ -60,6 +60,13 @@ def _fake_detector(changes):
     return detect
 
 
+def _with_geometry(plan, source_paths):
+    """cut_cli selects the output canvas before rendering; direct render calls must do the same."""
+    _, _, _, geometry_qc = media_geometry._select_output_geometry(source_paths, plan["clips"])
+    plan.setdefault("qc", {})["output_geometry"] = geometry_qc
+    return plan
+
+
 def _capture_render(monkeypatch, tmp_path, raw_clips, video_duration, *, config=None, probe=None):
     """Render a single-source plan with ffmpeg/ffprobe faked; return (output, plan, commands)."""
     video = tmp_path / "video.mp4"
@@ -83,7 +90,7 @@ def _capture_render(monkeypatch, tmp_path, raw_clips, video_duration, *, config=
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 2.0)
     if config:
         monkeypatch.setattr("cut_render.CONFIG", {**cut_render.CONFIG, **config})
-    output = build_edited_source_video(video, plan, work_dir)
+    output = build_edited_source_video(video, _with_geometry(plan, [str(video)]), work_dir)
     return output, plan, commands
 
 
@@ -278,15 +285,6 @@ def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
     assert ffmpeg_cmd[ffmpeg_cmd.index("-movflags") + 1] == "+faststart"
 
 
-def test_cut_source_fingerprint_detects_middle_only_changes(tmp_path):
-    first = tmp_path / "a.mp4"
-    second = tmp_path / "b.mp4"
-    first.write_bytes(b"A" * 70000 + b"middle-one" + b"Z" * 70000)
-    second.write_bytes(b"A" * 70000 + b"middle-two" + b"Z" * 70000)
-    assert first.stat().st_size == second.stat().st_size
-    assert cut.file_fingerprint(first) != cut.file_fingerprint(second)
-
-
 def _seed_cached_cut(tmp_path):
     """A work dir whose edited_source.mp4 is bound (meta) to the current source and plan."""
     video = tmp_path / "video.mp4"
@@ -302,7 +300,7 @@ def _seed_cached_cut(tmp_path):
     return video, work, edited
 
 
-@pytest.mark.parametrize("break_binding", ["none", "missing_meta", "plan", "source_bytes", "edited_bytes"])
+@pytest.mark.parametrize("break_binding", ["none", "missing_meta", "plan", "source", "empty_output"])
 def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatch, tmp_path, break_binding):
     _mock_media_probes(monkeypatch)
     video, work, edited = _seed_cached_cut(tmp_path)
@@ -311,12 +309,12 @@ def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatc
         Path(f"{edited}.meta.json").unlink()
     elif break_binding == "plan":
         argv += ["--clip-padding", "5"]
-    elif break_binding == "source_bytes":
+    elif break_binding == "source":
         video = tmp_path / "video_new.mp4"
         video.write_bytes(b"new source bytes")
         argv[1] = str(video)
-    elif break_binding == "edited_bytes":
-        edited.write_bytes(b"externally-mutated-edited-source")
+    elif break_binding == "empty_output":
+        edited.write_bytes(b"")
     calls = []
 
     def fake_build(video_path, validated_plan, work_dir, output_path=None):
@@ -342,7 +340,7 @@ def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatc
         assert validated["clips"][0]["source_start"] == 5.0
 
 
-def test_edited_source_cache_fingerprint_includes_render_affecting_config(monkeypatch, tmp_path):
+def test_edited_source_cache_settings_include_render_affecting_config(monkeypatch, tmp_path):
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
@@ -352,24 +350,36 @@ def test_edited_source_cache_fingerprint_includes_render_affecting_config(monkey
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 30.0})
     cut_contract._write_edited_source_meta(edited, plan, video)
     meta = json.loads((tmp_path / "edited_source.mp4.meta.json").read_text(encoding="utf-8"))
-    assert meta["render_cache"]["clip_join_audio_fade_ms"] == 30.0
-    assert meta["render_cache"]["geometry_render_algorithm_version"] == cut_contract.GEOMETRY_RENDER_ALGORITHM_VERSION
+    assert meta["schema_version"] == 3
+    assert meta["render_cache"] == {"clip_join_audio_fade_ms": 30.0}
+    assert meta["sources"] == {str(video): {"size": 5, "mtime_ns": video.stat().st_mtime_ns}}
     assert cut.should_reuse_edited_source(edited, plan, video) is True
 
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 80.0})
-    assert cut.edited_source_render_fingerprint() != meta["render_fingerprint"]
+    assert cut.edited_source_render_cache_payload() != meta["render_cache"]
     assert cut.should_reuse_edited_source(edited, plan, video) is False
 
 
-@pytest.mark.parametrize("metadata", ["not json", "{}", "[]"])
-def test_edited_source_cache_treats_corrupt_metadata_as_a_miss(tmp_path, metadata):
+@pytest.mark.parametrize("metadata", ["not json"])
+def test_edited_source_cache_corrupt_own_metadata_raises(tmp_path, metadata):
+    """edited_source.mp4.meta.json is this skill's own artifact: unparseable is a bug to
+    surface. A missing sidecar, or one from an older schema, stays a plain miss."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
     edited.write_bytes(b"edited")
-    Path(f"{edited}.meta.json").write_text(metadata, encoding="utf-8")
     plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
     assert cut.should_reuse_edited_source(edited, plan, video) is False
+    Path(f"{edited}.meta.json").write_text(metadata, encoding="utf-8")
+    with pytest.raises((ValueError, LookupError, TypeError)):
+        cut.should_reuse_edited_source(edited, plan, video)
+
+
+def test_build_edited_source_video_requires_selected_output_geometry(tmp_path):
+    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    plan["qc"] = {}
+    with pytest.raises(KeyError, match="output_geometry"):
+        cut.build_edited_source_video(tmp_path / "video.mp4", plan, tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -582,7 +592,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
     monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 3.0)
 
-    out = cut.build_edited_source_video("ignored.mp4", plan, work_dir)
+    out = cut.build_edited_source_video("ignored.mp4", _with_geometry(plan, [str(a), str(b)]), work_dir)
 
     ffmpeg_cmd = [cmd for cmd in commands if cmd[0] == "ffmpeg"][0]
     # Only the two media inputs: audio is synthesized per-clip inside filter_complex.
@@ -635,7 +645,7 @@ def test_build_edited_source_video_multi_resolution_mixed_audio_real_render(tmp_
                      {"source_id": "b", "source_path": str(b), "duration": 2.0}]},
     )
 
-    out = cut.build_edited_source_video(str(a), plan, work)
+    out = cut.build_edited_source_video(str(a), _with_geometry(plan, [str(a), str(b)]), work)
     assert out.exists() and out.stat().st_size > 0
 
     def _has_stream(kind):
@@ -891,3 +901,22 @@ def test_update_cut_qc_duration_status_and_allow_drift(kwargs, allowed_by):
     else:
         assert "blocking" not in plan["qc"]
         assert plan["qc"]["target_duration"]["duration_drift_allowed_by"] == allowed_by
+
+
+def test_edited_source_cache_from_content_hash_schema_is_a_miss(tmp_path):
+    """A schema_version 2 sidecar (clip_plan_fingerprint/source_fingerprints), or an empty
+    one, simply re-renders."""
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    edited = tmp_path / "edited_source.mp4"
+    edited.write_bytes(b"edited")
+    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    Path(f"{edited}.meta.json").write_text(json.dumps({
+        "schema_version": 2, "clip_plan_fingerprint": "a" * 32, "render_fingerprint": "b" * 32,
+        "render_cache": {}, "source_fingerprints": {str(video): "c" * 64},
+        "edited_source_fingerprint": "d" * 64, "total_duration": 1.0, "clip_count": 1,
+    }), encoding="utf-8")
+    assert cut.should_reuse_edited_source(edited, plan, video) is False
+    for empty in ("{}", "[]"):
+        Path(f"{edited}.meta.json").write_text(empty, encoding="utf-8")
+        assert cut.should_reuse_edited_source(edited, plan, video) is False

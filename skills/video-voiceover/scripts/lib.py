@@ -1,7 +1,6 @@
 """Self-contained config + utilities for this skill (no cross-skill imports).
 Merged from the shared core; reads the same env vars as the rest of the bundle."""
 import json
-import hashlib
 import math
 import os
 import re
@@ -116,7 +115,7 @@ CONFIG = {
     "mimo_api_key": _mimo_api_key,
     "mimo_tts_api_url": normalize_api_url(_raw_mimo_tts_api_url),
     "mimo_tts_api_key": _mimo_tts_api_key,
-    "mimo_tts_api_key_source": "MIMO_TTS_API_KEY" if os.environ.get("MIMO_TTS_API_KEY") else "MIMO_API_KEY",
+    "mimo_tts_env_var": "MIMO_TTS_API_KEY" if os.environ.get("MIMO_TTS_API_KEY") else "MIMO_API_KEY",
     "mimo_asr_model": os.environ.get("MIMO_ASR_MODEL", DEFAULT_MIMO_ASR_MODEL),
     "mimo_tts_model": os.environ.get("MIMO_TTS_MODEL", DEFAULT_MIMO_TTS_MODEL),
     "mimo_tts_voice": os.environ.get("MIMO_TTS_VOICE", "冰糖"),
@@ -190,45 +189,10 @@ def get_video_duration(video_path):
     return float(result.stdout.strip())
 
 
-def stable_hash(value):
-    """Return an md5 digest of a deterministic JSON serialization (non-secret cache fingerprints)."""
-    encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.md5(encoded.encode("utf-8")).hexdigest()
-
-
-_FILE_FINGERPRINT_MEMO = {}
-
-
-def _file_identity(path):
-    """(device, inode, size, mtime_ns) — changes whenever the bytes could have changed."""
+def file_identity(path):
+    """{size, mtime_ns} — the cache identity of an input file (no content read)."""
     st = os.stat(os.fspath(path))
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
-
-
-def file_fingerprint(path, chunk_size=1024 * 1024):
-    """Return a full-content fingerprint for cache-correct identity checks.
-
-    The digest covers CONTENT only — never the path or mtime — so a copied video or
-    artifact is still recognised as the same asset, while any byte change invalidates
-    the cache even if timestamps, size, head, or tail bytes are misleading.
-
-    Identity metadata is used ONLY to memoize within a single process. One understanding
-    run fingerprints the same source video 8-10 times and the whole extracted frame set
-    2-3 times; on a 40-minute video at fps=1 that is gigabytes of redundant reads before
-    any real work starts. A file rewritten in place gets a new (size, mtime_ns) and is
-    re-hashed, so the memo can never serve a stale digest.
-    """
-    key = _file_identity(path)
-    memoized = _FILE_FINGERPRINT_MEMO.get(key)
-    if memoized is not None:
-        return memoized
-    h = hashlib.sha256()
-    with open(os.fspath(path), "rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    digest = h.hexdigest()
-    _FILE_FINGERPRINT_MEMO[key] = digest
-    return digest
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 
 
 def _retry_after_seconds(value, fallback):
@@ -288,7 +252,7 @@ def mimo_tts_api_call(payload):
         max_retries=10,
         api_url=CONFIG["mimo_tts_api_url"],
         api_key=CONFIG["mimo_tts_api_key"],
-        api_key_source=CONFIG["mimo_tts_api_key_source"],
+        api_env_var=CONFIG["mimo_tts_env_var"],
     )
 
 
@@ -299,11 +263,11 @@ def mimo_asr_api_call(payload):
         max_retries=10,
         api_url=CONFIG["mimo_api_url"],
         api_key=CONFIG["mimo_api_key"],
-        api_key_source="MIMO_API_KEY",
+        api_env_var="MIMO_API_KEY",
     )
 
 
-def api_call(payload, *, api_url, api_key, api_key_source, max_retries=8):
+def api_call(payload, *, api_url, api_key, api_env_var, max_retries=8):
     """调用 OpenAI-compatible API，带重试。
 
     集群的 429 限流是常态而非错误，所以重试更耐心（更多次数 + 退避封顶 60s + 遵从 Retry-After），
@@ -330,7 +294,7 @@ def api_call(payload, *, api_url, api_key, api_key_source, max_retries=8):
                 wait = _retry_after_seconds(retry_after, max(wait, 10))
                 log(f"API 速率限制 (尝试 {attempt+1}/{max_retries}), 等待 {wait}s")
             elif e.code == 401:
-                raise RuntimeError(f"API 认证失败 (401)。请检查 {api_key_source} 和 API URL 是否匹配。")
+                raise RuntimeError(f"API 认证失败 (401)。请检查 {api_env_var} 和 API URL 是否匹配。")
             elif e.code == 403:
                 hint = "API 访问被拒绝 (403)。"
                 if "1010" in body or "cloudflare" in body.lower():

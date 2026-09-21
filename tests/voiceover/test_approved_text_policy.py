@@ -97,7 +97,7 @@ def test_legacy_default_still_truncates_and_resynthesizes(monkeypatch, tmp_path)
     assert result["truncated"] is True
 
 
-def test_approved_text_policy_is_part_of_segment_cache_key(monkeypatch, tmp_path):
+def test_approved_text_policy_is_part_of_segment_cache_inputs(monkeypatch, tmp_path):
     _configure_offline_tts(monkeypatch)
     seg = {"start": 0.0, "end": 2.0, "narration": "缓存必须隔离。"}
     tts_dir = tmp_path / "tts_segments"
@@ -114,10 +114,9 @@ def test_approved_text_policy_is_part_of_segment_cache_key(monkeypatch, tmp_path
 def test_legacy_cache_payload_shape_remains_compatible(monkeypatch, tmp_path):
     _configure_offline_tts(monkeypatch)
     monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
-    monkeypatch.setattr(voiceover, "stable_hash", lambda payload: payload)
     seg = {"start": 0.0, "end": 2.0, "narration": "旧缓存继续可用。"}
 
-    payload = voiceover._tts_segment_cache_key(
+    payload = voiceover._tts_segment_cache_inputs(
         "mimo-tts", 0, seg, "旧缓存继续可用。", "+0%", "+0Hz"
     )
 
@@ -126,16 +125,16 @@ def test_legacy_cache_payload_shape_remains_compatible(monkeypatch, tmp_path):
     assert "provider_text_cleanup" not in payload
 
 
-def test_strict_cache_fingerprints_raw_authored_text_after_cleanup(monkeypatch):
+def test_strict_cache_inputs_carry_raw_authored_text_after_cleanup(monkeypatch):
     _configure_offline_tts(monkeypatch)
     monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
     base = {"start": 0.0, "end": 2.0, "narration": "批准文本。"}
     marked = {**base, "narration": "[提示]批准文本。"}
 
-    base_key = voiceover._tts_segment_cache_key(
+    base_key = voiceover._tts_segment_cache_inputs(
         "mimo-tts", 0, base, "批准文本。", "+0%", "+0Hz"
     )
-    marked_key = voiceover._tts_segment_cache_key(
+    marked_key = voiceover._tts_segment_cache_inputs(
         "mimo-tts", 0, marked, "批准文本。", "+0%", "+0Hz"
     )
 

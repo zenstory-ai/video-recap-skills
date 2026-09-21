@@ -85,9 +85,6 @@
     "IDLE_ORIG_VOLUME": {
       "classification": "value"
     },
-    "INDEX_TTS_CACHE_REVISION": {
-      "classification": "value"
-    },
     "INDEX_TTS_ENDPOINT": {
       "classification": "url"
     },

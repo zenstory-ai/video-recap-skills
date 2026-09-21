@@ -159,10 +159,11 @@ def _occurrences(node, validated_plan, input_video):
     return occurrences
 
 
-def check_required_evidence(
-    contract, validated_plan, *, input_video, source_audio: dict[str, bool]
-) -> dict:
-    """Return bounded source-selection QC for a declared required-evidence contract."""
+def check_required_evidence(contract, validated_plan, *, input_video, source_audio) -> dict:
+    """Return bounded source-selection QC for a declared required-evidence contract.
+
+    `source_audio(realpath) -> bool` is consulted only for audio nodes, after the contract
+    has been validated, so callers never pre-walk the raw contract to decide whether to probe."""
     try:
         nodes, edges = _validate_contract(contract)
     except (AttributeError, KeyError, TypeError, ValueError) as exc:
@@ -173,8 +174,7 @@ def check_required_evidence(
     fragment_starts_by_id = {}
     report_nodes = []
     for node in nodes:
-        audio_available = source_audio.get(node["source"]) is True
-        if node["track"] == "audio" and not audio_available:
+        if node["track"] == "audio" and source_audio(node["source"]) is not True:
             occurrences = []
             fragment_starts = []
             findings.append(

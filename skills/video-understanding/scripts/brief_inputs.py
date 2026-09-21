@@ -1,11 +1,10 @@
 """Validate optional ASR, MiMo, and stage-status inputs for the brief."""
 
-import hashlib
 import json
 from pathlib import Path
 
-from lib import CONFIG, file_fingerprint, stable_hash
-from brief_context import _clean_asr_prompt_fingerprint, _consolidation_model
+from lib import CONFIG, file_identity
+from brief_context import _consolidation_model
 
 # Shared with consolidate.py, which this byte-identical copy cannot import (the sibling
 # skill ships no consolidate.py). Keep both literals in sync.
@@ -27,7 +26,7 @@ def _load_clean_asr(work_dir, asr_result):
     """Return consolidate.py's cleaned ASR segments, or None to fall back to raw asr_result.
 
     Accepted only when the file is at least as fresh as asr_result.json, its provenance
-    (source_md5 / model / prompt_md5) matches, and every segment keeps its original span
+    (source identity / model) matches, and every segment keeps its original span
     within _ASR_SPAN_TOL."""
     if not asr_result:
         return None
@@ -45,16 +44,12 @@ def _load_clean_asr(work_dir, asr_result):
         return None
     try:
         payload = json.loads(clean_path.read_text(encoding="utf-8"))
-        source_md5 = hashlib.md5(src_path.read_bytes()).hexdigest()
+        source = file_identity(src_path)
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(payload, dict):
         return None
-    provenance = {
-        "source_md5": source_md5,
-        "model": _consolidation_model(),
-        "prompt_md5": _clean_asr_prompt_fingerprint(),
-    }
+    provenance = {"source": source, "model": _consolidation_model()}
     if not payload.items() >= provenance.items():
         return None
     segments = payload.get("segments")
@@ -84,7 +79,7 @@ def _is_mimo_chunk_usable(content):
     return not any(marker in low for marker in _MIMO_REJECTION_MARKERS)
 
 
-def _mimo_video_settings_fingerprint():
+def _mimo_video_settings():
     """Non-secret MiMo video-overview settings that affect generated content."""
     return {
         "model": CONFIG["mimo_video_model"],
@@ -102,16 +97,6 @@ def _mimo_video_settings_fingerprint():
 def _mimo_chunk_cache_key(chunk):
     """Stable identifier for a MiMo chunk (index + scene span) for partial-cache reuse."""
     return f"{chunk['chunk_id']}|{chunk['scene_id']}|{chunk['start']:.3f}-{chunk['end']:.3f}"
-
-
-def _mimo_cached_chunks_fingerprint(done):
-    return stable_hash(done)
-
-
-def _mimo_overview_payload_fingerprint(overview):
-    payload = dict(overview)
-    payload.pop("overview_fingerprint", None)
-    return stable_hash(payload)
 
 
 def _mimo_video_chunks(scenes):
@@ -146,7 +131,7 @@ def _mimo_overview_matches_current_inputs(overview, scenes, video_path=None):
     Provenance keys are read with .get: a stale or partial file simply does not match."""
     if not isinstance(overview, dict) or overview.get("input") != "scene_chunks":
         return False
-    settings = _mimo_video_settings_fingerprint()
+    settings = _mimo_video_settings()
     expected_keys = [
         _mimo_chunk_cache_key(chunk) for chunk in _mimo_video_chunks(scenes)
     ]
@@ -160,7 +145,7 @@ def _mimo_overview_matches_current_inputs(overview, scenes, video_path=None):
         return False
     if video_path is not None:
         try:
-            if overview.get("source_video_fingerprint") != file_fingerprint(video_path):
+            if overview.get("source_video_identity") != file_identity(video_path):
                 return False
         except OSError:
             return False
@@ -168,14 +153,7 @@ def _mimo_overview_matches_current_inputs(overview, scenes, video_path=None):
         cached_keys = [_mimo_chunk_cache_key(chunk) for chunk in chunks]
     except (KeyError, TypeError, ValueError):
         return False
-    return (
-        overview.get("settings") == settings
-        and overview.get("overview_fingerprint")
-        == _mimo_overview_payload_fingerprint(overview)
-        and overview.get("chunks_fingerprint")
-        == _mimo_cached_chunks_fingerprint(chunks)
-        and cached_keys == expected_keys
-    )
+    return overview.get("settings") == settings and cached_keys == expected_keys
 
 
 def _load_mimo_overview_for_brief(work_dir, scenes, enabled=None, video_path=None):

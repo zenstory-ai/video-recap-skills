@@ -3,7 +3,6 @@
 import argparse
 from bisect import bisect_left
 from fractions import Fraction
-import hashlib
 import json
 import math
 import os
@@ -12,16 +11,8 @@ import re
 import subprocess
 import tempfile
 
-from cut_contract import cut_plan_fingerprint, edited_source_render_fingerprint
-
-
-def sha256_file(path):
-    """Fresh content read: do not infer identity from a filename or mtime."""
-    h = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+from cut_contract import edited_source_render_cache_payload
+from lib import file_identity
 
 
 def _positive(value, name, *, integer=False):
@@ -128,45 +119,38 @@ def probe_frame_clock(video):
     return pts, end, origin
 
 
-def _validate_scene_roi(roi, video=None):
-    """Validate an ROI in FFmpeg's auto-oriented, native-pixel coordinate space."""
-    if roi is None:
-        return None
-    if (not isinstance(roi, (list, tuple)) or len(roi) != 4
-            or any(type(value) is not int for value in roi)):
+def _validate_scene_roi(roi, video):
+    """Validate an ROI (four ints from the CLI) against the video's auto-oriented native frame."""
+    if len(roi) != 4:
         raise ValueError("scene ROI must contain exactly four integers")
     x, y, width, height = roi
     if x < 0 or y < 0 or width <= 0 or height <= 0:
         raise ValueError("scene ROI requires x/y >= 0 and width/height > 0")
-    normalized = [x, y, width, height]
-    if video is None:
-        return normalized
 
     from media_geometry import _probe_video_geometry
     facts = _probe_video_geometry(video).facts
     rotation = facts["rotation"]
-    if type(rotation) is not int or rotation not in {0, 90, 180, 270}:
+    if rotation not in {0, 90, 180, 270}:
         raise ValueError("scene ROI requires a right-angle video rotation")
-    coded_width, coded_height = facts["coded_width"], facts["coded_height"]
-    if (type(coded_width) is not int or type(coded_height) is not int
-            or coded_width <= 0 or coded_height <= 0):
-        raise ValueError("invalid coded video geometry for scene ROI")
     canvas_width, canvas_height = (
-        (coded_height, coded_width) if rotation in {90, 270}
-        else (coded_width, coded_height)
+        (facts["coded_height"], facts["coded_width"]) if rotation in {90, 270}
+        else (facts["coded_width"], facts["coded_height"])
     )
     if x + width > canvas_width or y + height > canvas_height:
         raise ValueError(
             f"scene ROI exceeds auto-oriented native frame {canvas_width}x{canvas_height}"
         )
-    return normalized
 
 
 def detect_scene_pts(video, threshold, roi=None):
-    """No seek or float pts_time: showinfo integer pts + its actual filter timebase."""
-    roi = _validate_scene_roi(roi, video)
+    """No seek or float pts_time: showinfo integer pts + its actual filter timebase.
+
+    The single library-side check of threshold/ROI; the CLIs pre-check with parser.error."""
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("scene threshold must be finite and in [0,1]")
     filters = []
     if roi is not None:
+        _validate_scene_roi(roi, video)
         x, y, width, height = roi
         filters.append(f"crop={width}:{height}:{x}:{y}:exact=1")
     filters.extend([f"select='gt(scene,{threshold})'", "showinfo"])
@@ -189,18 +173,19 @@ def detect_scene_pts(video, threshold, roi=None):
 
 
 def load_bound_plan(video, plan_path):
-    """Only associate with the current cut-render cache, including every source hash."""
+    """Only associate with the current cut-render cache: plan, render settings, sources."""
     from cut_contract import _edited_source_meta_path
     try:
         plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
         meta = json.loads(_edited_source_meta_path(video).read_text(encoding="utf-8"))
-        sources = meta["source_fingerprints"]
+        sources = meta["sources"]
         if not isinstance(sources, dict) or not sources:
             raise ValueError("source identities missing")
-        if (meta["clip_plan_fingerprint"] != cut_plan_fingerprint(plan)
-                or meta["render_fingerprint"] != edited_source_render_fingerprint()
-                or meta["edited_source_fingerprint"] != sha256_file(video)
-                or any(sha256_file(p) != fp for p, fp in sources.items())):
+        if not Path(video).is_file() or Path(video).stat().st_size == 0:
+            raise ValueError("rendered media missing")
+        if (meta["plan"] != plan["clips"]
+                or meta["render_cache"] != edited_source_render_cache_payload()
+                or any(file_identity(p) != identity for p, identity in sources.items())):
             raise ValueError("stale media, plan or render settings")
         declared = {c["source_path"] for c in plan["clips"] if "source_path" in c}
         if declared and declared != set(sources):
@@ -243,36 +228,23 @@ def _associate_plan(report, plan, pts, end):
 
 
 def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
-    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
-        raise ValueError("scene threshold must be finite and in [0,1]")
-    roi = _validate_scene_roi(roi)
     video = Path(video).resolve()
-    before = sha256_file(video)
-    plan_hash = sha256_file(plan_path) if plan_path is not None else None
     plan = load_bound_plan(video, plan_path) if plan_path is not None else None
     pts, end, origin = probe_frame_clock(video)
-    scenes = detect_scene_pts(video, threshold) if roi is None else detect_scene_pts(video, threshold, roi)
+    scenes = detect_scene_pts(video, threshold, roi)
     frames_by_pts = {p + origin: i for i, p in enumerate(pts)}
     if any(p not in frames_by_pts for p in scenes):
         raise ValueError("scene candidate does not match a unique decoded frame PTS")
     report = summarize_candidates(pts, end, [frames_by_pts[p] for p in scenes if frames_by_pts[p] > 0], **policy)
     if plan is not None:
         _associate_plan(report, plan, pts, end)
-        # The scan can take minutes: recheck inputs rather than signing a mixed revision.
-        if plan_hash != sha256_file(plan_path):
-            raise ValueError("cut plan changed during scan")
-        load_bound_plan(video, plan_path)
-    if sha256_file(video) != before:
-        raise ValueError("video changed during scan")
     report.update({
         "schema_version": 1, "artifact": "shot_review", "algorithm": "scene-frame-recall-v1", "scan_complete": True,
-        "media": {"path": str(video), "sha256": before, "frame_count": len(pts),
-                  "origin_pts_exact": str(origin), "duration_exact": str(end),
-                  "frame_clock_sha256": hashlib.sha256(
-                      json.dumps([str(p) for p in [*pts, end]]).encode()).hexdigest()},
-        "plan_binding": {"path": str(Path(plan_path).resolve()), "sha256": plan_hash} if plan is not None else None,
+        "media": {"path": str(video), "frame_count": len(pts),
+                  "origin_pts_exact": str(origin), "duration_exact": str(end)},
+        "plan_binding": {"path": str(Path(plan_path).resolve())} if plan is not None else None,
         "scene_threshold": threshold,
-        "scene_roi": roi,
+        "scene_roi": None if roi is None else list(roi),
         "limits": ["scene score is not a confirmed shot or flash-frame defect",
                    "source-origin confirmation requires independent source footage review",
                    "NO_CANDIDATES is not perceptual approval or listening evidence"],
@@ -317,7 +289,7 @@ def _report_target(video, output, plan_path):
 
 
 def _protect_declared_sources(video, plan_path, target):
-    """Use both plan and metadata declarations, even when their identities disagree."""
+    """Use both plan and metadata declarations, even when they disagree."""
     from cut_contract import _edited_source_meta_path
     if plan_path is None:
         return
@@ -328,7 +300,7 @@ def _protect_declared_sources(video, plan_path, target):
             if kind == "plan":
                 paths.update(c["source_path"] for c in data["clips"] if "source_path" in c)
             else:
-                paths.update(data["source_fingerprints"])
+                paths.update(data["sources"])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             errors.append(exc)
     if target in {Path(p).resolve() for p in paths}:
@@ -343,12 +315,13 @@ class UnsafeReportTarget(ValueError):
 
 def write_scan(video, output, **options):
     target = _report_target(video, output, options.get("plan_path"))
+    roi = options.get("roi")
     base = {"schema_version": 1, "artifact": "shot_review", "scan_complete": False,
             "normal_speed_review": "NOT_CHECKED",
-            "scene_threshold": options.get("threshold", 0.35), "scene_roi": None}
+            "scene_threshold": options.get("threshold", 0.35),
+            "scene_roi": None if roi is None else list(roi)}
     try:
         _protect_declared_sources(video, options.get("plan_path"), target)
-        base["scene_roi"] = _validate_scene_roi(options.get("roi"))
         _atomic_json(output, {**base, "status": "SCANNING"})
         report = scan_video(video, **options)
     except UnsafeReportTarget:

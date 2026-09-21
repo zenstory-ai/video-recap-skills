@@ -2,7 +2,6 @@
 
 import copy
 from fractions import Fraction
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -30,14 +29,6 @@ AAC_FRAME_SAMPLES = 1024
 
 def run(*args, check=True):
     return subprocess.run(list(map(str, args)), capture_output=True, check=check)
-
-
-def sha(path):
-    digest = hashlib.sha256()
-    with Path(path).open("rb") as stream:
-        for block in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(block)
-    return digest.hexdigest()
 
 
 def png(path, source, *, size="64x48", pix_fmt="rgba"):
@@ -80,8 +71,8 @@ def packet_clock_package(tmp_path, *, endcard_kind="still", audio_case="overhang
     pair_plan = tmp_path / "pair.json"
     pair_plan.write_text(json.dumps({
         "artifact": "media_pair", "schema_version": 1,
-        "picture": {"path": str(picture), "sha256": sha(picture)},
-        "audio": {"path": str(audio), "sha256": sha(audio), "selected_stream": 0},
+        "picture": {"path": str(picture)},
+        "audio": {"path": str(audio), "selected_stream": 0},
     }))
     pair_dir = tmp_path / "paired"
     pair_report = run_pair(pair_plan, pair_dir)
@@ -95,7 +86,7 @@ def packet_clock_package(tmp_path, *, endcard_kind="still", audio_case="overhang
         (foreground / f"frame_{index:06d}.png").symlink_to(clear)
     if endcard_kind == "still":
         endcard = {
-            "kind": "still", "path": str(clear), "sha256": sha(clear),
+            "kind": "still", "path": str(clear),
             "start_frame": 30, "end_frame": 32,
         }
     else:
@@ -106,26 +97,20 @@ def packet_clock_package(tmp_path, *, endcard_kind="still", audio_case="overhang
         endcard = {
             "kind": "sequence", "directory": str(sequence),
             "pattern": "frame_%06d.png", "start_frame": 30, "end_frame": 32,
-            "ordered_sha256": compose_foreground.ordered_sequence_digest(
-                sequence, "frame_%06d.png", 0, 2
-            ),
         }
     receipt = tmp_path / "receipt.json"
     receipt.write_text(json.dumps({"approved": False}))
     compose_plan = tmp_path / "compose.json"
     compose_plan.write_text(json.dumps({
         "artifact": "foreground_compose_plan", "schema_version": 1,
-        "base": {"path": str(base), "sha256": sha(base)},
+        "base": {"path": str(base)},
         "video": {"fps": "24/1", "width": 64, "height": 48, "total_frames": 32},
         "foreground": {
             "directory": str(foreground), "pattern": "frame_%06d.png",
             "start_frame": 0, "end_frame": 30,
-            "ordered_sha256": compose_foreground.ordered_sequence_digest(
-                foreground, "frame_%06d.png", 0, 30
-            ),
         },
         "endcard": endcard,
-        "producer_receipt": {"path": str(receipt), "sha256": sha(receipt)},
+        "producer_receipt": {"path": str(receipt)},
     }))
     return {
         "plan": compose_plan, "base": base, "audio": audio,
@@ -174,18 +159,15 @@ def package(tmp_path):
     }))
     document = {
         "artifact": "foreground_compose_plan", "schema_version": 1,
-        "base": {"path": str(base), "sha256": sha(base)},
+        "base": {"path": str(base)},
         "video": {"fps": "4/1", "width": 64, "height": 48, "total_frames": 8},
         "foreground": {
             "directory": str(foreground), "pattern": "frame_%06d.png",
             "start_frame": 0, "end_frame": 6,
-            "ordered_sha256": compose_foreground.ordered_sequence_digest(
-                foreground, "frame_%06d.png", 0, 6
-            ),
         },
-        "endcard": {"kind": "still", "path": str(endcard), "sha256": sha(endcard),
+        "endcard": {"kind": "still", "path": str(endcard),
                     "start_frame": 6, "end_frame": 8},
-        "producer_receipt": {"path": str(receipt), "sha256": sha(receipt)},
+        "producer_receipt": {"path": str(receipt)},
     }
     plan = tmp_path / "foreground_plan.json"
     plan.write_text(json.dumps(document))
@@ -198,7 +180,9 @@ def test_real_foreground_half_open_endcard_and_frozen_audio(package, tmp_path):
     report = compose_foreground.run_compose(package["plan"], target)
     output = target / "foreground.mp4"
     assert report["status"] == "FOREGROUND_RENDERED"
-    assert report["output"]["sha256"] == sha(output)
+    assert report["output"]["path"] == str(output) and output.is_file()
+    assert report["foreground"]["frame_count"] == 6
+    assert report["plan"] == {"path": str(package["plan"].resolve())}
     assert report["direct_listening"] == report["normal_speed_review"] == "NOT_CHECKED"
     assert report["release_approved"] is False
     # Transparent sequence pixels preserve the blue base; note is visible only [2, 4).
@@ -238,12 +222,7 @@ def test_real_full_length_foreground_without_endcard_preserves_last_frame(packag
     png(red, "color=c=red@1.0")
     (package["foreground"] / "frame_000006.png").symlink_to(red)
     (package["foreground"] / "frame_000007.png").symlink_to(red)
-    package["document"]["foreground"].update(
-        end_frame=8,
-        ordered_sha256=compose_foreground.ordered_sequence_digest(
-            package["foreground"], "frame_%06d.png", 0, 8
-        ),
-    )
+    package["document"]["foreground"].update(end_frame=8)
     package["document"]["endcard"] = {"kind": "none"}
     package["plan"].write_text(json.dumps(package["document"]))
 
@@ -374,20 +353,20 @@ def test_plan_only_and_isolated_copied_skill_cli(package, tmp_path):
     lambda d: d.update(schema_version=2),
     lambda d: d.update(artifact="wrong"),
     lambda d: d.update(extra=True),
-    lambda d: d["base"].update(sha256="0" * 64),
+    lambda d: d.pop("producer_receipt"),
+    lambda d: d["base"].update(path="/nonexistent/base.mp4"),
     lambda d: d["video"].update(fps="5/1"),
     lambda d: d["video"].update(width=32),
     lambda d: d["video"].update(total_frames=9),
     lambda d: d["foreground"].update(pattern="frame_%d.png"),
     lambda d: d["foreground"].update(start_frame=1),
     lambda d: d["foreground"].update(end_frame=5),
-    lambda d: d["foreground"].update(ordered_sha256="0" * 64),
     lambda d: d["endcard"].update(start_frame=5),
     lambda d: d["endcard"].update(end_frame=7),
-    lambda d: d["endcard"].update(sha256="0" * 64),
-    lambda d: d["producer_receipt"].update(sha256="0" * 64),
+    lambda d: d["endcard"].update(path="/nonexistent/endcard.png"),
+    lambda d: d["producer_receipt"].update(path="/nonexistent/receipt.json"),
 ])
-def test_invalid_plan_or_stale_identity_never_publishes(package, tmp_path, mutation):
+def test_invalid_plan_or_missing_input_never_publishes(package, tmp_path, mutation):
     document = copy.deepcopy(package["document"])
     mutation(document)
     package["plan"].write_text(json.dumps(document))
@@ -417,28 +396,13 @@ def test_sequence_shape_and_inventory_are_exact(package, tmp_path, fault):
     assert not (target / "foreground.mp4").exists()
 
 
-@pytest.mark.parametrize("changed", ["plan", "base", "receipt", "png", "mux_fail"])
-def test_mux_failure_or_toctou_never_publishes(package, tmp_path, monkeypatch, changed):
-    original = compose_foreground._run_ffmpeg
+def test_mux_failure_never_publishes(package, tmp_path, monkeypatch):
+    def failed(command, directory):
+        raise RuntimeError("simulated mux failure")
 
-    def interrupted(command, directory):
-        if changed == "mux_fail":
-            raise RuntimeError("simulated mux failure")
-        original(command, directory)
-        selected = {
-            "plan": package["plan"], "base": package["base"],
-            "receipt": package["receipt"],
-            "png": package["foreground"] / "frame_000002.png",
-        }.get(changed)
-        if selected:
-            if selected.is_symlink():
-                selected = selected.resolve()
-            with selected.open("ab") as stream:
-                stream.write(b"changed")
-
-    monkeypatch.setattr(compose_foreground, "_run_ffmpeg", interrupted)
-    target = tmp_path / changed
-    with pytest.raises((ValueError, RuntimeError)):
+    monkeypatch.setattr(compose_foreground, "_run_ffmpeg", failed)
+    target = tmp_path / "mux_fail"
+    with pytest.raises(RuntimeError):
         compose_foreground.run_compose(package["plan"], target)
     assert not (target / "foreground.mp4").exists()
     assert json.loads((target / "foreground_run.json").read_text())["status"] == "FAILED"
@@ -458,9 +422,6 @@ def test_caller_rendered_dynamic_endcard_sequence(package, tmp_path):
     package["document"]["endcard"] = {
         "kind": "sequence", "directory": str(sequence), "pattern": "frame_%06d.png",
         "start_frame": 6, "end_frame": 8,
-        "ordered_sha256": compose_foreground.ordered_sequence_digest(
-            sequence, "frame_%06d.png", 0, 2
-        ),
     }
     package["plan"].write_text(json.dumps(package["document"]))
     output_dir = tmp_path / "dynamic"

@@ -114,7 +114,6 @@ def main():
         CONFIG["target_duration"] = args.target_duration
     if args.mimo_video_overview:
         CONFIG["mimo_video_overview"] = True
-    scene_threshold = CONFIG.get("scene_threshold")
 
     video_duration = get_video_duration(video)
     if CONFIG["fps"] <= 0:
@@ -147,7 +146,7 @@ def main():
         scenes = _load_json(scenes_json)
         log(f"跳过场景检测（已存在 {len(scenes)} 个场景）")
     else:
-        scenes = detect_scenes(video, work_dir, scene_threshold)
+        scenes = detect_scenes(video, work_dir, CONFIG["scene_threshold"])
         _write_stage_meta(scenes_json, scenes_meta)
 
     # Step 3: ASR
@@ -208,13 +207,13 @@ def main():
         vlm_analysis = _load_json(vlm_json)
         log(f"跳过 VLM 分析（已存在 {len(vlm_analysis)} 个场景）")
     else:
-        if not CONFIG.get("api_key"):
-            key_name = CONFIG.get("api_key_source", "MIMO_API_KEY")
+        if not CONFIG["api_key"]:
+            key_name = CONFIG["api_env_var"]
             raise SystemExit(f"请设置 {key_name} 环境变量（VLM 画面分析需要）")
         log("VLM API 连通性预检...")
         api_call(
             {
-                "model": CONFIG.get("vlm_model", ""),
+                "model": CONFIG["vlm_model"],
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 5,
             }
@@ -224,8 +223,8 @@ def main():
 
     # Step 4.1: optional MiMo scene-chunk video understanding
     overview_path = work_dir / "mimo_video_overview.json"
-    if CONFIG.get("mimo_video_overview", False):
-        if not CONFIG.get("mimo_video_api_key"):
+    if CONFIG["mimo_video_overview"]:
+        if not CONFIG["mimo_video_api_key"]:
             log("跳过 MiMo 分片视频概览：未设置 MIMO_API_KEY")
             overview_path.unlink(missing_ok=True)
             _write_mimo_overview_status(
@@ -247,7 +246,7 @@ def main():
                 log(f"MiMo 分片视频概览失败（忽略）: {e}")
                 _write_mimo_overview_status(work_dir, "failed", e, None)
             else:
-                if overview_path.exists() and overview:
+                if overview:
                     _write_mimo_overview_status(
                         work_dir, "ok", "MiMo 分片视频概览完成", overview_path.name
                     )
@@ -361,7 +360,7 @@ def main():
         video_duration,
         work_dir,
         args.style,
-        mimo_overview_enabled=CONFIG.get("mimo_video_overview", False),
+        mimo_overview_enabled=CONFIG["mimo_video_overview"],
         mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )

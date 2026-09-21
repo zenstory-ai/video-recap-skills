@@ -1,7 +1,6 @@
 """Independent real-PCM checks for adopted score and source-bed boundaries."""
 
 from array import array
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -22,10 +21,6 @@ pytestmark = pytest.mark.skipif(
 
 def run(*args):
     return subprocess.run(list(map(str, args)), capture_output=True, check=True)
-
-
-def sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def pcm(path):
@@ -52,8 +47,7 @@ def score_only(tmp_path, score):
         'source_segments': [],
         'source_silence': [{'output_start_sample': 0, 'output_end_sample': 48000,
                             'role': 'silence'}],
-        'score': {'kind': 'frozen', 'path': str(score), 'sha256': sha(score),
-                  'audio_stream': 0},
+        'score': {'kind': 'frozen', 'path': str(score), 'audio_stream': 0},
     }
 
 
@@ -122,7 +116,7 @@ def test_source_fade_has_inclusive_sample_endpoints(tmp_path):
     plan = score_only(tmp_path, score)
     plan['source_silence'] = []
     plan['source_segments'] = [{
-        'id': 'source', 'path': str(source), 'sha256': sha(source), 'audio_stream': 0,
+        'id': 'source', 'path': str(source), 'audio_stream': 0,
         'source_fps': '24/1', 'source_start_frame': 0, 'source_end_frame': 24,
         'output_start_sample': 0, 'gain': 1, 'role': 'protected_original',
         'fade_in_samples': 96, 'fade_out_samples': 12000, 'fade_shape': 'linear',
@@ -185,7 +179,7 @@ def test_half_open_reorder_quiet_gain_and_continuous_score_sample_by_sample(tmp_
     plan['source_silence'] = []
     low_gain = 0.012529680840681807
     plan['source_segments'] = [{
-        'id': str(i), 'path': str(source), 'sha256': sha(source), 'audio_stream': 0,
+        'id': str(i), 'path': str(source), 'audio_stream': 0,
         'source_fps': '24/1', 'source_start_frame': start,
         'source_end_frame': start + 24, 'output_start_sample': i*48000,
         'gain': gain, 'role': role, 'fade_in_samples': 0,
