@@ -4,7 +4,7 @@ import importlib.util
 from pathlib import Path
 
 _SPEC = importlib.util.spec_from_file_location(
-    "video_recap_mimo_qc_lib", Path(__file__).parent.with_name("lib.py")
+    "video_recap_mimo_qc_lib", Path(__file__).resolve().parents[1] / "lib.py"
 )
 _LIB = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(_LIB)

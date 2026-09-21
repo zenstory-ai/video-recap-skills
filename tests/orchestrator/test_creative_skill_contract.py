@@ -303,7 +303,9 @@ def test_all_literal_prompt_anchors_resolve_in_the_owning_skill():
     for skill_name in SKILL_NAMES:
         skill_dir = SKILLS_ROOT / skill_name
         anchors = set()
-        for source_path in (skill_dir / "scripts").glob("*.py"):
+        for source_path in (skill_dir / "scripts").rglob("*.py"):
+            if "__pycache__" in source_path.parts:
+                continue
             tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call) or not node.args:
