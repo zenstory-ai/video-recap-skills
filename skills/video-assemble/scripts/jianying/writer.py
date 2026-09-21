@@ -9,7 +9,7 @@ import time
 import uuid
 import zipfile
 
-from jianying_templates import template
+from jianying.templates import template
 
 
 DRAFT_PATH_PLACEHOLDER = "##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##"

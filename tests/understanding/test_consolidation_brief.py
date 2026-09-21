@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -15,17 +16,22 @@ sys.path.insert(
 )
 
 from lib import CONFIG, file_identity  # noqa: E402
+import brief_context  # noqa: E402
+import brief_inputs  # noqa: E402
+import brief_timeline  # noqa: E402
 from agent_brief import build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
 from brief_context import (  # noqa: E402
     _format_consolidation,
     _load_consolidation,
+    assess_understanding_substrate,
 )
 from brief_inputs import (  # noqa: E402
     _load_clean_asr,
     _load_mimo_overview_for_brief,
     _load_optional_stage_status,
 )
+from narration_lint import lint_narration  # noqa: E402
 
 SCENES = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
 ASR = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
@@ -367,3 +373,608 @@ def test_producer_only_meta_keys_never_reject_a_fresh_index(tmp_path):
     assert _load_consolidation(tmp_path, SCENES) == index
     _write_clean_asr(tmp_path, producer_cache_key="opaque")
     assert _load_clean_asr(tmp_path, ASR) is not None
+
+
+def _write_json(path, payload):
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+
+
+def _write_source_anchors(work_dir, anchors):
+    _write_json(
+        work_dir / "speech_boundary_anchors.json",
+        {"schema_version": 1, "sentence_anchors": anchors},
+    )
+
+
+def _set_brief_mode(monkeypatch, edit_mode, target_duration="", context_info=""):
+    monkeypatch.setitem(CONFIG, "edit_mode", edit_mode)
+    monkeypatch.setitem(CONFIG, "target_duration", target_duration)
+    monkeypatch.setitem(CONFIG, "context_info", context_info)
+
+
+def _agent_brief_text(scenes, asr, silence, duration, work_dir, **kwargs):
+    return build_agent_brief(scenes, asr, silence, duration, work_dir, **kwargs).read_text(
+        encoding="utf-8"
+    )
+
+
+def _json_examples(text):
+    return [
+        json.loads(raw) for raw in re.findall(r"```json\s*\n(.*?)\n```", text, re.DOTALL)
+    ]
+
+
+def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
+    """Cut mode sizes the beat target to the OUTPUT length, not the source (2h->30min regression)."""
+    _set_brief_mode(monkeypatch, "cut", target_duration="1m")
+    scenes = [
+        {
+            "scene_id": i,
+            "start": i * 60.0,
+            "end": i * 60.0 + 60.0,
+            "description": "画面",
+        }
+        for i in range(10)
+    ]
+    text = _agent_brief_text(scenes, [], [], 600.0, tmp_path)
+    assert "CUT OUTPUT" in text
+    assert (
+        "narration BLOCKS across the ~1min CUT OUTPUT" in text
+    )  # sized to 1min output (~5 blocks)
+    assert "47 narration BLOCKS" not in text  # NOT the source-sized (10min) count
+    assert (
+        "step 1 of 2" in text
+    )  # A1: cut-first, write clip_plan only (no edited_source yet)
+    clip_plan = next(
+        item for item in _json_examples(text) if isinstance(item, dict) and "clips" in item
+    )
+    reason_parts = [part.strip() for part in clip_plan["clips"][0]["reason"].split("|")]
+    assert clip_plan["target_duration"] == "1m"
+    assert len(reason_parts) == 7
+    assert reason_parts[0].startswith("b") and "→" in reason_parts[2]
+    assert reason_parts[3].startswith("POV=")
+    assert reason_parts[-2].startswith("入点=") and reason_parts[-1].startswith("出点=")
+
+
+def test_build_agent_brief_cut_pass2_narrates_output_timeline_sized_to_validated_cut(
+    monkeypatch, tmp_path
+):
+    """Once edited_source.mp4 exists the cut brief becomes the PASS-2 variant: narrate in
+    OUTPUT time, list the kept clips, and size to the validated cut, not --target-duration."""
+    _set_brief_mode(monkeypatch, "cut", target_duration="1m")
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {
+            "clips": [
+                {
+                    "clip_id": 0,
+                    "source_start": 10.0,
+                    "source_end": 20.0,
+                    "output_start": 0.0,
+                    "output_end": 10.0,
+                    "reason": "开端",
+                },
+                {
+                    "clip_id": 1,
+                    "source_start": 40.0,
+                    "source_end": 50.0,
+                    "output_start": 10.0,
+                    "output_end": 20.0,
+                    "reason": "转折",
+                },
+            ],
+            "total_duration": 20.0,
+        },
+    )
+    scenes = [{"scene_id": 0, "start": 10.0, "end": 50.0, "description": "保留片段"}]
+    text = _agent_brief_text(scenes, [], [], 120.0, tmp_path)
+    assert "step 2 of 2: write `narration.json` in OUTPUT time" in text
+    assert "Kept clips on the OUTPUT timeline" in text
+    assert "OUTPUT 0.0–10.0s ← SOURCE[0] 10.0–20.0s" in text
+    assert "step 1 of 2" not in text
+    assert "across the ~20s CUT OUTPUT" in text
+    assert "edited_source.mp4` (~20s)" in text
+    assert "~1min" not in text
+
+
+def test_build_agent_brief_keeps_plan_linkage_in_the_board_not_narration_schema(
+    monkeypatch, tmp_path
+):
+    _set_brief_mode(monkeypatch, "full")
+
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 8.0, "description": "人物作出选择"}],
+        [{"start": 1.0, "end": 3.0, "text": "我决定留下。"}],
+        [],
+        8.0,
+        tmp_path,
+    )
+    narration = next(
+        item
+        for item in _json_examples(text)
+        if isinstance(item, list) and item and "narration" in item[0]
+    )
+
+    assert set(narration[0]) == {
+        "start",
+        "end",
+        "narration",
+        "pause_after_ms",
+        "overlaps_speech",
+        "emotion",
+        "source_entry_policy",
+    }
+    assert "beat 对应关系记录在 `visual_audio_board.json`" in text
+    assert "`narration.json` 仍只承载时间、文本与朗读参数" in text
+
+
+def test_build_agent_brief_surfaces_sentence_end_entry_anchors(tmp_path):
+    _write_source_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "text_tail": "带你重走詹姆斯的二十一年。", "confidence": "high"},
+            {"time": 22.86, "text_tail": "开启了自己的全明星之路。", "confidence": "high"},
+        ],
+    )
+
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 30.0, "description": "生涯回顾"}],
+        [{"start": 0.0, "end": 30.0, "text": "原声持续讲述。"}],
+        [],
+        30.0,
+        tmp_path,
+    )
+
+    assert "原声句末安全切入点" in text
+    assert "5.81s" in text and "22.86s" in text
+    assert "interrupts_source_sentence" in text
+    assert "source_entry_policy" in text
+
+
+def test_build_agent_brief_preserves_freeform_style_and_artifact_contract(tmp_path):
+    style = "悬疑冷幽默，但每句都像朋友复盘：别端着，保留东北味儿"
+
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}],
+        [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}],
+        [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}],
+        6.0,
+        tmp_path,
+        style=style,
+    )
+
+    assert f"- Style (--style, freeform verbatim guidance): {style}" in text
+    assert (
+        "Do not translate `--style` into a preset, enum, switch, or fallback ladder"
+        in text
+    )
+    assert "style_card.json" in text and "packaging_plan.json" in text
+    assert "deterministic report-only tool QC" in text
+    assert "not treat it as an AIGC detector" in text
+    assert "do not auto-rewrite" in text
+    assert "not a preset enum, fixed taxonomy" in text
+
+
+def test_build_agent_brief_empty_substrate_warns_and_relaxes_density(
+    monkeypatch, tmp_path
+):
+    """Empty substrate turns the density target into a ceiling, not a quota, so the agent
+    is not forced to fill beats with 看图说话."""
+    _set_brief_mode(monkeypatch, "full")
+    scenes = [
+        {"scene_id": i, "start": i * 6.0, "end": i * 6.0 + 6.0, "description": "画面"}
+        for i in range(4)
+    ]
+    assert assess_understanding_substrate(scenes, [])["level"] == "empty"
+    text = _agent_brief_text(scenes, [], [], 24.0, tmp_path)
+    assert "SUBSTRATE IS EMPTY" in text
+    assert "do NOT chase a beat count" in text
+    assert "grounded blocks" in text  # thin -> fewer, grounded blocks (no quota)
+    assert (
+        "segments/min (minimum" not in text
+    )  # the strict quota line is replaced when thin
+
+
+def test_build_agent_brief_research_directive_when_context_without_research(
+    monkeypatch, tmp_path
+):
+    """A title/context with no background_research.json triggers a research-first directive."""
+    _set_brief_mode(monkeypatch, "full", context_info="这是《庆余年》第一集")
+    scenes = [
+        {
+            "scene_id": 0,
+            "start": 0.0,
+            "end": 6.0,
+            "description": "范闲登场与人对峙暗藏机锋",
+        }
+    ]
+    asr = [{"start": 1.0, "end": 5.0, "text": "一句对白。"}]
+    text = _agent_brief_text(scenes, asr, [], 6.0, tmp_path)
+    assert "Research the story FIRST" in text
+    assert "庆余年" in text  # the context is echoed into the directive
+
+    (tmp_path / "background_research.json").write_text(
+        '{"synopsis": "范闲查案"}', encoding="utf-8"
+    )
+    text2 = _agent_brief_text(scenes, asr, [], 6.0, tmp_path)
+    assert (
+        "Research the story FIRST" not in text2
+    )  # already researched -> directive gone
+
+
+def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
+    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
+    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 20.0)
+    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 1.0)
+    chunks = [
+        {
+            "chunk_id": 0,
+            "scene_id": 0,
+            "start": 0.0,
+            "end": 3.0,
+            "content": "这是 MiMo 对分片汇总的故事线概览。",
+        }
+    ]
+    overview = {
+        "input": "scene_chunks",
+        "content": "这是 MiMo 对分片汇总的故事线概览。",
+        "reasoning_content": "内部推理",
+        "chunks": chunks,
+        "settings": brief_inputs._mimo_video_settings(),
+    }
+    _write_json(tmp_path / "mimo_video_overview.json", overview)
+    _set_brief_mode(monkeypatch, "full")
+
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "场景"}],
+        [],
+        [],
+        3.0,
+        tmp_path,
+    )
+    assert "MiMo scene-chunk video overview" in text
+    assert "这是 MiMo 对分片汇总的故事线概览。" in text
+    assert "内部推理" not in text
+
+
+def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
+    _set_brief_mode(monkeypatch, "full")
+    asr = [{"start": 0.0, "end": 1.0, "text": "原始对白"}]
+    _write_json(tmp_path / "asr_result.json", asr)
+    for name in (
+        "asr_clean.json",
+        "mimo_video_overview.json",
+        "mimo_video_overview.status.json",
+        "consolidation.status.json",
+        "understanding_index.json",
+        "understanding_index.json.meta.json",
+    ):
+        (tmp_path / name).write_text("not json", encoding="utf-8")
+
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 1.0, "description": "画面"}],
+        asr,
+        [],
+        1.0,
+        tmp_path,
+    )
+
+    assert "原始对白" in text
+
+
+def test_build_agent_brief_injects_background_research(monkeypatch, tmp_path):
+    _set_brief_mode(monkeypatch, "full")
+    _write_json(
+        tmp_path / "background_research.json",
+        {
+            "synopsis": "少年范闲深夜查案。",
+            "characters": {"范闲": "主角", "五竹": "范闲的护卫"},
+        },
+    )
+    text = _agent_brief_text(
+        [
+            {
+                "scene_id": 0,
+                "start": 0.0,
+                "end": 3.0,
+                "description": "夜路",
+                "frame_facts": {"1.0": ["走路"]},
+            }
+        ],
+        [{"start": 0.0, "end": 3.0, "text": "你终于来了"}],
+        [],
+        3.0,
+        tmp_path,
+    )
+    assert "Story context" in text
+    assert "五竹" in text
+    assert "范闲的护卫" in text
+
+
+def test_assess_understanding_substrate_levels():
+    empty = assess_understanding_substrate(
+        [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "短"}], []
+    )
+    assert empty["level"] == "empty"
+
+    facts_scenes = [
+        {
+            "scene_id": i,
+            "start": float(i),
+            "end": float(i + 1),
+            "description": "画面描述" * 6,
+            "frame_facts": {"1.0": ["动作"]},
+        }
+        for i in range(4)
+    ]
+    # Rich requires a story SPINE: substantial dialogue (ASR >= 200 chars) ...
+    rich = assess_understanding_substrate(
+        facts_scenes, [{"start": 0.0, "end": 3.0, "text": "对白" * 120}]
+    )
+    assert rich["level"] == "rich"
+    # ... or researched/given story context lifts a frame-fact-rich clip to rich.
+    storyful = assess_understanding_substrate(facts_scenes, [], has_story_context=True)
+    assert storyful["level"] == "rich"
+    # Frame-fact-rich but STORYLESS (no dialogue, no context) is thin, NOT rich, so the
+    # cold-narration safeguards (sparse warning, research directive, density relief) fire.
+    # This is the canonical anime case the old volume-only classifier mislabeled "rich".
+    storyless = assess_understanding_substrate(facts_scenes, [])
+    assert storyless["level"] == "thin"
+
+
+def test_parse_target_seconds_table():
+    """Parse documented forms, leave unset values empty, and fail fast on typos."""
+    from brief_timeline import _parse_target_seconds
+
+    assert _parse_target_seconds("1:30") == 90.0
+    assert _parse_target_seconds("00:30:00") == 1800.0
+    assert _parse_target_seconds("30m") == 1800.0
+    assert _parse_target_seconds("1h5m") == 3900.0
+    assert _parse_target_seconds("600") == 600.0
+    assert _parse_target_seconds(90) == 90.0
+    for unset in ("", None, "  "):
+        assert _parse_target_seconds(unset) is None
+    for bad in (
+        "abc",
+        "0",
+        "-5",
+        "10x",
+        "1:-30",
+        "1:2:3:4",
+        "nan",
+        "inf",
+    ):
+        with pytest.raises(ValueError):
+            _parse_target_seconds(bad)
+
+
+def test_build_agent_brief_storyless_rich_video_relaxes_and_prompts_research(
+    monkeypatch, tmp_path
+):
+    """Anime case: frame-fact-rich but storyless (no dialogue, no research) is treated as
+    thin, so the density relaxes and the research directive fires instead of shipping cold."""
+    _set_brief_mode(monkeypatch, "full")
+    scenes = [
+        {
+            "scene_id": i,
+            "start": float(i * 6),
+            "end": float(i * 6 + 6),
+            "description": "人物在画面里走动" * 3,
+            "frame_facts": {str(i * 6): ["走动"]},
+        }
+        for i in range(6)
+    ]
+    text = _agent_brief_text(scenes, [], [], 36.0, tmp_path)
+    assert "do NOT chase a beat count" in text  # density relaxed (FIX D)
+    assert "Research the story FIRST" in text  # research directive (FIX E)
+    assert "segments/min (minimum" not in text  # strict quota line suppressed
+
+
+def test_build_agent_brief_rich_substrate_frames_density_as_guide_without_research_nag(
+    monkeypatch, tmp_path
+):
+    """RICH substrate: density stays a GUIDE, never a quota, and a title alone (dialogue-rich,
+    no research file) must not trigger the research-first nag."""
+    _set_brief_mode(monkeypatch, "full", context_info="这是《庆余年》第一集")
+    scenes = [
+        {
+            "scene_id": i,
+            "start": float(i * 6),
+            "end": float(i * 6 + 6),
+            "description": "范闲在书房翻看卷宗神色凝重",
+            "frame_facts": {str(i * 6): ["翻书"]},
+        }
+        for i in range(6)
+    ]
+    asr = [
+        {"start": 1.0, "end": 5.0, "text": "对" * 250}
+    ]  # >= 200 chars -> a real story spine -> rich
+    assert assess_understanding_substrate(scenes, asr)["level"] == "rich"
+    text = _agent_brief_text(scenes, asr, [], 36.0, tmp_path)
+    assert (
+        "Content-led audio allocation" in text
+    )  # story/sound decisions, not ratio, are the headline
+    assert "not a quota or quality target" in text  # 7:3 remains only a rough fallback
+    assert "never pad" in text  # timing fallback is still not a quota
+    assert (
+        "Narration density target:" not in text
+    )  # the old hard-quota phrasing is gone
+    assert "Research the story FIRST" not in text  # rich + titled -> no nag
+
+
+def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path):
+    _set_brief_mode(monkeypatch, "cut", target_duration="10s")
+    raw_plan = {"clips": [{"start": 100.0, "end": 110.0}]}
+    _write_json(tmp_path / "clip_plan.json", raw_plan)
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {
+            "clips": [
+                {
+                    "source_start": 100.0,
+                    "source_end": 110.0,
+                    "output_start": 0.0,
+                    "output_end": 10.0,
+                }
+            ],
+        },
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_source_anchors(
+        tmp_path,
+        [{"time": 104.0, "text_tail": "输出第四秒句末。", "confidence": "high"}],
+    )
+    asr_payload = [{"start": 101.0, "end": 105.0, "text": "输出一到五秒对白。"}]
+    _write_json(tmp_path / "asr_result.json", asr_payload)
+    _write_json(
+        tmp_path / "asr_clean.json",
+        {
+            "segments": [{"start": 101.0, "end": 105.0, "text": "清洗后一到五秒对白。"}],
+            "source": file_identity(tmp_path / "asr_result.json"),
+            "model": brief_context._consolidation_model(),
+        },
+    )
+
+    text = _agent_brief_text(
+        [
+            {
+                "scene_id": 7,
+                "start": 100.0,
+                "end": 110.0,
+                "description": "保留片段",
+                "frame_facts": {"102.0": ["抬头"]},
+            }
+        ],
+        asr_payload,
+        [{"start": 106.0, "end": 108.0, "duration": 2.0, "has_speech": False}],
+        120.0,
+        tmp_path,
+    )
+
+    chunks = json.loads(
+        (tmp_path / "asr_writing_chunks.json").read_text(encoding="utf-8")
+    )
+    fusion = json.loads((tmp_path / "timeline_fusion.json").read_text(encoding="utf-8"))
+
+    assert chunks[0]["start"] == pytest.approx(1.0)
+    assert chunks[0]["end"] == pytest.approx(5.0)
+    assert chunks[0]["text"] == "清洗后一到五秒对白。"
+    assert fusion[0]["time_range"] == [0.0, 10.0]
+    assert fusion[0]["dialogue_segments"][0]["start"] == pytest.approx(1.0)
+    assert fusion[0]["dialogue_segments"][0]["end"] == pytest.approx(5.0)
+    assert fusion[0]["narration_slots"][0]["start"] == pytest.approx(6.0)
+    assert "ASR chunk 1: 1.0-5.0s" in text
+    assert "ASR chunk 1: 101.0-105.0s" not in text
+    assert "4.00s [high] (SOURCE 104.00s)" in text
+    output_anchors = json.loads(
+        (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )
+    assert output_anchors["sentence_anchors"][0]["time"] == 4.0
+    assert output_anchors["sentence_anchors"][0]["pause_start"] == 3.88
+    assert output_anchors["sentence_anchors"][0]["source_pause_start"] == 103.88
+
+    lint = lint_narration(
+        [
+            {
+                "start": 2.0,
+                "end": 6.0,
+                "narration": "剪后时间中途切入。",
+                "overlaps_speech": True,
+            },
+        ],
+        mode="cut",
+        work_dir=tmp_path,
+    )
+    issue = next(
+        item for item in lint["errors"] if item["code"] == "interrupts_source_sentence"
+    )
+    assert issue["suggested_start"] == 4.0
+
+
+def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):
+    plan = {
+        "clips": [
+            {
+                "source_start": 0.0,
+                "source_end": 10.0,
+                "output_start": 0.0,
+                "output_end": 10.0,
+            },
+            {
+                "source_start": 0.0,
+                "source_end": 10.0,
+                "output_start": 10.0,
+                "output_end": 20.0,
+            },
+        ]
+    }
+    _write_json(tmp_path / "clip_plan_validated.json", plan)
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(
+        tmp_path / "speech_boundary_anchors.json",
+        {"sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}]},
+    )
+
+    anchors = brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
+
+    assert [row["time"] for row in anchors] == [4.0, 14.0]
+
+
+@pytest.mark.parametrize(
+    "validated_plan, match",
+    [
+        pytest.param(
+            None,
+            "cut pass2 brief requires fresh clip_plan_validated.json",
+            id="missing_validated_plan",
+        ),
+        pytest.param(
+            {
+                "clips": [
+                    {
+                        "source_start": 100.0,
+                        "source_end": float("nan"),
+                        "output_start": 0.0,
+                        "output_end": 10.0,
+                    }
+                ],
+            },
+            "non-finite clip span",
+            id="non_finite_clip_span",
+        ),
+    ],
+)
+def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
+    monkeypatch, tmp_path, validated_plan, match
+):
+    _set_brief_mode(monkeypatch, "cut", target_duration="10s")
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    if validated_plan is not None:
+        _write_json(tmp_path / "clip_plan_validated.json", validated_plan)
+
+    with pytest.raises(SystemExit, match=match):
+        build_agent_brief(
+            [{"scene_id": 7, "start": 100.0, "end": 110.0, "description": "保留片段"}],
+            [{"start": 101.0, "end": 105.0, "text": "源时间对白。"}],
+            [],
+            120.0,
+            tmp_path,
+        )
+
+
+def test_script_narration_brief_does_not_leak_hardcoded_example_entities(tmp_path):
+    scenes = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
+    asr = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
+    silence = [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}]
+
+    text = build_agent_brief(scenes, asr, silence, 6.0, tmp_path, style="纪实复盘").read_text(encoding="utf-8")
+    requirements = json.loads((tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8"))
+
+    assert requirements == {
+        "schema_version": 1,
+        "style_card_required": False,
+    }
+    for leaked in ["范闲", "监察院", "五竹", "京都"]:
+        assert leaked not in text

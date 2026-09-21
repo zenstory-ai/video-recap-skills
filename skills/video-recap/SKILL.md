@@ -82,7 +82,7 @@ MiMo QC 默认关闭；每个选定阶段最多请求一次，写入 `mimo_qc.js
 
 ### 4.1 背景调研
 
-若能识别影片、剧集或主题，先按本技能的 `references/research-guide.md` 调研并写入
+若能识别影片、剧集或主题，先按 video-understanding 技能的调研指南 `research-guide.md` 调研并写入
 `work_dir/background_research.json`。视频理解会把人物名和剧情背景折入 VLM 上下文，避免只得到“黑衣男子”一类模糊描述。无法识别来源时可跳过。
 
 ### 4.2 分析并暂停创作

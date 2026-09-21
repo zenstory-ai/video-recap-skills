@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 
 
-_TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "references" / "jianying"
+_TEMPLATE_DIR = Path(__file__).resolve().parent.parent.parent / "references" / "jianying"
 _TEMPLATE_FILES = {
     "project": "empty_jy_project_info.json",
     "video": "empty_jy_material_video.json",

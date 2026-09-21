@@ -26,6 +26,7 @@ Status: implemented
 - **收益**：任一 skill 可独立 clone / 安装运行；配置面少了 583 条死声明，"声明即被读"成为结构不变量。
 - **代价**：共享逻辑要同步改多份副本，parity 测试会在忘记时变红；裁剪配置时静态 grep 和运行时插桩都看不到经 `dict(DEFAULT_CONFIG)` 副本发生的读取，#67 因此误删了 QC 报告依赖的 12 个键，#68 补回并改用行为测试（env → CONFIG → 请求链）兜底。裁配置 must 配行为测试，不能只靠结构检查。
 - 重访信号：所有目标宿主都开始支持 skill 间共享包时，再考虑抽公共库。
+- 2026-09-21：video-script 侧的 brief 链副本已删除，parity 清单缩到两 skill 仍共有的五个模块，见 [[2026-09-21-drop-script-brief-chain-and-orphan-references]]。
 
 ## Verification
 

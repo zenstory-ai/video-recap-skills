@@ -4,7 +4,7 @@ from pathlib import Path
 
 from lib import CONFIG, log
 
-def _maybe_export_jianying(work_dir, out_dir, stem):
+def maybe_export_jianying(work_dir, out_dir, stem):
     """Lazy-import the optional 剪映 exporter and write a draft from timeline.json.
 
     The export is a documented fail-open sidecar: any failure is logged and never

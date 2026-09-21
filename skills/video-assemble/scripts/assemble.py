@@ -578,8 +578,8 @@ def main():
     # OPTIONAL, decoupled: export a 剪映 draft from the timeline (lazy import; never
     # required by the core render path).
     if lib.CONFIG["export_jianying"]:
-        from jianying_optional import _maybe_export_jianying
-        _maybe_export_jianying(work_dir, args.jianying_out, stem)
+        from jianying.optional import maybe_export_jianying
+        maybe_export_jianying(work_dir, args.jianying_out, stem)
 
     print(json.dumps({"status": "assembled", "output": str(final_output), "work_dir": str(work_dir)},
                      ensure_ascii=False))

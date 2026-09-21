@@ -17,6 +17,7 @@ All notable changes to this project are documented here.
 
 ### Removed
 
+- video-script 删除无人调用的 brief 生成链（narration.py / agent_brief.py / brief_*.py，约 1,300 行）及其专属 CONFIG 键，brief 行为测试移到 understanding 组；video-recap 删除与 video-script 字节相同的 creative-editing-playbook.md 副本与和 video-understanding 近重复的 research-guide.md，README / data-schema 改指拥有它们的技能。
 - `video-understanding/references/data-schema.md` 只保留本技能产出的产物（vlm、asr、asr_timing_evidence、asr_writing_chunks、silence、timeline_fusion、deslop_qc_requirements）与输入 `background_research.json`；narration / clip_plan / style_card / deslop_qc 等段落改由 video-recap 的完整契约与创作简报说明，减少约 135 行重复。
 - **video-cut 旧版单阶段旁白映射路径。** `cut.py` 不再读取 `narration.json`、不再把原片时间的旁白映射为 `narration_mapped.json`，`--narration` / `--no-narration-map` / `--allow-sparse-cut` 参数随之删除；`recap.py --allow-sparse-cut` 同步移除。唯一支持的 cut 流程是先剪后配：Agent 对着 `edited_source.mp4` 按输出时间线写 `narration.json`。
 

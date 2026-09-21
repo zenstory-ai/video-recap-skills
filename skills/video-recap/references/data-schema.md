@@ -180,7 +180,7 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
 
 ## recap_story_plan.json / visual_audio_board.json（Agent 创作工作产物）
 
-这两个 JSON 是 skill 层的创作决策记录：前者保存导演意图、备选剪辑假设、POV/主线和 change-based beats；后者保存每拍的画面/表演选择、入点/出点、原声锚点、`audio_owner` 与 `narration_job`。完整字段与工作流见本技能的 `creative-editing-playbook.md`。
+这两个 JSON 是 skill 层的创作决策记录：前者保存导演意图、备选剪辑假设、POV/主线和 change-based beats；后者保存每拍的画面/表演选择、入点/出点、原声锚点、`audio_owner` 与 `narration_job`。完整字段与工作流见 video-script 技能的 `creative-editing-playbook.md`。
 
 CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解说评审在文件存在时读取它们，Agent 则用它们保证 cut、旁白和声音选择没有偏离同一个创作意图。
 

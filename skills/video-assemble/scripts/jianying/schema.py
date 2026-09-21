@@ -4,7 +4,7 @@ This module is intentionally data-oriented: it owns draft version metadata, the
 full `materials` parallel-array shape, and the implemented material dispatch.
 """
 
-from jianying_templates import template
+from jianying.templates import template
 
 # The full 剪映 materials object: ~45 parallel arrays. Only arrays backed by a
 # production builder are populated; retaining the full shape preserves compatibility.

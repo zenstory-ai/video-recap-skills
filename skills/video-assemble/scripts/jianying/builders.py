@@ -4,9 +4,9 @@ import json
 import os
 from copy import deepcopy
 
-from jianying_schema import scrub_platform_identity, us, validate_material_category
-from jianying_templates import template
-from jianying_tracks import SEGMENT_RENDER_INDEX
+from jianying.schema import scrub_platform_identity, us, validate_material_category
+from jianying.templates import template
+from jianying.tracks import SEGMENT_RENDER_INDEX
 
 
 def timerange(start_us, dur_us):

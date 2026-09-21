@@ -20,7 +20,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "jianying"
 sys.path.insert(0, str(SCRIPTS))
 
 from export_jianying import build_draft, export_timeline_to_jianying  # noqa: E402
-from jianying_builders import base_segment  # noqa: E402
+from jianying.builders import base_segment  # noqa: E402
 
 
 def _fixture(name):

@@ -3,8 +3,8 @@
 from dataclasses import dataclass, field
 from collections.abc import Callable
 
-from jianying_schema import us
-from jianying_tracks import TrackAllocator
+from jianying.schema import us
+from jianying.tracks import TrackAllocator
 
 
 ProbeFn = Callable[[str], tuple[int, int, int]]
@@ -49,7 +49,7 @@ class DraftBuildContext:
 
     @classmethod
     def from_timeline(cls, timeline, new_id, probe):
-        """Build from a timeline already validated by jianying_timeline_contract."""
+        """Build from a timeline already validated by jianying.timeline_contract."""
         canvas = timeline["canvas"]
         return cls(
             width=canvas["width"],
