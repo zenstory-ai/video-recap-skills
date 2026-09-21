@@ -11,9 +11,9 @@ import json
 from pathlib import Path
 import subprocess
 
-from frozen_audio import probe_audio_packets, verify_adopted_audio
+from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio
 from pair_media import probe_picture, validate_pair_timing
-from strict_inputs import (
+from adoption.strict_inputs import (
     canonical_fraction, require_declared_path, require_fields, require_integer, run_logged,
     without_digests, write_json_atomic,
 )

@@ -18,7 +18,7 @@ sys.path.insert(0, str(SCRIPTS))
 import asr  # noqa: E402
 from lib import file_identity  # noqa: E402
 import understanding_brief  # noqa: E402
-from agent_brief import build_agent_brief  # noqa: E402
+from briefing.builder import build_agent_brief  # noqa: E402
 from asr_timing_evidence import (  # noqa: E402
     EVIDENCE_FILENAME,
     asr_evidence_summary_for_brief,

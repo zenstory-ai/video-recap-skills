@@ -12,7 +12,7 @@ import shutil
 import subprocess
 
 from assemble_constants import SUPPORTED_PICTURE_CODECS, frame_clock_samples
-from strict_inputs import (
+from adoption.strict_inputs import (
     canonical_fraction, probe_json, read_json_bytes, require_declared_path, require_fields,
     require_integer, require_local_path, require_number, run_logged, without_digests,
     write_json_atomic,

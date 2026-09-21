@@ -6,8 +6,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
-from frozen_audio import probe_audio_packets
-from strict_inputs import (
+from adoption.frozen_audio import probe_audio_packets
+from adoption.strict_inputs import (
     read_json_bytes, require_fields, require_local_path, without_digests, write_json_atomic,
 )
 

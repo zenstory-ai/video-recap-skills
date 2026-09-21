@@ -52,7 +52,7 @@ def _top_level_literal(path, name):
 def test_asr_span_tol_matches_across_files():
     paths = {
         ROOT / "skills/video-understanding/scripts/consolidate.py",
-        UNDERSTANDING_SCRIPTS / "brief_inputs.py",
+        UNDERSTANDING_SCRIPTS / "briefing" / "inputs.py",
     }
     values = {
         str(path.relative_to(ROOT)): _top_level_literal(path, "_ASR_SPAN_TOL")

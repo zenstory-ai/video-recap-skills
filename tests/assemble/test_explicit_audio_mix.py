@@ -17,7 +17,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills/video-assemble/scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import assemble  # noqa: E402
-import audio_mix_binding  # noqa: E402
+import adoption.audio_mix_binding as audio_mix_binding  # noqa: E402
 from lib import CONFIG  # noqa: E402
 from tts_fixtures import tts_segment
 import source_score  # noqa: E402

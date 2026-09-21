@@ -167,7 +167,7 @@ def test_dense_scene_cut_policy_distinguishes_source_and_edit_created_cuts():
 
     for skill_name in ("video-understanding",):
         brief = (
-            SKILLS_ROOT / skill_name / "scripts" / "agent_brief.py"
+            SKILLS_ROOT / skill_name / "scripts" / "briefing" / "builder.py"
         ).read_text(encoding="utf-8")
         assert "Inspect dense scene-change candidates" in brief
         assert "restore same-source motion" in brief

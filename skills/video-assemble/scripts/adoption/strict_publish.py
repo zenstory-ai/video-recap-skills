@@ -10,8 +10,8 @@ by this render, so a strict output never exists without its consumed-input recor
 from pathlib import Path
 
 import assembly_contract
-import audio_mix_binding
-import narration_binding
+import adoption.audio_mix_binding as audio_mix_binding
+import adoption.narration_binding as narration_binding
 
 
 def current_narration_binding(work_dir, audio_mode):

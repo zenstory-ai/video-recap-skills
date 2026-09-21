@@ -11,7 +11,7 @@ from fractions import Fraction
 from pathlib import Path
 
 from artifacts import file_identity
-from frozen_audio import probe_audio_packets
+from adoption.frozen_audio import probe_audio_packets
 from lib import run_cmd
 from subtitles.track import load_subtitle_track
 

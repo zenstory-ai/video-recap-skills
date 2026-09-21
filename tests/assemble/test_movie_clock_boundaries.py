@@ -15,7 +15,7 @@ import assemble  # noqa: E402
 import pair_media  # noqa: E402
 import source_score  # noqa: E402
 import lib  # noqa: E402
-from frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
+from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
 from lib import CONFIG  # noqa: E402
 from test_explicit_audio_mix import explicit_case, _quiet  # noqa: E402, F401
 

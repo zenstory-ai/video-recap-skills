@@ -9,14 +9,14 @@ import assemble_constants as constants
 import assembly_contract
 import assembly_settings
 import audio_mix
-import audio_mix_binding
-import frozen_audio
+import adoption.audio_mix_binding as audio_mix_binding
+import adoption.frozen_audio as frozen_audio
 import media
 import narration_audio
-import narration_binding
+import adoption.narration_binding as narration_binding
 import pair_media
 import render_preflight
-import strict_publish
+import adoption.strict_publish as strict_publish
 import subtitles.render as subtitle_render
 import subtitles.track_binding as subtitle_track_binding
 import timeline_emit

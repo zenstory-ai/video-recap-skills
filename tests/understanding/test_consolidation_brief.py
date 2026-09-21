@@ -16,17 +16,17 @@ sys.path.insert(
 )
 
 from lib import CONFIG, file_identity  # noqa: E402
-import brief_context  # noqa: E402
-import brief_inputs  # noqa: E402
-import brief_timeline  # noqa: E402
-from agent_brief import build_agent_brief  # noqa: E402
+import briefing.context as brief_context  # noqa: E402
+import briefing.inputs as brief_inputs  # noqa: E402
+import briefing.timeline as brief_timeline  # noqa: E402
+from briefing.builder import build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
-from brief_context import (  # noqa: E402
+from briefing.context import (  # noqa: E402
     _format_consolidation,
     _load_consolidation,
     assess_understanding_substrate,
 )
-from brief_inputs import (  # noqa: E402
+from briefing.inputs import (  # noqa: E402
     _load_clean_asr,
     _load_mimo_overview_for_brief,
     _load_optional_stage_status,
@@ -726,7 +726,7 @@ def test_assess_understanding_substrate_levels():
 
 def test_parse_target_seconds_table():
     """Parse documented forms, leave unset values empty, and fail fast on typos."""
-    from brief_timeline import _parse_target_seconds
+    from briefing.timeline import _parse_target_seconds
 
     assert _parse_target_seconds("1:30") == 90.0
     assert _parse_target_seconds("00:30:00") == 1800.0

@@ -18,7 +18,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills/video-assemble/scripts"
 sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
 import assembly_settings  # noqa: E402
-import narration_binding  # noqa: E402
+import adoption.narration_binding as narration_binding  # noqa: E402
 
 # Reuse the real media setup without importing its collected tests.
 _media_fixture = pytest.fixture(name="render_media")(_render_media.__wrapped__)
