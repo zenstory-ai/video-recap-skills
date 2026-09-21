@@ -1,7 +1,6 @@
 """Regression contract for explicit non-narration assembly audio modes."""
 
 import json
-import hashlib
 import shutil
 import subprocess
 import sys
@@ -15,7 +14,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 from assemble import assemble_video  # noqa: E402
 import assembly_contract  # noqa: E402
-from assembly_settings import assembly_settings_fingerprint  # noqa: E402
+from assembly_settings import assembly_settings_payload  # noqa: E402
 import frozen_audio  # noqa: E402
 from frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
 from lib import CONFIG  # noqa: E402
@@ -58,16 +57,16 @@ def _qc(work):
 def test_manifest_only_references_current_bound_subtitle_track(tmp_path):
     track = tmp_path / "subtitle_track.json"
     track.write_bytes(b"current track")
-    digest = hashlib.sha256(track.read_bytes()).hexdigest()
     (tmp_path / "subtitle_track_validation.json").write_text(
-        json.dumps({"binding": {"track_sha256": digest}, "metadata": {"entries": 1}}),
+        json.dumps({"binding": {"inputs": {"track": {"size": 13, "mtime_ns": 0}}},
+                    "metadata": {"entries": 1}}),
         encoding="utf-8",
     )
     (tmp_path / "assembly_qc.json").write_text(json.dumps({
         "verdict": "PASS", "blocking_codes": [], "loudness_mode": None,
         "loudnorm_measurement": None, "audio_operations": {}, "adopted_audio": None,
     }), encoding="utf-8")
-    kwargs = dict(settings_fingerprint=lambda _work, **_: {})
+    kwargs = dict(settings_payload=lambda _work, **_: {})
     with pytest.raises(ValueError, match="version"):
         assembly_contract._assembly_manifest_payload(
             tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
@@ -238,7 +237,7 @@ def test_adopted_copy_with_video_reencode_preserves_all_selected_aac_packets(tmp
     before = probe_audio_packets(source, 0)
     after = probe_audio_packets(output, 0)
     assert before["packet_count"] == after["packet_count"]
-    assert before["payload_sha256"] == after["payload_sha256"]
+    assert before["payload_bytes"] == after["payload_bytes"]
     assert before["packets"] == after["packets"]
     qc = _qc(work)
     assert qc["verdict"] == "PASS"
@@ -323,23 +322,23 @@ def test_adopted_audio_verifier_detects_output_tampering(tmp_path):
     _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(copied),
          "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "64k", str(tampered))
 
-    with pytest.raises(RuntimeError, match="payload"):
+    with pytest.raises(RuntimeError, match="(payload|packet)"):
         verify_adopted_audio(source, tampered, 0)
 
 
-def test_adopted_settings_fingerprint_ignores_narration_mix_defaults(tmp_path, monkeypatch):
+def test_adopted_settings_payload_ignores_narration_mix_defaults(tmp_path, monkeypatch):
     _quiet_visuals(monkeypatch)
-    first = assembly_settings_fingerprint(tmp_path, audio_mode="adopted-packet-copy", audio_stream_index=0)
+    first = assembly_settings_payload(tmp_path, audio_mode="adopted-packet-copy", audio_stream_index=0)
     monkeypatch.setitem(CONFIG, "narration_speed", 1.91)
     monkeypatch.setitem(CONFIG, "ducking_orig_volume", 0.01)
     monkeypatch.setitem(CONFIG, "final_loudnorm", not CONFIG["final_loudnorm"])
-    second = assembly_settings_fingerprint(tmp_path, audio_mode="adopted-packet-copy", audio_stream_index=0)
+    second = assembly_settings_payload(tmp_path, audio_mode="adopted-packet-copy", audio_stream_index=0)
     assert first == second
     assert first["audio"] == {"mode": "adopted-packet-copy", "selected_stream_index": 0}
-    assert assembly_settings_fingerprint(tmp_path, audio_mode="narration") != first
+    assert assembly_settings_payload(tmp_path, audio_mode="narration") != first
 
 
-def _mock_packet_probe_payload(*, extradata=True):
+def _mock_packet_probe_payload():
     stream = {
         "index": 1,
         "codec_name": "aac",
@@ -350,8 +349,6 @@ def _mock_packet_probe_payload(*, extradata=True):
         "channels": 2,
         "channel_layout": "stereo",
     }
-    if extradata:
-        stream["extradata_hash"] = "SHA256:" + "ab" * 32
     return {
         "streams": [stream],
         "packets": [{
@@ -359,7 +356,6 @@ def _mock_packet_probe_payload(*, extradata=True):
             "dts": -1024,
             "duration": 1024,
             "size": "7",
-            "data_hash": "SHA256:" + "cd" * 32,
             "side_data_list": [{
                 "side_data_type": "Skip Samples",
                 "skip_samples": 1024,
@@ -371,7 +367,7 @@ def _mock_packet_probe_payload(*, extradata=True):
     }
 
 
-def test_packet_probe_captures_decoder_extradata_and_packet_side_data(monkeypatch):
+def test_packet_probe_captures_decoder_facts_and_packet_side_data(monkeypatch):
     monkeypatch.setattr(frozen_audio, "_probe", lambda *_args: _mock_packet_probe_payload())
 
     identity = frozen_audio.probe_audio_packets("unused.mp4", 0)
@@ -381,8 +377,9 @@ def test_packet_probe_captures_decoder_extradata_and_packet_side_data(monkeypatc
         "sample_rate": 48000,
         "channels": 2,
         "channel_layout": "stereo",
-        "extradata_sha256": "ab" * 32,
     }
+    assert identity["packet_count"] == 1
+    assert identity["payload_bytes"] == 7
     assert identity["packets"][0]["side_data_list"] == [{
         "side_data_type": "Skip Samples",
         "skip_samples": 1024,
@@ -392,21 +389,12 @@ def test_packet_probe_captures_decoder_extradata_and_packet_side_data(monkeypatc
     }]
 
 
-def test_packet_probe_rejects_aac_without_decoder_extradata(monkeypatch):
-    monkeypatch.setattr(
-        frozen_audio, "_probe", lambda *_args: _mock_packet_probe_payload(extradata=False)
-    )
-
-    with pytest.raises(RuntimeError, match="AAC.*extradata"):
-        frozen_audio.probe_audio_packets("unused.mp4", 0)
-
-
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
         (("decoder", "sample_rate", 44100), "decoder"),
         (("decoder", "channels", 1), "decoder"),
-        (("decoder", "extradata_sha256", "ef" * 32), "decoder"),
+        (("packet_size", "size", 9), "payload"),
         (("packet_side_data", "discard_padding", 0), "side data"),
     ],
 )
@@ -417,6 +405,9 @@ def test_verifier_rejects_mutated_decoder_or_packet_side_data(monkeypatch, mutat
     if mutation[0] == "decoder":
         actual["decoder"][mutation[1]] = mutation[2]
         actual[mutation[1]] = mutation[2]
+    elif mutation[0] == "packet_size":
+        actual["packets"][0]["size"] = mutation[2]
+        actual["payload_bytes"] = mutation[2]
     else:
         actual["packets"][0]["side_data_list"][0][mutation[1]] = mutation[2]
     monkeypatch.setattr(

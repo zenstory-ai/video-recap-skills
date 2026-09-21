@@ -20,7 +20,6 @@ import source_subtitles
 import subtitle_render
 import timeline_emit
 import visual_render
-from artifacts import _value_fingerprint
 from assemble import assemble_video
 from tts_fixtures import tts_segment
 
@@ -42,7 +41,7 @@ _DELIVERY = {
     "final_compat_notes": ["video_copy", "aac_48000", "faststart"],
 }
 from assembly_contract import _resolve_final_output
-from assembly_settings import assembly_settings_fingerprint
+from assembly_settings import assembly_settings_payload
 from audio_mix import _build_audio_filter_complex, final_loudnorm_filter
 from media import _build_video_clips
 from subtitle_core import (
@@ -85,7 +84,7 @@ def _assembly_manifest_payload(
         output_path,
         tts_meta_path=tts_meta_path,
         final_output=final_output,
-        settings_fingerprint=assembly_settings_fingerprint,
+        settings_payload=assembly_settings_payload,
     )
 
 
@@ -212,18 +211,19 @@ def _write_legacy_anchors(work_dir, sentence_anchors):
     )
 
 
-def _write_cut_output_anchors(work_dir, evidence, *, plan=None, fingerprint=None):
+def _write_cut_output_anchors(work_dir, evidence, *, plan=None, stale=False):
+    """Write anchors at least as new as the validated plan; ``stale`` backdates them."""
+    import os
+
     plan = {} if plan is None else plan
-    (work_dir / "clip_plan_validated.json").write_text(json.dumps(plan), encoding="utf-8")
-    payload = {
-        "schema_version": 2,
-        "timeline": "cut_output",
-        "clip_plan_fingerprint": fingerprint or _value_fingerprint(plan),
-        **evidence,
-    }
-    (work_dir / "speech_boundary_anchors_output.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+    plan_path = work_dir / "clip_plan_validated.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    payload = {"schema_version": 2, "timeline": "cut_output", **evidence}
+    anchors = work_dir / "speech_boundary_anchors_output.json"
+    anchors.write_text(json.dumps(payload), encoding="utf-8")
+    if stale:
+        older = plan_path.stat().st_mtime_ns - 1_000_000_000
+        os.utime(anchors, ns=(older, older))
 
 
 def test_adjust_tts_speed_derives_outputs_from_audio_name_only(monkeypatch, tmp_path):
@@ -256,7 +256,7 @@ def test_adjust_tts_speed_derives_outputs_from_audio_name_only(monkeypatch, tmp_
     assert commands[-1][-1] == str(wav_parent / "narr_000_adj.wav")
 
 
-def test_build_video_clips_prefers_fingerprint_matched_validated_cut_plan(
+def test_build_video_clips_prefers_newer_validated_cut_plan(
     monkeypatch, tmp_path
 ):
     original = tmp_path / "original.mp4"
@@ -269,7 +269,6 @@ def test_build_video_clips_prefers_fingerprint_matched_validated_cut_plan(
     (tmp_path / "clip_plan_validated.json").write_text(
         json.dumps(
             {
-                "raw_plan_fingerprint": _value_fingerprint(raw_payload),
                 "clips": [
                     {
                         "clip_id": 0,
@@ -342,7 +341,7 @@ def test_build_video_clips_ignores_ambient_source_video_without_explicit_opt_in(
         }
     ]
     assert manifest["source_video"] is None
-    assert manifest["source_video_fingerprint"] is None
+    assert manifest["source_video_identity"] is None
 
 
 def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_path):
@@ -359,8 +358,9 @@ def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_pat
         '{"clips":[{"clip_id":0,"source_start":0.0,"source_end":10.0,"output_start":0.0,"output_end":10.0}]}',
         encoding="utf-8",
     )
+    # The agent rewrote clip_plan.json after validation: the raw plan is newer.
     os.utime(tmp_path / "clip_plan_validated.json", (1_000, 1_000))
-    os.utime(tmp_path / "clip_plan.json", (1_000, 1_000))
+    os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
     monkeypatch.setitem(CONFIG, "source_video", str(original))
     monkeypatch.setitem(CONFIG, "source_video_explicit", True)
 
@@ -420,7 +420,7 @@ def test_assemble_main_creates_missing_output_dir(monkeypatch, tmp_path):
     assert (missing_out / "recap_demo.mp4").read_bytes() == b"mp4"
     manifest = json.loads((work / "assembly_manifest.json").read_text(encoding="utf-8"))
     assert manifest["source_video"] is None
-    assert manifest["source_video_fingerprint"] is None
+    assert manifest["source_video_identity"] is None
     assert manifest["final_output"].endswith("recap_demo.mp4")
 
 
@@ -500,7 +500,7 @@ def test_assemble_main_applies_explicit_measured_subtitle_band(
 def test_resolve_final_output_overwrites_stable_alias(tmp_path):
     """The recap output is always the stable alias recap_<stem>.mp4 (overwritten in
     place), so the iterate-on-narration loop refreshes one file instead of spawning
-    fingerprint-suffixed copies of every render."""
+    differently named copies of every render."""
     (tmp_path / "recap_clip.mp4").write_bytes(b"previous-render")
 
     resolved = _resolve_final_output(tmp_path, "clip")
@@ -1310,13 +1310,13 @@ def test_build_audio_filter_complex_explicit_modes(monkeypatch):
     assert "sidechaincompress" in _build_audio_filter_complex(segs)
 
 
-def test_assembly_settings_fingerprint_tracks_burn_style(monkeypatch):
+def test_assembly_settings_payload_tracks_burn_style(monkeypatch):
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    plain = assembly_settings_fingerprint()
+    plain = assembly_settings_payload()
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
-    burned = assembly_settings_fingerprint()
+    burned = assembly_settings_payload()
     monkeypatch.setitem(CONFIG, "subtitle_font_size", 50)
-    bigger = assembly_settings_fingerprint()
+    bigger = assembly_settings_payload()
 
     assert plain["burn_subtitles"] is False
     assert burned["burn_subtitles"] is True
@@ -1324,7 +1324,7 @@ def test_assembly_settings_fingerprint_tracks_burn_style(monkeypatch):
     assert bigger != burned
 
 
-def test_final_loudnorm_filter_and_fingerprint(monkeypatch):
+def test_final_loudnorm_filter_and_settings_payload(monkeypatch):
     monkeypatch.setitem(CONFIG, "final_loudnorm", True)
     monkeypatch.setitem(CONFIG, "target_lufs", -14.0)
     monkeypatch.setitem(CONFIG, "target_true_peak", -1.0)
@@ -1333,8 +1333,8 @@ def test_final_loudnorm_filter_and_fingerprint(monkeypatch):
     assert "loudnorm=I=-14.0:TP=-1.0:LRA=11.0" in filt
     assert "linear=true" in filt
     assert "alimiter=limit=0.98:level=false" in filt
-    assert assembly_settings_fingerprint()["audio_mix"]["final_loudnorm"] == filt
-    assert assembly_settings_fingerprint()["audio_mix"]["loudness_mode"] in {
+    assert assembly_settings_payload()["audio_mix"]["final_loudnorm"] == filt
+    assert assembly_settings_payload()["audio_mix"]["loudness_mode"] in {
         "two_pass_linear",
         "equivalent",
     }
@@ -1345,15 +1345,15 @@ def test_final_loudnorm_filter_and_fingerprint(monkeypatch):
     monkeypatch.setitem(CONFIG, "final_loudnorm", False)
     assert final_loudnorm_filter() == "alimiter=limit=0.98:level=false"
     assert (
-        assembly_settings_fingerprint()["audio_mix"]["final_loudnorm"]
+        assembly_settings_payload()["audio_mix"]["final_loudnorm"]
         == "alimiter=limit=0.98:level=false"
     )
     assert (
-        assembly_settings_fingerprint()["audio_mix"]["loudness_mode"] == "limiter_only"
+        assembly_settings_payload()["audio_mix"]["loudness_mode"] == "limiter_only"
     )
 
 
-_FINGERPRINT_BASE_SETTINGS = {
+_BASE_SETTINGS = {
     "burn_subtitles": False,
     "mask_source_subtitles": False,
     "source_subtitle_mask_ratio": 0.14,
@@ -1367,10 +1367,10 @@ _FINGERPRINT_BASE_SETTINGS = {
 }
 
 
-def _fingerprint_with(monkeypatch, **overrides):
-    for key, value in {**_FINGERPRINT_BASE_SETTINGS, **overrides}.items():
+def _settings_with(monkeypatch, **overrides):
+    for key, value in {**_BASE_SETTINGS, **overrides}.items():
         monkeypatch.setitem(CONFIG, key, value)
-    return assembly_settings_fingerprint()
+    return assembly_settings_payload()
 
 
 @pytest.mark.parametrize(
@@ -1387,16 +1387,16 @@ def _fingerprint_with(monkeypatch, **overrides):
         ("output_max_height", 720),
     ],
 )
-def test_assembly_settings_fingerprint_tracks_render_affecting_settings(
+def test_assembly_settings_payload_tracks_render_affecting_settings(
     monkeypatch, key, value
 ):
-    base = _fingerprint_with(monkeypatch)
+    base = _settings_with(monkeypatch)
 
-    assert _fingerprint_with(monkeypatch, **{key: value}) != base
+    assert _settings_with(monkeypatch, **{key: value}) != base
 
 
-def test_assembly_settings_fingerprint_records_legacy_implicit_mask_policy(monkeypatch):
-    legacy_implicit = _fingerprint_with(monkeypatch, mask_source_subtitles=True)
+def test_assembly_settings_payload_records_legacy_implicit_mask_policy(monkeypatch):
+    legacy_implicit = _settings_with(monkeypatch, mask_source_subtitles=True)
 
     assert (
         legacy_implicit["video_filters"]["source_subtitle_mask_policy"]
@@ -1408,7 +1408,7 @@ def test_assembly_settings_fingerprint_records_legacy_implicit_mask_policy(monke
     )
     # the mask ratio only matters once a mask is actually burned
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.20)
-    assert assembly_settings_fingerprint() == legacy_implicit
+    assert assembly_settings_payload() == legacy_implicit
 
 
 def test_assemble_video_uses_silent_original_track_when_source_has_no_audio(
@@ -1831,7 +1831,6 @@ def test_emit_timeline_maps_adopted_mix_by_index_across_a_skipped_segment(
         ],
         "prepared": {"prepared_bed.wav": {"path": str(prepared)}},
         "format": {"total_samples": 30},
-        "conversion_policy": "exact_adopted_pcm",
         "master_gain_db": 0.0,
     }
 
@@ -2137,7 +2136,7 @@ def test_source_handoff_rejects_stale_cut_output_evidence(tmp_path):
             "speech_spans": [{"start": 0.0, "end": 10.0}],
         },
         plan={"clips": [{"source_start": 0, "source_end": 10}]},
-        fingerprint="stale",
+        stale=True,
     )
     segment = {"actual_place_start": 4.0, "actual_place_end": 5.0, "overlaps_speech": False}
 
@@ -2470,17 +2469,17 @@ def test_assembly_qc_rolls_up_visual_and_delivery_facts_without_polluting_visual
     assert not (_VISUAL_QC_FORBIDDEN_DELIVERY_KEYS & set(_flatten_keys(visual_qc)))
 
 
-def test_mask_policy_must_be_explicit_and_cache_fingerprint_safe(monkeypatch):
+def test_mask_policy_must_be_explicit_and_recorded_in_settings(monkeypatch):
     """Changing source-subtitle mask policy changes rendered pixels, so the
-    effective policy must be declared and included in the assembly cache fingerprint."""
+    effective policy must be declared and included in the assembly settings payload."""
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "safe")
-    safe_fp = assembly_settings_fingerprint()
+    safe_fp = assembly_settings_payload()
     assert safe_fp["video_filters"]["source_subtitle_mask_policy"] == "safe"
 
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "forced")
-    forced_fp = assembly_settings_fingerprint()
+    forced_fp = assembly_settings_payload()
     assert forced_fp["video_filters"]["source_subtitle_mask_policy"] == "forced"
     assert forced_fp != safe_fp
 

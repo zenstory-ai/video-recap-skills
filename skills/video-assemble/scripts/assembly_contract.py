@@ -28,7 +28,7 @@ _AUDIO_QC_CODES = frozenset({
 
 
 def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
-                               tts_meta_path=None, final_output=None, *, settings_fingerprint,
+                               tts_meta_path=None, final_output=None, *, settings_payload,
                                audio_mode="narration", audio_stream_index=0,
                                narration_input_binding=None, audio_mix_binding=None):
     """Slim render record. The orchestrator reads `final_output` to report the result;
@@ -36,17 +36,17 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
     stale ambient SOURCE_VIDEO never leaked into a full-mode timeline / 剪映 export."""
     input_video = Path(input_video)
     output_path = Path(output_path)
-    source_video, source_video_fingerprint = _source_video_identity()
+    source_video_identity = _source_video_identity()
     qc_path = Path(work_dir) / ASSEMBLY_QC
     qc = _load_work_json(work_dir, ASSEMBLY_QC)  # always written by publish_render first
-    settings = settings_fingerprint(
+    settings = settings_payload(
         work_dir, audio_mode=audio_mode, audio_stream_index=audio_stream_index
     )
     payload = {
         "schema_version": 2,
         "input_video": str(input_video.resolve()),
-        "source_video": source_video,
-        "source_video_fingerprint": source_video_fingerprint,
+        "source_video": source_video_identity["path"] if source_video_identity else None,
+        "source_video_identity": source_video_identity,
         "tts_meta": str(Path(tts_meta_path).resolve()) if tts_meta_path else None,
         "tts_segments": len(tts_segments),
         "audio_mode": audio_mode,
@@ -57,7 +57,7 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
         "qc_path": str(qc_path.resolve()),
         "qc_verdict": qc["verdict"],
         "qc_blocking_codes": qc["blocking_codes"],
-        # The settings fingerprint records the configured/fallback loudness policy; these QC
+        # The settings payload records the configured/fallback loudness policy; these QC
         # fields record what the just-finished render actually used after the loudnorm probe.
         "qc_loudness_mode": qc["loudness_mode"],
         "qc_loudnorm_measurement": qc["loudnorm_measurement"],
@@ -98,7 +98,6 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                 "output_start_sample": seg.get("output_start_sample"),
                 "output_end_sample": seg.get("output_end_sample"),
                 "adopted_gain": seg.get("adopted_gain"),
-                "conversion_policy": seg.get("conversion_policy"),
             }
             for seg in tts_segments
         ],

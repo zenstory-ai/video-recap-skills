@@ -31,12 +31,14 @@ continuation, editor export, or material-cache reuse. Ambient TTS provider and v
 configuration are inert. Explicit TTS/voice/review/MiMo/editor flags are rejected rather
 than silently ignored.
 
-`recap_run_manifest.json` records the resolved path and independent full SHA-256 for all
-three local artifacts under `audio.local_adoption`. Analysis settings remain separate and
-unchanged. Recap validates routing and freshness; video-assemble remains authoritative
-for the adoption schemas, hashes, PCM identities, frame clock, mix, bindings, and final
-media transaction. This path executes caller-adopted assets and does not claim that recap
-authored or approved their story, voice, or mix.
+`recap_run_manifest.json` records the resolved path of all three local artifacts under
+`audio.local_adoption`, and the picture's path plus `{size, mtime_ns}` as
+`source_video_identity`. Analysis settings remain separate and unchanged. Recap validates
+routing and, after the child run, checks that the assembler's binding records reference
+the same adoption files and picture; video-assemble remains authoritative for the adoption
+schemas, PCM shapes, frame clock, mix, bindings, and final media transaction. This path
+executes caller-adopted assets and does not claim that recap authored or approved their
+story, voice, or mix.
 
 ## Keep adopted voice after a cut
 
@@ -62,8 +64,9 @@ episodes. Use two existing stages rather than sending an old mix binding into a 
 3. Match source dialogue, ambience and music to the new picture. Reuse the prepared bed
    only if that sound and its complete sample clock remain appropriate; otherwise rebuild
    it with the existing `video-assemble` source/score producer. Write a **new** mix adoption
-   with the actual picture hash, prepared receipt, total samples and complete WAV placements.
-   Reordering shots can require moving dialogue too; changing a hash alone cannot fix that.
+   with the prepared receipt path, total samples and complete WAV placements for the new
+   picture. Reordering shots can require moving dialogue too; a mix adoption written for
+   the old picture cannot simply be pointed at the new one.
 4. Run the local adopted `full` command in `SKILL.md` with `CUT_WORK/edited_source.mp4` and a new
    assembly work/delivery directory. Inspect the emitted narration placements and subtitles
    against that mixed output. Rebind any precise subtitle track to the new finished audio.

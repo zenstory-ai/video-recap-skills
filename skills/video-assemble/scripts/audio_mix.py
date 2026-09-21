@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from artifacts import _load_work_json, _value_fingerprint
+from artifacts import _load_work_json
 from audio_automation import (
     coalesce_duck_windows,
     ducking_expression,
@@ -126,13 +126,13 @@ def _load_sentence_handoff_anchors(work_dir):
     if payload is None:
         return [], None, {"require_measured": cut_mode}
     if cut_mode:
-        # Output-clock anchors are only trusted when they were derived from the current cut plan.
-        plan = _load_work_json(work_dir, "clip_plan_validated.json")
+        # Output-clock anchors are only trusted when they are at least as new as the cut plan.
+        plan_path = work_dir / "clip_plan_validated.json"
         fresh = (
             payload.get("schema_version") == 2
             and payload.get("timeline") == "cut_output"
-            and plan is not None
-            and payload.get("clip_plan_fingerprint") == _value_fingerprint(plan)
+            and plan_path.exists()
+            and (work_dir / artifact).stat().st_mtime_ns >= plan_path.stat().st_mtime_ns
         )
         if not fresh:
             return [], None, {"require_measured": True}

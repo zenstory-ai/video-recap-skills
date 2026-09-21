@@ -6,7 +6,7 @@ import json
 from typing import Any
 from collections.abc import Mapping, Sequence
 
-from mimo_qc_evidence import _fingerprint_value, safe_mimo_config
+from mimo_qc_evidence import safe_mimo_config
 from mimo_qc_contract import ARTIFACT_NAME, DEFAULT_STAGE
 
 
@@ -16,12 +16,11 @@ def _semantic_evidence(evidence: Mapping[str, Any], *, stage: str) -> dict[str, 
     ``collect_evidence`` already bounds every artifact independently.  The additional
     summarization here therefore needs enough depth to retain the narration/ASR/TTS
     scalars nested inside those summaries.  A shallow second pass used to replace the
-    values with fingerprints, which made live QC invent missing-script and failed-TTS
+    values with opaque placeholders, which made live QC invent missing-script and failed-TTS
     findings from evidence it could no longer read.
     """
     semantic = dict(evidence)
     semantic.pop("work_dir", None)
-    semantic.pop("fingerprint", None)
     semantic["evidence_roles"] = {
         "narration.json": (
             "Planned recap voiceover on the OUTPUT timeline; judge its factual and temporal "
@@ -104,7 +103,7 @@ def build_payload(
         "instructions": (
             "你是 video-recap 的建议性质量审阅器。结合解说、剪辑计划、字幕/ASR、TTS、"
             "组装元数据和抽样画面，指出语义或审美问题。只返回主观观察，不做自动修复，"
-            "只根据可见的实际字段判断，不得从文件字节数、指纹、截断或省略标记推断内容缺失；"
+            "只根据可见的实际字段判断，不得从文件字节数、截断或省略标记推断内容缺失；"
             "source_asr 是源素材原声证据，不是生成后 TTS 的逐字转录；generated_subtitles 是本轮生成字幕，"
             "二者角色不可混淆，解说改写与源台词不一致本身不是问题；"
             "空 failures 表示没有失败，storyboard 的 labels_burned 仅表示诊断图上的时间标签，"
@@ -131,9 +130,7 @@ def build_payload(
             '"semantic|aesthetic|sampled","evidence":{...}}]}。最多 12 条。'
         ),
         "evidence": _semantic_evidence(evidence, stage=stage),
-        "evidence_fingerprint": evidence["fingerprint"],
     }
-    payload["payload_fingerprint"] = _fingerprint_value(payload)
     return payload
 
 

@@ -122,7 +122,6 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
         timeline["audio_delivery"] = {
             "mode": "explicit_adopted_full_sound", "sample_rate": 48_000,
             "total_samples": explicit_audio_mix["format"]["total_samples"],
-            "conversion_policy": explicit_audio_mix["conversion_policy"],
             "master_gain_db": explicit_audio_mix["master_gain_db"],
             "canonical_renderer": "ffmpeg_explicit_mix",
             "reconstructable": False,

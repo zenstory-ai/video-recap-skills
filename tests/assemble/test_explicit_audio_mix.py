@@ -1,7 +1,6 @@
 """End-to-end regressions for the explicitly adopted full-sound consumer."""
 
 import array
-import hashlib
 import json
 import math
 import os
@@ -38,10 +37,6 @@ STRICT_TEMPO = {
 
 def _run(*args):
     subprocess.run(tuple(map(str, args)), check=True, capture_output=True)
-
-
-def _sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _wav(path, frequency, seconds=0.4, *, channels=1):
@@ -87,7 +82,7 @@ def explicit_case(tmp_path):
          "[0:a][1:a]amix=inputs=2:normalize=0[out]", "-map", "[out]",
          "-c:a", "pcm_f32le", beds / "prepared_bed.wav")
     identities = {
-        name: source_score._output_identity(beds / name)
+        name: source_score._output_facts(beds / name)
         for name in ("source_bed.wav", "score_bed.wav", "prepared_bed.wav")
     }
     receipt = beds / "prepared_bed_receipt.json"
@@ -102,28 +97,24 @@ def explicit_case(tmp_path):
         index=0, start=0.25, end=1.0, narration="bound voice",
         spoken_text="bound voice", audio_path=str(voice),
         audio_duration=0.4, pause_after_ms=0, overlaps_speech=False,
-        tts_rate_offset=0.0, processed_wav_sha256=_sha(voice),
+        tts_rate_offset=0.0,
     )
     meta = tmp_path / "tts_meta.json"
     meta.write_text(json.dumps({"segments": [segment]}))
     narration = tmp_path / "narration_adoption.json"
     narration.write_text(json.dumps({
         "artifact": "narration_adoption", "schema_version": 1,
-        "tts_meta_sha256": _sha(meta), "segments": [{
+        "segments": [{
             "index": 0, "spoken_text": "bound voice",
-            "processed_wav_sha256": _sha(voice),
             "requested_provider": "offline", "requested_voice": "voice-a",
         }], "tempo_policy": STRICT_TEMPO,
     }))
     adoption = tmp_path / "audio_mix_adoption.json"
     adoption.write_text(json.dumps({
         "artifact": "audio_mix_adoption", "schema_version": 1,
-        "picture_sha256": _sha(picture),
-        "prepared_receipt": {"path": str(receipt), "sha256": _sha(receipt)},
-        "narration_adoption_sha256": _sha(narration),
+        "prepared_receipt": {"path": str(receipt)},
         "format": {"sample_rate": 48000, "channels": 2, "total_samples": 96000},
-        "segments": [{"index": 0, "processed_wav_sha256": _sha(voice),
-                      "output_start_sample": 12000, "gain": 0.5}],
+        "segments": [{"index": 0, "output_start_sample": 12000, "gain": 0.5}],
         "master_gain_db": 0.75,
     }))
     return picture, work, [segment], meta, narration, adoption
@@ -136,8 +127,9 @@ def test_load_adoption_binds_picture_receipt_narration_and_segments(explicit_cas
         tts_segments=segments,
     )
     assert context["format"]["total_samples"] == 96000
-    assert context["conversion_policy"] == "mono_equal_power_stereo_identity"
-    assert context["prepared"]["prepared_bed.wav"]["sha256"]
+    assert context["prepared"]["prepared_bed.wav"]["pcm"]["samples"] == 96000
+    assert context["narration_adoption"] == {"path": str(narration.resolve())}
+    assert context["segments"] == [{"index": 0, "output_start_sample": 12000, "gain": 0.5}]
 
 
 def test_explicit_branch_renders_actual_bindings_and_ignores_ambient_mix(
@@ -183,13 +175,13 @@ def test_explicit_branch_allows_visual_reencode_but_preserves_picture_clock(
     assert output_picture["frame_count"] == report["picture"]["clock"]["frame_count"]
 
 
-@pytest.mark.parametrize("field", ["picture_sha256", "narration_adoption_sha256"])
-def test_stale_top_level_identity_fails_before_snapshot(explicit_case, field):
+@pytest.mark.parametrize("field", ["prepared_receipt", "format"])
+def test_missing_top_level_field_fails_before_snapshot(explicit_case, field):
     picture, work, segments, meta, narration, adoption = explicit_case
     value = json.loads(adoption.read_text())
-    value[field] = "0" * 64
+    del value[field]
     adoption.write_text(json.dumps(value))
-    with pytest.raises(ValueError, match="(?i)(identity|hash|picture|narration)"):
+    with pytest.raises(ValueError, match="(?i)(field|adoption)"):
         assemble.assemble_video(
             picture, segments, work, work / "output.mp4",
             narration_adoption_path=narration, tts_meta_path=meta,
@@ -197,95 +189,6 @@ def test_stale_top_level_identity_fails_before_snapshot(explicit_case, field):
         )
     assert not (work / ".narration_input_snapshots").exists()
     assert not (work / "output.mp4").exists()
-
-
-@pytest.mark.parametrize("asset,consumer", [
-    ("placed_0000_0.wav", "voice_bus"),
-    ("voice_bus.wav", "premaster"),
-    ("premaster.wav", "master"),
-])
-@pytest.mark.parametrize("when", ["before", "after"])
-def test_each_derived_pcm_is_sealed_across_its_consumer(
-    explicit_case, monkeypatch, asset, consumer, when
-):
-    picture, work, segments, meta, narration, adoption = explicit_case
-    original = audio_mix_binding._run
-
-    def intercepted(command, directory, label):
-        target = Path(directory) / asset
-        if label == consumer and when == "before":
-            target.write_bytes(target.read_bytes() + b"changed")
-        result = original(command, directory, label)
-        if label == consumer and when == "after":
-            target.write_bytes(target.read_bytes() + b"changed")
-        return result
-
-    monkeypatch.setattr(audio_mix_binding, "_run", intercepted)
-    with pytest.raises((ValueError, RuntimeError), match="(?i)(changed|identity|seal)"):
-        assemble.assemble_video(
-            picture, segments, work, work / "output.mp4",
-            narration_adoption_path=narration, tts_meta_path=meta,
-            audio_mix_adoption_path=adoption,
-        )
-    assert not (work / "output.mp4").exists()
-    assert not (work / "narration_input_binding.json").exists()
-    assert not (work / "audio_mix_binding.json").exists()
-
-
-@pytest.mark.parametrize("when", ["before", "after"])
-def test_master_is_sealed_across_final_aac_render(explicit_case, monkeypatch, when):
-    picture, work, segments, meta, narration, adoption = explicit_case
-    original = assemble.lib.run_cmd
-
-    def intercepted(command, *args, **kwargs):
-        if "-c:a" not in command or not str(command[-1]).endswith(".mp4"):
-            return original(command, *args, **kwargs)
-        target = work / ".explicit_audio_mix/master.wav"
-        if when == "before":
-            target.write_bytes(target.read_bytes() + b"changed")
-        result = original(command, *args, **kwargs)
-        if when == "after":
-            target.write_bytes(target.read_bytes() + b"changed")
-        return result
-
-    monkeypatch.setattr(assemble.lib, "run_cmd", intercepted)
-    with pytest.raises((ValueError, RuntimeError), match="(?i)(changed|identity|seal)"):
-        assemble.assemble_video(
-            picture, segments, work, work / "output.mp4",
-            narration_adoption_path=narration, tts_meta_path=meta,
-            audio_mix_adoption_path=adoption,
-        )
-    assert not (work / "output.mp4").exists()
-
-
-@pytest.mark.parametrize("when", ["before", "after"])
-def test_rendered_container_is_stable_across_final_probes(
-    explicit_case, monkeypatch, when
-):
-    picture, work, segments, meta, narration, adoption = explicit_case
-    original = audio_mix_binding._run
-
-    def intercepted(command, directory, label):
-        if label != "final_decode":
-            return original(command, directory, label)
-        rendered = Path(command[command.index("-i") + 1])
-        if when == "before":
-            rendered.write_bytes(rendered.read_bytes() + b"changed")
-        result = original(command, directory, label)
-        if when == "after":
-            rendered.write_bytes(rendered.read_bytes() + b"changed")
-        return result
-
-    monkeypatch.setattr(audio_mix_binding, "_run", intercepted)
-    with pytest.raises((ValueError, RuntimeError), match="(?i)(changed|identity)"):
-        assemble.assemble_video(
-            picture, segments, work, work / "output.mp4",
-            narration_adoption_path=narration, tts_meta_path=meta,
-            audio_mix_adoption_path=adoption,
-        )
-    assert not (work / "output.mp4").exists()
-    assert not (work / "narration_input_binding.json").exists()
-    assert not (work / "audio_mix_binding.json").exists()
 
 
 def test_isolated_copied_skill_cli_publishes_new_alias_and_manifest(explicit_case, tmp_path):

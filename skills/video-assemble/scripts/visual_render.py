@@ -4,7 +4,6 @@ import json
 import re
 from pathlib import Path
 
-from artifacts import _artifact_fingerprint
 from assemble_constants import (
     SUBTITLE_STYLE_REF_H,
     VISUAL_OVERLAYS,
@@ -136,7 +135,7 @@ def _load_visual_overlays(work_dir):
     """Return (overlays, source) from the canonical visual_overlays.json handoff."""
     path = Path(work_dir) / VISUAL_OVERLAYS
     if not path.exists():
-        return [], {"present": False, "path": str(path), "fingerprint": None}
+        return [], {"present": False, "path": str(path)}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
@@ -152,7 +151,6 @@ def _load_visual_overlays(work_dir):
     source = {
         "present": True,
         "path": str(path),
-        "fingerprint": _artifact_fingerprint(path),
         "schema_version": 1,
     }
     return data["overlays"], source

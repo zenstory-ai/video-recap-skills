@@ -145,14 +145,14 @@ def test_run_tts_engine_dispatches_to_fish(monkeypatch, tmp_path):
     assert seen[0][2]["rate"] == "+5%"
 
 
-def test_fish_settings_participate_in_cache_fingerprint(monkeypatch):
+def test_fish_settings_participate_in_cache_inputs(monkeypatch):
     monkeypatch.setitem(CONFIG, "tts_provider", "fish-audio")
     monkeypatch.setitem(CONFIG, "fish_api_key", "fish-key")
     monkeypatch.setitem(CONFIG, "fish_tts_model", "s2.1-pro-free")
     monkeypatch.setitem(CONFIG, "fish_tts_reference_id", "voice-a")
-    first = voiceover.tts_settings_fingerprint("fish-audio")
+    first = voiceover.tts_settings_payload("fish-audio")
     monkeypatch.setitem(CONFIG, "fish_tts_reference_id", "voice-b")
-    second = voiceover.tts_settings_fingerprint("fish-audio")
+    second = voiceover.tts_settings_payload("fish-audio")
 
     assert first["engine"] == "fish-audio"
     assert "mimo_tts_voice" not in first

@@ -3,8 +3,6 @@
 import json
 from pathlib import Path
 
-from lib import stable_hash
-
 
 def _load(work_dir, name):
     """Pipeline-written artifact: None when never written; corrupt JSON raises."""
@@ -92,19 +90,6 @@ def _load_review_grounding(work_dir):
     )
 
 
-def _source_fingerprint(work_dir, name):
-    path = Path(work_dir) / name
-    if not path.exists():
-        return ""
-    try:
-        return stable_hash(json.loads(path.read_text(encoding="utf-8")))
-    except (ValueError, OSError):
-        try:
-            return stable_hash(path.read_text(encoding="utf-8"))
-        except OSError:
-            return ""
-
-
 def _load_cut_clip_spans(work_dir):
     """Load explicit source→output spans from the validated cut plan only.
 
@@ -117,9 +102,11 @@ def _load_cut_clip_spans(work_dir):
     plan = _load(work_dir, "clip_plan_validated.json")
     if plan is None:
         return None
-    raw_plan = _load(work_dir, "clip_plan.json")
-    if raw_plan is not None and plan.get("raw_plan_fingerprint") != stable_hash(
-        raw_plan
+    raw_path = work_dir / "clip_plan.json"
+    if (
+        raw_path.exists()
+        and (work_dir / "clip_plan_validated.json").stat().st_mtime_ns
+        < raw_path.stat().st_mtime_ns
     ):
         return None
     spans = [

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 """Compose caller-rendered RGBA pixels over a frozen H264/CFR/AAC base.
 
-This operation validates pixels and immutable provenance. It does not generate or
+This operation validates pixels and declared inputs. It does not generate or
 interpret titles, dialogue, brands, typography, or release approval.
 """
 
 import argparse
 from fractions import Fraction
-import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -15,8 +14,8 @@ import subprocess
 from frozen_audio import probe_audio_packets, verify_adopted_audio
 from pair_media import probe_picture, validate_pair_timing
 from strict_inputs import (
-    canonical_fraction, require_asset, require_digest, require_fields, require_integer,
-    run_logged, sha256_file, write_json_atomic,
+    canonical_fraction, require_declared_path, require_fields, require_integer, run_logged,
+    without_digests, write_json_atomic,
 )
 
 
@@ -28,13 +27,14 @@ ENCODING = {
 
 
 def _fields(value, required):
+    value = without_digests(value, "compose plan")
     require_fields(value, required, "compose plan")
+    return value
 
 
 def _local_file(value, label):
-    _fields(value, ["path", "sha256"])
-    path, expected = require_asset(value["path"], value["sha256"], label)
-    return {"path": str(path), "sha256": expected}
+    _fields(value, ["path"])
+    return {"path": str(require_declared_path(value, label))}
 
 
 def _sequence_paths(directory, pattern, start, end):
@@ -50,19 +50,6 @@ def _sequence_paths(directory, pattern, start, end):
     if not all(path.is_file() for path in expected):
         raise FileNotFoundError("Sequence frame missing or not a file")
     return directory, expected
-
-
-def ordered_sequence_digest(directory, pattern, start, end):
-    """Digest ordered frame numbers and resolved content hashes; symlinks may repeat."""
-    start = require_integer(start, "sequence start")
-    end = require_integer(end, "sequence end")
-    if end <= start:
-        raise ValueError("Sequence interval must be non-empty")
-    _, paths = _sequence_paths(directory, pattern, start, end)
-    manifest = [{"frame": index, "sha256": sha256_file(path.resolve())}
-                for index, path in zip(range(start, end), paths)]
-    encoded = json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _probe_image(path):
@@ -88,35 +75,32 @@ def _validate_rgba(path, width, height):
 
 
 def _sequence(value, required, *, local_count, width, height):
-    _fields(value, required)
+    value = _fields(value, required)
     directory = value["directory"]
     if not isinstance(directory, str) or not directory or "://" in directory:
         raise ValueError("Sequence requires a local directory")
     if value["pattern"] != PATTERN:
         raise ValueError(f"Only the literal simple pattern {PATTERN!r} is supported")
-    expected_digest = require_digest(value["ordered_sha256"], "sequence")
     resolved, paths = _sequence_paths(directory, value["pattern"], 0, local_count)
-    if ordered_sequence_digest(resolved, value["pattern"], 0, local_count) != expected_digest:
-        raise ValueError("Sequence ordered content digest mismatch")
     for path in paths:
         _validate_rgba(path, width, height)
-    return {**value, "directory": str(resolved)}, paths
+    return {**value, "directory": str(resolved), "frame_count": len(paths)}, paths
 
 
 def validate_endcard(value, *, foreground_end, total_frames, width, height):
     """Validate the exact endcard union and return normalized data and bound paths."""
     if not isinstance(value, dict) or value.get("kind") not in {"none", "still", "sequence"}:
         raise ValueError("Endcard kind must be none, still, or sequence")
+    value = without_digests(value, "endcard")
     if value["kind"] == "none":
         _fields(value, ["kind"])
         if foreground_end != total_frames:
             raise ValueError("No endcard requires foreground to cover the full frame clock")
         return {"kind": "none"}, []
     if value["kind"] == "still":
-        required = ["kind", "path", "sha256", "start_frame", "end_frame"]
+        required = ["kind", "path", "start_frame", "end_frame"]
     else:
-        required = ["kind", "directory", "pattern", "start_frame", "end_frame",
-                    "ordered_sha256"]
+        required = ["kind", "directory", "pattern", "start_frame", "end_frame"]
     _fields(value, required)
     end_start = require_integer(value["start_frame"], "endcard start_frame")
     end_end = require_integer(value["end_frame"], "endcard end_frame", minimum=1)
@@ -125,7 +109,7 @@ def validate_endcard(value, *, foreground_end, total_frames, width, height):
     if end_start != foreground_end or end_end != total_frames:
         raise ValueError("Foreground and endcard must exactly partition the base frame clock")
     if value["kind"] == "still":
-        asset = _local_file({"path": value["path"], "sha256": value["sha256"]}, "endcard")
+        asset = _local_file({"path": value["path"]}, "endcard")
         _validate_rgba(asset["path"], width, height)
         return {**value, **asset}, [Path(asset["path"])]
     return _sequence(
@@ -135,30 +119,26 @@ def validate_endcard(value, *, foreground_end, total_frames, width, height):
 
 def validate_plan(plan_path):
     plan_path = Path(plan_path).resolve()
-    raw = plan_path.read_bytes()
-    plan_hash = hashlib.sha256(raw).hexdigest()
-    plan = json.loads(raw)
+    plan = json.loads(plan_path.read_bytes())
     _fields(plan, ["artifact", "schema_version", "base", "video", "foreground",
                    "endcard", "producer_receipt"])
+    plan = {**plan, "video": _fields(plan["video"], ["fps", "width", "height", "total_frames"])}
     if plan["artifact"] != "foreground_compose_plan" or type(plan["schema_version"]) is not int \
             or plan["schema_version"] != 1:
         raise ValueError("Unsupported foreground_compose_plan schema")
     base = _local_file(plan["base"], "base")
     receipt = _local_file(plan["producer_receipt"], "producer_receipt")
-    _fields(plan["video"], ["fps", "width", "height", "total_frames"])
     fps = canonical_fraction(plan["video"]["fps"], "video fps")
     width = require_integer(plan["video"]["width"], "video width", minimum=1)
     height = require_integer(plan["video"]["height"], "video height", minimum=1)
     total = require_integer(plan["video"]["total_frames"], "video total_frames", minimum=1)
-    _fields(plan["foreground"], ["directory", "pattern", "start_frame", "end_frame",
-                                 "ordered_sha256"])
+    _fields(plan["foreground"], ["directory", "pattern", "start_frame", "end_frame"])
     foreground_start = require_integer(plan["foreground"]["start_frame"], "foreground start_frame")
     foreground_end = require_integer(plan["foreground"]["end_frame"], "foreground end_frame", minimum=1)
     if foreground_start != 0 or foreground_end > total:
         raise ValueError("Foreground must start at frame 0 and not exceed the frame clock")
     foreground, foreground_paths = _sequence(
-        plan["foreground"], ["directory", "pattern", "start_frame", "end_frame",
-                             "ordered_sha256"],
+        plan["foreground"], ["directory", "pattern", "start_frame", "end_frame"],
         local_count=foreground_end, width=width, height=height,
     )
     normalized_endcard, endcard_paths = validate_endcard(
@@ -178,32 +158,12 @@ def validate_plan(plan_path):
     audio = probe_audio_packets(base["path"], 0)
     validate_pair_timing(picture, audio)
     return {
-        "plan_path": plan_path, "plan_sha256": plan_hash, "base": base,
+        "plan_path": plan_path, "base": base,
         "video": {"fps": str(fps), "width": width, "height": height, "total_frames": total},
         "foreground": foreground, "foreground_paths": foreground_paths,
         "endcard": normalized_endcard, "endcard_paths": endcard_paths,
         "producer_receipt": receipt, "picture": picture, "audio": audio,
     }
-
-
-def _assert_current(validated):
-    if sha256_file(validated["plan_path"]) != validated["plan_sha256"]:
-        raise ValueError("Compose plan changed during operation")
-    for asset in (validated["base"], validated["producer_receipt"]):
-        if sha256_file(asset["path"]) != asset["sha256"]:
-            raise ValueError("Bound input or producer receipt changed during operation")
-    foreground = validated["foreground"]
-    if ordered_sequence_digest(foreground["directory"], foreground["pattern"], 0,
-                               foreground["end_frame"]) != foreground["ordered_sha256"]:
-        raise ValueError("Foreground sequence changed during operation")
-    endcard = validated["endcard"]
-    if endcard["kind"] == "still":
-        if sha256_file(endcard["path"]) != endcard["sha256"]:
-            raise ValueError("Endcard changed during operation")
-    elif endcard["kind"] == "sequence" and ordered_sequence_digest(
-            endcard["directory"], endcard["pattern"], 0,
-            endcard["end_frame"] - endcard["start_frame"]) != endcard["ordered_sha256"]:
-        raise ValueError("Endcard sequence changed during operation")
 
 
 def _run_ffmpeg(command, directory):
@@ -250,13 +210,12 @@ def run_compose(plan_path, output_dir, *, plan_only=False):
     try:
         value = validate_plan(plan_path)
         report.update(
-            plan={"path": str(value["plan_path"]), "sha256": value["plan_sha256"]},
+            plan={"path": str(value["plan_path"])},
             base=value["base"], video=value["video"], foreground=value["foreground"],
             endcard=value["endcard"],
             producer_receipt={**value["producer_receipt"],
                               "semantic_validation": "DECLARED_NOT_CHECKED"},
         )
-        _assert_current(value)
         if plan_only:
             report["status"] = "PLANNED"
             write_json_atomic(report_path, report)
@@ -301,12 +260,10 @@ def run_compose(plan_path, output_dir, *, plan_only=False):
                     str(value["audio"]["sample_rate"]), "-movflags", "+faststart",
                     str(staged)]
         _run_ffmpeg(command, directory)
-        _assert_current(value)
         output_picture, audio_proof = _verify_output(staged, value)
-        _assert_current(value)
         write_json_atomic(directory / "picture_identity.json", output_picture)
         write_json_atomic(directory / "adopted_audio_identity.json", audio_proof)
-        report["output"] = {"path": str(output), "sha256": sha256_file(staged),
+        report["output"] = {"path": str(output),
                             "full_decode": "PASS", "frame_clock": "EXACT",
                             "audio_packet_identity": "EXACT"}
         staged.rename(output)

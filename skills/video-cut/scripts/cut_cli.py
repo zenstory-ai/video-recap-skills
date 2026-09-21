@@ -16,7 +16,6 @@ from cut_contract import (
     normalize_multi_source_clip_plan,
     parse_duration_seconds,
     should_reuse_edited_source,
-    value_fingerprint,
 )
 from cut_render import (
     build_edited_source_video,
@@ -205,7 +204,6 @@ def main():
             start_max_trim=CONFIG["clip_start_snap_max_trim"],
         )
 
-    validated_plan["raw_plan_fingerprint"] = value_fingerprint(raw_plan)
     validated_plan.setdefault("qc", {})["join_fade_ms"] = round(
         CONFIG["clip_join_audio_fade_ms"], 3
     )

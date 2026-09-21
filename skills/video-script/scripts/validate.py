@@ -12,7 +12,7 @@ import json
 import math
 from pathlib import Path
 
-from lib import CONFIG, log, stable_hash
+from lib import CONFIG, log
 from narration_lint import (
     _validate_narration_budget,
     validate_narration_or_raise,
@@ -34,14 +34,11 @@ def _load_cut_clip_plan(work_dir):
     if not raw_plan.exists():
         return _load(validated_plan)
 
-    raw = _load(raw_plan)
-    validated = _load(validated_plan)
-    if validated.get("raw_plan_fingerprint") == stable_hash(raw):
-        return validated
-    # Validation may run before the cut stage refreshes clip_plan_validated.json.
-    # Without a matching raw-plan provenance fingerprint, lint against the current
-    # raw plan even when mtimes are equal or misleading.
-    return raw
+    # Validation may run before the cut stage refreshes clip_plan_validated.json;
+    # a validated plan older than the raw plan is stale, so lint against the raw plan.
+    if validated_plan.stat().st_mtime_ns >= raw_plan.stat().st_mtime_ns:
+        return _load(validated_plan)
+    return _load(raw_plan)
 
 
 def _validate_output_timeline_bounds(narration, duration, tolerance=0.05):

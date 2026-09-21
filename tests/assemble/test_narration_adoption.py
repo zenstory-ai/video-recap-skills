@@ -1,7 +1,6 @@
-"""Regression tests for explicit narration adoption and byte identity binding."""
+"""Regression tests for explicit narration adoption and the consumed-input record."""
 
 import array
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -32,10 +31,6 @@ STRICT_TEMPO = {
 }
 
 
-def _sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
 def _tone(path, frequency=997, *, seconds=1.0):
     sample_rate = 44100
     frames = int(sample_rate * seconds)
@@ -54,8 +49,8 @@ def _tone(path, frequency=997, *, seconds=1.0):
     return path
 
 
-def _segment(audio_path, *, seconds=1.0, with_hash=True, receipt=None):
-    segment = tts_segment(
+def _segment(audio_path, *, seconds=1.0):
+    return tts_segment(
         index=0,
         start=0.25,
         end=1.75,
@@ -67,11 +62,6 @@ def _segment(audio_path, *, seconds=1.0, with_hash=True, receipt=None):
         overlaps_speech=False,
         tts_rate_offset=0.0,
     )
-    if with_hash:
-        segment["processed_wav_sha256"] = _sha256(audio_path)
-    if receipt is not None:
-        segment["provider_receipt"] = receipt
-    return segment
 
 
 def _adoption(tmp_path, segments, *, provider="offline-provider", voice="offline-voice"):
@@ -83,12 +73,10 @@ def _adoption(tmp_path, segments, *, provider="offline-provider", voice="offline
             {
                 "artifact": "narration_adoption",
                 "schema_version": 1,
-                "tts_meta_sha256": _sha256(meta),
                 "segments": [
                     {
                         "index": item["index"],
                         "spoken_text": item["spoken_text"],
-                        "processed_wav_sha256": item["processed_wav_sha256"],
                         "requested_provider": provider,
                         "requested_voice": voice,
                     }
@@ -118,9 +106,13 @@ def test_load_adoption_accepts_exact_v1_contract(tmp_path):
         adoption, tts_meta_path=meta, tts_segments=segments
     )
 
-    assert loaded["sha256"] == _sha256(adoption)
-    assert loaded["tts_meta"] == {"path": str(meta.resolve()), "sha256": _sha256(meta)}
+    assert loaded["path"] == str(adoption.resolve())
+    assert loaded["tts_meta"] == {"path": str(meta.resolve())}
     assert loaded["tempo_policy"] == STRICT_TEMPO
+    assert loaded["segments"] == [{
+        "index": 0, "spoken_text": "identity fixture",
+        "requested_provider": "offline-provider", "requested_voice": "offline-voice",
+    }]
 
 
 @pytest.mark.parametrize(
@@ -139,6 +131,20 @@ def test_load_adoption_rejects_contract_shape_changes(tmp_path, mutate):
 
     with pytest.raises(ValueError, match="(?i)(schema|field)"):
         narration_binding.load_adoption(adoption, tts_meta_path=meta, tts_segments=segments)
+
+
+def test_load_adoption_ignores_legacy_digest_keys(tmp_path):
+    audio = _tone(tmp_path / "voice.wav")
+    segments = [_segment(audio)]
+    adoption, meta = _adoption(tmp_path, segments)
+    _rewrite(adoption, lambda value: (
+        value.update(tts_meta_sha256="0" * 64),
+        value["segments"][0].update(processed_wav_sha256="0" * 64),
+    ))
+
+    loaded = narration_binding.load_adoption(adoption, tts_meta_path=meta, tts_segments=segments)
+
+    assert "processed_wav_sha256" not in loaded["segments"][0]
 
 
 @pytest.mark.parametrize(
@@ -183,16 +189,6 @@ def test_load_adoption_honours_a_valid_non_default_tempo_policy(tmp_path):
     assert loaded["tempo_policy"] == declared
 
 
-def test_load_adoption_rejects_stale_tts_meta_bytes(tmp_path):
-    audio = _tone(tmp_path / "voice.wav")
-    segments = [_segment(audio)]
-    adoption, meta = _adoption(tmp_path, segments)
-    meta.write_bytes(meta.read_bytes() + b"\n")
-
-    with pytest.raises(ValueError, match="(?i)(tts_meta|bytes|hash)"):
-        narration_binding.load_adoption(adoption, tts_meta_path=meta, tts_segments=segments)
-
-
 def test_load_adoption_rejects_in_memory_segments_different_from_bound_file(tmp_path):
     audio = _tone(tmp_path / "voice.wav")
     segments = [_segment(audio)]
@@ -205,54 +201,32 @@ def test_load_adoption_rejects_in_memory_segments_different_from_bound_file(tmp_
 
 @pytest.mark.parametrize(
     "field,value",
-    [("index", 9), ("spoken_text", "stale words"), ("processed_wav_sha256", "0" * 64)],
+    [("index", 9), ("spoken_text", "stale words")],
 )
-def test_load_adoption_rejects_segment_identity_different_from_tts_meta(
-    tmp_path, field, value
-):
+def test_load_adoption_rejects_segment_different_from_tts_meta(tmp_path, field, value):
     audio = _tone(tmp_path / "voice.wav")
     segments = [_segment(audio)]
     adoption, meta = _adoption(tmp_path, segments)
     _rewrite(adoption, lambda payload: payload["segments"][0].update({field: value}))
 
-    with pytest.raises(ValueError, match="(?i)(segment|hash|spoken|tts_meta)"):
+    with pytest.raises(ValueError, match="(?i)(segment|spoken|tts_meta)"):
         narration_binding.load_adoption(adoption, tts_meta_path=meta, tts_segments=segments)
 
 
-def test_declared_hash_mismatch_rejects_even_without_adoption(tmp_path):
-    actual = _tone(tmp_path / "actual.wav", 330)
-    intended = _tone(tmp_path / "intended.wav", 997)
-    segment = _segment(actual)
-    segment["processed_wav_sha256"] = _sha256(intended)
-
-    with pytest.raises(ValueError, match="(?i)(hash|identity)"):
-        narration_binding.prepare_binding([segment], tmp_path / "work")
-
-
-def test_old_metadata_without_hash_is_explicitly_legacy_unverified(tmp_path):
-    audio = _tone(tmp_path / "voice.wav")
-    segment = _segment(audio, with_hash=False)
-
-    context = narration_binding.prepare_binding([segment], tmp_path / "work")
-
-    assert context["identity_status"] == "LEGACY_UNVERIFIED"
-    assert context["active"] is False
-    assert segment["audio_path"] == str(audio)
-
-
-def test_hash_bound_metadata_without_adoption_is_snapshotted_but_not_promoted(tmp_path):
+def test_metadata_without_adoption_is_unadopted_and_not_snapshotted(tmp_path):
     audio = _tone(tmp_path / "voice.wav")
     segment = _segment(audio)
 
     context = narration_binding.prepare_binding([segment], tmp_path / "work")
 
-    assert context["identity_status"] == "DECLARED_HASH_BOUND_UNADOPTED"
+    assert context["identity_status"] == "UNADOPTED"
+    assert context["active"] is False
     assert context["adoption"] is None
-    assert Path(segment["audio_path"]).read_bytes() == audio.read_bytes()
-    assert Path(segment["audio_path"]).resolve() != audio.resolve()
+    assert segment["audio_path"] == str(audio)
+    assert not (tmp_path / "work/.narration_input_snapshots").exists()
 
 
-def test_adoption_without_receipt_keeps_request_evidence_unknown(tmp_path):
+def test_adoption_snapshots_inputs_and_records_paths_only(tmp_path):
     audio = _tone(tmp_path / "voice.wav")
     segments = [_segment(audio)]
     adoption, meta = _adoption(tmp_path, segments)
@@ -265,74 +239,27 @@ def test_adoption_without_receipt_keeps_request_evidence_unknown(tmp_path):
     )
 
     assert context["identity_status"] == "BOUND_TO_ADOPTION"
-    assert context["segments"][0]["request_evidence"] == "UNKNOWN"
-
-
-def test_matching_provider_receipt_records_request_only_not_acoustic_voice_pass(tmp_path):
-    audio = _tone(tmp_path / "voice.wav")
-    digest = _sha256(audio)
-    receipt = {
-        "provider": "offline-provider",
-        "requested_voice": "offline-voice",
-        "processed_wav_sha256": digest,
-    }
-    segments = [_segment(audio, receipt=receipt)]
-    adoption, meta = _adoption(tmp_path, segments)
-
-    context = narration_binding.prepare_binding(
-        segments,
-        tmp_path / "work",
-        narration_adoption_path=adoption,
-        tts_meta_path=meta,
-    )
-
-    assert context["segments"][0]["request_evidence"] == "RECEIPT_MATCHED"
+    recorded = context["segments"][0]
+    assert recorded["original"] == {"path": str(audio.resolve())}
+    assert recorded["snapshot"] == {"path": segments[0]["audio_path"]}
+    assert Path(segments[0]["audio_path"]).read_bytes() == audio.read_bytes()
+    assert Path(segments[0]["audio_path"]).resolve() != audio.resolve()
+    assert recorded["requested_provider"] == "offline-provider"
     assert not any("voice" in key.lower() and value == "PASS" for key, value in context.items())
 
 
-@pytest.mark.parametrize(
-    "field,value",
-    [
-        ("provider", "different-provider"),
-        ("processed_wav_sha256", "0" * 64),
-    ],
-)
-def test_provider_receipt_contradictions_are_rejected(tmp_path, field, value):
-    audio = _tone(tmp_path / "voice.wav")
-    receipt = {
-        "provider": "offline-provider",
-        "requested_voice": "offline-voice",
-        "processed_wav_sha256": _sha256(audio),
-    }
-    receipt[field] = value
-    segments = [_segment(audio, receipt=receipt)]
-    adoption, meta = _adoption(tmp_path, segments)
-
-    with pytest.raises(ValueError, match="(?i)(receipt|contradict)"):
-        narration_binding.prepare_binding(
-            segments,
-            tmp_path / "work",
-            narration_adoption_path=adoption,
-            tts_meta_path=meta,
-        )
-
-
-@pytest.mark.parametrize("changed", ["audio", "metadata", "adoption"])
-def test_assert_current_rejects_post_preflight_identity_changes(tmp_path, changed):
+def test_missing_narration_audio_is_rejected_before_snapshot(tmp_path):
     audio = _tone(tmp_path / "voice.wav")
     segments = [_segment(audio)]
     adoption, meta = _adoption(tmp_path, segments)
-    context = narration_binding.prepare_binding(
-        segments,
-        tmp_path / "work",
-        narration_adoption_path=adoption,
-        tts_meta_path=meta,
-    )
-    selected = {"audio": audio, "metadata": meta, "adoption": adoption}[changed]
-    selected.write_bytes(selected.read_bytes() + b"changed")
+    audio.unlink()
 
-    with pytest.raises(ValueError, match="(?i)(changed|identity)"):
-        narration_binding.assert_current(context)
+    with pytest.raises(ValueError, match="(?i)missing"):
+        narration_binding.prepare_binding(
+            segments, tmp_path / "work",
+            narration_adoption_path=adoption, tts_meta_path=meta,
+        )
+    assert not (tmp_path / "work/.narration_input_snapshots").exists()
 
 
 @pytest.fixture
@@ -432,13 +359,14 @@ def test_adopted_f32_stereo_input_is_decoded_and_bound_through_final_mix(
     report = json.loads((work / "narration_input_binding.json").read_text())
     segment_report = report["segments"][0]
     assert report["identity_status"] == "BOUND_TO_ADOPTION"
-    assert segment_report["original"]["sha256"] == _sha256(adopted)
+    assert segment_report["original"]["path"] == str(adopted.resolve())
     assert segment_report["conversion"]["applied"] is True
     assert segment_report["conversion"]["pcm"]["sample_rate"] == "44100"
     assert segment_report["conversion"]["pcm"]["channels"] == 1
-    assert segment_report["placed"]["sha256"] == _sha256(segment_report["placed"]["path"])
-    assert report["narration_bus"]["sha256"] == _sha256(report["narration_bus"]["path"])
-    assert report["final_output"]["sha256"] == _sha256(output)
+    assert Path(segment_report["placed"]["path"]).is_file()
+    assert Path(report["narration_bus"]["path"]).is_file()
+    assert report["final_output"]["path"] == str(output.resolve())
+    assert report["final_output"]["audio_stream"]["packet_count"] > 0
     assert report["voice_authentication"] == "NOT_CHECKED"
 
 
@@ -490,9 +418,7 @@ def test_overlong_strict_adoption_fails_without_speedup_or_speech_cut(render_med
     assert segments[0]["placed_audio_duration"] == 0.0
 
 
-def test_post_preflight_source_change_rejects_without_overwriting_old_output(
-    render_media, tmp_path, monkeypatch
-):
+def test_strict_adoption_never_overwrites_an_existing_output(render_media, tmp_path):
     source, work = render_media
     audio = _tone(tmp_path / "voice.wav")
     segments = [_segment(audio)]
@@ -500,15 +426,8 @@ def test_post_preflight_source_change_rejects_without_overwriting_old_output(
     output = work / "output.mp4"
     previous = b"previous successful delivery"
     output.write_bytes(previous)
-    original_copy = narration_binding._copy_snapshot
 
-    def copy_then_mutate(source_path, destination):
-        original_copy(source_path, destination)
-        Path(source_path).write_bytes(Path(source_path).read_bytes() + b"changed")
-
-    monkeypatch.setattr(narration_binding, "_copy_snapshot", copy_then_mutate)
-
-    with pytest.raises(ValueError, match="(?i)(changed|identity)"):
+    with pytest.raises(RuntimeError, match="output_path"):
         assemble.assemble_video(
             source,
             segments,

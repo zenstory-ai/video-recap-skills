@@ -27,14 +27,13 @@ def test_state_full_mode(tmp_path):
     (tmp_path / "narration.json").write_text("[]", encoding="utf-8")
     (tmp_path / "recap_run_manifest.json").write_text(json.dumps({
         "source_video": "/videos/movie.mp4",
-        "source_video_fingerprint": "abc123",
+        "source_video_identity": {"size": 1, "mtime_ns": 1},
         "settings": {"edit_mode": "full"},
     }), encoding="utf-8")
 
     state = recap_inspect.cmd_state(tmp_path, compact=True)
     assert state["mode"] == "full"
     assert state["source_video"]["path"] == "/videos/movie.mp4"
-    assert state["source_video"]["fingerprint"] == "abc123"
     assert state["source_video"]["origin"] == "recap_run_manifest.json"
     assert state["next_pause"] is None  # narration.json present
     assert "scenes.json" in state["artifacts"]["understanding"]["present"]
@@ -74,7 +73,7 @@ def test_state_source_from_assembly_manifest_when_no_run_manifest(tmp_path):
     (tmp_path / "assembly_manifest.json").write_text(json.dumps({
         "input_video": "/videos/in.mp4",
         "source_video": "/videos/src.mp4",
-        "source_video_fingerprint": "ff00",
+        "source_video_identity": {"size": 1, "mtime_ns": 1},
     }), encoding="utf-8")
     state = recap_inspect.cmd_state(tmp_path, compact=True)
     assert state["source_video"]["path"] == "/videos/src.mp4"
@@ -82,16 +81,15 @@ def test_state_source_from_assembly_manifest_when_no_run_manifest(tmp_path):
 
 
 def test_state_source_from_cut_meta_when_no_manifests(tmp_path):
-    """video-cut's sidecar records {source_path: fingerprint}; a single entry is the source."""
+    """video-cut's sidecar records sources: {path: {size, mtime_ns}}; a single entry is the source."""
     (tmp_path / "edited_source.mp4.meta.json").write_text(json.dumps({
-        "schema_version": 2,
-        "source_fingerprints": {"/videos/ep1.mp4": "c" * 64},
-        "edited_source_fingerprint": "d" * 64,
+        "schema_version": 3,
+        "sources": {"/videos/ep1.mp4": {"size": 10, "mtime_ns": 5}},
+        "plan": [],
     }), encoding="utf-8")
     state = recap_inspect.cmd_state(tmp_path, compact=True)
     assert state["source_video"] == {
         "path": "/videos/ep1.mp4",
-        "fingerprint": "c" * 64,
         "origin": "edited_source.mp4.meta.json",
     }
 
@@ -146,7 +144,7 @@ def test_state_cut_narration_without_phase_ledger_flagged_stale(tmp_path):
     (tmp_path / "clip_plan_validated.json").write_text(json.dumps({"clips": []}), encoding="utf-8")
     (tmp_path / "narration.json").write_text("[]", encoding="utf-8")
     (tmp_path / "recap_run_manifest.json").write_text(json.dumps(
-        {"source_video": "/v.mp4", "source_video_fingerprint": "x"}), encoding="utf-8")
+        {"source_video": "/v.mp4", "source_video_identity": {"size": 1, "mtime_ns": 1}}), encoding="utf-8")
     state = recap_inspect.cmd_state(tmp_path, compact=True)
     notes = " ".join(state["stale_manifest_notes"])
     assert "recap_phase.json" in notes
@@ -301,9 +299,9 @@ def test_state_surfaces_multi_source_manifest(tmp_path):
         "schema_version": 1,
         "sources": [
             {"source_id": "src_a", "source_path": "/videos/a.mp4", "source_name": "a.mp4",
-             "source_video_fingerprint": "a" * 64, "source_work_dir": "sources/src_a", "material_id": "a-src_a"},
+             "source_video_identity": {"size": 1, "mtime_ns": 1}, "source_work_dir": "sources/src_a", "material_id": "a-src_a"},
             {"source_id": "src_b", "source_path": "/videos/b.mp4", "source_name": "b.mp4",
-             "source_video_fingerprint": "b" * 64, "source_work_dir": "sources/src_b", "material_id": "b-src_b"},
+             "source_video_identity": {"size": 2, "mtime_ns": 2}, "source_work_dir": "sources/src_b", "material_id": "b-src_b"},
         ],
     }), encoding="utf-8")
     state = recap_inspect.cmd_state(tmp_path, compact=True)

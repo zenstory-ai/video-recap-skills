@@ -15,12 +15,11 @@ unit-testable with a mocked api_call. NON-required: the pipeline runs unchanged 
 """
 
 import argparse
-import hashlib
 import json
 import re
 from pathlib import Path
 
-from lib import CONFIG, log, api_call, load_background_research
+from lib import CONFIG, log, api_call, file_identity, load_background_research
 from understanding_cache import _fresh
 
 # Shared tolerance for the per-segment span check. The brief-side gate inlines the SAME
@@ -94,17 +93,10 @@ def parse_clean_response(text, asr_result):
     return out
 
 
-def _json_md5_file(work_dir, name):
+def _input_identity(work_dir, name):
+    """{size, mtime_ns} of one input artifact, or None when it is absent."""
     path = Path(work_dir) / name
-    return hashlib.md5(path.read_bytes()).hexdigest() if path.exists() else ""
-
-
-def _asr_clean_source_md5(work_dir):
-    return _json_md5_file(work_dir, "asr_clean.json")
-
-
-def _research_source_md5(work_dir):
-    return _json_md5_file(work_dir, "background_research.json")
+    return file_identity(path) if path.exists() else None
 
 
 def _research_glossary_from_context(background_research):
@@ -419,44 +411,31 @@ def _extract_json(text):
         return None
 
 
-def _asr_source_md5(work_dir):
-    """Provenance: md5 of the on-disk asr_result.json BYTES (writer + reader hash the same thing)."""
-    path = Path(work_dir) / "asr_result.json"
-    return hashlib.md5(path.read_bytes()).hexdigest() if path.exists() else ""
-
-
-def _vlm_source_md5(work_dir):
-    """Provenance: md5 of the on-disk vlm_analysis.json bytes."""
-    path = Path(work_dir) / "vlm_analysis.json"
-    return hashlib.md5(path.read_bytes()).hexdigest() if path.exists() else ""
-
-
 def _index_meta_path(work_dir):
     return Path(work_dir) / "understanding_index.json.meta.json"
 
 
-def _prompt_fingerprint(prompt):
-    return hashlib.md5(str(prompt or "").encode("utf-8")).hexdigest()
+def _index_meta(work_dir, vlm_analysis):
+    """Provenance of understanding_index.json: `source` (vlm_analysis.json identity) + `model`
+    are what brief consumers check; the other inputs and the prompt text are the producer's
+    own rebuild gate."""
+    return {
+        "schema_version": INDEX_SCHEMA_VERSION,
+        "source": _input_identity(work_dir, "vlm_analysis.json"),
+        "inputs": {
+            "asr_result": _input_identity(work_dir, "asr_result.json"),
+            "asr_clean": _input_identity(work_dir, "asr_clean.json"),
+            "background_research": _input_identity(work_dir, "background_research.json"),
+        },
+        "scene_count": len([s for s in (vlm_analysis or []) if isinstance(s, dict)]),
+        "model": CONFIG["vlm_model"],
+        "prompt": INDEX_PROMPT,
+    }
 
 
 def _write_index_meta(work_dir, vlm_analysis):
     _index_meta_path(work_dir).write_text(
-        json.dumps(
-            {
-                "schema_version": INDEX_SCHEMA_VERSION,
-                "source_md5": _vlm_source_md5(work_dir),
-                "asr_md5": _asr_source_md5(work_dir),
-                "asr_clean_md5": _asr_clean_source_md5(work_dir),
-                "research_md5": _research_source_md5(work_dir),
-                "scene_count": len(
-                    [s for s in (vlm_analysis or []) if isinstance(s, dict)]
-                ),
-                "model": CONFIG["vlm_model"],
-                "prompt_md5": _prompt_fingerprint(INDEX_PROMPT),
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
+        json.dumps(_index_meta(work_dir, vlm_analysis), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
@@ -469,18 +448,7 @@ def _index_cache_matches(work_dir, vlm_analysis):
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return False
-    return (
-        isinstance(meta, dict)
-        and meta.get("schema_version") == INDEX_SCHEMA_VERSION
-        and meta.get("source_md5") == _vlm_source_md5(work_dir)
-        and meta.get("asr_md5", "") == _asr_source_md5(work_dir)
-        and meta.get("asr_clean_md5", "") == _asr_clean_source_md5(work_dir)
-        and meta.get("research_md5", "") == _research_source_md5(work_dir)
-        and meta.get("scene_count")
-        == len([s for s in (vlm_analysis or []) if isinstance(s, dict)])
-        and meta.get("model") == CONFIG["vlm_model"]
-        and meta.get("prompt_md5") == _prompt_fingerprint(INDEX_PROMPT)
-    )
+    return meta == _index_meta(work_dir, vlm_analysis)
 
 
 # ── thin drivers (I/O + api_call) ─────────────────────────────────────────────
@@ -504,9 +472,9 @@ def consolidate_transcript(work_dir):
     if _fresh(out_path, work_dir / "asr_result.json"):
         existing = _load(work_dir, "asr_clean.json") or {}
         if (
-            existing.get("source_md5") == _asr_source_md5(work_dir)
+            existing.get("source") == _input_identity(work_dir, "asr_result.json")
             and existing.get("model") == CONFIG["vlm_model"]
-            and existing.get("prompt_md5") == _prompt_fingerprint(CLEAN_PROMPT)
+            and existing.get("prompt") == CLEAN_PROMPT
             and existing.get("postprocess_version") == ASR_CLEAN_POSTPROCESS_VERSION
         ):
             log("consolidate(asr): asr_clean.json 已最新，跳过")
@@ -522,9 +490,9 @@ def consolidate_transcript(work_dir):
     content = _response_text(resp)
     segments = parse_clean_response(content, asr_result)
     payload = {
-        "source_md5": _asr_source_md5(work_dir),
+        "source": _input_identity(work_dir, "asr_result.json"),
         "model": CONFIG["vlm_model"],
-        "prompt_md5": _prompt_fingerprint(CLEAN_PROMPT),
+        "prompt": CLEAN_PROMPT,
         "postprocess_version": ASR_CLEAN_POSTPROCESS_VERSION,
         "segments": segments,
     }

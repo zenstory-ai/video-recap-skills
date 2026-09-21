@@ -1,16 +1,13 @@
-"""Independent local-adoption route checks: no synthesis and separate audio identity."""
+"""Independent local-adoption route checks: no synthesis, paths forwarded verbatim."""
 
 import json
-import hashlib
 import sys
 
 import pytest
 
 import recap_cli
 import recap_runner
-import recap_runtime
 import recap_source
-from _helpers import manifest_args as _args
 from test_audio_routing import _finish_stubs
 
 
@@ -37,8 +34,7 @@ def adopted_finish_stubs(monkeypatch, picture, paths, work, calls):
     fake_run = _finish_stubs(monkeypatch, work, calls)
 
     def identity(path):
-        return {'path': str(path.resolve()),
-                'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
+        return {'path': str(path.resolve())}
 
     def finish(skill, script, *args):
         result = fake_run(skill, script, *args)
@@ -92,17 +88,6 @@ def test_local_adoption_ignores_ambient_synthesis_and_never_opens_authoring(
     assert '--voice-ref' not in forwarded and '--tts-provider' not in forwarded
 
 
-@pytest.mark.parametrize('changed', ['tts_meta', 'narration_adoption', 'audio_mix_adoption'])
-def test_each_adoption_content_change_is_audio_only_identity(local_inputs, changed):
-    _, paths = local_inputs
-    args = _args(**{key: str(path) for key, path in paths.items()})
-    before = recap_source.audio_binding(args)
-    analysis = recap_runtime._analysis_settings(args)
-    paths[changed].write_text(paths[changed].read_text(encoding="utf-8")+'\n')
-    assert recap_source.audio_binding(args) != before
-    assert recap_runtime._analysis_settings(args) == analysis
-
-
 def test_existing_adopted_workdir_cannot_trigger_any_stage(local_inputs, tmp_path, monkeypatch):
     picture, paths = local_inputs
     work = tmp_path/'already-used'
@@ -116,29 +101,6 @@ def test_existing_adopted_workdir_cannot_trigger_any_stage(local_inputs, tmp_pat
         recap_runner.main()
     assert calls == []
     assert sentinel.read_text(encoding="utf-8") == 'preserve'
-
-
-def test_adoption_cannot_change_between_run_manifest_and_assemble(
-    local_inputs, tmp_path, monkeypatch,
-):
-    picture, paths = local_inputs
-    work = tmp_path/'changing-work'
-    calls = []
-    fake_run = _finish_stubs(monkeypatch, work, calls)
-
-    def changed_bundle(skill, script, *args):
-        if script == 'assemble.py':
-            # The child can see a different valid document than the one recorded
-            # in the parent's run manifest. The parent must not report success.
-            path = paths['audio_mix_adoption']
-            path.write_text(path.read_text(encoding="utf-8")+'\n')
-        return fake_run(skill, script, *args)
-
-    monkeypatch.setattr(recap_runner, '_run', changed_bundle)
-    monkeypatch.setattr(sys, 'argv', arguments(picture, paths, work))
-    with pytest.raises((SystemExit, ValueError, RuntimeError)):
-        recap_runner.main()
-    assert [script for _, script, _ in calls] == ['assemble.py']
 
 
 @pytest.mark.parametrize('flag', ['--voice-ref', '--voice-r'])

@@ -1,7 +1,6 @@
 """A fractional-second AAC interval must survive producing, pairing and packaging."""
 
 from fractions import Fraction
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -28,10 +27,6 @@ pytestmark = pytest.mark.skipif(
 
 def run(*args):
     subprocess.run(list(map(str, args)), check=True, capture_output=True)
-
-
-def identity(path):
-    return {'path': str(path), 'sha256': hashlib.sha256(path.read_bytes()).hexdigest()}
 
 
 def assert_sample_clock(video):
@@ -80,7 +75,7 @@ def test_frozen_aac_fractional_interval_survives_each_consumer(
         plan = tmp_path / 'pair.json'
         plan.write_text(json.dumps({
             'artifact': 'media_pair', 'schema_version': 1,
-            'picture': identity(base), 'audio': {**identity(base), 'selected_stream': 0},
+            'picture': {'path': str(base)}, 'audio': {'path': str(base), 'selected_stream': 0},
         }))
         pair_media.run_pair(plan, output_dir)
         output = output_dir / 'paired.mp4'
@@ -149,10 +144,9 @@ def test_explicit_mix_produces_sample_accurate_fractional_movie_clock(
         run('ffmpeg', '-v', 'error', '-i', path, '-af', 'atrim=end_sample=64000',
             '-c:a', 'pcm_f32le', trimmed)
         trimmed.replace(path)
-        prepared['outputs'][name] = source_score._output_identity(path)
+        prepared['outputs'][name] = source_score._output_facts(path)
     prepared['format']['total_samples'] = 64000
     receipt.write_text(json.dumps(prepared))
-    chosen.update(picture_sha256=identity(picture)['sha256'], prepared_receipt=identity(receipt))
     chosen['format']['total_samples'] = 64000
     adoption.write_text(json.dumps(chosen))
     output = work / 'output.mp4'

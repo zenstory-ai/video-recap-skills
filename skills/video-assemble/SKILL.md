@@ -34,7 +34,7 @@ description: >
 
 - `<video>`：源视频；cut 模式下为 `edited_source.mp4`。
 - `work_dir/tts_meta.json`：默认 `narration` 模式必需；配音阶段写出的 `{segments: [...]}`。每段包含 `audio_path`、时间、`pause_after_ms`、`overlaps_speech` 和用于混音/字幕的位置。显式 `source-mix` / `adopted-packet-copy` 模式不读取它。
-- 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、WAV 指纹、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与证据边界见 `references/narration-adoption.md`。
+- 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与记录边界见 `references/narration-adoption.md`。
 - 已采用的完整声音底轨与逐段配音可再传 `--audio-mix-adoption`；严格格式、48 kHz 声道矩阵和双 binding 事务见 `references/explicit-audio-mix.md`。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
@@ -58,9 +58,9 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - `subtitles.srt`：旁白字幕；烧录时另有 `subtitles.ass`。
 - `timeline.json`：后端无关的多轨模型，包含视频、原声、旁白、BGM、字幕和 ducking 自动化。
 - `_placed_*.wav`：实际写入主混音的完整逐段旁白 PCM；时间线与剪映只引用这些文件。
-- `narration_input_binding.json`：旁白输入、转换、实际放置、旁白总轨和最终音轨的消费证据。区分旧输入未核、指纹匹配但未经独立采用、与采用决定绑定；不等于声线鉴定或听审。
-- `audio_mix_binding.json`：显式完整声音分支的画面、底轨、48 kHz 配音、premaster、固定 master gain、最终 PCM/AAC 与另一 binding 的单向身份链。
-- `assembly_manifest.json`：输入来源、cut 来源指纹、渲染设置与最终输出路径。
+- `narration_input_binding.json`：旁白输入、转换、实际放置、旁白总轨和最终音轨的消费记录（路径、PCM 参数、packet 计数）。区分未采用与已绑定采用决定两种状态；不等于声线鉴定或听审。
+- `audio_mix_binding.json`：显式完整声音分支消费的画面时钟、底轨、48 kHz 配音放置、premaster、固定 master gain、最终 PCM/AAC 事实与 narration binding 路径的记录。
+- `assembly_manifest.json`：输入来源、cut 来源标识（路径、大小、mtime）、渲染设置与最终输出路径。
 - `assembly_qc.json`：旁白完整性、原声句末交接、时间线素材时长与交付质量的发布门禁。
 - 剪映草稿目录：仅 `--export-jianying` 时生成，包含 `draft_content.json`、`draft_info.json` 与 `draft_meta_info.json`。
 

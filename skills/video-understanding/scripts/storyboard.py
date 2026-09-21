@@ -26,11 +26,6 @@ from pathlib import Path
 from extract import frame_number_for_time, parse_frame_number
 from lib import CONFIG, run_cmd, log, get_video_duration
 
-try:  # file_fingerprint is the project's content-fingerprint helper; reuse when cheap.
-    from lib import file_fingerprint
-except ImportError:  # pragma: no cover - lib always ships it; degrade gracefully if not.
-    file_fingerprint = None
-
 
 # Candidate font files probed (in order) for burning mm:ss labels. The first that exists
 # AND that drawtext can actually load wins. A probe that RAISES must never abort the sheet.
@@ -159,15 +154,6 @@ def _scene_anchor_timestamps(scenes, max_tiles):
         step = len(anchors) / float(max_tiles)
         anchors = [anchors[int(i * step)] for i in range(max_tiles)]
     return anchors
-
-
-def _file_fp(path):
-    if file_fingerprint is None:
-        return None
-    try:
-        return file_fingerprint(path)
-    except (OSError, ValueError):
-        return None
 
 
 def _labelled_frame(frame_path, label, font_path, scratch_dir, out_name):
@@ -332,7 +318,6 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
             "schema_version": 1,
             "timeline": "source",
             "video_path": str(video_path),
-            "video_fingerprint": _file_fp(video_path),
             "fps": float(fps) if fps else None,
             "labels_burned": labels_burned,
             "page_images": [str(p) for p in pages],
@@ -442,7 +427,6 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
             "timeline": "output",
             "source_video_path": str(source_video_path),
             "edited_video_path": str(edited_source) if edited_source.exists() else None,
-            "clip_plan_fingerprint": _clip_plan_fingerprint(clip_plan_validated),
             "labels_burned": labels_burned,
             "page_images": [str(p) for p in pages],
             "sample_policy": {
@@ -459,17 +443,3 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
     except Exception as exc:  # noqa: BLE001 - advisory: never propagate
         log(f"storyboard edited 失败（忽略）: {exc}")
         return None
-
-
-def _clip_plan_fingerprint(clip_plan_validated):
-    """Stable fingerprint of the validated plan that drives the edited tiles."""
-    try:
-        return _stable_hash(clip_plan_validated)
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _stable_hash(value):
-    import hashlib
-    blob = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-    return hashlib.md5(blob.encode("utf-8")).hexdigest()

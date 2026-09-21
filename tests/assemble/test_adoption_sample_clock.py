@@ -57,5 +57,5 @@ def test_non_narration_mode_does_not_read_stale_narration_binding(
     def forbidden(_work_dir):
         raise AssertionError("non-narration mode read stale narration evidence")
 
-    monkeypatch.setattr(assemble.narration_binding, "binding_fingerprint", forbidden)
+    monkeypatch.setattr(assemble.narration_binding, "binding_record", forbidden)
     assert assemble._current_narration_binding(tmp_path, audio_mode) is None

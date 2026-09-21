@@ -26,7 +26,6 @@ from lib import (  # noqa: E402
     env_bool,
     env_float,
     env_int,
-    file_fingerprint,
     get_video_duration,
     is_mimo_token_plan_key,
     load_background_research,
@@ -234,28 +233,6 @@ def test_mimo_video_overview_embeds_small_local_chunk(monkeypatch, tmp_path):
     data_url = _video_data_url(video)
 
     assert data_url.startswith("data:video/mp4;base64,")
-
-
-def test_content_fingerprint_cache_keys_ignore_path_and_mtime(tmp_path):
-    first = tmp_path / "a.mp4"
-    second = tmp_path / "nested" / "b.mp4"
-    second.parent.mkdir()
-    first.write_bytes(b"same video bytes" * 100)
-    second.write_bytes(first.read_bytes())
-
-    assert file_fingerprint(first) == file_fingerprint(second)
-
-
-def test_content_fingerprint_detects_middle_only_changes(tmp_path):
-    first = tmp_path / "a.mp4"
-    second = tmp_path / "b.mp4"
-    first.write_bytes(b"A" * 70000 + b"middle-one" + b"Z" * 70000)
-    second.write_bytes(b"A" * 70000 + b"middle-two" + b"Z" * 70000)
-
-    assert first.stat().st_size == second.stat().st_size
-    assert first.read_bytes()[:65536] == second.read_bytes()[:65536]
-    assert first.read_bytes()[-65536:] == second.read_bytes()[-65536:]
-    assert file_fingerprint(first) != file_fingerprint(second)
 
 
 def test_research_context_feeds_vlm_from_background_research(tmp_path):

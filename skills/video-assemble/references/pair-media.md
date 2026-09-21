@@ -10,17 +10,17 @@ end card. It does not decide which inputs the editor intended to adopt.
 {
   "artifact": "media_pair",
   "schema_version": 1,
-  "picture": {"path": "/project/picture.mp4", "sha256": "<current 64-hex SHA256>"},
-  "audio": {"path": "/project/adopted.m4a", "sha256": "<current 64-hex SHA256>", "selected_stream": 0}
+  "picture": {"path": "/project/picture.mp4"},
+  "audio": {"path": "/project/adopted.m4a", "selected_stream": 0}
 }
 ```
 
 Both paths must be explicit local files. `selected_stream` is the audio ordinal
 (`a:N`), not the absolute stream index. The audio donor may be an old MP4 with
 unrelated video: only the selected audio is used. The picture's audio is ignored.
-Input hashes must come from actual current files, not filenames or modification
-times. The plan is strict: unknown fields do not silently request unsupported
-retime, gain, trimming or offset operations.
+Both files must exist when the plan is read. The plan is strict: unknown fields
+do not silently request unsupported retime, gain, trimming or offset operations
+(legacy `sha256` keys are ignored).
 
 ```bash
 python3 scripts/pair_media.py pair.json --output-dir new-pair-directory --plan-only
@@ -34,11 +34,11 @@ actual inputs and timing but creates no video and invokes no mux. A rendered run
 provides:
 
 - `paired.mp4`: selected picture and audio, both compressed-stream copied.
-- `pair_run.json`: `PLANNED`, `PAIR_RENDERED`, or `FAILED`, explicit inputs,
-  plan/output hashes, frame count, timing tolerance and output stream numbering.
+- `pair_run.json`: `PLANNED`, `PAIR_RENDERED`, or `FAILED`, explicit input and
+  plan/output paths, frame count, timing tolerance and output stream numbering.
 - `picture_identity.json`: decoder, geometry/color, complete actual frame clock
-  and compressed packet payload/timing/side-data identity.
-- `adopted_audio_identity.json`: exact donor-to-output AAC packet/decoder proof.
+  and compressed packet size/timing/side-data facts.
+- `adopted_audio_identity.json`: donor and output AAC packet/decoder facts.
 - mux command/log for reconstruction and diagnosis.
 
 The first implementation deliberately accepts H264 or HEVC in an MP4-family container,
@@ -53,10 +53,10 @@ the larger of one picture frame or one nominal AAC packet. The interval check is
 compatibility, **not perceptual synchronization or acoustic alignment**. A tiny
 container-tail tolerance does not authorize cutting a word.
 
-Muxing goes to a staging file. The plan and both sources are checked again;
-video decoder/packets/full frame clock/geometry/color and adopted AAC identity
-must remain exact, the output must contain only `v:0,a:0`, and full decode must
-pass before final publication. Failure leaves a FAILED record and logs, not a
+Muxing goes to a staging file. The output's video decoder/packet sizes and
+timestamps/full frame clock/geometry/color and adopted AAC packets must match
+the inputs, the output must contain only `v:0,a:0`, and full decode must pass
+before final publication. Failure leaves a FAILED record and logs, not a
 final `paired.mp4`. Rebuilding source geometry is certified by its own upstream
 render/map evidence, not by the existence of a successfully paired container.
 
@@ -65,8 +65,8 @@ render/map evidence, not by the existence of a successfully paired container.
 The output audio ordinal is always **0**, even when the donor used `a:1`.
 Create the complete output-clock `subtitle_track.json` against
 `subtitle_track_binding.current_bindings(paired_video, 0)`, then run the existing
-adopted assembly path. Do not reuse the picture-only container hash or the donor's
-old stream ordinal. A present stale subtitle track fails rather than falling
+adopted assembly path. Do not reuse a binding computed against the picture-only
+file or the donor's old stream ordinal. A present stale subtitle track fails rather than falling
 back to estimated timings. See [subtitle-track.md](subtitle-track.md).
 
 Pairing preserves the input picture, including any explicit black tail; it does

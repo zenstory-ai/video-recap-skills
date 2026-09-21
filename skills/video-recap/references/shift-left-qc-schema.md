@@ -9,7 +9,7 @@
 - `stage`：只能是 `pre_cut`、`post_cut`、`pre_tts`、`post_tts`、`pre_assemble`、`post_render`、`golden`。
   - 不得使用 `pre_voiceover`、`post_voiceover`、`pre_export`、`post_export`、`final`、`golden_eval` 或 `mimo_qc` 作为阶段值。
   - `mimo_qc.json` 是产物名；MiMo finding 必须挂在 `post_tts`、`pre_assemble` 等真实阶段上。
-- `findings[]`：每项必须包含 `finding_id`、`stage`、`severity`、`blocking`、`deterministic`、`confidence`、`rule_id`、`decision_reason`、`location`、`evidence`、`sample_policy`、`model_used`、`artifact_fingerprints` 与 `next_action`。
+- `findings[]`：每项必须包含 `finding_id`、`stage`、`severity`、`blocking`、`deterministic`、`confidence`、`rule_id`、`decision_reason`、`location`、`evidence`、`sample_policy`、`model_used` 与 `next_action`。
 - `sample_policy`：至少包含 `type`；其值只能是 `all`、`deterministic`、`sampled`、`semantic` 或 `aesthetic`。
 - `location.timecode` 与 `location.source_span` 必须存在；剪辑前阶段可以把任一字段设为 `null`。
 - 为兼容与诊断，当前辅助函数还可能写出 `id`、`category`、`code`、`message`、`source` 与 `objective_corroboration`。

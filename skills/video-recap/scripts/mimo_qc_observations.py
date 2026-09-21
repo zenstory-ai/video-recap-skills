@@ -8,7 +8,7 @@ from typing import Any
 from collections.abc import Mapping
 
 import qc_contract
-from mimo_qc_evidence import _fingerprint_value, _summarize, safe_mimo_config
+from mimo_qc_evidence import _summarize, safe_mimo_config
 from mimo_qc_payload import _strip_json_fence
 from mimo_qc_contract import (
     ARTIFACT_NAME,
@@ -146,10 +146,6 @@ def normalize_observations(
             **(raw_evidence if isinstance(raw_evidence, Mapping) else {}),
             "model": model_used,
             "config": cfg,
-            "fingerprint": {
-                "evidence": payload["evidence_fingerprint"],
-                "observation": _fingerprint_value(observation),
-            },
         }
         location = obs.get("location")
         findings.append(
@@ -172,10 +168,6 @@ def normalize_observations(
                 location=location if isinstance(location, Mapping) else {},
                 evidence=evidence,
                 model_used=model_used,
-                artifact_fingerprints={
-                    "payload": payload["payload_fingerprint"],
-                    "evidence": payload["evidence_fingerprint"],
-                },
                 next_action="human_review",
                 decision_reason=message,
             )

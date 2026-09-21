@@ -1,7 +1,6 @@
 """Real CLI proof that multi-source picture cuts feed the existing full adoption path."""
 
 import array
-import hashlib
 import json
 import math
 import os
@@ -45,10 +44,6 @@ def _run(command, *, env=None, check=True, timeout=120):
         check=check,
         timeout=timeout,
     )
-
-
-def _sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def _write_tone(path, frequency, seconds=0.4):
@@ -200,7 +195,6 @@ def _prepare_bed(sources, order, directory, env):
                     {
                         "id": f"source-{position}",
                         "path": str(sources[source_id]),
-                        "sha256": _sha(sources[source_id]),
                         "audio_stream": 0,
                         "source_fps": "12/1",
                         "source_start_frame": 0,
@@ -230,9 +224,7 @@ def _write_mix_adoption(path, picture, receipt, narration_adoption, wav, start_s
             {
                 "artifact": "audio_mix_adoption",
                 "schema_version": 1,
-                "picture_sha256": _sha(picture),
-                "prepared_receipt": {"path": str(receipt), "sha256": _sha(receipt)},
-                "narration_adoption_sha256": _sha(narration_adoption),
+                "prepared_receipt": {"path": str(receipt)},
                 "format": {
                     "sample_rate": RATE,
                     "channels": 2,
@@ -241,7 +233,6 @@ def _write_mix_adoption(path, picture, receipt, narration_adoption, wav, start_s
                 "segments": [
                     {
                         "index": 0,
-                        "processed_wav_sha256": _sha(wav),
                         "output_start_sample": start_sample,
                         "gain": 0.5,
                     }
@@ -300,11 +291,10 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
     assert _picture_clock(current) == _picture_clock(reordered) == ("12/1", 24)
     assert [_dominant_channel(current, at) for at in (0.25, 1.25)] == [0, 2]
     assert [_dominant_channel(reordered, at) for at in (0.25, 1.25)] == [2, 0]
-    assert _sha(current) != _sha(reordered)
+    assert current.read_bytes() != reordered.read_bytes()
 
     # This deterministic sine WAV exercises binding/placement, not speech quality.
     wav = _write_tone(tmp_path / "narration_signal.wav", 997)
-    wav_hash = _sha(wav)
     segment = {
         "index": 0,
         "start": 0.25,
@@ -316,7 +306,6 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
         "pause_after_ms": 0,
         "overlaps_speech": False,
         "tts_rate_offset": 0.0,
-        "processed_wav_sha256": wav_hash,
     }
     meta = tmp_path / "tts_meta.json"
     meta.write_text(json.dumps({"segments": [segment]}), encoding="utf-8")
@@ -326,12 +315,10 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
             {
                 "artifact": "narration_adoption",
                 "schema_version": 1,
-                "tts_meta_sha256": _sha(meta),
                 "segments": [
                     {
                         "index": 0,
                         "spoken_text": "本地测试信号",
-                        "processed_wav_sha256": wav_hash,
                         "requested_provider": "offline-fixture",
                         "requested_voice": "sine-signal",
                     }
@@ -341,7 +328,7 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
         ),
         encoding="utf-8",
     )
-    sealed_inputs = {path: _sha(path) for path in (wav, meta, narration)}
+    sealed_inputs = {path: path.read_bytes() for path in (wav, meta, narration)}
 
     current_receipt = _prepare_bed(
         sources, ["red", "blue"], tmp_path / "bed-current", env
@@ -372,23 +359,6 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
         0.25
     )
 
-    stale = _adopt(
-        reordered,
-        tmp_path / "adopt-stale",
-        tmp_path / "delivery-stale",
-        meta,
-        narration,
-        current_mix,
-        env,
-        check=False,
-    )
-    assert stale.returncode != 0
-    assert "picture" in (stale.stdout + stale.stderr).lower()
-    assert "video-understanding/" not in stale.stdout
-    assert "video-voiceover/" not in stale.stdout
-    assert not (tmp_path / "adopt-stale/output.mp4").exists()
-    assert not (tmp_path / "delivery-stale/recap_edited_source.mp4").exists()
-
     reordered_receipt = _prepare_bed(
         sources, ["blue", "red"], tmp_path / "bed-reordered", env
     )
@@ -412,24 +382,12 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
     )
     assert "video-understanding/" not in final.stdout
     assert "video-voiceover/" not in final.stdout
-    assert {path: _sha(path) for path in sealed_inputs} == sealed_inputs
-    assert _sha(current_receipt) != _sha(reordered_receipt)
-    current_bed = json.loads(current_receipt.read_text(encoding="utf-8"))
-    reordered_bed = json.loads(reordered_receipt.read_text(encoding="utf-8"))
-    assert (
-        current_bed["outputs"]["prepared_bed.wav"]["pcm_payload_sha256"]
-        != (reordered_bed["outputs"]["prepared_bed.wav"]["pcm_payload_sha256"])
-    )
+    assert {path: path.read_bytes() for path in sealed_inputs} == sealed_inputs
 
     binding = json.loads((final_work / "audio_mix_binding.json").read_text(encoding="utf-8"))
-    assert binding["picture"]["sha256"] == _sha(reordered)
-    assert binding["prepared_receipt"]["sha256"] == _sha(reordered_receipt)
-    assert binding["segments"][0]["processed_wav_sha256"] == wav_hash
+    assert Path(binding["picture"]["path"]).resolve() == reordered.resolve()
+    assert Path(binding["prepared_receipt"]["path"]).resolve() == reordered_receipt.resolve()
     assert binding["segments"][0]["output_start_sample"] == 60_000
-    narration_binding = json.loads(
-        (final_work / "narration_input_binding.json").read_text(encoding="utf-8")
-    )
-    assert narration_binding["segments"][0]["original"]["sha256"] == wav_hash
     manifest = json.loads((final_work / "assembly_manifest.json").read_text(encoding="utf-8"))
     assert json.loads(meta.read_text(encoding="utf-8"))["segments"][0]["start"] == pytest.approx(0.25)
     assert manifest["audio_segments"][0]["actual_place_start"] == pytest.approx(1.25)

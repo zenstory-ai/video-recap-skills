@@ -21,7 +21,7 @@ PUBLIC_ENTRYPOINTS = (
 REQUIRED_PUBLIC_EXPORTS = {
     "skills/video-assemble/scripts/assemble.py": {
         "assemble_video",
-        "assembly_settings_fingerprint",
+        "assembly_settings_payload",
         "final_loudnorm_filter",
         "main",
     },

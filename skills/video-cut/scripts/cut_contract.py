@@ -1,20 +1,11 @@
-"""Normalize cut plans and maintain render-cache provenance."""
-
-import hashlib
+"""Normalize cut plans and maintain the render-cache sidecar."""
 
 import json
-import os
-
 import re
-
 
 from pathlib import Path
 
-from lib import CONFIG, get_video_duration, log
-
-EDITED_SOURCE_RENDER_ALGORITHM_VERSION = "edited-source-render-v3"
-
-GEOMETRY_RENDER_ALGORITHM_VERSION = "geometry-weighted-orientation-area-fps-v2"
+from lib import CONFIG, file_identity, get_video_duration, log
 
 
 def parse_duration_seconds(value):
@@ -101,62 +92,6 @@ def load_clip_plan(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
-def _stable_json_dumps(value):
-    return json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str
-    )
-
-
-def value_fingerprint(value):
-    """Return a stable fingerprint for JSON-serializable non-secret values."""
-    return hashlib.md5(_stable_json_dumps(value).encode("utf-8")).hexdigest()
-
-
-def cut_plan_fingerprint(validated_plan):
-    """Hash the exact normalized clip plan that determines edited_source.mp4 bytes."""
-    payload = dict(validated_plan)
-    # Provenance for raw-plan freshness is not part of the edited media bytes.
-    payload.pop("raw_plan_fingerprint", None)
-    # QC is observability derived from the media plan, not an input range decision.
-    payload.pop("qc", None)
-    return value_fingerprint(payload)
-
-
-_FILE_FINGERPRINT_MEMO = {}
-
-
-def _file_identity(path):
-    """(device, inode, size, mtime_ns) — changes whenever the bytes could have changed."""
-    st = os.stat(os.fspath(path))
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
-
-
-def file_fingerprint(path, chunk_size=1024 * 1024):
-    """Return a full-content fingerprint for cache-correct identity checks.
-
-    The digest covers CONTENT only — never the path or mtime — so a copied video or
-    artifact is still recognised as the same asset, while any byte change invalidates
-    the cache even if timestamps, size, head, or tail bytes are misleading.
-
-    Identity metadata is used ONLY to memoize within a single process. One understanding
-    run fingerprints the same source video 8-10 times and the whole extracted frame set
-    2-3 times; on a 40-minute video at fps=1 that is gigabytes of redundant reads before
-    any real work starts. A file rewritten in place gets a new (size, mtime_ns) and is
-    re-hashed, so the memo can never serve a stale digest.
-    """
-    key = _file_identity(path)
-    memoized = _FILE_FINGERPRINT_MEMO.get(key)
-    if memoized is not None:
-        return memoized
-    h = hashlib.sha256()
-    with open(os.fspath(path), "rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    digest = h.hexdigest()
-    _FILE_FINGERPRINT_MEMO[key] = digest
-    return digest
-
-
 def _edited_source_meta_path(output_path):
     return Path(str(output_path) + ".meta.json")
 
@@ -169,40 +104,30 @@ def _load_edited_source_meta(output_path):
     return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
-def _source_fingerprints_for_plan(validated_plan, input_video=None):
-    """Fingerprint every media file that can affect edited_source.mp4 bytes."""
+def _source_identities_for_plan(validated_plan, input_video=None):
+    """{path: {size, mtime_ns}} for every media file that can affect edited_source.mp4."""
     # Single-source plans carry no per-clip source_path; the CLI video is the only input.
     paths = {clip["source_path"] for clip in validated_plan["clips"] if "source_path" in clip}
     if not paths and input_video is not None:
         paths.add(str(input_video))
-    return {str(Path(path)): file_fingerprint(path) for path in sorted(paths)}
+    return {str(Path(path)): file_identity(path) for path in sorted(paths)}
 
 
 def edited_source_render_cache_payload():
     """Render-affecting settings that invalidate edited_source.mp4 cache reuse.
 
-    Keep this payload limited to inputs/algorithms that can change rendered media bytes.
+    Keep this payload limited to inputs that can change rendered media bytes.
     Observational QC produced after validation/render is intentionally excluded.
     """
-    return {
-        "render_algorithm_version": EDITED_SOURCE_RENDER_ALGORITHM_VERSION,
-        "geometry_render_algorithm_version": GEOMETRY_RENDER_ALGORITHM_VERSION,
-        "clip_join_audio_fade_ms": round(CONFIG["clip_join_audio_fade_ms"], 3),
-    }
-
-
-def edited_source_render_fingerprint():
-    return value_fingerprint(edited_source_render_cache_payload())
+    return {"clip_join_audio_fade_ms": round(CONFIG["clip_join_audio_fade_ms"], 3)}
 
 
 def _write_edited_source_meta(output_path, validated_plan, input_video=None):
     meta = {
-        "schema_version": 2,
-        "clip_plan_fingerprint": cut_plan_fingerprint(validated_plan),
-        "render_fingerprint": edited_source_render_fingerprint(),
+        "schema_version": 3,
+        "plan": validated_plan["clips"],
         "render_cache": edited_source_render_cache_payload(),
-        "source_fingerprints": _source_fingerprints_for_plan(validated_plan, input_video),
-        "edited_source_fingerprint": file_fingerprint(output_path),
+        "sources": _source_identities_for_plan(validated_plan, input_video),
         "total_duration": validated_plan["total_duration"],
         "clip_count": len(validated_plan["clips"]),
     }
@@ -212,21 +137,18 @@ def _write_edited_source_meta(output_path, validated_plan, input_video=None):
 
 
 def should_reuse_edited_source(output_path, validated_plan, input_video=None):
-    """Return True only when edited_source.mp4 matches source media and cut params."""
+    """True only when a non-empty edited_source.mp4 matches the plan, settings and sources."""
     output_path = Path(output_path)
-    if not output_path.exists():
+    if not output_path.exists() or output_path.stat().st_size == 0:
         return False
     meta = _load_edited_source_meta(output_path)
     if meta is None:
         return False
-    if (
-        meta["clip_plan_fingerprint"] != cut_plan_fingerprint(validated_plan)
-        or meta["render_fingerprint"] != edited_source_render_fingerprint()
-        or meta["source_fingerprints"]
-        != _source_fingerprints_for_plan(validated_plan, input_video)
-    ):
-        return False
-    return meta["edited_source_fingerprint"] == file_fingerprint(output_path)
+    return (
+        meta["plan"] == validated_plan["clips"]
+        and meta["render_cache"] == edited_source_render_cache_payload()
+        and meta["sources"] == _source_identities_for_plan(validated_plan, input_video)
+    )
 
 
 def _manifest_source_entries(sources_manifest):

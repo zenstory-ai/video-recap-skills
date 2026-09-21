@@ -19,9 +19,9 @@ subtitle_track = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(subtitle_track)
 
 
-PICTURE_SHA256 = "1" * 64
-EDIT_SHA256 = "2" * 64
-AUDIO_SHA256 = "3" * 64
+PICTURE_PATH = "/media/picture.mp4"
+EDIT_PLAN = "/media/edit_plan.json"
+AUDIO_FACTS = {"selected_stream": 1, "sample_rate": 48000, "packet_count": 470}
 
 
 def _cue(**overrides):
@@ -51,11 +51,8 @@ def _track(*, cues=None):
         },
         "overlap_policy": "forbid",
         "bindings": {
-            "picture": {
-                "sha256": PICTURE_SHA256,
-                "edit_sha256": EDIT_SHA256,
-            },
-            "audio": {"sha256": AUDIO_SHA256, "selected_stream": 1},
+            "picture": {"path": PICTURE_PATH, "edit_plan": EDIT_PLAN},
+            "audio": dict(AUDIO_FACTS),
         },
         "cues": [_cue()] if cues is None else cues,
     }
@@ -63,14 +60,8 @@ def _track(*, cues=None):
 
 def _load(track=None, **overrides):
     kwargs = {
-        "expected_picture_identity": {
-            "sha256": PICTURE_SHA256,
-            "edit_sha256": EDIT_SHA256,
-        },
-        "expected_audio_identity": {
-            "sha256": AUDIO_SHA256,
-            "selected_stream": 1,
-        },
+        "expected_picture_identity": {"path": PICTURE_PATH, "edit_plan": EDIT_PLAN},
+        "expected_audio_identity": dict(AUDIO_FACTS),
         "expected_duration_seconds": 10,
     }
     kwargs.update(overrides)
@@ -141,10 +132,11 @@ def test_cue_is_not_visible_before_its_start_tick():
 @pytest.mark.parametrize(
     ("override", "message"),
     [
-        ({"expected_picture_identity": {"sha256": "4" * 64, "edit_sha256": EDIT_SHA256}}, "picture"),
-        ({"expected_picture_identity": {"sha256": PICTURE_SHA256, "edit_sha256": "5" * 64}}, "edit"),
-        ({"expected_audio_identity": {"sha256": "6" * 64, "selected_stream": 1}}, "audio"),
-        ({"expected_audio_identity": {"sha256": AUDIO_SHA256, "selected_stream": 2}}, "selected_stream"),
+        ({"expected_picture_identity": {"path": "/media/other.mp4", "edit_plan": EDIT_PLAN}}, "picture"),
+        ({"expected_picture_identity": {"path": PICTURE_PATH, "edit_plan": "/media/other.json"}}, "edit"),
+        ({"expected_audio_identity": {**AUDIO_FACTS, "packet_count": 471}}, "packet_count"),
+        ({"expected_audio_identity": {**AUDIO_FACTS, "sample_rate": 44100}}, "sample_rate"),
+        ({"expected_audio_identity": {**AUDIO_FACTS, "selected_stream": 2}}, "selected_stream"),
         ({"expected_duration_seconds": 9.5}, "duration"),
     ],
 )
@@ -153,9 +145,22 @@ def test_rejects_stale_picture_edit_audio_stream_or_duration_binding(override, m
         _load(**override)
 
 
-def test_track_edit_identity_requires_independent_caller_identity():
+def test_track_edit_plan_requires_independent_caller_edit_plan():
     with pytest.raises(subtitle_track.SubtitleTrackError, match="edit"):
-        _load(expected_picture_identity={"sha256": PICTURE_SHA256})
+        _load(expected_picture_identity={"path": PICTURE_PATH})
+
+
+def test_legacy_digest_keys_in_bindings_are_ignored():
+    track = _track()
+    track["bindings"]["picture"].update(sha256="1" * 64, edit_sha256="2" * 64)
+    track["bindings"]["audio"]["sha256"] = "3" * 64
+
+    loaded = _load(track)
+
+    assert loaded["metadata"]["bindings"] == {
+        "picture": {"path": PICTURE_PATH, "edit_plan": EDIT_PLAN},
+        "audio": dict(AUDIO_FACTS),
+    }
 
 
 @pytest.mark.parametrize("schema_version", [0, 2, "1", 1.0, True])

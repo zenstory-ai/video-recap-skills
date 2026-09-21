@@ -1,10 +1,7 @@
 """Validate recap audio ownership without importing another skill."""
 
-import hashlib
 import json
 from pathlib import Path
-
-import materials
 
 
 AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
@@ -54,10 +51,7 @@ def audio_binding(args):
     }
     if uses_local_adoption(args):
         binding["local_adoption"] = {
-            field: {
-                "path": str(Path(getattr(args, field)).resolve()),
-                "sha256": materials.file_fingerprint(getattr(args, field)),
-            }
+            field: {"path": str(Path(getattr(args, field)).resolve())}
             for field, _ in _LOCAL_ADOPTION_OPTIONS
         }
     return binding
@@ -116,7 +110,7 @@ def validate_local_adoption(parser, args):
 
 
 def load_local_assembly_evidence(work_dir):
-    """Load the assembler's minimal parent-verifiable identity references."""
+    """Load the assembler's binding records for the adopted local bundle."""
     work_dir = Path(work_dir)
     try:
         return {
@@ -131,23 +125,26 @@ def load_local_assembly_evidence(work_dir):
         raise SystemExit("assembler did not publish readable local adoption evidence") from exc
 
 
+def _same_file(declared, expected):
+    return Path(declared).resolve() == Path(expected).resolve()
+
+
 def verify_local_assembly_evidence(evidence, manifest):
-    """Cross-check only the adoption and picture identities owned by recap."""
+    """The child bindings must reference the same adoption files and picture recap ran with."""
     try:
         local = manifest["audio"]["local_adoption"]
         narration = evidence["narration"]
         mix = evidence["mix"]
         matches = (
-            narration["adoption"]["sha256"] == local["narration_adoption"]["sha256"]
-            and narration["adoption"]["tts_meta"]["sha256"]
-            == local["tts_meta"]["sha256"]
-            and mix["adoption"]["sha256"] == local["audio_mix_adoption"]["sha256"]
-            and mix["picture"]["sha256"] == manifest["source_video_fingerprint"]
+            _same_file(narration["adoption"]["path"], local["narration_adoption"]["path"])
+            and _same_file(narration["adoption"]["tts_meta"]["path"], local["tts_meta"]["path"])
+            and _same_file(mix["adoption"]["path"], local["audio_mix_adoption"]["path"])
+            and _same_file(mix["picture"]["path"], manifest["source_video"])
         )
     except (KeyError, TypeError):
         matches = False
     if not matches:
-        raise SystemExit("assembler bindings do not match the sealed local adoption manifest")
+        raise SystemExit("assembler bindings do not match the local adoption manifest")
 
 
 def owned_local_delivery(evidence):
@@ -163,20 +160,12 @@ def owned_local_delivery(evidence):
             Path(evidence["narration"]["final_output"]["path"]).resolve(),
             Path(evidence["mix"]["final_output"]["path"]).resolve(),
         ]
-        hashes = {
-            evidence["narration"]["final_output"]["sha256"],
-            evidence["mix"]["final_output"]["sha256"],
-        }
     except (KeyError, TypeError):
         return None
-    if declared != [expected, expected] or len(hashes) != 1 or not expected.is_file():
-        return None
-    with expected.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if hashes != {digest}:
+    if declared != [expected, expected] or not expected.is_file():
         return None
     stat = expected.stat()
-    return {"path": expected, "sha256": digest, "device": stat.st_dev, "inode": stat.st_ino}
+    return {"path": expected, "device": stat.st_dev, "inode": stat.st_ino}
 
 
 def remove_owned_local_delivery(token):
@@ -186,10 +175,7 @@ def remove_owned_local_delivery(token):
     if not path.is_file():
         return
     stat = path.stat()
-    with path.open("rb") as stream:
-        digest = hashlib.file_digest(stream, "sha256").hexdigest()
-    if (stat.st_dev, stat.st_ino) == (token["device"], token["inode"]) \
-            and digest == token["sha256"]:
+    if (stat.st_dev, stat.st_ino) == (token["device"], token["inode"]):
         path.unlink()
 
 

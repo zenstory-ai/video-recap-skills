@@ -65,18 +65,19 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 
 ## 6. 运行规则
 
-- 重跑只复用内容与 TTS 设置均匹配的分段音频；修改旁白或合成参数后，只重生成受影响的 WAV。
-- 批准稿保护策略属于缓存身份：严格模式不会命中旧的自动缩稿缓存；只有同一严格策略下、
-  `spoken_text` 完整匹配且音频指纹有效的缓存才可离线复用。
-- 严格 CLI 在本轮合成前把旧 `tts_meta.json` 按内容指纹归档至 `tts_meta.history/`，因此失败时
+- 重跑只复用分段 sidecar 中记录的文本、TTS 设置与该 WAV 的 `size`/`mtime_ns` 均与当前相等的分段音频；
+  修改旁白或合成参数后，只重生成受影响的 WAV。
+- 批准稿保护策略属于缓存设置：严格模式不会命中旧的自动缩稿缓存；只有同一严格策略下、
+  `spoken_text` 完整匹配且 WAV 存在非空的缓存才可离线复用。
+- 严格 CLI 在本轮合成前把旧 `tts_meta.json` 按时间戳归档至 `tts_meta.history/`，因此失败时
   当前路径不会继续冒充本轮成功；成功元数据通过同目录临时文件原子替换。
 - `auto` 优先使用已配置的 MiMo，MiMo key 缺失且设置了 `FISH_API_KEY` 时使用 Fish Audio；需要可复现的 provider 选择时显式传 `--tts-provider`。
 - 自托管 index-tts 端点只能由 `--tts-provider index-tts` 或 `TTS_PROVIDER=index-tts` 显式选择，`auto`
   永不兜底选择它。协议、请求体、receipt 语义与缓存失效规则见 `references/index-tts.md`。
 - Fish Audio 直接请求 WAV；默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），`FISH_TTS_REFERENCE_ID` 可覆盖。模型、音色 ID、API URL、动态语速或归一化设置变化时会重新生成缓存。当前免费模型无 SLA，受 Fair Use 和官方免费期限约束。
 - `--voice-ref` 仅用于 full/cut 解说克隆，切换到 `mimo-v2.5-tts-voiceclone`。仅在确需新合成时惰性规范化一次；
-- dub voiceclone 原始 WAV 也会用模型、提示、台词和参考音频指纹缓存；匹配重跑不再重复请求或计费，`dub_manifest.json` 逐行记录 `tts_cache=hit|miss`；
-  参考音频内容或预处理指纹变化会使旧缓存失效。仅在获得授权后使用，参考音频会发送到 MiMo。
+- dub voiceclone 原始 WAV 也会按模型、提示、台词和参考音频的 `size`/`mtime_ns` 缓存；匹配重跑不再重复请求或计费，`dub_manifest.json` 逐行记录 `tts_cache=hit|miss`；
+  参考音频文件变化会使旧缓存失效。仅在获得授权后使用，参考音频会发送到 MiMo。
 - `TTS_WORKERS`、`TTS_TIMEOUT`、`TTS_RETRIES`、`ALLOW_PARTIAL_TTS` 用于调整并发、超时、重试与部分成功策略。
 - dub 模式有独立的确定性门禁：`dub_lint.json` 会在语音克隆前阻止空行、重叠或越界译文；
   `dub_review.json` 用于记录忠实度、语气、时长和平台适配复核。可通过

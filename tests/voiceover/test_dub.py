@@ -319,7 +319,7 @@ def _stub_render_pipeline(monkeypatch):
 
 def test_dub_render_reuses_matching_voiceclone_cache(monkeypatch, tmp_path):
     ref, raw = _prepare_render_cache_fixture(tmp_path)
-    dub._write_clone_cache_meta(raw, "你好", ref.read_bytes())
+    dub._write_clone_cache_meta(raw, "你好", dub.file_identity(ref))
     _stub_render_pipeline(monkeypatch)
     monkeypatch.setattr(
         dub,
@@ -339,7 +339,7 @@ def test_dub_render_invalidates_voiceclone_cache_when_text_changes(
     monkeypatch, tmp_path
 ):
     ref, raw = _prepare_render_cache_fixture(tmp_path, text="新台词")
-    dub._write_clone_cache_meta(raw, "旧台词", ref.read_bytes())
+    dub._write_clone_cache_meta(raw, "旧台词", dub.file_identity(ref))
     _stub_render_pipeline(monkeypatch)
     calls = []
 

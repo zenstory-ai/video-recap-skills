@@ -9,7 +9,6 @@
 export TTS_PROVIDER=index-tts
 export INDEX_TTS_ENDPOINT=http://127.0.0.1:<port>/tts
 export INDEX_TTS_VOICE=<authorized-voice-name>
-export INDEX_TTS_CACHE_REVISION=<operator-deployment-revision>  # 可选
 ```
 
 - 缺 `INDEX_TTS_ENDPOINT` 或 `INDEX_TTS_VOICE` 时在缓存/请求前失败。
@@ -24,10 +23,9 @@ export INDEX_TTS_CACHE_REVISION=<operator-deployment-revision>  # 可选
 
 ## Receipt 与缓存
 
-receipt 记录“请求的 voice”、返回原始 WAV SHA-256 与处理后 WAV SHA-256。它只证明
-请求参数和收到的字节，不是该声线的声学验证，也不代表已做人耳听审或音色身份验证。
-若归一化改变字节且未另存 raw WAV，receipt 明确标记 raw 不可由哈希重建；缓存命中必须复用
-匹配 sidecar 中的 receipt，不能现场补造。
+每段的 `provider_receipt` 只记录 `provider` 与“请求的 voice”（`requested_voice`）。它说明请求参数，
+不是该声线的声学验证，也不代表已做人耳听审或音色身份验证。endpoint 不写入任何文件。
 
-操作员可在部署或声线实现变化后提升 `INDEX_TTS_CACHE_REVISION` 使旧缓存失效；未配置时不声称
-已记录或可重建服务端模型版本。
+缓存复用条件：sidecar 中的文本与设置（含 `index_tts_voice`）与当前相等、WAV 的 `size`/`mtime_ns` 未变，
+且 sidecar 的 receipt 对应当前 voice；缓存命中复用 sidecar 中的 receipt，不能现场补造。
+服务端模型或部署变化不会被自动察觉；更换声线实现后请删除 `tts_segments/*.cache.json` 强制重合成。

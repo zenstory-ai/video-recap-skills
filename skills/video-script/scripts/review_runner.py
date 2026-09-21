@@ -17,7 +17,6 @@ from review_grounding import (
     remap_grounding_to_output_timeline,
 )
 from review_response import (
-    _bundle_fingerprint,
     _chunk_evidence_bundle,
     _load_review_research_context,
     _merge_chunk_reviews,
@@ -60,7 +59,6 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
         research=_load_review_research_context(work_dir),
         warnings=warnings,
     )
-    bundle_fp = _bundle_fingerprint(bundle)
     chunk_reviews = []
     chunks = _chunk_evidence_bundle(bundle)
     for chunk in chunks:
@@ -98,7 +96,6 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
         "clock": bundle["clock"],
         "coverage_policy_version": COVERAGE_POLICY_VERSION,
         "selected_ranges": bundle["coverage"]["selected_ranges"],
-        "evidence_bundle_fingerprint": bundle_fp,
         "chunk_count": len(chunks),
         "warnings": warnings,
     }

@@ -4,22 +4,20 @@ import json
 import os
 from pathlib import Path
 
-from artifacts import _explicit_source_video, _value_fingerprint
+from artifacts import _explicit_source_video
 from lib import log, run_cmd
 
 def _load_cut_timeline_plan(work_dir):
-    """The cut plan, preferring clip_plan_validated.json when it matches the raw plan; None in full mode."""
+    """The cut plan, preferring clip_plan_validated.json unless the raw plan is newer; None in full mode."""
     raw_plan_path = Path(work_dir) / "clip_plan.json"
     validated_plan_path = Path(work_dir) / "clip_plan_validated.json"
     if not validated_plan_path.exists():
         return json.loads(raw_plan_path.read_text(encoding="utf-8")) if raw_plan_path.exists() else None
     if not raw_plan_path.exists():
         return json.loads(validated_plan_path.read_text(encoding="utf-8"))
-    raw_plan = json.loads(raw_plan_path.read_text(encoding="utf-8"))
-    validated_plan = json.loads(validated_plan_path.read_text(encoding="utf-8"))
-    if validated_plan.get("raw_plan_fingerprint") == _value_fingerprint(raw_plan):
-        return validated_plan
-    return raw_plan
+    if validated_plan_path.stat().st_mtime_ns >= raw_plan_path.stat().st_mtime_ns:
+        return json.loads(validated_plan_path.read_text(encoding="utf-8"))
+    return json.loads(raw_plan_path.read_text(encoding="utf-8"))
 
 
 def _plan_clip_spans(work_dir):

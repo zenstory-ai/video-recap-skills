@@ -15,12 +15,13 @@ from subtitle_track import load_subtitle_track
 loaded = load_subtitle_track(
     "subtitle_track.json",
     expected_picture_identity={
-        "sha256": current_picture_sha256,
-        "edit_sha256": current_edit_sha256,
+        "path": "/project/paired.mp4",
+        "edit_plan": "/project/edit_plan.json",
     },
     expected_audio_identity={
-        "sha256": adopted_audio_sha256,
         "selected_stream": 1,
+        "sample_rate": 48000,
+        "packet_count": 4700,
     },
     expected_duration_seconds=Fraction(duration_ts) * stream_time_base,
     reject_legacy_estimate=True,
@@ -65,12 +66,13 @@ reports the labels present; it is not an aggregate precision verdict.
   "overlap_policy": "forbid",
   "bindings": {
     "picture": {
-      "sha256": "1111111111111111111111111111111111111111111111111111111111111111",
-      "edit_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+      "path": "/project/paired.mp4",
+      "edit_plan": "/project/edit_plan.json"
     },
     "audio": {
-      "sha256": "3333333333333333333333333333333333333333333333333333333333333333",
-      "selected_stream": 1
+      "selected_stream": 1,
+      "sample_rate": 48000,
+      "packet_count": 4700
     }
   },
   "cues": [
@@ -103,23 +105,21 @@ reports the labels present; it is not an aggregate precision verdict.
 - `attribution.kind` is `source` or `narration`; `ref` identifies the source
   utterance or narration item without changing its text.
 - Unknown fields and schema versions other than integer `1` are rejected, so a
-  newer producer cannot be silently interpreted as v1.
+  newer producer cannot be silently interpreted as v1. Legacy `sha256` /
+  `edit_sha256` binding keys are the one exception: they are ignored.
 
-## Independent identity checks
+## Independent binding checks
 
-All SHA-256 fields are lowercase 64-hex digests. The loader compares track
-declarations with the caller's current facts; it never treats a track's own
-binding as evidence that the track is fresh.
+The loader compares track declarations with the caller's current facts; it never
+treats a track's own binding as evidence that the track is fresh.
 
-- `picture.sha256` is mandatory. `edit_sha256` is optional for inputs without a
-  separately materialized edit identity; if the track contains it, the caller
-  must supply the same current edit digest.
-- `audio.sha256` and `selected_stream` bind the **actually adopted** audio, not
-  merely a source filename or an intended mix manifest. The caller owns the
-  canonicalization policy. For frozen/adopted production audio, use a SHA-256
-  over canonical packet payload plus rational packet timestamp data, and pass
-  that independently computed digest. This module deliberately does not run
-  ffprobe or define media packet serialization.
+- `picture.path` is mandatory and must resolve to the caller's current picture
+  path. `edit_plan` is optional for inputs without a separately materialized
+  edit plan; if the track contains it, the caller must supply the same path.
+- `audio.selected_stream`, `sample_rate` and `packet_count` describe the
+  **actually adopted** audio stream, not merely a source filename or an intended
+  mix manifest. Pass the facts probed from the current media; this module
+  deliberately does not run ffprobe itself.
 - `expected_duration_seconds` is mandatory and checked against
   `duration_ticks * timebase`. Prefer `Fraction(duration_ts) * time_base` from
   the actual output stream to avoid decimal/container rounding. `int`, finite
@@ -150,8 +150,8 @@ Because cue intervals are half-open, a cue is not visible at any tick before its
 ## Deliberate limits
 
 - Schema v1 has no source-to-cut/edit map and cannot map source-clock cues.
-- The module does not inspect media, compute hashes, select audio streams, or
-  tolerate a self-declared identity without current caller evidence.
+- The module does not inspect media, select audio streams, or tolerate a
+  self-declared binding without current caller facts.
 - Validation proves schema consistency and the requested bindings only. Actual
   rendered first/last subtitle frames and perceptual speech alignment require
   separate render/media review.
@@ -166,12 +166,11 @@ remain; an empty `cues` array intentionally removes all generated subtitles.
 Unknown patch/merge modes are rejected by schema v1. This does not detect words
 missing from the authored full track: acoustic/coverage review remains required.
 
-The assembly integration independently probes the chosen input stream and
-hashes codec, sample rate, channels, and ordered packets (payload SHA-256, size,
-rational PTS/DTS/duration). It also hashes the complete input container for the
-picture binding; even an audio-only byte change therefore invalidates that
-conservative picture binding. It does not use the track's own declarations as
-current facts.
+The assembly integration independently probes the chosen input stream for its
+sample rate and packet count, resolves the input path for the picture binding,
+and records the `{size, mtime_ns}` of the track, video and optional edit plan in
+`subtitle_track_validation.json`. It does not use the track's own declarations
+as current facts.
 
 Actual decoded frame PTS are read before projection. Integer cue ticks and the
 rational timebase are retained until each boundary is resolved to the first
@@ -183,16 +182,17 @@ clock. A cue with no visible frame, or a boundary that ASS cannot distinguish,
 is rejected rather than silently dropped. The original author file is not
 rewritten. Legacy subtitles keep their previous rendering behavior.
 
-Each consumption checks track/media/optional edit identities and projection
-integrity. Deleting the explicit track clears its previous validation record.
+Each consumption re-checks the track/media/optional edit plan `{size, mtime_ns}`
+and the consumer duration; a rewritten input is stale and must be prepared
+again. Deleting the explicit track clears its previous validation record.
 An invalid/stale track never falls back to character-proportional timing.
 
 Current limits:
 - Integration is for output media starting at zero with an adopted AAC track,
   not raw-source-to-edited-output mapping or a newly mixed narration track.
 - The low-level preparation API accepts `edit_plan_path`, but the assembly CLI
-  does not yet expose it. CLI tracks must omit `edit_sha256`; that path proves
-  input-media binding, not edit-plan ancestry.
+  does not yet expose it. CLI tracks must omit `edit_plan`; that path binds the
+  input media, not edit-plan ancestry.
 - The low-level policy `reject_legacy_estimate=True` is available. There is not
   yet a wired commercial-profile CLI gate. The current CLI preserves timing
   evidence labels and does not call every accepted cue precisely aligned.

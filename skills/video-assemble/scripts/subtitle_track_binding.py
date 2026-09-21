@@ -6,14 +6,13 @@ soundtrack. Bound cue timing is a declared decision, not proof of speech onset.
 """
 
 import bisect
-import hashlib
 import json
 from fractions import Fraction
 from pathlib import Path
 
+from artifacts import file_identity
 from frozen_audio import probe_audio_packets
 from lib import run_cmd
-from strict_inputs import sha256_file
 from subtitle_track import load_subtitle_track
 
 TRACK = 'subtitle_track.json'
@@ -23,18 +22,20 @@ PROJECTOR_VERSION = 1
 
 
 def current_bindings(video, selected_audio_stream=0, *, edit_plan_path=None):
-    """Compute identities independently of the supplied subtitle track.
+    """Compute the binding facts independently of the supplied subtitle track.
 
-    Audio identity hashes decoder configuration/packet side data and ordered packet payload,
-    size and rational PTS/DTS/duration. Container byte layout is not audio identity.
+    The picture binding is the resolved media path (plus the edit plan path when one
+    exists); the audio binding is the selected stream ordinal with its sample rate and
+    packet count.
     """
     packets = probe_audio_packets(video, selected_audio_stream)
-    audio = {'decoder': packets['decoder'], 'packets': packets['packets']}
-    audio_hash = hashlib.sha256(json.dumps(audio, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-    picture = {'sha256': sha256_file(video)}
+    picture = {'path': str(Path(video).resolve())}
     if edit_plan_path is not None:
-        picture['edit_sha256'] = sha256_file(edit_plan_path)
-    return {'picture': picture, 'audio': {'sha256': audio_hash, 'selected_stream': selected_audio_stream}}
+        picture['edit_plan'] = str(Path(edit_plan_path).resolve())
+    return {'picture': picture,
+            'audio': {'selected_stream': selected_audio_stream,
+                      'sample_rate': packets['sample_rate'],
+                      'packet_count': packets['packet_count']}}
 
 
 def _picture_clock(video):
@@ -54,11 +55,6 @@ def _picture_clock(video):
     if not pts or pts[0] != 0 or any(b <= a for a, b in zip(pts, pts[1:])) or pts[-1] >= duration:
         raise ValueError('Cannot verify picture frame clock: expected strictly increasing PTS within duration')
     return pts, duration
-
-
-def _frame_clock_hash(frame_pts, duration):
-    clock = {'pts': [str(pts) for pts in frame_pts], 'duration': str(duration)}
-    return hashlib.sha256(json.dumps(clock, sort_keys=True).encode()).hexdigest()
 
 
 def _project_boundary(target, frame_pts, duration):
@@ -97,8 +93,7 @@ def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
         return None
     if audio_mode != 'adopted-packet-copy':
         raise ValueError('Explicit subtitle_track currently requires adopted-packet-copy; new mix is not bound')
-    raw_track = path.read_bytes()
-    document = json.loads(raw_track)
+    document = json.loads(path.read_bytes())
     bindings = current_bindings(input_video, selected_audio_stream, edit_plan_path=edit_plan_path)
     frame_pts, duration = _picture_clock(input_video)
     if abs(float(duration) - float(video_duration)) > 0.05:
@@ -122,9 +117,9 @@ def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
     loaded['projector_version'] = PROJECTOR_VERSION
     loaded['binding'] = {
         'input_video': str(Path(input_video).resolve()), 'identities': bindings,
-        'track_sha256': hashlib.sha256(raw_track).hexdigest(), 'duration': str(duration),
-        'frame_clock_sha256': _frame_clock_hash(frame_pts, duration),
-        'projection_sha256': hashlib.sha256(json.dumps(loaded['entries'], sort_keys=True).encode()).hexdigest(),
+        'inputs': {'track': file_identity(path), 'video': file_identity(input_video),
+                   'edit_plan': file_identity(edit_plan_path) if edit_plan_path is not None else None},
+        'duration': str(duration), 'frame_count': len(frame_pts),
         'edit_plan': str(Path(edit_plan_path).resolve()) if edit_plan_path is not None else None,
         'verification': 'media_binding_and_declared_frame_projection_only',
         'direct_listening': 'NOT_CHECKED', 'acoustic_alignment': 'NOT_CHECKED',
@@ -153,13 +148,14 @@ def bound_subtitle_entries(work_dir, video_duration):
         return None
     loaded = _load_validation(work)
     record = loaded['binding']
-    if hashlib.sha256(json.dumps(loaded['entries'], sort_keys=True).encode()).hexdigest() != record['projection_sha256']:
-        raise ValueError('stale subtitle track: prepared projection changed after validation')
-    if sha256_file(work / TRACK) != record['track_sha256']:
+    inputs = record['inputs']
+    if file_identity(work / TRACK) != inputs['track']:
         raise ValueError('stale subtitle track: author file changed after prepare')
-    if sha256_file(record['input_video']) != record['identities']['picture']['sha256']:
+    video = Path(record['input_video'])
+    if not video.is_file() or file_identity(video) != inputs['video']:
         raise ValueError('stale subtitle track: adopted media changed after prepare')
-    if record['edit_plan'] and sha256_file(record['edit_plan']) != record['identities']['picture']['edit_sha256']:
+    if record['edit_plan'] and (not Path(record['edit_plan']).is_file()
+                                or file_identity(record['edit_plan']) != inputs['edit_plan']):
         raise ValueError('stale subtitle track: edit plan changed after prepare')
     if abs(float(Fraction(record['duration'])) - float(video_duration)) > 0.05:
         raise ValueError('stale subtitle track: consumer duration changed after prepare')
@@ -177,12 +173,11 @@ def verify_rendered_picture(work_dir, output_path):
     loaded['rendered_picture'] = {'output': str(Path(output_path).resolve()),
                                   'frame_clock_verified': False}
     path.write_text(json.dumps(loaded, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
-    frame_pts, duration = _picture_clock(output_path)
-    actual_hash = _frame_clock_hash(frame_pts, duration)
-    if actual_hash != loaded['binding']['frame_clock_sha256']:
+    if _picture_clock(output_path) != _picture_clock(loaded['binding']['input_video']):
         raise ValueError('Rendered frame clock changed; subtitle frame projection is no longer valid')
-    loaded['rendered_picture'].update(frame_clock_verified=True, frame_count=len(frame_pts),
-                                      frame_clock_sha256=actual_hash, sha256=sha256_file(output_path))
+    loaded['rendered_picture'].update(frame_clock_verified=True,
+                                      frame_count=loaded['binding']['frame_count'],
+                                      identity=file_identity(output_path))
     path.write_text(json.dumps(loaded, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     return loaded['rendered_picture']
 
@@ -197,9 +192,9 @@ def manifest_subtitle_evidence(work_dir, input_video, output_path):
     rendered = loaded.get('rendered_picture', {})
     if rendered.get('frame_clock_verified') is not True:
         raise ValueError('Subtitle output frame clock has not been verified')
-    if sha256_file(input_video) != loaded['binding']['identities']['picture']['sha256']:
+    if str(Path(input_video).resolve()) != loaded['binding']['input_video']:
         raise ValueError('stale subtitle manifest: input media differs')
-    if sha256_file(output_path) != rendered.get('sha256'):
+    if not Path(output_path).is_file() or file_identity(output_path) != rendered.get('identity'):
         raise ValueError('stale subtitle manifest: actual output differs from verified render')
     return {'validation_path': str((work / VALIDATION).resolve()),
             'binding': loaded['binding'], 'metadata': loaded['metadata'], 'rendered_picture': rendered}

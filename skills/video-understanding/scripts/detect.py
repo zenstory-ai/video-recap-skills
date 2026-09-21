@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from lib import CONFIG
-from lib import log, run_cmd, get_video_duration, file_fingerprint
+from lib import log, run_cmd, get_video_duration, file_identity
 
 # ── Step 2: 场景检测 ──────────────────────────────────────────────────
 
@@ -482,17 +482,17 @@ def _audio_cache_matches(audio_path, video_path):
     except (OSError, ValueError, TypeError):
         return False
     try:
-        expected = file_fingerprint(video_path)
+        expected = file_identity(video_path)
     except OSError:
         return False
-    return meta.get("source_video_fingerprint") == expected
+    return isinstance(meta, dict) and meta.get("source_video_identity") == expected
 
 
 def _write_audio_meta(work_dir, video_path):
     _audio_meta_path(work_dir).write_text(
         json.dumps({
             "schema_version": 1,
-            "source_video_fingerprint": file_fingerprint(video_path),
+            "source_video_identity": file_identity(video_path),
             "audio": "audio.wav",
         }, ensure_ascii=False, indent=2),
         encoding="utf-8",

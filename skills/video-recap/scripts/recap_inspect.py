@@ -6,7 +6,7 @@ probing, no new deps, no cross-skill import). A missing artifact is the legitima
 "that stage has not run yet" state and is reported as such.
 
 Two subcommands:
-  state     summarize the work_dir: source video + fingerprint, full|cut mode, which stage
+  state     summarize the work_dir: source video, full|cut mode, which stage
             artifacts are present vs missing, which file is the NEXT pause the pipeline waits
             on, stale-manifest risk, and storyboard path(s) if present.
   clip-map  read clip_plan_validated.json and map a queried window between the OUTPUT and
@@ -90,39 +90,29 @@ def _fmt_seconds(value):
 
 # --- source video discovery --------------------------------------------------
 def _discover_source(work_dir):
-    """Find the source video path + fingerprint by reading recap artifacts, most authoritative
-    first. Returns {path, fingerprint, origin} with None values + origin="unknown" when
-    nothing records it."""
+    """Find the source video path by reading recap artifacts, most authoritative first.
+    Returns {path, origin} with path=None + origin="unknown" when nothing records it."""
     work_dir = Path(work_dir)
     # 1. recap_run_manifest.json — canonical: written before the first pause with both fields.
     #    A multi-source manifest carries `sources` instead of `source_video`.
     data = _load_optional(work_dir / "recap_run_manifest.json")
     if data is not None and data.get("source_video"):
-        return {
-            "path": data["source_video"],
-            "fingerprint": data.get("source_video_fingerprint"),
-            "origin": "recap_run_manifest.json",
-        }
+        return {"path": data["source_video"], "origin": "recap_run_manifest.json"}
     # 2. assembly_manifest.json — late stage; carries input_video (+ source_video in cut mode).
     data = _load_optional(work_dir / "assembly_manifest.json")
     if data is not None:
         return {
             "path": data.get("source_video") or data["input_video"],
-            "fingerprint": data.get("source_video_fingerprint"),
             "origin": "assembly_manifest.json",
         }
-    # 3. edited_source.mp4.meta.json — video-cut records {source_path: fingerprint};
+    # 3. edited_source.mp4.meta.json — video-cut records sources: {path: {size, mtime_ns}};
     #    a single-source cut has exactly one entry.
     data = _load_optional(work_dir / "edited_source.mp4.meta.json")
-    fingerprints = data.get("source_fingerprints") if isinstance(data, dict) else None
-    if isinstance(fingerprints, dict) and len(fingerprints) == 1:
-        (path, fingerprint), = fingerprints.items()
-        return {
-            "path": path,
-            "fingerprint": fingerprint,
-            "origin": "edited_source.mp4.meta.json",
-        }
-    return {"path": None, "fingerprint": None, "origin": "unknown"}
+    sources = data.get("sources") if isinstance(data, dict) else None
+    if isinstance(sources, dict) and len(sources) == 1:
+        (path,) = sources
+        return {"path": path, "origin": "edited_source.mp4.meta.json"}
+    return {"path": None, "origin": "unknown"}
 
 
 def _discover_multi_source(work_dir):
@@ -186,8 +176,7 @@ def _next_pause(work_dir, mode):
 
 
 def _stale_manifest_note(work_dir, mode):
-    """Advisory stale-manifest risks read purely from file presence (no fingerprint recompute —
-    that would need the source bytes). Surfaces the two desync traps recap.py guards: a cut
+    """Advisory stale-manifest risks read purely from file presence. Surfaces the two desync traps recap.py guards: a cut
     narration without the phase ledger that ties it to a clip_plan, and a missing run manifest."""
     notes = []
     if not _present(work_dir, "recap_run_manifest.json"):
@@ -236,10 +225,6 @@ def cmd_state(work_dir, compact=None):
     }
 
 
-def _short_fingerprint(fp):
-    return f"{fp[:12]}…" if fp else "unknown"
-
-
 def _render_state_md(state, compact):
     if "error" in state:
         return state["error"]
@@ -248,17 +233,13 @@ def _render_state_md(state, compact):
         lines.append(f"状态来源（write-side manifest）: {', '.join(state['forward_state_files'])}")
     lines.append(f"模式: **{state['mode']}**")
     src = state["source_video"]
-    lines.append(
-        f"源视频: {_truncate(src['path'] or 'unknown', compact)}  "
-        f"(fp {_short_fingerprint(src['fingerprint'])}, 来源 {src['origin']})"
-    )
+    lines.append(f"源视频: {_truncate(src['path'] or 'unknown', compact)}  (来源 {src['origin']})")
     if state["multi_source"]:
         lines.append("多源素材:")
         for s in state["multi_source"]["sources"]:
             lines.append(
                 f"  - {s['source_id']}: {_truncate(s['source_path'], compact)} "
-                f"(fp {_short_fingerprint(s['source_video_fingerprint'])}, "
-                f"work_dir {s['source_work_dir']}, material {s['material_id']})"
+                f"(work_dir {s['source_work_dir']}, material {s['material_id']})"
             )
     lines.append("")
 

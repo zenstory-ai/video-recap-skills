@@ -9,7 +9,7 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
 )
 import validate as narration_validate
-from lib import CONFIG, stable_hash
+from lib import CONFIG, file_identity
 
 
 def _run_validate(monkeypatch, work_dir, mode="full", *extra, preserve=True):
@@ -53,7 +53,9 @@ def _write_output_evidence(work_dir):
             {
                 "schema_version": 2,
                 "timeline": "cut_output",
-                "clip_plan_fingerprint": stable_hash(plan),
+                "clip_plan_identity": file_identity(
+                    work_dir / "clip_plan_validated.json"
+                ),
                 "sentence_anchors": [],
                 "speech_spans": [],
                 "quiet_windows": [{"start": 0, "end": 10}],

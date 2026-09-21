@@ -1,7 +1,6 @@
 """Real independent picture/audio pairing, not copying an already finished AV movie."""
 
 import copy
-import hashlib
 import json
 from pathlib import Path
 import shutil
@@ -27,10 +26,6 @@ def run(*args):
     return subprocess.run(list(map(str, args)), capture_output=True, text=True, check=True)
 
 
-def sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
-
-
 @pytest.fixture
 def media(tmp_path):
     picture = tmp_path / 'picture.mp4'
@@ -43,8 +38,8 @@ def media(tmp_path):
         'sine=frequency=900:sample_rate=48000:duration=2', '-map', '0:a', '-map', '1:a',
         '-c:a', 'aac', donor)
     document = {'artifact': 'media_pair', 'schema_version': 1,
-                'picture': {'path': str(picture), 'sha256': sha(picture)},
-                'audio': {'path': str(donor), 'sha256': sha(donor), 'selected_stream': 1}}
+                'picture': {'path': str(picture)},
+                'audio': {'path': str(donor), 'selected_stream': 1}}
     plan = tmp_path / 'pair.json'
     plan.write_text(json.dumps(document))
     return picture, donor, plan, document
@@ -56,7 +51,8 @@ def test_real_pair_selected_audio_copy_picture_and_bound_cues(media, tmp_path):
     report = pair_media.run_pair(plan, target)
     output = target / 'paired.mp4'
     assert report['status'] == 'PAIR_RENDERED'
-    assert report['output']['sha256'] == sha(output)
+    assert report['output']['path'] == str(output) and output.is_file()
+    assert report['plan'] == {'path': str(plan.resolve())}
     assert report['direct_listening'] == 'NOT_CHECKED'
     assert report['normal_speed_review'] == 'NOT_CHECKED'
     assert report['release_approved'] is False
@@ -67,15 +63,16 @@ def test_real_pair_selected_audio_copy_picture_and_bound_cues(media, tmp_path):
     b = probe_audio_packets(output, 0)
     assert a['decoder'] == b['decoder'] and a['packets'] == b['packets']
     assert a['packets'][0]['pts'] == '-8/375'  # AAC priming must survive
-    assert a['payload_sha256'] != probe_audio_packets(donor, 0)['payload_sha256']
+    assert a['payload_bytes'] != probe_audio_packets(donor, 0)['payload_bytes']
     assert pair_media.probe_picture(picture) == pair_media.probe_picture(output)
     command = json.loads((target / 'mux.command.json').read_text())
     for forbidden in ['-shortest', '-t', '-r', '-af', '-filter_complex', '-itsoffset', '-ar']:
         assert forbidden not in command
     assert command[command.index('-c') + 1] == 'copy'
     binding = current_bindings(output, 0)
-    assert binding['picture']['sha256'] == sha(output) != sha(picture)
-    assert binding['audio']['selected_stream'] == 0
+    assert binding['picture'] == {'path': str(output.resolve())}
+    assert binding['audio'] == {'selected_stream': 0, 'sample_rate': 48000,
+                                'packet_count': b['packet_count']}
     track = {'schema_version': 1, 'clock': {'kind': 'output',
               'timebase': {'numerator': 1, 'denominator': 24}, 'duration_ticks': 48},
              'overlap_policy': 'forbid', 'bindings': binding,
@@ -86,7 +83,12 @@ def test_real_pair_selected_audio_copy_picture_and_bound_cues(media, tmp_path):
     (target / 'subtitle_track.json').write_text(json.dumps(track))
     prepared = prepare_subtitle_track(output, target, 2, audio_mode='adopted-packet-copy')
     assert prepared is not None
-    track['bindings']['picture']['sha256'] = sha(picture)
+    track['bindings']['picture']['path'] = str(picture)
+    (target / 'subtitle_track.json').write_text(json.dumps(track))
+    with pytest.raises(ValueError):
+        prepare_subtitle_track(output, target, 2, audio_mode='adopted-packet-copy')
+    track['bindings'] = binding
+    track['bindings']['audio']['packet_count'] += 1
     (target / 'subtitle_track.json').write_text(json.dumps(track))
     with pytest.raises(ValueError):
         prepare_subtitle_track(output, target, 2, audio_mode='adopted-packet-copy')
@@ -118,8 +120,8 @@ def test_plan_only_existing_directory_and_independent_cli(media, tmp_path):
     lambda d: d.update(schema_version=2),
     lambda d: d.update(artifact='anything'),
     lambda d: d.update(unknown=0),
-    lambda d: d['picture'].update(sha256='0'*64),
-    lambda d: d['audio'].update(sha256='0'*64),
+    lambda d: d['picture'].update(path='/nonexistent/picture.mp4'),
+    lambda d: d['audio'].pop('selected_stream'),
     lambda d: d['audio'].update(selected_stream=True),
     lambda d: d['audio'].update(selected_stream=-1),
     lambda d: d['audio'].update(selected_stream=3),
@@ -142,7 +144,7 @@ def test_short_or_long_audio_rejected(media, tmp_path, duration):
     _, donor, plan, doc = media
     run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
         f'sine=sample_rate=48000:duration={duration}', '-c:a', 'aac', donor)
-    doc['audio'].update(sha256=sha(donor), selected_stream=0)
+    doc['audio'].update(selected_stream=0)
     plan.write_text(json.dumps(doc))
     with pytest.raises(ValueError, match='interval'):
         pair_media.run_pair(plan, tmp_path / 'bad_duration')
@@ -152,24 +154,20 @@ def test_non_aac_rejected(media, tmp_path):
     _, _, plan, doc = media
     wav = tmp_path / 'pcm.wav'
     run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i', 'sine=duration=2', wav)
-    doc['audio'] = {'path': str(wav), 'sha256': sha(wav), 'selected_stream': 0}
+    doc['audio'] = {'path': str(wav), 'selected_stream': 0}
     plan.write_text(json.dumps(doc))
     with pytest.raises(ValueError, match='AAC'):
         pair_media.run_pair(plan, tmp_path / 'not_aac')
 
 
-@pytest.mark.parametrize('mutation', ['plan', 'picture', 'donor', 'mux_fail', 'corrupt_audio', 'corrupt_picture'])
-def test_changes_or_failed_mux_never_publish(media, tmp_path, monkeypatch, mutation):
-    picture, donor, plan, _ = media
+@pytest.mark.parametrize('mutation', ['mux_fail', 'corrupt_audio', 'corrupt_picture'])
+def test_corrupt_or_failed_mux_never_publishes(media, tmp_path, monkeypatch, mutation):
+    _picture, _donor, plan, _ = media
     original = pair_media._run_mux
     def changed(command, directory):
         if mutation == 'mux_fail':
             raise RuntimeError('simulated mux failure')
         original(command, directory)
-        if mutation in {'plan', 'picture', 'donor'}:
-            selected = {'plan': plan, 'picture': picture, 'donor': donor}[mutation]
-            with selected.open('ab') as stream:
-                stream.write(b'changed')
         if mutation.startswith('corrupt_'):
             staged = directory / 'paired.rendering.mp4'
             source = directory / 'before.mp4'
@@ -214,7 +212,7 @@ def test_audio_donor_unrelated_video_ignored(media, tmp_path):
     run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
         'color=c=red:size=160x120:rate=24:duration=3', '-i', donor,
         '-map', '0:v:0', '-map', '1:a:1', '-c:v', 'libx264', '-threads', '2', '-c:a', 'copy', av)
-    doc['audio'] = {'path': str(av), 'sha256': sha(av), 'selected_stream': 0}
+    doc['audio'] = {'path': str(av), 'selected_stream': 0}
     plan.write_text(json.dumps(doc))
     output = tmp_path / 'donor_video'
     pair_media.run_pair(plan, output)

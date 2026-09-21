@@ -15,8 +15,8 @@ description: >
 video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [video-cut] ─▶ video-voiceover ─▶ video-assemble
 ```
 
-流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会校验
-`recap_run_manifest.json`，拒绝复用来自其他源视频或其他运行参数的旧工作目录；视频理解产物也只在来源一致时复用。
+流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会比对
+`recap_run_manifest.json` 记录的源视频路径、文件大小/修改时间与运行参数，拒绝复用来自其他源视频或其他参数的旧工作目录；视频理解产物也只在来源一致时复用。
 
 画面流程 `--edit-mode full|cut|dub` 与声音策略分开：`--audio-mode narration` 保留上述解说流程；
 `source-mix` 不做配音；`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。使用原声模式时读
@@ -33,12 +33,12 @@ python3 scripts/recap.py picture.mp4 --edit-mode full --work-dir NEW_WORK \
 ```
 
 三个 JSON 参数必须同时出现。该入口只接受单视频、full、narration、音轨 0、新工作目录和未存在的
-交付文件；不运行理解、写稿、解说评审、TTS、cut、MiMo QC 或剪映导出。语义和媒体身份仍由
-video-assemble 严格验证，recap 不把调用方采用的声音或混音声明成自动创作或发布批准。详见
-`references/audio-routing.md`。
+交付文件；不运行理解、写稿、解说评审、TTS、cut、MiMo QC 或剪映导出。语义与媒体形状仍由
+video-assemble 严格验证，recap 只核对子技能绑定记录引用的是同一批采用文件与母版路径，不把调用方
+采用的声音或混音声明成自动创作或发布批准。详见 `references/audio-routing.md`。
 
 这里的单视频是**已经剪好的母版**。重剪后可以复用未改动的 WAV 与 `tts_meta.json`，但必须按新母版
-重新绑定画面哈希与落点；衔接步骤见 `references/audio-routing.md` 的 “Keep adopted voice after a cut”。
+重新写混音采用文件里的落点与准备好的音床；衔接步骤见 `references/audio-routing.md` 的 “Keep adopted voice after a cut”。
 
 ## 2. 创作职责
 
@@ -138,7 +138,7 @@ python3 scripts/recap.py <video> --work-dir <work_dir>  # 可追加 --edit-mode 
 python3 scripts/recap.py <video> --work-dir <work_dir> --mimo-qc both
 ```
 
-合成前复核会读取脚本、计划和 TTS 元数据；成片后还会读取最多六张临时 JPEG。相同输入命中内容缓存，`--mimo-qc-refresh` 可强制刷新。帧的 base64 与凭证不会写入磁盘。
+合成前复核会读取脚本、计划和 TTS 元数据；成片后还会读取最多六张临时 JPEG。输入文件的大小/修改时间、模型与提示都未变时直接复用上次报告，`--mimo-qc-refresh` 可强制刷新。帧的 base64 与凭证不会写入磁盘。
 
 已有批准解说稿时加 `--preserve-approved-text`：校验与 TTS 原样保留批准稿（只更新 `overlaps_speech`），装不下时间窗即失败，不缩稿、不降级为部分成功。
 

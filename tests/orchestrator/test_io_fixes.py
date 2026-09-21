@@ -495,16 +495,16 @@ def test_recap_strict_cut_output_review_forwards_strict_evidence(monkeypatch, tm
     assert "--strict-evidence" in review_args
 
 
-def test_recap_manifest_fingerprint_detects_middle_only_source_changes(tmp_path):
-    first = tmp_path / "a.mp4"
-    second = tmp_path / "b.mp4"
-    first.write_bytes(b"A" * 70000 + b"middle-one" + b"Z" * 70000)
-    second.write_bytes(b"A" * 70000 + b"middle-two" + b"Z" * 70000)
+def test_recap_manifest_identity_is_size_and_mtime(tmp_path):
+    video = tmp_path / "a.mp4"
+    video.write_bytes(b"A" * 10)
+    stat = video.stat()
 
-    assert first.stat().st_size == second.stat().st_size
-    assert material_lib.file_fingerprint(first) != material_lib.file_fingerprint(
-        second
-    )
+    assert material_lib.file_identity(video) == {
+        "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
+    }
+    os.utime(video, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1))
+    assert material_lib.file_identity(video)["mtime_ns"] == stat.st_mtime_ns + 1
 
 
 def test_recap_phase_b_rejects_work_dir_from_different_source(monkeypatch, tmp_path):
@@ -879,10 +879,12 @@ def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
 
 def test_cut_narration_stale_guard_logic():
     """Any clip_plan change while a cut narration is present makes that narration stale."""
-    assert recap_timeline._cut_narration_is_stale(None, "cp1") is False
-    base = {"clip_plan_fingerprint": "cp1"}
-    assert recap_timeline._cut_narration_is_stale(base, "cp1") is False
-    assert recap_timeline._cut_narration_is_stale(base, "cp2") is True
+    cp1 = {"size": 10, "mtime_ns": 1}
+    cp2 = {"size": 10, "mtime_ns": 2}
+    assert recap_timeline._cut_narration_is_stale(None, cp1) is False
+    base = {"clip_plan_identity": cp1}
+    assert recap_timeline._cut_narration_is_stale(base, dict(cp1)) is False
+    assert recap_timeline._cut_narration_is_stale(base, cp2) is True
 
 
 def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
@@ -895,7 +897,7 @@ def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
         rendered=False,
     )
     recap_timeline._write_phase_ledger(
-        work, clip_plan_fingerprint="OLD_DIFFERENT_FP", edited_source_rendered=True
+        work, clip_plan_identity={"size": 0, "mtime_ns": 0}, edited_source_rendered=True
     )
 
     def fake_run(skill, script, *cli_args):
@@ -1292,8 +1294,8 @@ def _save_seed_material(tmp_path, video, args, brief):
         lib,
         seed,
         video,
-        material_lib.file_fingerprint(video),
-        recap_runtime._material_settings_fingerprint(args),
+        material_lib.file_identity(video),
+        recap_runtime._analysis_settings(args),
     )
     return lib
 
@@ -1450,7 +1452,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
             "source_id": "src_a",
             "source_name": "a.mp4",
             "source_path": str(tmp_path / "a.mp4"),
-            "source_video_fingerprint": "a" * 64,
+            "source_video_identity": {"size": 1, "mtime_ns": 1},
             "source_work_dir": "sources/src_a",
             "material_id": "mat-a",
         }

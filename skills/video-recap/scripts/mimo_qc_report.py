@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
 import json
 import math
 import os
@@ -19,7 +18,6 @@ from mimo_qc_evidence import (
     _cache_evidence,
     _effective_config,
     _existing_final_output,
-    _fingerprint_value,
     collect_evidence,
     safe_mimo_config,
 )
@@ -121,7 +119,7 @@ def sample_video_frames(
                 {
                     "data_url": "data:image/jpeg;base64,"
                     + base64.b64encode(raw).decode("ascii"),
-                    "sha256": hashlib.sha256(raw).hexdigest(),
+                    "bytes": len(raw),
                     "timestamp": round(timestamp, 3),
                 }
             )
@@ -135,7 +133,7 @@ def _frame_metadata(samples: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "max_dimension": MAX_FRAME_DIMENSION,
         "sampler_version": FRAME_SAMPLER_VERSION,
         "samples": [
-            {"sha256": sample["sha256"], "timestamp": sample["timestamp"]}
+            {"bytes": sample["bytes"], "timestamp": sample["timestamp"]}
             for sample in samples
         ],
     }
@@ -147,10 +145,13 @@ def _cache_input(
     evidence: Mapping[str, Any],
     frames: Mapping[str, Any],
 ) -> dict[str, Any]:
+    """Everything a stage report depends on; an existing report whose stored cache_input
+    equals this dict is reused instead of a new request."""
     return {
         "stage": stage,
         "model": payload["model"],
-        "payload_fingerprint": payload["payload_fingerprint"],
+        "config": payload["config"],
+        "instructions": payload["instructions"],
         "evidence": _cache_evidence(evidence),
         "frames": frames,
         "contract": qc_contract.SCHEMA_VERSION,
@@ -201,12 +202,11 @@ def build_report(
             )[:MAX_FRAMES]
     frame_meta = _frame_metadata(samples)
     cache_input = _cache_input(stage, payload, evidence, frame_meta)
-    cache_key = _fingerprint_value(cache_input)
 
     if (
         not refresh
         and existing is not None
-        and existing["metadata"]["cache_key"] == cache_key
+        and existing["metadata"]["cache_input"] == cache_input
     ):
         cached = json.loads(json.dumps(existing))
         cached["metadata"].update(status="cached", mode="live_cache", request_count=0)
@@ -261,7 +261,6 @@ def build_report(
         "request_count": 1
         if mode == "live" and status in {"completed", "failed"}
         else 0,
-        "cache_key": cache_key,
         "cache_input": cache_input,
         "frame_samples": frame_meta,
         "evidence": evidence,

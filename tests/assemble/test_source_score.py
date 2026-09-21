@@ -2,7 +2,6 @@
 
 import array
 from fractions import Fraction
-import hashlib
 import json
 import math
 from pathlib import Path
@@ -26,10 +25,6 @@ pytestmark = pytest.mark.skipif(
 
 def run(*args, check=True):
     return subprocess.run(list(map(str, args)), capture_output=True, text=True, check=check)
-
-
-def sha(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def tone(path, frequency, seconds, rate=44_100):
@@ -88,19 +83,19 @@ def plan(tmp_path):
         "artifact": "source_score_plan", "schema_version": 1,
         "output": {"sample_rate": 48_000, "channels": 2, "total_samples": 96_000},
         "source_segments": [
-            {"id": "second-first", "path": str(video), "sha256": sha(video),
+            {"id": "second-first", "path": str(video),
              "audio_stream": 0, "source_fps": "4/1", "source_start_frame": 4,
              "source_end_frame": 8, "output_start_sample": 0, "gain": 1.0,
              "fade_in_samples": 0, "fade_out_samples": 0, "fade_shape": "linear",
              "role": "protected_original"},
-            {"id": "first-low", "path": str(video), "sha256": sha(video),
+            {"id": "first-low", "path": str(video),
              "audio_stream": 0, "source_fps": "4/1", "source_start_frame": 0,
              "source_end_frame": 4, "output_start_sample": 48_000, "gain": 0.25,
              "fade_in_samples": 0, "fade_out_samples": 0, "fade_shape": "linear",
              "role": "mixed_original_under_narration"},
         ],
         "source_silence": [],
-        "score": {"kind": "raw", "path": str(score), "sha256": sha(score),
+        "score": {"kind": "raw", "path": str(score),
                   "audio_stream": 0, "source_offset_sample": 24_000, "gain": 0.1,
                   "fade_in_samples": 4_800, "fade_out_samples": 4_800,
                   "fade_shape": "half_cosine"},
@@ -128,8 +123,10 @@ def test_real_reorder_gain_continuous_score_and_receipt(plan, tmp_path):
     assert receipt["status"] == "PREPARED"
     assert receipt["direct_listening"] == "NOT_CHECKED"
     assert receipt["release_approved"] is False
+    assert receipt["plan"] == {"path": str(path.resolve())}
     for name in ("source_bed.wav", "score_bed.wav", "prepared_bed.wav"):
-        assert receipt["outputs"][name]["sha256"] == sha(output / name)
+        assert receipt["outputs"][name]["path"] == str(output / name)
+        assert receipt["outputs"][name]["bytes"] == (output / name).stat().st_size
         assert receipt["outputs"][name]["pcm"]["codec_name"] == "pcm_f32le"
         assert receipt["outputs"][name]["finite"] is True
     assert receipt["outputs"]["prepared_bed.wav"]["headroom_policy"] == \
@@ -148,13 +145,14 @@ def test_no_score_keeps_reordered_faded_source_payload_and_writes_zero_score(
 
     output = tmp_path / "none"
     receipt = source_score.prepare_source_score(path, output)
-    source_identity = source_score._output_identity(output / "source_bed.wav")
-    prepared_identity = source_score._output_identity(output / "prepared_bed.wav")
+    source_facts = source_score._output_facts(output / "source_bed.wav")
+    prepared_facts = source_score._output_facts(output / "prepared_bed.wav")
     score = pcm(output / "score_bed.wav")
 
     assert receipt["score"] == {"kind": "none"}
-    assert source_identity["pcm"]["samples"] == 96_000
-    assert prepared_identity["pcm_payload_sha256"] == source_identity["pcm_payload_sha256"]
+    assert source_facts["pcm"]["samples"] == 96_000
+    assert pcm(output / "prepared_bed.wav") == pcm(output / "source_bed.wav")
+    assert prepared_facts["bytes"] == source_facts["bytes"]
     assert len(score) == 96_000 * 2
     assert all(sample == 0.0 for sample in score)
 
@@ -170,7 +168,7 @@ def test_no_score_rejects_unknown_fields(plan, tmp_path):
 def test_raw_half_cosine_fades_clamp_outside_their_windows(plan, tmp_path):
     path, document, _video, _score = plan
     score = constant_pcm(tmp_path / "constant.wav", 0.5, 3)
-    document["score"].update(path=str(score), sha256=sha(score), gain=0.1)
+    document["score"].update(path=str(score), gain=0.1)
     path.write_text(json.dumps(document))
     source_score.prepare_source_score(path, tmp_path / "half-cosine")
     samples = pcm(tmp_path / "half-cosine/score_bed.wav")
@@ -190,37 +188,12 @@ def test_decoded_source_must_cover_every_selected_sample(plan, tmp_path):
         "-map", "0:v", "-map", "1:a", "-c:v", "libx264", "-threads", "2",
         "-c:a", "pcm_s16le", video)
     for segment in document["source_segments"]:
-        segment.update(path=str(video), sha256=sha(video))
+        segment.update(path=str(video))
     path.write_text(json.dumps(document))
     output = tmp_path / "short-source"
     with pytest.raises(ValueError, match="too short"):
         source_score.prepare_source_score(path, output)
     assert not (output / "prepared_bed.wav").exists()
-
-
-@pytest.mark.parametrize("changed", ["decoded", "source_bed", "score_bed"])
-def test_derived_assets_are_sealed_across_consumption(plan, tmp_path, monkeypatch, changed):
-    path, _document, _source, _score = plan
-    original = source_score._run
-
-    def intercepted(command, directory, label):
-        result = original(command, directory, label)
-        targets = {
-            "decoded": ("source", directory / ".source_000.decoded.wav"),
-            "source_bed": ("prepare", directory / ".source_bed.rendering.wav"),
-            "score_bed": ("prepare", directory / ".score_bed.rendering.wav"),
-        }
-        trigger, target = targets[changed]
-        if label == trigger:
-            target.write_bytes(target.read_bytes() + b"changed")
-        return result
-
-    monkeypatch.setattr(source_score, "_run", intercepted)
-    output = tmp_path / f"mutated-{changed}"
-    with pytest.raises(ValueError, match="changed"):
-        source_score.prepare_source_score(path, output)
-    assert not (output / "prepared_bed.wav").exists()
-    assert not (output / "prepared_bed_receipt.json").exists()
 
 
 @pytest.mark.parametrize("mutation", [
@@ -243,23 +216,18 @@ def test_invalid_semantics_never_publish(plan, tmp_path, mutation):
     assert not (output / "prepared_bed_receipt.json").exists()
 
 
-@pytest.mark.parametrize("changed", ["plan", "source", "score", "ffmpeg"])
-def test_toctou_or_ffmpeg_failure_never_publish(plan, tmp_path, monkeypatch, changed):
-    path, _document, source, score = plan
+def test_ffmpeg_failure_never_publishes(plan, tmp_path, monkeypatch):
+    path, _document, _source, _score = plan
     original = source_score._run
 
     def intercepted(command, directory, label):
-        if changed == "ffmpeg" and label == "prepare":
+        if label == "prepare":
             raise RuntimeError("injected ffmpeg failure")
-        result = original(command, directory, label)
-        selected = {"plan": path, "source": source, "score": score}.get(changed)
-        if selected and label == "prepare":
-            selected.write_bytes(selected.read_bytes() + b"changed")
-        return result
+        return original(command, directory, label)
 
     monkeypatch.setattr(source_score, "_run", intercepted)
-    output = tmp_path / changed
-    with pytest.raises((ValueError, RuntimeError)):
+    output = tmp_path / "ffmpeg"
+    with pytest.raises(RuntimeError):
         source_score.prepare_source_score(path, output)
     assert not (output / "prepared_bed.wav").exists()
     assert not (output / "prepared_bed_receipt.json").exists()
@@ -296,7 +264,7 @@ def test_accepts_ntsc_frame_clock_and_rounds_sample_bounds_consistently(tmp_path
         "artifact": "source_score_plan", "schema_version": 1,
         "output": {"sample_rate": 48_000, "channels": 2, "total_samples": total},
         "source_segments": [
-            {"id": "ntsc", "path": str(video), "sha256": sha(video),
+            {"id": "ntsc", "path": str(video),
              "audio_stream": 0, "source_fps": "30000/1001", "source_start_frame": 1,
              "source_end_frame": 29, "output_start_sample": 0, "gain": 1.0,
              "fade_in_samples": 0, "fade_out_samples": 0, "fade_shape": "linear",

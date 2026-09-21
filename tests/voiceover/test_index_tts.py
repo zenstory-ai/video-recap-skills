@@ -1,4 +1,3 @@
-import hashlib
 import http.client
 import io
 import json
@@ -73,14 +72,7 @@ def test_index_transport_posts_exact_contract_and_records_request_receipt(monkey
     assert request.get_header("Accept") == "audio/wav"
     assert seen["timeout"] == 7
     assert output.read_bytes() == audio
-    assert receipt == {
-        "receipt_schema": "index-tts-request-receipt",
-        "receipt_version": 1,
-        "provider": "index-tts",
-        "requested_voice": "private-voice",
-        "returned_wav_sha256": hashlib.sha256(audio).hexdigest(),
-        "speed_policy": "provider-default-no-rate-control",
-    }
+    assert receipt == {"provider": "index-tts", "requested_voice": "private-voice"}
 
 
 @pytest.mark.parametrize(
@@ -296,61 +288,27 @@ def test_index_provider_is_explicit_and_auto_never_selects_it(monkeypatch):
     assert voiceover.resolve_tts_engine() == "index-tts"
 
 
-def test_index_cache_identity_tracks_voice_and_endpoint_without_exposing_endpoint(monkeypatch):
+def test_index_cache_settings_track_voice_without_exposing_endpoint(monkeypatch):
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private-a.invalid/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
-    first = voiceover.tts_settings_fingerprint("index-tts")
+    first = voiceover.tts_settings_payload("index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-b")
-    second = voiceover.tts_settings_fingerprint("index-tts")
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private-b.invalid/tts")
-    third = voiceover.tts_settings_fingerprint("index-tts")
+    second = voiceover.tts_settings_payload("index-tts")
 
-    assert first != second != third
+    assert first != second
     assert "private-a.invalid" not in json.dumps(first)
     assert first["index_tts_voice"] == "voice-a"
 
 
-def test_index_cache_revision_is_optional_but_invalidates_when_bumped(monkeypatch):
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://private.invalid/tts")
-    monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
-    monkeypatch.delitem(CONFIG, "index_tts_cache_revision", raising=False)
-    unspecified = voiceover.tts_settings_fingerprint("index-tts")
-    monkeypatch.setitem(CONFIG, "index_tts_cache_revision", "deployment-2")
-    revised = voiceover.tts_settings_fingerprint("index-tts")
-
-    assert unspecified["index_tts_cache_revision"] == ""
-    assert revised["index_tts_cache_revision"] == "deployment-2"
-    assert unspecified != revised
-
-
-def test_index_cached_receipt_requires_complete_consistent_schema():
-    processed = "a" * 64
-    base = {
-        "audio_fingerprint": processed,
-        "processed_wav_sha256": processed,
-        "provider_receipt": {
-            "receipt_schema": "index-tts-request-receipt",
-            "receipt_version": 1,
-            "provider": "index-tts",
-            "requested_voice": "voice",
-            "returned_wav_sha256": processed,
-            "processed_wav_sha256": processed,
-            "speed_policy": "provider-default-no-rate-control",
-            "raw_wav_retained_as_processed": True,
-            "raw_wav_reconstructable_from_receipt": False,
-        },
-    }
+def test_index_cached_receipt_requires_current_voice():
     config = {"index_tts_endpoint": "http://host/tts", "index_tts_voice": "voice"}
+    base = {"provider_receipt": {"provider": "index-tts", "requested_voice": "voice"}}
     assert index_tts.valid_cached_receipt(base, config) is True
 
     mutations = [
-        lambda data: data["provider_receipt"].pop("receipt_schema"),
-        lambda data: data["provider_receipt"].update(returned_wav_sha256="Z" * 64),
-        lambda data: data["provider_receipt"].pop("raw_wav_retained_as_processed"),
-        lambda data: data.update(processed_wav_sha256="b" * 64),
-        lambda data: data["provider_receipt"].update(
-            returned_wav_sha256="b" * 64, raw_wav_retained_as_processed=True
-        ),
+        lambda data: data["provider_receipt"].update(requested_voice="other"),
+        lambda data: data["provider_receipt"].pop("provider"),
+        lambda data: data.update(provider_receipt=None),
     ]
     for mutate in mutations:
         candidate = json.loads(json.dumps(base))
@@ -405,7 +363,7 @@ def test_index_preparation_rejects_unsupported_segment_controls(monkeypatch, tmp
         voiceover._prepare_tts_segment(0, segment, [segment], tmp_path, "index-tts")
 
 
-def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch, tmp_path):
+def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
@@ -419,14 +377,7 @@ def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch,
     def fake_synthesize(text, output_path, config):
         calls.append((text, config))
         output_path.write_bytes(audio)
-        return {
-            "receipt_schema": "index-tts-request-receipt",
-            "receipt_version": 1,
-            "provider": "index-tts",
-            "requested_voice": config["index_tts_voice"],
-            "returned_wav_sha256": hashlib.sha256(audio).hexdigest(),
-            "speed_policy": "provider-default-no-rate-control",
-        }
+        return {"provider": "index-tts", "requested_voice": config["index_tts_voice"]}
 
     monkeypatch.setattr(index_tts, "synthesize_configured", fake_synthesize)
     monkeypatch.setattr(voiceover, "get_video_duration", lambda _path: 0.01)
@@ -439,9 +390,8 @@ def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch,
     assert first[0]["authored_text"] == second[0]["authored_text"] == "批准全文。"
     assert first[0]["spoken_text"] == second[0]["spoken_text"] == "批准全文。"
     receipt = second[0]["provider_receipt"]
-    assert receipt["requested_voice"] == "voice-a"
-    assert receipt["returned_wav_sha256"] == hashlib.sha256(audio).hexdigest()
-    assert receipt["processed_wav_sha256"] == hashlib.sha256(audio).hexdigest()
+    assert receipt == {"provider": "index-tts", "requested_voice": "voice-a"}
+    assert "processed_wav_sha256" not in second[0]
     sidecar = json.loads((tmp_path / "tts_segments/narr_000.wav.cache.json").read_text())
     assert sidecar["provider_receipt"] == receipt
 

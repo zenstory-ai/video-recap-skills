@@ -1,11 +1,10 @@
 """Load and format research, consolidation, and substrate context."""
 
-import hashlib
 import json
 import re
 from pathlib import Path
 
-from lib import CONFIG
+from lib import CONFIG, file_identity
 
 
 def _load_background_research(work_dir):
@@ -253,17 +252,13 @@ def _load_consolidation(work_dir, scenes_analysis):
         return {}
     try:
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        source_md5 = hashlib.md5(
-            (work_dir / "vlm_analysis.json").read_bytes()
-        ).hexdigest()
+        source = file_identity(work_dir / "vlm_analysis.json")
     except (OSError, json.JSONDecodeError):
         return {}
     if not isinstance(meta, dict):
         return {}
-    # prompt_md5 is the producer's own cache key (consolidate.py); the consumer only
-    # checks that the index was built from the current analysis and model.
     expected = {
-        "source_md5": source_md5,
+        "source": source,
         "model": _consolidation_model(),
     }
     if scenes_analysis:

@@ -82,12 +82,8 @@ def test_local_adoption_route_strict_failure_exits_before_success(
         burn_subtitles=False, subtitle_y_top=None, subtitle_y_bot=None,
         require_final_qc=True,
     )
-    manifest = {"source_video_fingerprint": "picture-id", "audio": "audio-id"}
+    manifest = {"source_video": str(video), "audio": "audio-id"}
     monkeypatch.setattr(recap_runner, "_write_run_manifest", lambda *_: manifest)
-    monkeypatch.setattr(
-        recap_runner.material_lib, "file_fingerprint", lambda *_: "picture-id"
-    )
-    monkeypatch.setattr(recap_runner, "audio_binding", lambda *_: "audio-id")
     monkeypatch.setattr(recap_runner, "begin_local_adoption_qc", lambda *_: None)
     monkeypatch.setattr(recap_runner, "_run", lambda *_: None)
     monkeypatch.setattr(recap_runner, "load_local_assembly_evidence", lambda *_: {})
@@ -145,7 +141,7 @@ def test_multi_cut_route_strict_failure_exits_before_success(
     assert "✅ 完成" not in capsys.readouterr().out
 
 
-def test_continuation_preserves_strict_flag_without_cache_fingerprint_change(
+def test_continuation_preserves_strict_flag_without_analysis_settings_change(
     monkeypatch
 ):
     monkeypatch.setattr(
@@ -156,8 +152,7 @@ def test_continuation_preserves_strict_flag_without_cache_fingerprint_change(
     assert "--require-final-qc" in command
     baseline = Namespace(**vars(strict))
     baseline.require_final_qc = False
-    assert recap_runtime._material_settings_fingerprint(strict) == \
-        recap_runtime._material_settings_fingerprint(baseline)
+    assert recap_runtime._analysis_settings(strict) == recap_runtime._analysis_settings(baseline)
 
 
 def test_strict_dub_rejected_before_work_or_probe(monkeypatch, tmp_path, capsys):

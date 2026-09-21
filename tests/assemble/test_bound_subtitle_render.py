@@ -1,5 +1,4 @@
 """Actual output-clock cue consumption, independent of ASR accuracy claims."""
-import hashlib
 import json
 import shutil
 import subprocess
@@ -102,7 +101,7 @@ def test_actual_burn_starts_on_declared_frame_not_coarse_window(tmp_path):
     assert len(raw) == 4 * size
     before, last_before, on, off = [raw[i:i + size] for i in range(0, len(raw), size)]
     assert before == last_before == off
-    assert hashlib.sha256(on).digest() != hashlib.sha256(before).digest()
+    assert on != before
 
 
 @pytest.mark.parametrize('rate', [24, 25, 30, 60])
@@ -132,19 +131,6 @@ def test_between_frame_cue_is_rejected_instead_of_silently_invisible(tmp_path):
     _write_track(tmp_path, track)
     with pytest.raises(ValueError, match='visible frame'):
         binding.prepare_subtitle_track(video, tmp_path, 6, audio_mode='adopted-packet-copy')
-
-
-def test_changed_prepared_projection_is_rejected(tmp_path):
-    video = tmp_path / 'input.mp4'
-    _media(video)
-    _write_track(tmp_path, _track(video))
-    binding.prepare_subtitle_track(video, tmp_path, 6, audio_mode='adopted-packet-copy')
-    path = tmp_path / binding.VALIDATION
-    projection = json.loads(path.read_text())
-    projection['entries'][0]['start'] = 0
-    path.write_text(json.dumps(projection))
-    with pytest.raises(ValueError, match='stale'):
-        source_subtitles._combined_subtitle_entries([], tmp_path, 6)
 
 
 def test_deleting_explicit_track_clears_old_manifest_evidence(tmp_path):
@@ -205,9 +191,9 @@ def test_actual_assembly_burn_and_output_clock_are_verified(tmp_path, monkeypatc
     assert report['rendered_picture']['frame_count'] == 144
     assert report['binding']['acoustic_alignment'] == 'NOT_CHECKED'
     from assembly_contract import _assembly_manifest_payload
-    from assembly_settings import assembly_settings_fingerprint
+    from assembly_settings import assembly_settings_payload
     manifest = _assembly_manifest_payload(video, [], work, output,
-        settings_fingerprint=assembly_settings_fingerprint, audio_mode='adopted-packet-copy')
+        settings_payload=assembly_settings_payload, audio_mode='adopted-packet-copy')
     assert manifest['subtitle_track']['rendered_picture']['frame_clock_verified'] is True
     # A different output clock is a failure even when source/track are unchanged.
     short = tmp_path / 'short.mp4'

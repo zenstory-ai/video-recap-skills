@@ -285,15 +285,6 @@ def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
     assert ffmpeg_cmd[ffmpeg_cmd.index("-movflags") + 1] == "+faststart"
 
 
-def test_cut_source_fingerprint_detects_middle_only_changes(tmp_path):
-    first = tmp_path / "a.mp4"
-    second = tmp_path / "b.mp4"
-    first.write_bytes(b"A" * 70000 + b"middle-one" + b"Z" * 70000)
-    second.write_bytes(b"A" * 70000 + b"middle-two" + b"Z" * 70000)
-    assert first.stat().st_size == second.stat().st_size
-    assert cut.file_fingerprint(first) != cut.file_fingerprint(second)
-
-
 def _seed_cached_cut(tmp_path):
     """A work dir whose edited_source.mp4 is bound (meta) to the current source and plan."""
     video = tmp_path / "video.mp4"
@@ -309,7 +300,7 @@ def _seed_cached_cut(tmp_path):
     return video, work, edited
 
 
-@pytest.mark.parametrize("break_binding", ["none", "missing_meta", "plan", "source_bytes", "edited_bytes"])
+@pytest.mark.parametrize("break_binding", ["none", "missing_meta", "plan", "source", "empty_output"])
 def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatch, tmp_path, break_binding):
     _mock_media_probes(monkeypatch)
     video, work, edited = _seed_cached_cut(tmp_path)
@@ -318,12 +309,12 @@ def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatc
         Path(f"{edited}.meta.json").unlink()
     elif break_binding == "plan":
         argv += ["--clip-padding", "5"]
-    elif break_binding == "source_bytes":
+    elif break_binding == "source":
         video = tmp_path / "video_new.mp4"
         video.write_bytes(b"new source bytes")
         argv[1] = str(video)
-    elif break_binding == "edited_bytes":
-        edited.write_bytes(b"externally-mutated-edited-source")
+    elif break_binding == "empty_output":
+        edited.write_bytes(b"")
     calls = []
 
     def fake_build(video_path, validated_plan, work_dir, output_path=None):
@@ -349,7 +340,7 @@ def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatc
         assert validated["clips"][0]["source_start"] == 5.0
 
 
-def test_edited_source_cache_fingerprint_includes_render_affecting_config(monkeypatch, tmp_path):
+def test_edited_source_cache_settings_include_render_affecting_config(monkeypatch, tmp_path):
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
@@ -359,12 +350,13 @@ def test_edited_source_cache_fingerprint_includes_render_affecting_config(monkey
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 30.0})
     cut_contract._write_edited_source_meta(edited, plan, video)
     meta = json.loads((tmp_path / "edited_source.mp4.meta.json").read_text(encoding="utf-8"))
-    assert meta["render_cache"]["clip_join_audio_fade_ms"] == 30.0
-    assert meta["render_cache"]["geometry_render_algorithm_version"] == cut_contract.GEOMETRY_RENDER_ALGORITHM_VERSION
+    assert meta["schema_version"] == 3
+    assert meta["render_cache"] == {"clip_join_audio_fade_ms": 30.0}
+    assert meta["sources"] == {str(video): {"size": 5, "mtime_ns": video.stat().st_mtime_ns}}
     assert cut.should_reuse_edited_source(edited, plan, video) is True
 
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 80.0})
-    assert cut.edited_source_render_fingerprint() != meta["render_fingerprint"]
+    assert cut.edited_source_render_cache_payload() != meta["render_cache"]
     assert cut.should_reuse_edited_source(edited, plan, video) is False
 
 

@@ -106,14 +106,13 @@
 {
   "schema_version": 2,
   "timeline": "cut_output",
-  "clip_plan_fingerprint": "md5-of-canonical-clip-plan",
   "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
   "speech_spans": [{"start": 0.0, "end": 3.8}],
   "quiet_windows": [{"start": 3.8, "end": 4.1}]
 }
 ```
 
-`clip_plan_fingerprint` 必须与当前 `clip_plan_validated.json` 一致。缺失、过期或畸形的
+该文件必须不早于当前 `clip_plan_validated.json`（按修改时间判断）。缺失、过期或畸形的
 output 证据一律 fail closed，不能回退到原片时钟或信任 Agent 写入的
 `overlaps_speech=false`。多来源剪辑的每条映射记录还保留 `source_id` 和原片起止时间。
 
@@ -264,19 +263,19 @@ CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解�
 
 ## multi_source_manifest.json（多视频 cut）
 
-多视频剪辑模式下，项目级 `work_dir/multi_source_manifest.json` 是编排、剪辑与合成阶段共用的来源契约。`source_id` 默认由源文件 SHA-256 派生为 `src_<fingerprint[:12]>`；同一项目里重复 fingerprint 的不同路径会追加短 path hash 后缀。
+多视频剪辑模式下，项目级 `work_dir/multi_source_manifest.json` 是编排、剪辑与合成阶段共用的来源契约。`source_id` 由源文件名主干与文件大小派生为 `src_<stem>_<size>`；同一项目里得到相同 id 的后续来源按输入顺序追加 `_2`、`_3` 后缀。`source_video_identity` 记录该文件的 `{size, mtime_ns}`，续跑时与当前输入逐项比对。
 
 ```json
 {
   "schema_version": 1,
   "sources": [
     {
-      "source_id": "src_0123456789ab",
+      "source_id": "src_episode1_734003200",
       "source_path": "/abs/episode1.mp4",
       "source_name": "episode1.mp4",
-      "source_video_fingerprint": "0123456789abcdef...",
-      "source_work_dir": "sources/src_0123456789ab",
-      "material_id": "episode1-0123456789ab"
+      "source_video_identity": {"size": 734003200, "mtime_ns": 1758326400000000000},
+      "source_work_dir": "sources/src_episode1_734003200",
+      "material_id": "episode1-734003200"
     }
   ]
 }
@@ -362,7 +361,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 ## material library（可选，grep 复用）
 
-`--material-library-dir <dir> --save-materials` 会把每个源视频的已分析小文件复制到 `<dir>/materials/<material_id>/`，不复制原始媒体。`--use-materials` 会在 fingerprint 和 settings fingerprint 匹配时把这些 JSON/MD 产物恢复到当前 per-source `work_dir`。
+`--material-library-dir <dir> --save-materials` 会把每个源视频的已分析小文件复制到 `<dir>/materials/<material_id>/`，不复制原始媒体。`--use-materials` 会在源文件路径、`source_video_identity`（`{size, mtime_ns}`）和分析 `settings` 都相等时把这些 JSON/MD 产物恢复到当前 per-source `work_dir`。
 
 ```text
 .video-materials/
@@ -377,7 +376,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
     artifacts/understanding_index.json
 ```
 
-`materials_index.jsonl` 每次保存追加一行，字段包括 `schema_version`, `event`, `material_id`, `source_name`, `source_path`, `source_video_fingerprint`, `settings_fingerprint`, `summary`, `tags`, `material_dir`, `updated_at`。当前权威状态始终以 `materials/<material_id>/material.json` 为准。MVP 只承诺 `grep -R "关键词" <library>` 这类文件检索；没有 DB、embedding 或语义搜索。
+`materials_index.jsonl` 每次保存追加一行，字段包括 `schema_version`, `event`, `material_id`, `source_name`, `source_path`, `source_video_identity`, `summary`, `tags`, `material_dir`, `updated_at`；`material.json` 另外记录分析 `settings` 字典与每个产物的 `bytes`。当前权威状态始终以 `materials/<material_id>/material.json` 为准。MVP 只承诺 `grep -R "关键词" <library>` 这类文件检索；没有 DB、embedding 或语义搜索。
 
 保存时会对凭证形态（`tp-`/`sk-`/`gh*_`/`AKIA`/JWT 与 `KEY=VALUE` 赋值）和凭证命名的 JSON key 做脱敏，但这只是**尽力而为**的兜底，不是保证：陌生格式的密钥仍可能漏过。请从源头避免把密钥写进分析产物——key 从环境变量/`.env` 读取，不需要落进 scenes/ASR/VLM/summary 等 JSON。
 
@@ -479,7 +478,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 deterministic lint，把明显不可发布的脚本挡在昂贵的克隆 TTS 之前。空译文、相邻行重叠、时间越界、`room < 0.4s` 等 **error** 会 `verdict=FAIL` 并阻断 render；`fast_speech`、`trim_risk` 等是 warning，不阻断。
 
-每行 voiceclone 原始 WAV 会按模型、合成提示、中文台词和参考音频 SHA-256 写入相邻的 `*.wav.meta.json`。指纹完全匹配且 WAV 可读取时，dub render 直接复用并在 `dub_manifest.json.lines[].tts_cache` 记录 `hit`；台词、参考音频、模型或提示变化都会自动失效并重新合成。
+每行 voiceclone 原始 WAV 会把中文台词、模型/提示等合成设置和参考音频信息写入相邻的 `*.wav.meta.json`。台词与设置完全相等且 WAV 可读取时，dub render 直接复用并在 `dub_manifest.json.lines[].tts_cache` 记录 `hit`；台词、参考音频、模型或提示变化都会重新合成。
 
 ```json
 {
@@ -510,7 +509,7 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
 
 `preflight_qc.json`、`final_qc.json`、`golden_eval.json`、`mimo_qc.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render` / `golden`，其中 `mimo_qc.json` 是 artifact 而不是 stage。详见 `shift-left-qc-schema.md`。
 
-`recap.py` 可通过 `--mimo-qc pre-assemble|post-render|both`（默认 `off`）在组装前和/或成片后写 `mimo_qc.json`。每个 stage 最多一次 live request；相同素材/模型命中内容缓存，`--mimo-qc-refresh` 可刷新。`post_render` 最多临时抽取 6 张、最长边 768px 的 JPEG；base64 只进入请求，不写进 artifact。多 stage 报告聚合在 `metadata.stages`，状态为 `completed` / `cached` / `unavailable` / `failed`，任何状态都不阻断、也不自动修复。关闭功能会清理旧 `mimo_qc.json`，避免陈旧建议被误认为本轮结果。
+`recap.py` 可通过 `--mimo-qc pre-assemble|post-render|both`（默认 `off`）在组装前和/或成片后写 `mimo_qc.json`。每个 stage 最多一次 live request；报告的 `metadata.cache_input`（证据文件的 kind/bytes/mtime_ns、模型、提示与抽帧元数据）与本次完全相等时复用上次结果，`--mimo-qc-refresh` 可刷新。`post_render` 最多临时抽取 6 张、最长边 768px 的 JPEG；base64 只进入请求，不写进 artifact。多 stage 报告聚合在 `metadata.stages`，状态为 `completed` / `cached` / `unavailable` / `failed`，任何状态都不阻断、也不自动修复。关闭功能会清理旧 `mimo_qc.json`，避免陈旧建议被误认为本轮结果。
 
 QC 证据把 `source_asr` 与 `generated_subtitles` 分开：前者只用于源事实/原声时序，后者是本轮旁白派生字幕，不能反过来充当事实证据。多视频项目从 `multi_source_manifest.json` 指向的逐源 work dir 汇集 ASR；`cut_output` 解说评审同样按 `source_id` 映射逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
 

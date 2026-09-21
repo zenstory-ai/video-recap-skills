@@ -12,7 +12,7 @@ Status: implemented
 - 刻意复制的模块 must 字节一致，由 `tests/orchestrator/test_brief_narration_parity.py` 守：video-understanding 的 `brief.py` 与 video-script 的 `narration.py`，以及两者共有的 `agent_brief / agent_text / brief_context / brief_inputs / brief_timeline / narration_lint / speech_ownership / timeline_fusion / deslop_qc`；video-recap 与 video-script 的 `creative-editing-playbook.md`。改一处必须同批改另一处。
 - 每份 `lib.py` 只声明自己代码读取的 CONFIG 键（`test_no_skill_declares_config_it_never_reads`）；多个 skill 共同声明的音频与 tempo 键取值必须一致（`test_audio_policy_parity.py`）。never 为"方便"把别的 skill 的键加进来。
 - 每个脚本模块 ≤ 800 行，skill 内 import 图无环（`test_test_suite_architecture.py`）。
-- `file_fingerprint` 等在多份 `lib.py` 里各有一份的辅助函数，由跨 skill 测试钉在同一行为上，因为它们在实践中互相比对（video-cut 写 `edited_source.mp4.meta.json`，recap 与 assemble 读）。
+- `file_identity`（size/mtime_ns）等在多份 `lib.py` 里各有一份的辅助函数保持同形；内容指纹已于 2026-09-20 整体移除（见 [[2026-09-20-no-content-hashing]]），跨 skill 只比较路径与 size/mtime_ns。
 
 来源：080b22b、eff7db5、a5fa71b、e222cb8 (#67)、7d8f979 (#68)、c4da353 (#65)
 

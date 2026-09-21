@@ -3,7 +3,6 @@
 import argparse
 from bisect import bisect_left
 from fractions import Fraction
-import hashlib
 import json
 import math
 import os
@@ -12,16 +11,8 @@ import re
 import subprocess
 import tempfile
 
-from cut_contract import cut_plan_fingerprint, edited_source_render_fingerprint
-
-
-def sha256_file(path):
-    """Fresh content read: do not infer identity from a filename or mtime."""
-    h = hashlib.sha256()
-    with Path(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            h.update(chunk)
-    return h.hexdigest()
+from cut_contract import edited_source_render_cache_payload
+from lib import file_identity
 
 
 def _positive(value, name, *, integer=False):
@@ -182,18 +173,19 @@ def detect_scene_pts(video, threshold, roi=None):
 
 
 def load_bound_plan(video, plan_path):
-    """Only associate with the current cut-render cache, including every source hash."""
+    """Only associate with the current cut-render cache: plan, render settings, sources."""
     from cut_contract import _edited_source_meta_path
     try:
         plan = json.loads(Path(plan_path).read_text(encoding="utf-8"))
         meta = json.loads(_edited_source_meta_path(video).read_text(encoding="utf-8"))
-        sources = meta["source_fingerprints"]
+        sources = meta["sources"]
         if not isinstance(sources, dict) or not sources:
             raise ValueError("source identities missing")
-        if (meta["clip_plan_fingerprint"] != cut_plan_fingerprint(plan)
-                or meta["render_fingerprint"] != edited_source_render_fingerprint()
-                or meta["edited_source_fingerprint"] != sha256_file(video)
-                or any(sha256_file(p) != fp for p, fp in sources.items())):
+        if not Path(video).is_file() or Path(video).stat().st_size == 0:
+            raise ValueError("rendered media missing")
+        if (meta["plan"] != plan["clips"]
+                or meta["render_cache"] != edited_source_render_cache_payload()
+                or any(file_identity(p) != identity for p, identity in sources.items())):
             raise ValueError("stale media, plan or render settings")
         declared = {c["source_path"] for c in plan["clips"] if "source_path" in c}
         if declared and declared != set(sources):
@@ -237,8 +229,6 @@ def _associate_plan(report, plan, pts, end):
 
 def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
     video = Path(video).resolve()
-    before = sha256_file(video)
-    plan_hash = sha256_file(plan_path) if plan_path is not None else None
     plan = load_bound_plan(video, plan_path) if plan_path is not None else None
     pts, end, origin = probe_frame_clock(video)
     scenes = detect_scene_pts(video, threshold, roi)
@@ -248,19 +238,11 @@ def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
     report = summarize_candidates(pts, end, [frames_by_pts[p] for p in scenes if frames_by_pts[p] > 0], **policy)
     if plan is not None:
         _associate_plan(report, plan, pts, end)
-        # The scan can take minutes: recheck inputs rather than signing a mixed revision.
-        if plan_hash != sha256_file(plan_path):
-            raise ValueError("cut plan changed during scan")
-        load_bound_plan(video, plan_path)
-    if sha256_file(video) != before:
-        raise ValueError("video changed during scan")
     report.update({
         "schema_version": 1, "artifact": "shot_review", "algorithm": "scene-frame-recall-v1", "scan_complete": True,
-        "media": {"path": str(video), "sha256": before, "frame_count": len(pts),
-                  "origin_pts_exact": str(origin), "duration_exact": str(end),
-                  "frame_clock_sha256": hashlib.sha256(
-                      json.dumps([str(p) for p in [*pts, end]]).encode()).hexdigest()},
-        "plan_binding": {"path": str(Path(plan_path).resolve()), "sha256": plan_hash} if plan is not None else None,
+        "media": {"path": str(video), "frame_count": len(pts),
+                  "origin_pts_exact": str(origin), "duration_exact": str(end)},
+        "plan_binding": {"path": str(Path(plan_path).resolve())} if plan is not None else None,
         "scene_threshold": threshold,
         "scene_roi": None if roi is None else list(roi),
         "limits": ["scene score is not a confirmed shot or flash-frame defect",
@@ -307,7 +289,7 @@ def _report_target(video, output, plan_path):
 
 
 def _protect_declared_sources(video, plan_path, target):
-    """Use both plan and metadata declarations, even when their identities disagree."""
+    """Use both plan and metadata declarations, even when they disagree."""
     from cut_contract import _edited_source_meta_path
     if plan_path is None:
         return
@@ -318,7 +300,7 @@ def _protect_declared_sources(video, plan_path, target):
             if kind == "plan":
                 paths.update(c["source_path"] for c in data["clips"] if "source_path" in c)
             else:
-                paths.update(data["source_fingerprints"])
+                paths.update(data["sources"])
         except (OSError, ValueError, KeyError, TypeError) as exc:
             errors.append(exc)
     if target in {Path(p).resolve() for p in paths}:

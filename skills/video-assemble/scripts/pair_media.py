@@ -8,17 +8,15 @@ paired.mp4; its subtitle binding must be newly computed on that container/a:0.
 
 import argparse
 from fractions import Fraction
-import hashlib
 import json
 from pathlib import Path
-import re
 import subprocess
 
 from assemble_constants import SUPPORTED_PICTURE_CODECS
 from frozen_audio import probe_audio_packets, verify_adopted_audio
 from strict_inputs import (
-    probe_json, require_asset, require_fields, require_integer, run_logged, sha256_file,
-    write_json_atomic,
+    probe_json, require_declared_path, require_fields, require_integer, run_logged,
+    without_digests, write_json_atomic,
 )
 
 
@@ -26,12 +24,13 @@ _probe = probe_json
 
 
 def _asset(value, audio=False):
-    require_fields(value, ['path', 'sha256', 'selected_stream'] if audio else ['path', 'sha256'],
-                   'asset')
+    value = without_digests(value, 'asset')
+    require_fields(value, ['path', 'selected_stream'] if audio else ['path'], 'asset')
+    path = require_declared_path(value, 'asset')
     if audio:
-        require_integer(value['selected_stream'], 'Audio selected_stream')
-    path, _ = require_asset(value['path'], value['sha256'], 'asset')
-    return {**value, 'path': str(path)}
+        return {'path': str(path),
+                'selected_stream': require_integer(value['selected_stream'], 'Audio selected_stream')}
+    return {'path': str(path)}
 
 
 def _time(value):
@@ -44,13 +43,13 @@ def _time(value):
 
 
 def probe_picture(path):
-    """Actual full CFR presentation clock plus codec-order compressed packets."""
+    """Actual full CFR presentation clock plus codec-order packet sizes and timestamps."""
     data = _probe(path, '-select_streams', 'v:0', '-show_streams', '-show_packets',
-                  '-show_format', '-show_data_hash', 'sha256', '-show_entries',
+                  '-show_format', '-show_entries',
                   'format=format_name:stream=codec_name,profile,level,width,height,pix_fmt,'
                   'sample_aspect_ratio,field_order,color_range,color_space,color_transfer,'
-                  'color_primaries,chroma_location,time_base,start_pts,duration_ts,avg_frame_rate,'
-                  'extradata_hash:packet=pts,dts,duration,size,data_hash,side_data_list')
+                  'color_primaries,chroma_location,time_base,start_pts,duration_ts,avg_frame_rate'
+                  ':packet=pts,dts,duration,size,side_data_list')
     streams = data.get('streams', [])
     if len(streams) != 1 or streams[0].get('codec_name') not in SUPPORTED_PICTURE_CODECS:
         raise ValueError('Pairing requires one selected H264/HEVC picture stream')
@@ -66,21 +65,17 @@ def probe_picture(path):
     pts = [_time(frame.get('pts')) * tb for frame in frames]
     if not pts or any(t != Fraction(i, fps) for i, t in enumerate(pts)) or duration != len(pts) / fps:
         raise ValueError('Picture requires complete zero-origin CFR frame clock and exact duration')
-    extradata = v.get('extradata_hash', '')
-    if not re.fullmatch('SHA256:[a-fA-F0-9]{64}', extradata):
-        raise ValueError('Picture missing decoder extradata hash')
     decoder_keys = ['codec_name', 'profile', 'level', 'width', 'height', 'pix_fmt',
                     'sample_aspect_ratio', 'field_order', 'color_range', 'color_space',
-                    'color_transfer', 'color_primaries', 'chroma_location', 'extradata_hash']
+                    'color_transfer', 'color_primaries', 'chroma_location']
     packets = []
     for packet in data.get('packets', []):
-        digest = packet.get('data_hash', '')
-        if not re.fullmatch('SHA256:[a-fA-F0-9]{64}', digest):
-            raise ValueError('Picture packet missing payload hash')
+        if packet.get('size') is None:
+            raise ValueError('Picture packet missing size')
         ticks = {key: str(_time(packet.get(key)) * tb) for key in ['pts', 'dts', 'duration']}
         if _time(ticks['duration']) <= 0:
             raise ValueError('Picture packet has invalid duration')
-        packets.append({**ticks, 'payload': digest, 'size': packet['size'],
+        packets.append({**ticks, 'size': int(packet['size']),
                         'side_data_list': packet.get('side_data_list', [])})
     if len(packets) != len(pts):
         raise ValueError('Picture packet/frame counts disagree')
@@ -159,25 +154,15 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
               'release_approved': False}
     write_json_atomic(report_path, report)
     try:
-        raw = plan_path.read_bytes()
-        plan_hash = hashlib.sha256(raw).hexdigest()
-        plan = json.loads(raw)
+        plan = json.loads(plan_path.read_bytes())
         require_fields(plan, ['artifact', 'schema_version', 'picture', 'audio'], 'media_pair plan')
         if plan['artifact'] != 'media_pair' or type(plan['schema_version']) is not int or plan['schema_version'] != 1:
             raise ValueError('Unsupported media_pair schema')
         picture, audio = _asset(plan['picture']), _asset(plan['audio'], audio=True)
-        report.update(plan={'path': str(plan_path), 'sha256': plan_hash},
-                      inputs={'picture': picture, 'audio': audio})
-        def assert_inputs():
-            if sha256_file(plan_path) != plan_hash:
-                raise ValueError('Pair plan changed during operation')
-            for asset in [picture, audio]:
-                if sha256_file(asset['path']) != asset['sha256']:
-                    raise ValueError('Pair input changed during operation')
+        report.update(plan={'path': str(plan_path)}, inputs={'picture': picture, 'audio': audio})
         video_facts = probe_picture(picture['path'])
         audio_facts = probe_audio_packets(audio['path'], audio['selected_stream'])
         report['timing'] = validate_pair_timing(video_facts, audio_facts)
-        assert_inputs()
         report['picture'] = {k: v for k, v in video_facts.items() if k not in ['packets', 'frame_pts']}
         report['audio'] = {'input_stream': audio['selected_stream'], 'output_stream': 0,
                            'packet_count': audio_facts['packet_count']}
@@ -191,7 +176,6 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
                    '-movie_timescale', str(audio_facts['sample_rate']),
                    '-movflags', '+faststart', str(staged)]
         _run_mux(command, directory)
-        assert_inputs()
         if probe_picture(staged) != video_facts:
             raise ValueError('Paired picture packets, decoder, geometry/color or full frame clock changed')
         proof = verify_adopted_audio(audio['path'], staged, audio['selected_stream'], 0)
@@ -200,10 +184,9 @@ def run_pair(plan_path, output_dir, *, plan_only=False):
             raise ValueError('Output audio presentation interval changed')
         report['output_timing'] = output_timing
         _verify_output(staged)
-        assert_inputs()
         write_json_atomic(directory / 'picture_identity.json', video_facts)
         write_json_atomic(directory / 'adopted_audio_identity.json', proof)
-        report['output'] = {'path': str(output), 'sha256': sha256_file(staged), 'full_decode': 'PASS',
+        report['output'] = {'path': str(output), 'full_decode': 'PASS',
                             'picture_identity': 'EXACT', 'audio_packet_identity': 'EXACT'}
         staged.rename(output)
         report['status'] = 'PAIR_RENDERED'

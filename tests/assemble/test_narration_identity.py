@@ -1,7 +1,6 @@
-"""Actual-audio regressions: declared TTS identity must reach the consumed mix."""
+"""Actual-audio regression: the selected TTS wav must reach the consumed mix."""
 
 import array
-import hashlib
 import math
 from pathlib import Path
 import shutil
@@ -20,12 +19,8 @@ from tts_fixtures import tts_segment
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
-    reason="ffmpeg/ffprobe required for actual audio identity regression",
+    reason="ffmpeg/ffprobe required for actual audio regression",
 )
-
-
-def _sha256(path):
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _tone(path, frequency):
@@ -67,13 +62,12 @@ def media(tmp_path, monkeypatch):
     return source, old, intended, work
 
 
-def _segment(audio_path, declared_audio):
+def _segment(audio_path):
     return tts_segment(
         index=0, start=0.25, end=1.75,
-        narration="offline audio identity test", spoken_text="offline audio identity test",
+        narration="offline audio test", spoken_text="offline audio test",
         audio_path=str(audio_path), audio_duration=1.0,
         pause_after_ms=0, overlaps_speech=False,
-        processed_wav_sha256=_sha256(declared_audio),
     )
 
 
@@ -95,18 +89,9 @@ def _amplitudes(video):
     return result
 
 
-def test_supplied_processed_hash_rejects_wrong_wav_before_render(media):
-    source, old, intended, work = media
-    output = work / "output.mp4"
-    with pytest.raises((ValueError, RuntimeError), match="(?i)(hash|identity|fingerprint|指纹|身份)"):
-        assemble.assemble_video(source, [_segment(old, intended)], work, output)
-    assert not output.exists()
-    assert not list(work.glob("_placed_*.wav"))
-
-
-def test_correct_selected_wav_reaches_actual_final_audio(media):
+def test_selected_wav_reaches_actual_final_audio(media):
     source, _old, intended, work = media
     output = work / "output.mp4"
-    assemble.assemble_video(source, [_segment(intended, intended)], work, output)
+    assemble.assemble_video(source, [_segment(intended)], work, output)
     magnitudes = _amplitudes(output)
     assert magnitudes[997] > 100 * magnitudes[330], magnitudes

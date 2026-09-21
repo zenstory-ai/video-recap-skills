@@ -114,8 +114,7 @@ def build_agent_brief(
     # Understanding validates evidence before calling; the standalone script skill
     # has no producer dependency and must not invent an available ASR status.
     if asr_evidence is None:
-        asr_evidence = {"status": "MISSING_OR_STALE", "evidence_fingerprint": None,
-                        "glossary_modifications": None}
+        asr_evidence = {"status": "MISSING_OR_STALE", "glossary_modifications": None}
 
     lines.extend(
         [
@@ -123,7 +122,6 @@ def build_agent_brief(
             "## ASR timing evidence",
             "",
             f"- Status: {asr_evidence['status']}",
-            f"- Evidence fingerprint: {asr_evidence['evidence_fingerprint'] or '(missing)'}",
             f"- Glossary modifications: {asr_evidence.get('glossary_modifications') or '(unverified)'}; details: asr_timing_evidence.json",
             "- Empty text: UNKNOWN_NOT_PROVEN_SILENCE; these windows locate a search region, not subtitle onsets.",
             "- Timing: coarse provider windows; word alignment: NOT_PERFORMED; dialogue boundaries: NOT_VERIFIED.",

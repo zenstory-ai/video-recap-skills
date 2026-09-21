@@ -314,7 +314,7 @@ def _run_cached(monkeypatch, video, work_dir, *argv_extra):
 
 
 def test_understand_recomputes_stage_when_artifact_bytes_change(monkeypatch, tmp_path):
-    """A cached artifact whose bytes no longer match its sidecar must be recomputed."""
+    """A cached artifact rewritten behind its sidecar (identity mismatch) must be recomputed."""
     video = _video(tmp_path)
     calls = []
 
@@ -396,7 +396,7 @@ def test_understand_recomputes_asr_when_asr_settings_change(monkeypatch, tmp_pat
 
 
 def test_understand_recomputes_silence_when_asr_content_changes(monkeypatch, tmp_path):
-    """Silence cache freshness must include ASR artifact bytes/provenance."""
+    """Silence cache freshness must include the ASR artifact identity/provenance."""
     video = _video(tmp_path)
     calls = []
     asr_payload = {"value": [{"start": 0.0, "end": 1.0, "text": "first"}]}

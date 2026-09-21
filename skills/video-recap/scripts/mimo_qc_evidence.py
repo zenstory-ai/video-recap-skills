@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -48,14 +47,6 @@ _OPTIONAL_VISUAL_METADATA = (
 )
 
 
-def _stable_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _fingerprint_value(value: Any) -> str:
-    return hashlib.sha256(_stable_json(value).encode("utf-8")).hexdigest()
-
-
 def _load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -75,7 +66,7 @@ def _summarize(
 ) -> Any:
     """Keep request/report evidence bounded while retaining useful structure."""
     if depth >= 4:
-        return {"type": type(value).__name__, "fingerprint": _fingerprint_value(value)}
+        return {"type": type(value).__name__, "omitted": True}
     if isinstance(value, Mapping):
         out = {
             str(key): _summarize(
@@ -110,11 +101,12 @@ def _collect_file(work_dir: Path, name: str) -> dict[str, Any] | None:
         kind, summary = "json", _summarize(_load_json(path))
     else:
         kind, summary = "text", _summarize(_read_text_sample(path))
+    stat = path.stat()
     return {
         "path": name,
         "kind": kind,
-        "bytes": path.stat().st_size,
-        "fingerprint": qc_contract.artifact_fingerprint(path),
+        "bytes": stat.st_size,
+        "mtime_ns": stat.st_mtime_ns,
         "summary": summary,
     }
 
@@ -164,12 +156,8 @@ def _final_output_metadata(
     path, display = resolved
     item: dict[str, Any] = {"path": display, "exists": path.is_file()}
     if item["exists"]:
-        item.update(
-            {
-                "bytes": path.stat().st_size,
-                "fingerprint": qc_contract.artifact_fingerprint(path),
-            }
-        )
+        stat = path.stat()
+        item.update({"bytes": stat.st_size, "mtime_ns": stat.st_mtime_ns})
     return {"candidates": [item]}
 
 
@@ -221,7 +209,6 @@ def collect_evidence(
     }
     if not evidence["source_asr"]:
         evidence["source_asr"] = _collect_multi_source_asr(root)
-    evidence["fingerprint"] = _fingerprint_value(_cache_evidence(evidence))
     # The evidence goes into the MiMo request as well as the persisted report, so it is
     # redacted here, before either.
     return qc_contract.redact_secrets(evidence)
@@ -229,19 +216,21 @@ def collect_evidence(
 
 def _cache_file_group(group: Mapping[str, Any]) -> dict[str, Any]:
     return {
-        name: {key: item[key] for key in ("kind", "bytes", "fingerprint")}
+        name: {key: item[key] for key in ("kind", "bytes", "mtime_ns")}
         for name, item in sorted(group.items())
     }
 
 
 def _cache_evidence(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    """The per-file identities ({kind, bytes, mtime_ns}) a cached stage report was built
+    from; work_dir is excluded so moving the directory is still a cache hit."""
     return {
         "artifacts": _cache_file_group(evidence["artifacts"]),
         "source_asr": _cache_file_group(evidence["source_asr"]),
         "generated_subtitles": _cache_file_group(evidence["generated_subtitles"]),
         "visual_metadata": _cache_file_group(evidence["visual_metadata"]),
         "final_output": [
-            {key: item[key] for key in ("exists", "bytes", "fingerprint") if key in item}
+            {key: item[key] for key in ("exists", "bytes", "mtime_ns") if key in item}
             for item in evidence["final_output"]["candidates"]
         ],
     }

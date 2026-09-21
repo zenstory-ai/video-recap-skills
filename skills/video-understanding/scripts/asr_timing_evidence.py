@@ -1,19 +1,16 @@
 """Write and validate honest timing/provenance evidence for coarse MiMo ASR."""
 
-import hashlib
 import json
 import math
 import os
-import re
 import tempfile
 from pathlib import Path
 
-from lib import file_fingerprint, load_background_research
+from lib import file_identity, load_background_research
 
 
 EVIDENCE_FILENAME = "asr_timing_evidence.json"
-SCHEMA_VERSION = 1
-GLOSSARY_POLICY_VERSION = 1
+SCHEMA_VERSION = 2
 VALID_STATUSES = {
     "AVAILABLE_COARSE",
     "EXPLICITLY_SKIPPED",
@@ -25,26 +22,26 @@ VALID_STATUSES = {
     "LEGACY_UNVERIFIED",
 }
 _TOP_KEYS = {
-    "schema_version", "status", "source_video_fingerprint", "audio_fingerprint",
-    "asr_result_fingerprint", "glossary", "precision", "windows",
+    "schema_version", "status", "source_video", "audio", "asr_result",
+    "glossary", "precision", "windows",
 }
 _WINDOW_KEYS = {
     "index", "start", "end", "text_availability", "observed_text",
     "post_glossary_text", "glossary_modified",
 }
-_GLOSSARY_KEYS = {"policy_version", "names_sha256", "name_count"}
+_GLOSSARY_KEYS = {"names", "name_count"}
 _PRECISION = {
     "window_timing": "COARSE_SEGMENT_WINDOWS",
     "dialogue_boundaries": "NOT_VERIFIED",
     "word_alignment": "NOT_PERFORMED",
     "empty_text_meaning": "UNKNOWN_NOT_PROVEN_SILENCE",
 }
-_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
-def _fingerprint(path):
+def _identity(path):
+    """{size, mtime_ns} of a bound file, or None when it does not exist."""
     path = Path(path)
-    return file_fingerprint(path) if path.exists() else None
+    return file_identity(path) if path.exists() else None
 
 
 def load_glossary_names(work_dir):
@@ -67,15 +64,11 @@ def load_glossary_names(work_dir):
 
 
 def _glossary_binding(work_dir, *, legacy=False):
+    """The glossary names that could have corrected this transcription (legacy: unknown)."""
     if legacy:
-        return {"policy_version": None, "names_sha256": None, "name_count": None}
+        return {"names": None, "name_count": None}
     names = load_glossary_names(work_dir)
-    normalized = json.dumps(sorted(names), ensure_ascii=False, separators=(",", ":"))
-    return {
-        "policy_version": GLOSSARY_POLICY_VERSION,
-        "names_sha256": hashlib.sha256(normalized.encode("utf-8")).hexdigest(),
-        "name_count": len(names),
-    }
+    return {"names": names, "name_count": len(names)}
 
 
 def _atomic_json_write(path, payload):
@@ -117,7 +110,8 @@ def write_asr_timing_evidence(
     work_dir, video_path, status, *, observed_segments=None, final_segments=None,
     audio_path=None,
 ):
-    """Write a source/audio/result-bound sidecar without changing the legacy result."""
+    """Write a sidecar recording which source/audio/result files it describes, without
+    changing the legacy result."""
     if status not in VALID_STATUSES:
         raise ValueError(f"unknown ASR timing evidence status: {status}")
     work_dir = Path(work_dir)
@@ -125,9 +119,9 @@ def write_asr_timing_evidence(
     payload = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
-        "source_video_fingerprint": _fingerprint(video_path),
-        "audio_fingerprint": _fingerprint(audio_path) if audio_path else None,
-        "asr_result_fingerprint": _fingerprint(work_dir / "asr_result.json"),
+        "source_video": _identity(video_path),
+        "audio": _identity(audio_path) if audio_path else None,
+        "asr_result": _identity(work_dir / "asr_result.json"),
         "glossary": _glossary_binding(work_dir, legacy=legacy),
         "precision": dict(_PRECISION),
         "windows": _window_evidence(observed_segments, final_segments, legacy),
@@ -145,8 +139,11 @@ def _is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
-def _is_sha256(value):
-    return isinstance(value, str) and _SHA256.fullmatch(value) is not None
+def _is_identity(value):
+    return (
+        isinstance(value, dict) and set(value) == {"size", "mtime_ns"}
+        and _is_int(value["size"]) and _is_int(value["mtime_ns"])
+    )
 
 
 def _valid_glossary(payload, work_dir, legacy):
@@ -154,30 +151,25 @@ def _valid_glossary(payload, work_dir, legacy):
         return False
     if legacy:
         return payload == _glossary_binding(work_dir, legacy=True)
-    expected = _glossary_binding(work_dir)
-    return (
-        payload == expected
-        and _is_int(payload.get("policy_version"))
-        and _is_int(payload.get("name_count"))
-        and _is_sha256(payload.get("names_sha256"))
-    )
+    return payload == _glossary_binding(work_dir) and _is_int(payload.get("name_count"))
 
 
-def _valid_status_relationships(status, result, audio_fingerprint):
+def _valid_status_relationships(status, result, audio):
     texts = [str(segment.get("text") or "") for segment in result]
     if status == "AVAILABLE_COARSE":
-        return bool(result) and any(texts) and _is_sha256(audio_fingerprint)
+        return bool(result) and any(texts) and _is_identity(audio)
     if status == "EMPTY_UNKNOWN":
-        return bool(result) and not any(texts) and _is_sha256(audio_fingerprint)
+        return bool(result) and not any(texts) and _is_identity(audio)
     if status == "UNAVAILABLE_NO_DURATION":
-        return result == [] and _is_sha256(audio_fingerprint)
+        return result == [] and _is_identity(audio)
     if status in {"EXPLICITLY_SKIPPED", "UNAVAILABLE_NO_KEY", "LEGACY_UNVERIFIED"}:
-        return audio_fingerprint is None and (status == "LEGACY_UNVERIFIED" or result == [])
+        return audio is None and (status == "LEGACY_UNVERIFIED" or result == [])
     return False
 
 
 def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
-    """Return whether a sidecar still proves the identity and limited timing it claims."""
+    """Return whether a sidecar still describes the current source/audio/result files
+    (by size + mtime_ns) and the limited timing it claims."""
     evidence_path = Path(evidence_path)
     result_path = Path(asr_result_path)
     try:
@@ -196,24 +188,24 @@ def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
         return False
     if evidence.get("precision") != _PRECISION:
         return False
-    source_fingerprint = _fingerprint(video_path)
-    result_fingerprint = _fingerprint(result_path)
-    if not _is_sha256(source_fingerprint) or evidence.get("source_video_fingerprint") != source_fingerprint:
+    source_identity = _identity(video_path)
+    result_identity = _identity(result_path)
+    if not _is_identity(source_identity) or evidence.get("source_video") != source_identity:
         return False
-    if not _is_sha256(result_fingerprint) or evidence.get("asr_result_fingerprint") != result_fingerprint:
+    if not _is_identity(result_identity) or evidence.get("asr_result") != result_identity:
         return False
-    audio_fingerprint = evidence.get("audio_fingerprint")
-    if audio_fingerprint is not None and not _is_sha256(audio_fingerprint):
+    audio = evidence.get("audio")
+    if audio is not None and not _is_identity(audio):
         return False
-    if not _valid_status_relationships(status, result, audio_fingerprint):
+    if not _valid_status_relationships(status, result, audio):
         return False
     legacy = status == "LEGACY_UNVERIFIED"
     if not _valid_glossary(evidence.get("glossary"), evidence_path.parent, legacy):
         return False
 
-    if audio_fingerprint is not None:
+    if audio is not None:
         audio_path = evidence_path.parent / "audio.wav"
-        if audio_fingerprint != _fingerprint(audio_path):
+        if audio != _identity(audio_path):
             return False
         try:
             audio_meta = json.loads(
@@ -223,7 +215,7 @@ def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
             return False
         if not isinstance(audio_meta, dict):
             return False
-        if audio_meta.get("source_video_fingerprint") != source_fingerprint:
+        if audio_meta.get("source_video_identity") != source_identity:
             return False
 
     windows = evidence.get("windows")
@@ -267,14 +259,12 @@ def asr_evidence_summary_for_brief(work_dir, video_path):
     work_dir = Path(work_dir)
     evidence_path = work_dir / EVIDENCE_FILENAME
     result_path = work_dir / "asr_result.json"
-    fingerprint = _fingerprint(evidence_path)
     valid = bool(video_path) and validate_asr_timing_evidence(
         evidence_path, video_path, result_path
     )
     if valid:
         payload = json.loads(evidence_path.read_text(encoding="utf-8"))
-        return {"status": payload["status"], "evidence_fingerprint": fingerprint,
+        return {"status": payload["status"],
                 "glossary_modifications": None if payload["status"] == "LEGACY_UNVERIFIED"
                 else sum(w["glossary_modified"] is True for w in payload["windows"])}
-    return {"status": "MISSING_OR_STALE", "evidence_fingerprint": fingerprint,
-            "glossary_modifications": None}
+    return {"status": "MISSING_OR_STALE", "glossary_modifications": None}

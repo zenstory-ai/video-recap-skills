@@ -1,6 +1,5 @@
 """Probe and verify an adopted AAC stream without decoding or rewriting it."""
 
-import hashlib
 import json
 from fractions import Fraction
 from pathlib import Path
@@ -10,6 +9,16 @@ from lib import run_cmd
 
 def _fraction(value):
     return Fraction(str(value))
+
+
+def _packet_span(audio):
+    """The stream duration proved by its packets: last packet end minus first packet start."""
+    packets = audio["packets"]
+    if not packets or packets[0]["pts"] is None or packets[-1]["pts"] is None \
+            or packets[-1]["duration"] is None:
+        return None
+    return Fraction(packets[-1]["pts"]) + Fraction(packets[-1]["duration"]) \
+        - Fraction(packets[0]["pts"])
 
 
 def _rational_ticks(value, time_base):
@@ -32,7 +41,7 @@ def _probe(path, *args):
 
 
 def probe_audio_packets(path, audio_stream_index):
-    """Return packet payload and rational timestamp identity for one audio stream.
+    """Return packet sizes and rational timestamps for one audio stream.
 
     ``audio_stream_index`` is the zero-based audio-stream ordinal accepted by
     ffmpeg's ``0:a:N`` selector, not the file-wide absolute stream index.
@@ -40,10 +49,10 @@ def probe_audio_packets(path, audio_stream_index):
     payload = _probe(
         path,
         "-select_streams", f"a:{audio_stream_index}",
-        "-show_streams", "-show_packets", "-show_data_hash", "sha256",
+        "-show_streams", "-show_packets",
         "-show_entries",
         "stream=index,codec_name,time_base,start_pts,start_time,duration_ts,duration,sample_rate,channels,"
-        "channel_layout,extradata_hash:packet=pts,dts,duration,size,data_hash,side_data_list",
+        "channel_layout:packet=pts,dts,duration,size,side_data_list",
     )
     streams = payload.get("streams", [])
     if len(streams) != 1:
@@ -53,18 +62,6 @@ def probe_audio_packets(path, audio_stream_index):
     if not time_base:
         raise RuntimeError(f"音频流 a:{audio_stream_index} 缺少 time_base")
     codec = stream.get("codec_name")
-    extradata_hash = stream.get("extradata_hash", "")
-    extradata_sha256 = (
-        extradata_hash.removeprefix("SHA256:").lower() if extradata_hash else None
-    )
-    if codec == "aac" and (
-        extradata_sha256 is None
-        or len(extradata_sha256) != 64
-        or any(char not in "0123456789abcdef" for char in extradata_sha256)
-    ):
-        raise RuntimeError(
-            f"AAC 音频流 a:{audio_stream_index} 缺少有效 decoder extradata hash"
-        )
     sample_rate = int(stream["sample_rate"]) if stream.get("sample_rate") else None
     channels = int(stream["channels"]) if stream.get("channels") else None
     channel_layout = stream.get("channel_layout")
@@ -73,18 +70,12 @@ def probe_audio_packets(path, audio_stream_index):
         "sample_rate": sample_rate,
         "channels": channels,
         "channel_layout": channel_layout,
-        "extradata_sha256": extradata_sha256,
     }
     packets = []
-    ordered_payload_hashes = hashlib.sha256()
     for packet in payload.get("packets", []):
-        data_hash = packet.get("data_hash")
-        if not data_hash:
-            raise RuntimeError(f"音频流 a:{audio_stream_index} 的 packet 缺少 payload hash")
-        digest = data_hash.removeprefix("SHA256:").lower()
-        ordered_payload_hashes.update(bytes.fromhex(digest))
+        if packet.get("size") is None:
+            raise RuntimeError(f"音频流 a:{audio_stream_index} 的 packet 缺少 size")
         packets.append({
-            "payload_sha256": digest,
             "size": int(packet["size"]),
             "pts": _rational_ticks(packet.get("pts"), time_base),
             "dts": _rational_ticks(packet.get("dts"), time_base),
@@ -101,10 +92,9 @@ def probe_audio_packets(path, audio_stream_index):
         "sample_rate": sample_rate,
         "channels": channels,
         "channel_layout": channel_layout,
-        "extradata_sha256": extradata_sha256,
         "decoder": decoder,
         "packet_count": len(packets),
-        "payload_sha256": ordered_payload_hashes.hexdigest(),
+        "payload_bytes": sum(packet["size"] for packet in packets),
         "packets": packets,
     }
 
@@ -161,17 +151,19 @@ def validate_adopted_source(path, audio_stream_index):
 
 
 def verify_adopted_audio(input_path, output_path, input_stream_index, output_stream_index=0):
-    """Probe the rendered output and prove packet payload/timing identity."""
+    """Probe the rendered output and check packet count, payload bytes, duration and timing."""
     expected = probe_audio_packets(input_path, input_stream_index)
     actual = probe_audio_packets(output_path, output_stream_index)
     if expected["decoder"] != actual["decoder"]:
-        raise RuntimeError("采用音频 decoder identity 已改变")
+        raise RuntimeError("采用音频 decoder 参数已改变")
     if expected["packet_count"] != actual["packet_count"]:
         raise RuntimeError(
             f"采用音频 packet count 已改变: {expected['packet_count']} -> {actual['packet_count']}"
         )
-    if expected["payload_sha256"] != actual["payload_sha256"]:
-        raise RuntimeError("采用音频 packet payload hash 不一致")
+    if expected["payload_bytes"] != actual["payload_bytes"]:
+        raise RuntimeError("采用音频 packet payload 总字节数不一致")
+    if _packet_span(expected) != _packet_span(actual):
+        raise RuntimeError("采用音频流时长已改变")
     expected_packet_core = [
         {key: value for key, value in packet.items() if key != "side_data_list"}
         for packet in expected["packets"]

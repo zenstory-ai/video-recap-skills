@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from lib import CONFIG, stable_hash
+from lib import CONFIG, file_identity
 
 
 def _empty_evidence(mode):
@@ -21,11 +21,11 @@ def _read_json(path):
 
 
 def _output_payload_is_current(payload, work_dir):
-    plan = _read_json(Path(work_dir) / "clip_plan_validated.json")
+    plan_path = Path(work_dir) / "clip_plan_validated.json"
     return (
         payload is not None
-        and plan is not None
-        and payload["clip_plan_fingerprint"] == stable_hash(plan)
+        and plan_path.exists()
+        and payload["clip_plan_identity"] == file_identity(plan_path)
     )
 
 

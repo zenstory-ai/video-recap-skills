@@ -1,6 +1,5 @@
 """Strict local full-sound adoption enters recap only at the assembly boundary."""
 
-import hashlib
 import json
 import os
 import sys
@@ -53,20 +52,17 @@ def _finish_stubs(monkeypatch, work, calls):
             for flag in ("--tts-meta", "--narration-adoption", "--audio-mix-adoption")
         }
 
-        def digest(path):
-            return hashlib.sha256(path.read_bytes()).hexdigest()
-
-        final_identity = {"path": str(final), "sha256": digest(final)}
+        final_identity = {"path": str(final)}
         (work / "narration_input_binding.json").write_text(json.dumps({
             "adoption": {
-                "sha256": digest(values["--narration-adoption"]),
-                "tts_meta": {"sha256": digest(values["--tts-meta"])},
+                "path": str(values["--narration-adoption"]),
+                "tts_meta": {"path": str(values["--tts-meta"])},
             },
             "final_output": final_identity,
         }))
         (work / "audio_mix_binding.json").write_text(json.dumps({
-            "adoption": {"sha256": digest(values["--audio-mix-adoption"])},
-            "picture": {"sha256": digest(Path(args[0]))},
+            "adoption": {"path": str(values["--audio-mix-adoption"])},
+            "picture": {"path": str(args[0])},
             "final_output": final_identity,
         }))
 
@@ -166,7 +162,7 @@ def test_local_bundle_ignores_hostile_ambient_tts_and_voice(monkeypatch, tmp_pat
     assert [script for _, script, _ in calls] == ["assemble.py"]
 
 
-def test_audio_binding_hashes_each_local_artifact_without_changing_analysis(tmp_path):
+def test_audio_binding_records_each_local_artifact_path(tmp_path):
     bundle = _bundle(tmp_path)
     args = Namespace(
         audio_mode="narration", audio_stream_index=0,
@@ -175,14 +171,12 @@ def test_audio_binding_hashes_each_local_artifact_without_changing_analysis(tmp_
         audio_mix_adoption=str(bundle["audio_mix_adoption"]),
     )
 
-    first = recap_source.audio_binding(args)
-    bundle["tts_meta"].write_bytes(b"changed")
-    second = recap_source.audio_binding(args)
+    binding = recap_source.audio_binding(args)
 
-    assert first["mode"] == second["mode"] == "narration"
-    assert first["local_adoption"]["tts_meta"]["sha256"] != second["local_adoption"]["tts_meta"]["sha256"]
-    assert first["local_adoption"]["narration_adoption"] == second["local_adoption"]["narration_adoption"]
-    assert first["local_adoption"]["audio_mix_adoption"] == second["local_adoption"]["audio_mix_adoption"]
+    assert binding["mode"] == "narration"
+    assert binding["local_adoption"] == {
+        name: {"path": str(path.resolve())} for name, path in bundle.items()
+    }
 
 
 @pytest.mark.parametrize("precreate", ["work", "delivery"])
@@ -251,7 +245,7 @@ def test_parent_rejects_assembler_binding_that_does_not_match_manifest(
         valid_run(*args)
         binding_path = work / "audio_mix_binding.json"
         binding = json.loads(binding_path.read_text(encoding="utf-8"))
-        binding["adoption"]["sha256"] = "0" * 64
+        binding["adoption"]["path"] = str(tmp_path / "other_mix_adoption.json")
         binding_path.write_text(json.dumps(binding), encoding="utf-8")
 
     monkeypatch.setattr(recap_runner, "_run", mismatched_run)
@@ -303,7 +297,7 @@ def test_copied_skill_python_i_cli_routes_offline_bundle_only_to_assemble(tmp_pa
     assemble_scripts.mkdir(parents=True)
     (assemble_scripts / "assemble.py").write_text(
         """#!/usr/bin/env python3
-import argparse,hashlib,json,shutil
+import argparse,json,shutil
 from pathlib import Path
 p=argparse.ArgumentParser(); p.add_argument('video'); p.add_argument('--work-dir',required=True)
 p.add_argument('--recap-stem',required=True); p.add_argument('--output-dir',required=True)
@@ -312,9 +306,8 @@ p.add_argument('--audio-mix-adoption',required=True); p.add_argument('--no-burn-
 a=p.parse_args(); work=Path(a.work_dir); out=Path(a.output_dir)/f'recap_{a.recap_stem}.mp4'
 out.parent.mkdir(parents=True,exist_ok=True); shutil.copy2(a.video,out)
 (work/'assembly_manifest.json').write_text(json.dumps({'final_output':str(out)}))
-d=lambda p:hashlib.sha256(Path(p).read_bytes()).hexdigest()
-(work/'narration_input_binding.json').write_text(json.dumps({'adoption':{'sha256':d(a.narration_adoption),'tts_meta':{'sha256':d(a.tts_meta)}}}))
-(work/'audio_mix_binding.json').write_text(json.dumps({'adoption':{'sha256':d(a.audio_mix_adoption)},'picture':{'sha256':d(a.video)}}))
+(work/'narration_input_binding.json').write_text(json.dumps({'adoption':{'path':a.narration_adoption,'tts_meta':{'path':a.tts_meta}}}))
+(work/'audio_mix_binding.json').write_text(json.dumps({'adoption':{'path':a.audio_mix_adoption},'picture':{'path':a.video}}))
 """,
         encoding="utf-8",
     )

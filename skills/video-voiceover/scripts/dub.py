@@ -20,7 +20,6 @@ brittle and case-by-case. Two stages around an agent-authored pause:
 """
 import argparse
 import base64
-import hashlib
 import json
 import re
 import unicodedata
@@ -28,6 +27,7 @@ import wave
 from pathlib import Path
 
 from lib import (
+    file_identity,
     CONFIG,
     get_video_duration,
     log,
@@ -44,7 +44,6 @@ ATEMPO_CAP = 2.0  # max compression before we trim instead (atempo>2 also sounds
 DUB_FAST_SPEECH_CPS = 7.0
 DUB_TRIM_RISK_CPS = 7.0
 DUB_MIN_ASR_WINDOW_SECONDS = 0.5
-DUB_TTS_CACHE_VERSION = 1
 DUB_TTS_STYLE_PROMPT = "自然、清晰，保持原说话人的音色与节奏，语气平稳。"
 
 DUB_SCHEMA_VERSION = 1
@@ -349,16 +348,13 @@ def _clone_tts(text, ref_b64, out_wav):
     Path(out_wav).write_bytes(base64.b64decode(data))
 
 
-def _clone_cache_fingerprint(text, ref_bytes):
-    payload = {
-        "cache_version": DUB_TTS_CACHE_VERSION,
+def _clone_cache_inputs(text, ref_identity):
+    return {
         "model": CLONE_MODEL,
         "style_prompt": DUB_TTS_STYLE_PROMPT,
         "text": str(text),
-        "reference_sha256": hashlib.sha256(ref_bytes).hexdigest(),
+        "reference": ref_identity,
     }
-    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
 
 
 def _clone_cache_meta_path(raw_wav):
@@ -374,30 +370,26 @@ def _usable_clone_wav(path):
     return sample_rate > 0 and channels > 0 and bool(frames)
 
 
-def _write_clone_cache_meta(raw_wav, text, ref_bytes):
-    meta = {
-        "schema_version": DUB_TTS_CACHE_VERSION,
-        "fingerprint": _clone_cache_fingerprint(text, ref_bytes),
-        "model": CLONE_MODEL,
-    }
+def _write_clone_cache_meta(raw_wav, text, ref_identity):
+    meta = {"inputs": _clone_cache_inputs(text, ref_identity)}
     return _write_json(_clone_cache_meta_path(raw_wav), meta)
 
 
-def _ensure_clone_tts(text, ref_b64, ref_bytes, raw_wav):
+def _ensure_clone_tts(text, ref_b64, ref_identity, raw_wav):
     raw_wav = Path(raw_wav)
-    expected = _clone_cache_fingerprint(text, ref_bytes)
+    expected = _clone_cache_inputs(text, ref_identity)
     meta_path = _clone_cache_meta_path(raw_wav)
     # Missing sidecar = never synthesized; a sidecar this skill wrote but cannot parse is a
     # bug, not a reason to silently pay for re-synthesis.
     if meta_path.exists():
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if meta["fingerprint"] == expected and _usable_clone_wav(raw_wav):
+        if meta["inputs"] == expected and _usable_clone_wav(raw_wav):
             return True
 
     _clone_tts(text, ref_b64, raw_wav)
     if not _usable_clone_wav(raw_wav):
         raise RuntimeError(f"MiMo voiceclone returned an invalid WAV: {raw_wav}")
-    _write_clone_cache_meta(raw_wav, text, ref_bytes)
+    _write_clone_cache_meta(raw_wav, text, ref_identity)
     return False
 
 
@@ -528,8 +520,8 @@ def stage_render(video, work, ref_start, ref_dur):
     if not ref_wav.exists():
         rs, rd = _ref_window(duration, ref_start, ref_dur)
         _cut_wav(work / "dub_source.wav", ref_wav, rs, rd)
-    ref_bytes = ref_wav.read_bytes()
-    ref_b64 = base64.b64encode(ref_bytes).decode("ascii")
+    ref_identity = file_identity(ref_wav)
+    ref_b64 = base64.b64encode(ref_wav.read_bytes()).decode("ascii")
 
     tts_dir = work / "dub_tts"
     tts_dir.mkdir(exist_ok=True)
@@ -541,7 +533,7 @@ def stage_render(video, work, ref_start, ref_dur):
         room = max(0.4, min(slot_end, nxt) - ln["start"])
         raw = tts_dir / f"line_{i:03d}_raw.wav"
         fitted = tts_dir / f"line_{i:03d}.wav"
-        cache_hit = _ensure_clone_tts(ln["zh"], ref_b64, ref_bytes, raw)
+        cache_hit = _ensure_clone_tts(ln["zh"], ref_b64, ref_identity, raw)
         ln["tts_cache"] = "hit" if cache_hit else "miss"
         ln["fitted_wav"] = str(fitted)
         ln["fitted_dur"] = round(_time_fit(raw, fitted, room), 2)

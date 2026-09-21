@@ -55,7 +55,7 @@ python3 scripts/understand.py <video> --work-dir <work_dir> \
 |------|------|
 | `scenes.json` | 场景切点、起止时间与时长 |
 | `asr_result.json` | `[{start, end, text}]` 时间戳对白 |
-| `asr_timing_evidence.json` | ASR 来源/音频/结果绑定、可用性状态、粗窗口精度与 glossary 前后文本 |
+| `asr_timing_evidence.json` | ASR 可用性状态、粗窗口精度、glossary 前后文本，以及它所描述的源视频/音频/结果文件（路径存在性 + size/mtime） |
 | `vlm_analysis.json` | 逐场景描述、深层分析与 `frame_facts` |
 | `silence_periods.json` | `[{start, end, duration, has_speech}]` 安静窗口 |
 | `timeline_fusion.json` | VLM、ASR 与静音信息的统一时间线 |

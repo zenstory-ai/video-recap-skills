@@ -1,7 +1,6 @@
 """Self-hosted index-tts JSON-to-WAV transport with no redirect forwarding."""
 
 import contextlib
-import hashlib
 import io
 import json
 import os
@@ -16,8 +15,6 @@ from pathlib import Path
 MAX_WAV_BYTES = 64 * 1024 * 1024
 MAX_ERROR_BYTES = 512
 SPEED_POLICY = "provider-default-no-rate-control"
-RECEIPT_SCHEMA = "index-tts-request-receipt"
-RECEIPT_VERSION = 1
 
 
 class _SafeResponseError(RuntimeError):
@@ -57,10 +54,6 @@ def validate_index_tts_config(endpoint, voice):
     return endpoint, voice
 
 
-def endpoint_fingerprint(endpoint):
-    return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
-
-
 def load_private_config(config, environ):
     """Read the private index-tts settings; validate them once, only when that provider is selected."""
     endpoint = environ.get("INDEX_TTS_ENDPOINT", "").strip()
@@ -69,15 +62,13 @@ def load_private_config(config, environ):
         endpoint, voice = validate_index_tts_config(endpoint, voice)
     config["index_tts_endpoint"] = endpoint
     config["index_tts_voice"] = voice
-    config["index_tts_cache_revision"] = environ.get("INDEX_TTS_CACHE_REVISION", "").strip()
 
 
 def cache_settings(config):
+    """Non-secret settings that decide reuse; the endpoint is never written to disk."""
     return {
-        "index_tts_endpoint_sha256": endpoint_fingerprint(config["index_tts_endpoint"]),
         "index_tts_voice": config["index_tts_voice"],
         "index_tts_speed_policy": SPEED_POLICY,
-        "index_tts_cache_revision": config.get("index_tts_cache_revision", ""),
     }
 
 
@@ -98,43 +89,13 @@ def synthesize_configured(text, output_path, config):
     )
 
 
-def finalize_receipt(receipt, processed_hash):
-    if not receipt:
-        return receipt
-    receipt["processed_wav_sha256"] = processed_hash
-    receipt["raw_wav_retained_as_processed"] = receipt["returned_wav_sha256"] == processed_hash
-    receipt["raw_wav_reconstructable_from_receipt"] = False
-    return receipt
-
-
 def valid_cached_receipt(cache_data, config):
+    """A cached index-tts segment must carry the receipt of a request for the current voice."""
     receipt = cache_data.get("provider_receipt")
-    if not isinstance(receipt, dict):
-        return False
-    expected = {
-        "receipt_schema": RECEIPT_SCHEMA,
-        "receipt_version": RECEIPT_VERSION,
+    return isinstance(receipt, dict) and receipt == {
         "provider": "index-tts",
         "requested_voice": config["index_tts_voice"],
-        "speed_policy": SPEED_POLICY,
-        "processed_wav_sha256": cache_data.get("audio_fingerprint"),
     }
-    raw_hash = receipt.get("returned_wav_sha256")
-    processed_hash = receipt.get("processed_wav_sha256")
-    retained = receipt.get("raw_wav_retained_as_processed")
-    if not all(receipt.get(key) == value for key, value in expected.items()):
-        return False
-    if cache_data.get("processed_wav_sha256") != processed_hash:
-        return False
-    if not all(
-        isinstance(value, str) and len(value) == 64
-        and all(char in "0123456789abcdef" for char in value)
-        for value in (raw_hash, processed_hash)
-    ):
-        return False
-    if not isinstance(retained, bool) or receipt.get("raw_wav_reconstructable_from_receipt") is not False:
-        return False
-    return not retained or raw_hash == processed_hash
 
 
 def _discard_http_error_body(error):
@@ -220,11 +181,4 @@ def synthesize_index_tts(text, output_path, *, endpoint, voice, timeout):
         os.replace(partial, output)
     finally:
         partial.unlink(missing_ok=True)
-    return {
-        "receipt_schema": RECEIPT_SCHEMA,
-        "receipt_version": RECEIPT_VERSION,
-        "provider": "index-tts",
-        "requested_voice": voice,
-        "returned_wav_sha256": hashlib.sha256(audio).hexdigest(),
-        "speed_policy": SPEED_POLICY,
-    }
+    return {"provider": "index-tts", "requested_voice": voice}

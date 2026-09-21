@@ -1,7 +1,6 @@
 """Self-contained config + utilities for this skill (no cross-skill imports).
 Merged from the shared core; reads the same env vars as the rest of the bundle."""
 import json
-import hashlib
 import math
 import os
 import re
@@ -251,47 +250,12 @@ def load_background_research(work_dir):
         raise ValueError("background_research.json 顶层必须是 JSON 对象（{...}）")
     return data
 
-def stable_json_dumps(value):
-    """Serialize values deterministically for non-secret cache fingerprints."""
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), default=str)
-
-def stable_hash(value):
-    """Return an md5 digest for deterministic JSON-serializable values."""
-    return hashlib.md5(stable_json_dumps(value).encode("utf-8")).hexdigest()
-
-_FILE_FINGERPRINT_MEMO = {}
-
-
-def _file_identity(path):
-    """(device, inode, size, mtime_ns) — changes whenever the bytes could have changed."""
+def file_identity(path):
+    """{"size", "mtime_ns"} of a file: the cache identity recorded instead of content hashes."""
     st = os.stat(os.fspath(path))
-    return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns)
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
 
 
-def file_fingerprint(path, chunk_size=1024 * 1024):
-    """Return a full-content fingerprint for cache-correct identity checks.
-
-    The digest covers CONTENT only — never the path or mtime — so a copied video or
-    artifact is still recognised as the same asset, while any byte change invalidates
-    the cache even if timestamps, size, head, or tail bytes are misleading.
-
-    Identity metadata is used ONLY to memoize within a single process. One understanding
-    run fingerprints the same source video 8-10 times and the whole extracted frame set
-    2-3 times; on a 40-minute video at fps=1 that is gigabytes of redundant reads before
-    any real work starts. A file rewritten in place gets a new (size, mtime_ns) and is
-    re-hashed, so the memo can never serve a stale digest.
-    """
-    key = _file_identity(path)
-    memoized = _FILE_FINGERPRINT_MEMO.get(key)
-    if memoized is not None:
-        return memoized
-    h = hashlib.sha256()
-    with open(os.fspath(path), "rb") as f:
-        for chunk in iter(lambda: f.read(chunk_size), b""):
-            h.update(chunk)
-    digest = h.hexdigest()
-    _FILE_FINGERPRINT_MEMO[key] = digest
-    return digest
 def _retry_after_seconds(value, fallback):
     """Parse Retry-After seconds or HTTP-date; return fallback on malformed input."""
     if not value:

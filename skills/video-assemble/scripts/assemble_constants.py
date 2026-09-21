@@ -3,8 +3,6 @@
 from fractions import Fraction
 import math
 
-SUBTITLE_RENDER_VERSION = 9
-SUBTITLE_TEXT_NORMALIZE_VERSION = 1
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 ASSEMBLY_QC = "assembly_qc.json"
 VISUAL_QC = "visual_qc.json"

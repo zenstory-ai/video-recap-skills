@@ -13,6 +13,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scri
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
+import materials  # noqa: E402
 import recap_runtime  # noqa: E402
 import recap_timeline  # noqa: E402
 
@@ -155,7 +156,7 @@ def seed_cut_work(
     if rendered:
         recap_timeline._write_phase_ledger(
             work,
-            clip_plan_fingerprint=recap_timeline._file_md5(work / "clip_plan.json"),
+            clip_plan_identity=materials.file_identity(work / "clip_plan.json"),
             edited_source_rendered=True,
         )
     return video, work

@@ -17,7 +17,7 @@ description: >
 3. 拼接选定区间，输出 `edited_source.mp4`。
 4. 到此停止，由 Agent 按真实输出时间线写 `narration.json`；本工具不读取旁白，也不做原片→输出映射。
 
-相同输入会得到相同输出。缓存按源文件完整内容指纹、标准化计划、渲染设置及输出文件身份验证；只看 `mtime` 或只有 sidecar 而没有媒体文件都不足以复用。
+相同输入会得到相同输出。`edited_source.mp4.meta.json` 记录标准化 clips、渲染设置和每个源文件的 `size`/`mtime_ns`；三者与当前一致且 `edited_source.mp4` 存在非空才复用，任一不同即重渲染。只有 sidecar 而没有媒体文件不复用。
 
 ## 2. 输入契约
 
@@ -98,7 +98,7 @@ ffmpeg -i input.mp4 -vf "select='gt(scene,0.35)',showinfo" -an -f null -
 
 `0.35` 是起始阈值，不是质量判据；大幅运动、闪白和叠化都可能误报。把候选映射回原片 shot 与本次拼接边界后，按上面的来源分类处理，并以正常速度播放决定是否保留。
 
-需要精确到实际帧、检查长区间内部残镜并保存版本绑定证据时，使用
+需要精确到实际帧、检查长区间内部残镜并记录所用计划路径时，使用
 `scripts/shot_review.py` 或 `cut.py --review-shots`（有黑边或包装时加 `--roi` / `--shot-roi`）；
 详见 `references/shot-review.md`。
 

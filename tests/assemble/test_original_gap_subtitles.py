@@ -8,7 +8,6 @@ import json  # noqa: E402
 import pytest  # noqa: E402
 
 import assembly_settings  # noqa: E402
-from assemble_constants import SUBTITLE_TEXT_NORMALIZE_VERSION  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import source_subtitles  # noqa: E402
 import subtitle_core  # noqa: E402
@@ -50,12 +49,16 @@ def test_plan_clip_spans_from_validated_plan(tmp_path):
 
 
 def test_plan_clip_spans_ignore_stale_validated_plan(tmp_path):
+    import os
+
     raw = {"clips": [{"start": 40.0, "end": 45.0}]}
     (tmp_path / "clip_plan.json").write_text(json.dumps(raw), encoding="utf-8")
     (tmp_path / "clip_plan_validated.json").write_text(json.dumps({
-        "raw_plan_fingerprint": "stale",
         "clips": [{"source_start": 0.0, "source_end": 10.0, "output_start": 0.0, "output_end": 10.0}],
     }), encoding="utf-8")
+    # The raw plan was rewritten after validation, so the validated copy is stale.
+    os.utime(tmp_path / "clip_plan_validated.json", (1_000, 1_000))
+    os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
 
     spans = source_subtitles._plan_clip_spans(tmp_path)
 
@@ -317,11 +320,6 @@ def test_original_gap_text_normalizes_em_dashes(monkeypatch, tmp_path):
     assert "活着，让我看看" in ass
 
 
-def test_fingerprint_includes_subtitle_text_normalize_version():
-    fp = assembly_settings.assembly_settings_fingerprint()
-    assert fp["subtitle_text_normalize"] == SUBTITLE_TEXT_NORMALIZE_VERSION
-
-
 # --- R1: user-provided subtitle file as override primary ----------------------
 
 def test_user_json_output_time_used_verbatim_above_agent(monkeypatch, tmp_path):
@@ -390,12 +388,12 @@ def test_user_subtitles_absent_returns_none(tmp_path):
     assert source_subtitles._load_user_original_subtitles(tmp_path) is None
 
 
-def test_fingerprint_user_subtitles_flag(tmp_path):
-    assert assembly_settings.assembly_settings_fingerprint(tmp_path)["user_subtitles"] is False
+def test_settings_payload_user_subtitles_flag(tmp_path):
+    assert assembly_settings.assembly_settings_payload(tmp_path)["user_subtitles"] is False
     (tmp_path / "user_subtitles.json").write_text("[]", encoding="utf-8")
-    assert assembly_settings.assembly_settings_fingerprint(tmp_path)["user_subtitles"] is True
+    assert assembly_settings.assembly_settings_payload(tmp_path)["user_subtitles"] is True
     # no work_dir → flag is constant False (back-compat for no-arg callers)
-    assert assembly_settings.assembly_settings_fingerprint()["user_subtitles"] is False
+    assert assembly_settings.assembly_settings_payload()["user_subtitles"] is False
 
 
 # --- R2: precise interval-clip path -------------------------------------------

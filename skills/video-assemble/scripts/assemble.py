@@ -22,12 +22,12 @@ import subtitle_track_binding
 import timeline_emit
 import visual_render
 import lib
-from assembly_settings import assembly_settings_fingerprint
+from assembly_settings import assembly_settings_payload
 from audio_mix import final_loudnorm_filter
 
 __all__ = [
     "assemble_video",
-    "assembly_settings_fingerprint",
+    "assembly_settings_payload",
     "final_loudnorm_filter",
     "main",
 ]
@@ -364,17 +364,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         cmd += ["-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-movflags", "+faststart",
                 "-t", str(video_duration), str(output_path)]
     try:
-        if binding:
-            narration_binding.assert_current(binding)
-        if explicit_mix is not None:
-            audio_mix_binding.assert_current(explicit_mix)
         result = lib.run_cmd(cmd)
         if result.returncode != 0:
             raise RuntimeError(f"视频组装失败: {result.stderr}")
-        if binding:
-            narration_binding.assert_current(binding)
-        if explicit_mix is not None:
-            audio_mix_binding.assert_current(explicit_mix)
     finally:
         # 清理临时 filter 脚本（无论 ffmpeg 是否成功）
         if fc_script is not None:
@@ -568,7 +560,7 @@ def main():
             narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
             audio_mix_binding=_current_audio_mix_binding(work_dir, args.audio_mode),
             final_output=final_output,
-            settings_fingerprint=assembly_settings.assembly_settings_fingerprint,
+            settings_payload=assembly_settings.assembly_settings_payload,
             audio_mode=args.audio_mode,
             audio_stream_index=args.audio_stream_index,
         )

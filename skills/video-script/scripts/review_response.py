@@ -7,7 +7,6 @@ import re
 
 from pathlib import Path
 
-from lib import stable_hash
 
 from evidence_bundle import (
     _clip_text,
@@ -17,7 +16,7 @@ from evidence_bundle import (
     build_review_coverage_metadata,
     render_evidence_bundle,
 )
-from review_grounding import _load_agent_optional, _source_fingerprint
+from review_grounding import _load_agent_optional
 
 CATEGORIES = [
     "hallucination",
@@ -108,18 +107,6 @@ def merge_review_findings(chunks):
     )
 
 
-def _bundle_fingerprint(bundle):
-    return stable_hash(
-        {
-            "schema_version": bundle["schema_version"],
-            "clock": bundle["clock"],
-            "coverage": bundle["coverage"],
-            "items": bundle["items"],
-            "context_items": bundle["context_items"],
-        }
-    )
-
-
 def _bundle_prompt_size(bundle):
     return len(render_evidence_bundle(bundle))
 
@@ -134,11 +121,10 @@ def _chunk_evidence_bundle(bundle, *, max_items=80, max_chars=12000):
     """
     items = list(bundle["items"])
     if len(items) <= max_items and _bundle_prompt_size(bundle) <= max_chars:
-        fp = _bundle_fingerprint(bundle)
         one = dict(bundle)
         one["chunk_index"] = 0
         one["chunk_count"] = 1
-        one["metadata"] = {**bundle["metadata"], "evidence_bundle_fingerprint": fp}
+        one["metadata"] = dict(bundle["metadata"])
         return [one]
     ranges = bundle["coverage"]["selected_ranges"]
     chunks = []
@@ -176,14 +162,9 @@ def _chunk_evidence_bundle(bundle, *, max_items=80, max_chars=12000):
         chunk["chunk_index"] = 0
         chunks = [chunk]
     count = len(chunks)
-    fp = _bundle_fingerprint(bundle)
     for chunk in chunks:
         chunk["chunk_count"] = count
-        chunk["metadata"] = {
-            **bundle["metadata"],
-            "chunked_review": count > 1,
-            "evidence_bundle_fingerprint": fp,
-        }
+        chunk["metadata"] = {**bundle["metadata"], "chunked_review": count > 1}
     return chunks
 
 
@@ -629,7 +610,7 @@ def format_review_md(review):
 def build_grounding_qc(work_dir, review, bundle, *, timeline="source"):
     """Pure-ish compatibility seam: build grounding QC payload without writing it.
 
-    It reads optional source fingerprints/QC from work_dir to preserve the existing artifact
+    It reads optional QC sidecars from work_dir to preserve the existing artifact
     contract, but has no side effects.
     """
     work_dir = Path(work_dir)
@@ -643,23 +624,11 @@ def build_grounding_qc(work_dir, review, bundle, *, timeline="source"):
     coverage_meta = build_review_coverage_metadata(bundle)
     visual_items = [item for item in items if item["source"] == "visual"]
     asr_items = [item for item in items if item["source"] == "asr"]
-    visual_fp = _source_fingerprint(work_dir, "vlm_analysis.json") or (
-        stable_hash(visual_items) if visual_items else ""
-    )
-    asr_fp = _source_fingerprint(work_dir, "asr_result.json") or (
-        stable_hash(asr_items) if asr_items else ""
-    )
     return {
         "schema_version": 1,
         "owner": "video-script.review",
         "timeline": timeline,
         "coverage_policy_version": COVERAGE_POLICY_VERSION,
-        "source_fingerprints": {
-            "vlm": visual_fp,
-            "asr": asr_fp,
-            "research": _source_fingerprint(work_dir, "background_research.json"),
-            "clip_plan": _source_fingerprint(work_dir, "clip_plan_validated.json"),
-        },
         "review_coverage": {
             "time_ranges": coverage_meta["time_ranges"],
             "scene_count": coverage_meta["scene_count"],
@@ -676,7 +645,7 @@ def build_grounding_qc(work_dir, review, bundle, *, timeline="source"):
         "index_inputs": {
             "vlm": bool(visual_items),
             "asr": bool(asr_items),
-            "research": bool(_source_fingerprint(work_dir, "background_research.json")),
+            "research": (work_dir / "background_research.json").exists(),
         },
         "speech_window_qc": _load_optional_json(work_dir, "silence_periods.qc.json")
         or {"coarse_asr_windows": 0, "low_confidence_speech_flags": 0},

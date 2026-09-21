@@ -45,7 +45,9 @@ def test_collects_lightweight_evidence_prefers_validated_plan(tmp_path):
     assert "storyboard.json" in evidence["visual_metadata"]
     assert evidence["final_output"]["candidates"][0]["exists"] is True
     assert "tp-should-redact" not in json.dumps(evidence)
-    assert len(evidence["fingerprint"]) == 64
+    assert "fingerprint" not in evidence
+    item = evidence["artifacts"]["narration.json"]
+    assert set(item) == {"path", "kind", "bytes", "mtime_ns", "summary"}
 
 
 def test_payload_preserves_semantic_values_and_only_relevant_final_output(tmp_path):
@@ -332,7 +334,7 @@ def test_injected_judge_payload_and_report_validation(tmp_path):
 
     assert seen["artifact"] == "mimo_qc.json"
     assert "instructions" in seen
-    assert len(seen["payload_fingerprint"]) == 64
+    assert "payload_fingerprint" not in seen and "evidence_fingerprint" not in seen
     finding = result["report"]["findings"][0]
     assert finding["sample_policy"]["type"] == "sampled"
     assert finding["severity"] == "advisory"
@@ -374,9 +376,14 @@ def test_live_call_is_one_request_per_stage_and_uses_cache_unless_refreshed(
     assert first["report"]["metadata"]["request_count"] == 1
     assert second["report"]["metadata"]["request_count"] == 0
     assert refreshed["report"]["metadata"]["request_count"] == 1
-    cache_key = first["report"]["metadata"]["cache_key"]
-    assert len(cache_key) == 64
-    assert str(work) not in json.dumps(first["report"]["metadata"]["cache_input"])
+    cache_input = first["report"]["metadata"]["cache_input"]
+    assert "cache_key" not in first["report"]["metadata"]
+    assert str(work) not in json.dumps(cache_input)
+    assert cache_input["evidence"]["artifacts"]["narration.json"] == {
+        "kind": "json",
+        "bytes": (work / "narration.json").stat().st_size,
+        "mtime_ns": (work / "narration.json").stat().st_mtime_ns,
+    }
 
 
 def test_live_missing_key_is_unavailable(monkeypatch, tmp_path):
@@ -468,12 +475,12 @@ def test_post_render_sends_bounded_frames_but_never_persists_base64(
     samples = [
         {
             "data_url": "data:image/jpeg;base64,BASE64SECRET1",
-            "sha256": "a" * 64,
+            "bytes": 13,
             "timestamp": 5.125,
         },
         {
             "data_url": "data:image/jpeg;base64,BASE64SECRET2",
-            "sha256": "b" * 64,
+            "bytes": 13,
             "timestamp": 15.25,
         },
     ]
@@ -503,7 +510,7 @@ def test_post_render_sends_bounded_frames_but_never_persists_base64(
     assert result["report"]["metadata"]["frame_samples"]["count"] == 2
 
 
-def test_cache_input_includes_prompt_payload_fingerprint():
+def test_cache_input_includes_prompt_instructions_and_config():
     evidence = {
         "artifacts": {},
         "source_asr": {},
@@ -512,21 +519,16 @@ def test_cache_input_includes_prompt_payload_fingerprint():
         "final_output": {"candidates": []},
     }
     frames = {"count": 0, "samples": []}
+    payload = {"model": "m", "config": {"model": "m"}, "instructions": "prompt-v1"}
 
-    first = mimo_qc_report._cache_input(
-        "post_render",
-        {"model": "m", "payload_fingerprint": "prompt-v1"},
-        evidence,
-        frames,
-    )
+    first = mimo_qc_report._cache_input("post_render", payload, evidence, frames)
+    same = mimo_qc_report._cache_input("post_render", dict(payload), evidence, frames)
     second = mimo_qc_report._cache_input(
-        "post_render",
-        {"model": "m", "payload_fingerprint": "prompt-v2"},
-        evidence,
-        frames,
+        "post_render", {**payload, "instructions": "prompt-v2"}, evidence, frames
     )
 
-    assert first["payload_fingerprint"] == "prompt-v1"
+    assert first["instructions"] == "prompt-v1"
+    assert first == same
     assert first != second
 
 
@@ -561,7 +563,7 @@ def test_pre_and_post_reports_are_aggregated_without_overwriting_each_other(
         config=config,
         final_output=work / "output.mp4",
         frame_sampler=lambda *_a, **_k: [
-            {"data_url": "data:image/jpeg;base64,FRAME", "sha256": "c" * 64}
+            {"data_url": "data:image/jpeg;base64,FRAME", "bytes": 5}
         ],
     )
 
