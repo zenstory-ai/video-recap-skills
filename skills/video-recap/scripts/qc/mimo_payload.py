@@ -6,8 +6,8 @@ import json
 from typing import Any
 from collections.abc import Mapping, Sequence
 
-from mimo_qc_evidence import safe_mimo_config
-from mimo_qc_contract import ARTIFACT_NAME, DEFAULT_STAGE
+from qc.mimo_evidence import safe_mimo_config
+from qc.mimo_contract import ARTIFACT_NAME, DEFAULT_STAGE
 
 
 def _semantic_evidence(evidence: Mapping[str, Any], *, stage: str) -> dict[str, Any]:

@@ -17,7 +17,7 @@ import media
 import narration_audio
 import render_preflight
 import source_subtitles
-import subtitle_render
+import subtitles.render as subtitle_render
 import timeline_emit
 import visual_render
 from assemble import assemble_video
@@ -44,13 +44,13 @@ from assembly_contract import _resolve_final_output
 from assembly_settings import assembly_settings_payload
 from audio_mix import _build_audio_filter_complex, final_loudnorm_filter
 from media import _build_video_clips
-from subtitle_core import (
+from subtitles.core import (
     _split_subtitle_chunks,
     _subtitle_entries,
     _seconds_to_ass_time,
     _seconds_to_srt_time,
 )
-from subtitle_render import _escape_ass_text, _generate_ass, _generate_srt
+from subtitles.render import _escape_ass_text, _generate_ass, _generate_srt
 from timeline_emit import _emit_timeline
 from visual_render import (
     _output_downscale_filter,

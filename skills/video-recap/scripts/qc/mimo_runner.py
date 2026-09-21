@@ -15,8 +15,8 @@ from collections.abc import Callable, Mapping, Sequence
 
 import qc_contract
 
-from mimo_qc_report import _stage_reports, build_report, write_report
-from mimo_qc_contract import ARTIFACT_NAME, DEFAULT_STAGE
+from qc.mimo_report import _stage_reports, build_report, write_report
+from qc.mimo_contract import ARTIFACT_NAME, DEFAULT_STAGE
 
 JudgeCallable = Callable[
     [Mapping[str, Any]], Mapping[str, Any] | Sequence[Mapping[str, Any]]

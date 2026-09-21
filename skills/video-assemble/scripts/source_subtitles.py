@@ -17,8 +17,8 @@ from assemble_constants import (
     _MIN_READABLE_SECONDS,
     _SUBTITLE_CLOSING_QUOTES,
 )
-from subtitle_track_binding import bound_subtitle_entries
-from subtitle_core import (
+from subtitles.track_binding import bound_subtitle_entries
+from subtitles.core import (
     _bracketed_original_chunks,
     _subtitle_entries,
 )

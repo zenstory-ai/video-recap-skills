@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-a
 import narration_audio  # noqa: E402
 from audio_mix import _seg_place_window  # noqa: E402
 from lib import CONFIG  # noqa: E402
-from subtitle_core import _subtitle_entries  # noqa: E402
+from subtitles.core import _subtitle_entries  # noqa: E402
 from tts_fixtures import tts_segment
 
 

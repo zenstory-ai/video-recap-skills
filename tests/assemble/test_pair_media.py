@@ -13,7 +13,7 @@ SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import pair_media
 from frozen_audio import probe_audio_packets
-from subtitle_track_binding import current_bindings, prepare_subtitle_track
+from subtitles.track_binding import current_bindings, prepare_subtitle_track
 
 
 pytestmark = pytest.mark.skipif(

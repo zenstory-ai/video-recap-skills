@@ -5,7 +5,7 @@ Status: implemented
 ## Problem
 
 800 行预算（[[2026-06-14-self-contained-skills-duplicated-libs]]）让大功能按行数切成一堆同前缀平铺文件，
-而不是按职责分组：video-assemble 的 `scripts/` 有 30 个 .py，其中剪映导出一项就是 `export_jianying.py` 加
+而不是按职责分组：video-assemble 的 `scripts/` 有 36 个 .py，其中剪映导出一项就是 `export_jianying.py` 加
 `jianying_builders / jianying_model / jianying_optional / jianying_schema / jianying_templates /
 jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件、约 1,900 行，与混音、字幕、绑定文件
 平铺在同一目录里。读者要靠前缀猜边界；`assemble.py` 还以私有名 `_maybe_export_jianying` 跨模块 import。
@@ -33,11 +33,14 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
 
 ## Consequences
 
-- **收益**：video-assemble 顶层从 30 个文件降到 22 个；剪映导出的边界从目录结构上可见；私有名跨模块 import 少一处。
+- **收益**：video-assemble 顶层从 36 个文件降到 28 个（第二批字幕子包后 24 个）；video-recap 顶层从 22 个降到 15 个；剪映导出的边界从目录结构上可见；私有名跨模块 import 少一处。
 - **代价**：测试里 `from jianying_schema import …` 改为 `from jianying.schema import …`；子包模块不再出现在
   "顶层模块清单"里，依赖顶层入口把它们带进隔离导入测试。
-- 后续可比照处理的候选：video-recap 的 `mimo_qc_*`（与 `mimo_qc.py` 入口同名，需先给包改名）、
-  video-assemble 的 `subtitle_*`（被 SKILL.md 点名，需先确认入口）。
+- 同日第二批（同一决定的延伸）：video-recap 的 7 个 `mimo_qc_*.py` 改为 `scripts/qc/mimo_{client,contract,evidence,observations,payload,report,runner}.py`，
+  入口 `mimo_qc.py` 与被 references 点名的 `qc_contract.py`、`final_qc.py` 留在顶层（包不能叫 `mimo_qc`，会与入口模块同名）；
+  video-assemble 的 4 个 `subtitle_*.py` 改为 `scripts/subtitles/{core,render,track,track_binding}.py`，
+  `references/subtitle-track.md` 的脚本路径同步改为 `scripts/subtitles/track.py`。
+  合同测试对 markdown 里带 `scripts/` 前缀的脚本路径也做本地解析。
 
 ## Verification
 

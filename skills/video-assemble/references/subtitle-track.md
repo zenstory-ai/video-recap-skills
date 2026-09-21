@@ -1,6 +1,6 @@
 # Independent subtitle track contract (schema v1)
 
-`scripts/subtitle_track.py` loads a subtitle track whose cue times already use
+`scripts/subtitles/track.py` loads a subtitle track whose cue times already use
 the final **output clock**. It validates the track against picture, edit, audio,
 and duration facts independently supplied by the caller. It does not align
 speech, remap source time, split text, repair cue boundaries, or prove that a
@@ -10,7 +10,7 @@ subtitle is perceptually synchronized.
 
 ```python
 from fractions import Fraction
-from subtitle_track import load_subtitle_track
+from subtitles.track import load_subtitle_track
 
 loaded = load_subtitle_track(
     "subtitle_track.json",

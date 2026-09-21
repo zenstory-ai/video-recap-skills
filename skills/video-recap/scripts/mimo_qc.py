@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Public API and CLI entrypoint for advisory MiMo multimodal QC."""
 
-import mimo_qc_report
-import mimo_qc_runner
-from mimo_qc_evidence import collect_evidence, safe_mimo_config
-from mimo_qc_observations import normalize_observations
-from mimo_qc_payload import build_payload
-from mimo_qc_client import mimo_qc_api_call
+import qc.mimo_report as mimo_qc_report
+import qc.mimo_runner as mimo_qc_runner
+from qc.mimo_evidence import collect_evidence, safe_mimo_config
+from qc.mimo_observations import normalize_observations
+from qc.mimo_payload import build_payload
+from qc.mimo_client import mimo_qc_api_call
 
 sample_video_frames = mimo_qc_report.sample_video_frames
 write_report = mimo_qc_report.write_report

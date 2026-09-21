@@ -8,9 +8,9 @@ from typing import Any
 from collections.abc import Mapping
 
 import qc_contract
-from mimo_qc_evidence import _summarize, safe_mimo_config
-from mimo_qc_payload import _strip_json_fence
-from mimo_qc_contract import (
+from qc.mimo_evidence import _summarize, safe_mimo_config
+from qc.mimo_payload import _strip_json_fence
+from qc.mimo_contract import (
     ARTIFACT_NAME,
     DEFAULT_STAGE,
     MAX_MESSAGE_CHARS,

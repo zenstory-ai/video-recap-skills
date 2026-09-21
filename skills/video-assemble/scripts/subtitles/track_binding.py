@@ -13,7 +13,7 @@ from pathlib import Path
 from artifacts import file_identity
 from frozen_audio import probe_audio_packets
 from lib import run_cmd
-from subtitle_track import load_subtitle_track
+from subtitles.track import load_subtitle_track
 
 TRACK = 'subtitle_track.json'
 VALIDATION = 'subtitle_track_validation.json'

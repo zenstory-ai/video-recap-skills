@@ -14,7 +14,7 @@ from assemble_constants import (
     SEGMENT_AUDIO_SCHEMA_VERSION,
 )
 from audio_mix import _loudness_mode
-from subtitle_track_binding import manifest_subtitle_evidence
+from subtitles.track_binding import manifest_subtitle_evidence
 from artifacts import (
     _load_work_json,
     _source_video_identity,

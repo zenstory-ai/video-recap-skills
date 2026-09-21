@@ -10,7 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'))
 from source_subtitles import _map_asr_to_output, _combined_subtitle_entries
 from lib import CONFIG
-from subtitle_render import _generate_ass
+from subtitles.render import _generate_ass
 
 
 def span(source_start, source_end, output_start):

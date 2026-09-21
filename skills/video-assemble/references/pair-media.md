@@ -64,7 +64,7 @@ render/map evidence, not by the existence of a successfully paired container.
 
 The output audio ordinal is always **0**, even when the donor used `a:1`.
 Create the complete output-clock `subtitle_track.json` against
-`subtitle_track_binding.current_bindings(paired_video, 0)`, then run the existing
+`subtitles.track_binding.current_bindings(paired_video, 0)`, then run the existing
 adopted assembly path. Do not reuse a binding computed against the picture-only
 file or the donor's old stream ordinal. A present stale subtitle track fails rather than falling
 back to estimated timings. See [subtitle-track.md](subtitle-track.md).

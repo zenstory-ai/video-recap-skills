@@ -18,7 +18,7 @@ from source_subtitles import (
     _original_gap_subtitle_entries,
     _source_subtitle_mask_policy,
 )
-from subtitle_core import (
+from subtitles.core import (
     _measured_subtitle_band,
     _measured_subtitle_safe_area,
     _normalize_subtitle_text,

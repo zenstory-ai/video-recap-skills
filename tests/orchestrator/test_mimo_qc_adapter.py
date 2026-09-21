@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 import mimo_qc
-import mimo_qc_report
+import qc.mimo_report as mimo_qc_report
 import qc_contract as qc
 
 

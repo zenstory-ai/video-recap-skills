@@ -9,7 +9,7 @@ from typing import Any
 from collections.abc import Mapping, Sequence
 
 import qc_contract
-from mimo_qc_client import DEFAULT_CONFIG
+from qc.mimo_client import DEFAULT_CONFIG
 
 _JSON_ARTIFACTS = (
     "narration.json",

@@ -251,6 +251,15 @@ def test_markdown_references_are_local_and_resolve_inside_each_skill():
             for script_name in re.findall(r"`([A-Za-z0-9_.-]+\.py)`", text):
                 assert (skill_dir / "scripts" / script_name).is_file(), (markdown_path, script_name)
 
+            # A backticked path rooted at `scripts/` with a subdirectory (e.g.
+            # `scripts/subtitles/track.py`) names a script inside a subpackage of THIS
+            # skill. It must resolve relative to the skill directory rather than silently
+            # pointing nowhere. A bare `scripts/name.py` is left alone: prose elsewhere
+            # legitimately uses that shape to point at another skill's own script (e.g.
+            # "that skill's own `scripts/cut.py`").
+            for script_path in re.findall(r"`(scripts/[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+\.py)`", text):
+                assert (skill_dir / script_path).is_file(), (markdown_path, script_path)
+
 
 def test_stage_sources_never_point_to_a_sibling_skill_path():
     paths = [

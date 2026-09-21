@@ -17,8 +17,8 @@ import narration_binding
 import pair_media
 import render_preflight
 import strict_publish
-import subtitle_render
-import subtitle_track_binding
+import subtitles.render as subtitle_render
+import subtitles.track_binding as subtitle_track_binding
 import timeline_emit
 import visual_render
 import lib
