@@ -127,15 +127,19 @@ def _clean_narration_text(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
-def _synthesize_segment(i, seg, narration, tts_dir, engine):
-    """合成单个 TTS 段（线程安全），支持 resume 跳过已有文件"""
-    prepared = _prepare_tts_segment(i, seg, narration, tts_dir, engine)
+def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None):
+    """合成单个 TTS 段（线程安全），支持 resume 跳过已有文件。
+
+    `prepared` is the `_prepare_tts_segment` tuple of a segment synthesize_tts already probed
+    as a cache miss; passing it skips a second sidecar read + settings fingerprint."""
     if prepared is None:
-        return None
+        prepared = _prepare_tts_segment(i, seg, narration, tts_dir, engine)
+        if prepared is None:
+            return None
+        cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], engine)
+        if cached:
+            return cached
     text, output_wav, rate, pitch, cache_key = prepared
-    cached = _reuse_tts_segment_cache(i, seg, output_wav, cache_key, engine)
-    if cached:
-        return cached
 
     provider_receipt = _run_tts_engine(
         engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion")
@@ -273,26 +277,25 @@ def synthesize_tts(narration, work_dir):
         if cache_engine == "fish-audio":
             raise RuntimeError("Fish Audio 不接受本地 VOICE_REF/--voice-ref；请改用 FISH_TTS_REFERENCE_ID")
         raise RuntimeError("index-tts 不支持本地 VOICE_REF/--voice-ref 克隆")
-    # A fully cached narration needs no credential: probe every segment's sidecar first.
-    cached_segments = []
-    needs_fresh = False
-    prepared_count = 0
+    # A fully cached narration needs no credential: probe every segment's sidecar once here;
+    # hits are final and only misses reach the workers (with their prepared inputs).
+    segments = []
+    misses = []
     for i, seg in enumerate(narration):
         prepared = _prepare_tts_segment(i, seg, narration, tts_dir, cache_engine)
         if prepared is None:
             continue
-        prepared_count += 1
         cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], cache_engine)
-        if not cached:
-            needs_fresh = True
-            break
-        cached_segments.append(cached)
-    if prepared_count == 0:
+        if cached:
+            segments.append(cached)
+        else:
+            misses.append((i, seg, prepared))
+    if not segments and not misses:
         raise RuntimeError("narration.json 没有可配音的有效文本，已中止以避免生成无解说视频")
-    if not needs_fresh:
-        cached_segments.sort(key=lambda x: x["index"])
+    if not misses:
+        segments.sort(key=lambda x: x["index"])
         log(f"TTS 引擎: {cache_engine} (cache)")
-        return cached_segments, cache_engine, []
+        return segments, cache_engine, []
 
     engine = resolve_tts_engine()
 
@@ -302,15 +305,14 @@ def synthesize_tts(narration, work_dir):
 
     log(f"TTS 引擎: {engine}")
 
-    segments = []
     failures = []
-    max_workers = min(len(narration), CONFIG["tts_workers"])
+    max_workers = min(len(misses), CONFIG["tts_workers"])
 
     try:
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = {
-                executor.submit(_synthesize_segment, i, seg, narration, tts_dir, engine): i
-                for i, seg in enumerate(narration)
+                executor.submit(_synthesize_segment, i, seg, narration, tts_dir, engine, prepared): i
+                for i, seg, prepared in misses
             }
             for future in as_completed(futures):
                 try:
@@ -365,11 +367,10 @@ def synthesize_tts(narration, work_dir):
 
 
 def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=None):
-    """Run one TTS engine with retry and remove partial files after failures."""
-    if engine not in SUPPORTED_TTS_ENGINES:
-        raise RuntimeError(f"不支持的 TTS 引擎: {engine}。支持 mimo-tts、fish-audio、index-tts。")
-    if engine == "index-tts":
-        index_provider.validate_controls(rate, pitch, emotion)
+    """Run one TTS engine with retry and remove partial files after failures.
+
+    `engine` comes from resolve_tts_engine; index-tts controls were already forced to the
+    provider defaults by _prepare_tts_segment."""
     retries = CONFIG["tts_retries"]
     last_error = None
 
@@ -481,23 +482,14 @@ def _load_tts_segment_cache(output_wav, cache_key):
     cache_path = _tts_segment_cache_path(output_wav)
     if not output_wav.exists() or not cache_path.exists():
         return None
+    # This skill wrote the sidecar (_write_tts_segment_cache): one it cannot parse or that
+    # lacks its fields is a bug to surface, not a silent cache miss and paid re-synthesis.
     try:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    required = {
-        "cache_key", "audio_fingerprint", "spoken_text", "audio_duration",
-        "tts_rate_offset", "truncated", "truncate_reason", "normalization",
-    }
-    if not isinstance(data, dict) or not required <= data.keys():
-        return None
-    try:
-        audio_fingerprint = file_fingerprint(output_wav)
-    except OSError:
-        return None
-    if data["cache_key"] != cache_key or data["audio_fingerprint"] != audio_fingerprint:
-        return None
-    return data
+        stale = data["cache_key"] != cache_key or data["audio_fingerprint"] != file_fingerprint(output_wav)
+    except (ValueError, LookupError, TypeError) as exc:
+        raise RuntimeError(f"TTS 缓存 sidecar 损坏: {cache_path}") from exc
+    return None if stale else data
 
 
 def _write_tts_segment_cache(output_wav, cache_key, spoken_text, duration, rate_offset,
@@ -529,9 +521,6 @@ def _configured_tts_engine_for_cache():
         if CONFIG["mimo_tts_api_key"] or not CONFIG["fish_api_key"]:
             return "mimo-tts"
         return "fish-audio"
-    if provider == "index-tts":
-        index_provider.configured_values(CONFIG)
-        return provider
     if provider not in SUPPORTED_TTS_ENGINES:
         raise RuntimeError(
             "TTS_PROVIDER/--tts-provider 必须是 auto、mimo-tts、fish-audio 或 index-tts"
@@ -764,12 +753,9 @@ def main():
         CONFIG["mimo_tts_voice"] = args.mimo_voice
     if args.mimo_voice and CONFIG["voice_ref"]:
         ap.error("--mimo-voice and --voice-ref are mutually exclusive")
-    if args.tts_provider == "fish-audio" and (args.mimo_voice or CONFIG["voice_ref"]):
-        ap.error("--mimo-voice/--voice-ref are only supported by the MiMo TTS provider")
-    try:
-        index_provider.validate_cli_options(args.tts_provider, args.mimo_voice, CONFIG["voice_ref"])
-    except ValueError as exc:
-        ap.error(str(exc))
+    if args.mimo_voice and args.tts_provider in {"fish-audio", "index-tts"}:
+        ap.error("--mimo-voice is only supported by the MiMo TTS provider")
+    # A local --voice-ref with fish-audio/index-tts is rejected by synthesize_tts.
     # Voice-reference normalization is intentionally lazy: a fully cached rerun should not
     # invoke ffmpeg. _tts_mimo uses a process-wide lock so a fresh parallel run still converts
     # the reference exactly once.

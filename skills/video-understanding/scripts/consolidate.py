@@ -9,8 +9,8 @@ Optional, synchronous, in-pipeline. Two independent LLM passes over the video's 
     TEXT per segment index only; each segment's original start/end is re-attached here, so a
     cleanup pass can never shift the timing-bearing spans downstream chunking depends on.
 
-Both passes degrade gracefully (a chat-API failure logs and is skipped) and are idempotent
-(a fresh artifact is reused). Mirrors review.py's pure-seam + thin-driver shape so it is
+Both passes are idempotent (a fresh artifact is reused); a failure raises and the runner
+records it in consolidation.status.json. Mirrors review.py's pure-seam + thin-driver shape so it is
 unit-testable with a mocked api_call. NON-required: the pipeline runs unchanged without it.
 """
 
@@ -20,7 +20,7 @@ import json
 import re
 from pathlib import Path
 
-from lib import CONFIG, log, api_call
+from lib import CONFIG, log, api_call, load_background_research
 from understanding_cache import _fresh
 
 # Shared tolerance for the per-segment span check. The brief-side gate inlines the SAME
@@ -59,9 +59,7 @@ INDEX_PROMPT = """你在根据逐场景画面分析、ASR对白、background_res
 def build_clean_messages(asr_result):
     lines = []
     for i, seg in enumerate(asr_result or []):
-        if not isinstance(seg, dict):
-            continue
-        lines.append(f"{i}. {str(seg.get('text', '')).strip()}")
+        lines.append(f"{i}. {seg['text'].strip()}")
     user = f"{CLEAN_PROMPT}\n\n## 逐段转写（共 {len(lines)} 段）\n" + "\n".join(lines)
     return [{"role": "user", "content": user}]
 
@@ -69,7 +67,7 @@ def build_clean_messages(asr_result):
 def parse_clean_response(text, asr_result):
     """Zip cleaned TEXT onto the original segments (start/end preserved by construction).
     Returns the original asr_result UNCHANGED on any parse / shape / count problem."""
-    base = [s for s in (asr_result or []) if isinstance(s, dict)]
+    base = list(asr_result or [])
     if not base:
         return asr_result
     data = _extract_json(text)
@@ -87,8 +85,8 @@ def parse_clean_response(text, asr_result):
     out = []
     for i, seg in enumerate(base):
         cleaned = by_index.get(i, {})
-        new_text = str(cleaned.get("text", "")).strip() or str(seg.get("text", ""))
-        merged = {"start": seg.get("start"), "end": seg.get("end"), "text": new_text}
+        new_text = str(cleaned.get("text", "")).strip() or seg["text"]
+        merged = {"start": seg["start"], "end": seg["end"], "text": new_text}
         speaker = str(cleaned.get("speaker", "")).strip()
         if speaker:
             merged["speaker"] = speaker
@@ -148,23 +146,22 @@ def _research_glossary_from_context(background_research):
     return glossary
 
 
+def _dialogue_source(asr_result, asr_clean):
+    """asr_clean.json segments when present (consolidate's own output), else raw asr_result rows."""
+    return asr_clean["segments"] if asr_clean else (asr_result or [])
+
+
 def _dialogue_segments_for_index(asr_result=None, asr_clean=None):
-    clean_segments = (
-        (asr_clean or {}).get("segments") if isinstance(asr_clean, dict) else None
-    )
-    source = clean_segments if isinstance(clean_segments, list) else (asr_result or [])
     out = []
-    for i, seg in enumerate(source or []):
-        if not isinstance(seg, dict):
-            continue
-        text = str(seg.get("text", "")).strip()
+    for i, seg in enumerate(_dialogue_source(asr_result, asr_clean)):
+        text = seg["text"].strip()
         if not text:
             continue
         out.append(
             {
                 "id": f"asr:{i}",
-                "start": seg.get("start"),
-                "end": seg.get("end"),
+                "start": seg["start"],
+                "end": seg["end"],
                 "text": text,
             }
         )
@@ -280,44 +277,34 @@ def build_index_messages(
 ):
     lines = []
     for i, scene in enumerate(vlm_analysis or []):
-        if not isinstance(scene, dict):
-            continue
-        sid = scene.get("scene_id", i)
-        start = float(scene.get("start", 0) or 0)
-        end = float(scene.get("end", 0) or 0)
-        desc = str(scene.get("description", "")).strip().replace("\n", " ")
-        facts = scene.get("frame_facts")
+        sid = scene["scene_id"]
+        start = float(scene["start"])
+        end = float(scene["end"])
+        desc = scene["description"].strip().replace("\n", " ")
+        facts = scene.get("frame_facts")  # vlm.py only writes the key when non-empty
         fact_txt = ""
-        if isinstance(facts, dict) and facts:
+        if facts:
             actions = []
 
             def fact_key(x):
+                # timestamps are regex-captured from the VLM reply ("[\d.]+"), so "1.2.3" is possible
                 try:
                     return (0, float(x))
-                except (TypeError, ValueError):
+                except ValueError:
                     return (1, str(x))
 
             for ts in sorted(facts.keys(), key=fact_key):
-                vals = facts[ts]
-                actions.extend(vals if isinstance(vals, list) else [str(vals)])
+                actions.extend(facts[ts])
             if actions:
                 fact_txt = " | 帧实: " + "；".join(a for a in actions[:6] if a)
         lines.append(f"[visual:{i} 场景{sid} {start:.0f}-{end:.0f}s] {desc}{fact_txt}")
     asr_lines = []
-    clean_segments = (
-        (asr_clean or {}).get("segments") if isinstance(asr_clean, dict) else None
-    )
-    source_asr = (
-        clean_segments if isinstance(clean_segments, list) else (asr_result or [])
-    )
-    for i, seg in enumerate(source_asr or []):
-        if not isinstance(seg, dict):
-            continue
-        text = str(seg.get("text", "")).strip()
+    for i, seg in enumerate(_dialogue_source(asr_result, asr_clean)):
+        text = seg["text"].strip()
         if not text:
             continue
         asr_lines.append(
-            f"[asr:{i} {float(seg.get('start', 0) or 0):.0f}-{float(seg.get('end', 0) or 0):.0f}s] {text}"
+            f"[asr:{i} {float(seg['start']):.0f}-{float(seg['end']):.0f}s] {text}"
         )
     glossary = _research_glossary_from_context(background_research)
     glossary_lines = []
@@ -464,7 +451,7 @@ def _write_index_meta(work_dir, vlm_analysis):
                 "scene_count": len(
                     [s for s in (vlm_analysis or []) if isinstance(s, dict)]
                 ),
-                "model": CONFIG.get("vlm_model", ""),
+                "model": CONFIG["vlm_model"],
                 "prompt_md5": _prompt_fingerprint(INDEX_PROMPT),
             },
             ensure_ascii=False,
@@ -491,7 +478,7 @@ def _index_cache_matches(work_dir, vlm_analysis):
         and meta.get("research_md5", "") == _research_source_md5(work_dir)
         and meta.get("scene_count")
         == len([s for s in (vlm_analysis or []) if isinstance(s, dict)])
-        and meta.get("model") == CONFIG.get("vlm_model", "")
+        and meta.get("model") == CONFIG["vlm_model"]
         and meta.get("prompt_md5") == _prompt_fingerprint(INDEX_PROMPT)
     )
 
@@ -500,13 +487,11 @@ def _index_cache_matches(work_dir, vlm_analysis):
 
 
 def _load(work_dir, name):
+    """Read one of this skill's own JSON artifacts: absent → None, corrupt → raise."""
     path = Path(work_dir) / name
     if not path.exists():
         return None
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
-        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def consolidate_transcript(work_dir):
@@ -520,7 +505,7 @@ def consolidate_transcript(work_dir):
         existing = _load(work_dir, "asr_clean.json") or {}
         if (
             existing.get("source_md5") == _asr_source_md5(work_dir)
-            and existing.get("model") == CONFIG.get("vlm_model", "")
+            and existing.get("model") == CONFIG["vlm_model"]
             and existing.get("prompt_md5") == _prompt_fingerprint(CLEAN_PROMPT)
             and existing.get("postprocess_version") == ASR_CLEAN_POSTPROCESS_VERSION
         ):
@@ -528,7 +513,7 @@ def consolidate_transcript(work_dir):
             return existing
     resp = api_call(
         {
-            "model": CONFIG.get("vlm_model", ""),
+            "model": CONFIG["vlm_model"],
             "messages": build_clean_messages(asr_result),
             "max_tokens": 4000,
             "temperature": 0.2,
@@ -538,7 +523,7 @@ def consolidate_transcript(work_dir):
     segments = parse_clean_response(content, asr_result)
     payload = {
         "source_md5": _asr_source_md5(work_dir),
-        "model": CONFIG.get("vlm_model", ""),
+        "model": CONFIG["vlm_model"],
         "prompt_md5": _prompt_fingerprint(CLEAN_PROMPT),
         "postprocess_version": ASR_CLEAN_POSTPROCESS_VERSION,
         "segments": segments,
@@ -564,10 +549,10 @@ def consolidate_index(work_dir):
         return _load(work_dir, "understanding_index.json")
     asr_result = _load(work_dir, "asr_result.json") or []
     asr_clean = _load(work_dir, "asr_clean.json") or {}
-    background_research = _load(work_dir, "background_research.json") or {}
+    background_research = load_background_research(work_dir)
     resp = api_call(
         {
-            "model": CONFIG.get("vlm_model", ""),
+            "model": CONFIG["vlm_model"],
             "messages": build_index_messages(
                 vlm_analysis,
                 asr_result=asr_result,
@@ -599,18 +584,14 @@ def consolidate_index(work_dir):
 
 
 def consolidate(work_dir, do_asr=False, do_index=True):
-    """Default = index-only (Pass B, zero timing risk). Pass A (asr) is opt-in."""
+    """Default = index-only (Pass B, zero timing risk). Pass A (asr) is opt-in.
+
+    Failures propagate; understanding_runner catches them and writes the "failed" status."""
     result = {}
     if do_asr:
-        try:
-            result["asr_clean"] = consolidate_transcript(work_dir)
-        except Exception as e:
-            log(f"consolidate(asr) 跳过（忽略）: {e}")
+        result["asr_clean"] = consolidate_transcript(work_dir)
     if do_index:
-        try:
-            result["index"] = consolidate_index(work_dir)
-        except Exception as e:
-            log(f"consolidate(index) 跳过（忽略）: {e}")
+        result["index"] = consolidate_index(work_dir)
     return result
 
 

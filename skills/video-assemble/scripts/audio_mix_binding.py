@@ -69,7 +69,7 @@ def load_adoption(path, *, input_video, narration_adoption_path, tts_segments):
         require_fields(adopted, ["index", "processed_wav_sha256", "output_start_sample", "gain"],
                 "audio mix segment")
         index = require_integer(adopted["index"], "audio mix segment index")
-        if index in seen or index != segment.get("index"):
+        if index in seen or index != segment["index"]:
             raise ValueError("audio mix segment index/order differs from narration")
         seen.add(index)
         digest = require_digest(adopted["processed_wav_sha256"], "processed_wav_sha256")

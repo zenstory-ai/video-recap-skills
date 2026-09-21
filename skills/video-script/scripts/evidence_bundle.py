@@ -88,7 +88,9 @@ def coverage_policy_v1(
             "coverage_policy_version": COVERAGE_POLICY_VERSION,
             "selected_ranges": [],
             "dropped_ranges": [],
+            "dropped_range_count": 0,
             "duration": 0.0,
+            "baseline_range_count_before_narration": 0,
         }
     width = min(float(window_seconds), max(5.0, duration / 8.0))
     ranges = [
@@ -345,70 +347,19 @@ def filter_evidence_by_ranges(vlm_analysis, asr_result, ranges, *, timeline="sou
 
 
 def build_review_coverage_metadata(bundle):
-    """Pure compatibility seam: summarize the evidence coverage contract."""
-    items = bundle.get("items") or [] if isinstance(bundle, dict) else []
-    coverage = bundle.get("coverage", {}) if isinstance(bundle, dict) else {}
-    metadata = bundle.get("metadata", {}) if isinstance(bundle, dict) else {}
+    """Summarize a build_evidence_bundle() bundle's coverage contract."""
+    coverage = bundle["coverage"]
+    metadata = bundle["metadata"]
     return {
-        "coverage_policy_version": coverage.get(
-            "coverage_policy_version", COVERAGE_POLICY_VERSION
-        ),
-        "time_ranges": coverage.get("selected_ranges", []),
-        "dropped_ranges": coverage.get("dropped_ranges", []),
-        "dropped_range_count": coverage.get(
-            "dropped_range_count", len(coverage.get("dropped_ranges", []))
-        ),
-        "scene_count": metadata.get(
-            "reviewed_scene_count",
-            sum(1 for item in items if item.get("source") == "visual"),
-        ),
-        "asr_count": metadata.get(
-            "reviewed_asr_count",
-            sum(1 for item in items if item.get("source") == "asr"),
-        ),
-        "dropped_scene_count": metadata.get("dropped_scene_count", 0),
-        "dropped_asr_count": metadata.get("dropped_asr_count", 0),
+        "coverage_policy_version": coverage["coverage_policy_version"],
+        "time_ranges": coverage["selected_ranges"],
+        "dropped_ranges": coverage["dropped_ranges"],
+        "dropped_range_count": coverage["dropped_range_count"],
+        "scene_count": metadata["reviewed_scene_count"],
+        "asr_count": metadata["reviewed_asr_count"],
+        "dropped_scene_count": metadata["dropped_scene_count"],
+        "dropped_asr_count": metadata["dropped_asr_count"],
     }
-
-
-def validate_public_evidence_contract(bundle):
-    """Pure compatibility seam: validate the public evidence bundle shape.
-
-    Returns a non-throwing report so callers can use it in tests or advisory QC paths.
-    """
-    errors = []
-    warnings = []
-    if not isinstance(bundle, dict):
-        return {"valid": False, "errors": ["bundle must be a dict"], "warnings": []}
-    if bundle.get("schema_version") != EVIDENCE_CONTRACT_VERSION:
-        errors.append("unsupported schema_version")
-    if bundle.get("clock") not in ("source", "output"):
-        errors.append("clock must be source or output")
-    for idx, item in enumerate(bundle.get("items") or []):
-        if not isinstance(item, dict):
-            errors.append(f"items[{idx}] must be a dict")
-            continue
-        if item.get("source") not in ("visual", "asr"):
-            errors.append(f"items[{idx}].source must be visual or asr")
-        if item.get("clock") not in ("source", "output"):
-            errors.append(f"items[{idx}].clock must be source or output")
-        if item.get("support") != "direct":
-            warnings.append(f"items[{idx}].support is not direct")
-        start, end = item.get("start"), item.get("end")
-        try:
-            if float(end) <= float(start):
-                errors.append(f"items[{idx}] has non-positive time range")
-        except (TypeError, ValueError):
-            errors.append(f"items[{idx}] has invalid time range")
-    for idx, item in enumerate(bundle.get("context_items") or []):
-        if not isinstance(item, dict):
-            errors.append(f"context_items[{idx}] must be a dict")
-            continue
-        if item.get("clock") is not None:
-            errors.append(f"context_items[{idx}].clock must be null")
-        if item.get("support") != "context_only":
-            errors.append(f"context_items[{idx}].support must be context_only")
-    return {"valid": not errors, "errors": errors, "warnings": warnings}
 
 
 def build_evidence_bundle(
@@ -448,30 +399,27 @@ def build_evidence_bundle(
 
 
 def render_evidence_bundle(bundle, *, limit_items=220):
-    clock = str(bundle.get("clock") or "source").upper()
+    clock = bundle["clock"].upper()
     lines = [f"## Timeline evidence (clock={clock}; source=visual/asr)"]
-    items = bundle.get("items") or []
+    items = bundle["items"]
     if not items:
         lines.append("(无 timeline evidence)")
     for item in items[:limit_items]:
-        label = "画面" if item.get("source") == "visual" else "对白"
+        label = "画面" if item["source"] == "visual" else "对白"
         backref = ""
-        if (
-            item.get("clock") == "output"
-            and "source_start" in item
-            and "source_end" in item
-        ):
-            backref = f" ← SOURCE {float(item['source_start']):.1f}-{float(item['source_end']):.1f}s"
-            if item.get("output_segment_index") is not None:
-                backref += f" clip#{item.get('output_segment_index')}"
+        # Remapped cut_output evidence carries its source-time provenance.
+        if "source_start" in item:
+            backref = f" ← SOURCE {item['source_start']:.1f}-{item['source_end']:.1f}s"
+            if "output_segment_index" in item:
+                backref += f" clip#{item['output_segment_index']}"
         lines.append(
-            f"[{clock} {float(item.get('start', 0)):.1f}-{float(item.get('end', 0)):.1f}s {label} id={item.get('id')}{backref}] {item.get('text', '')}"
+            f"[{clock} {item['start']:.1f}-{item['end']:.1f}s {label} id={item['id']}{backref}] {item['text']}"
         )
     if len(items) > limit_items:
         lines.append(
             f"... dropped from prompt: {len(items) - limit_items} items (artifact metadata keeps counts)"
         )
-    context = bundle.get("context_items") or []
+    context = bundle["context_items"]
     lines.extend(
         [
             "",
@@ -482,7 +430,7 @@ def render_evidence_bundle(bundle, *, limit_items=220):
         lines.append("(无 context-only evidence)")
     for item in context[:40]:
         lines.append(
-            f"[clock=null {item.get('source')} support=context_only id={item.get('id')}] {item.get('text', '')}"
+            f"[clock=null {item['source']} support=context_only id={item['id']}] {item['text']}"
         )
     return "\n".join(lines)
 

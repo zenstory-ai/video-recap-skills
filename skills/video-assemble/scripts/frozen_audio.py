@@ -37,12 +37,6 @@ def probe_audio_packets(path, audio_stream_index):
     ``audio_stream_index`` is the zero-based audio-stream ordinal accepted by
     ffmpeg's ``0:a:N`` selector, not the file-wide absolute stream index.
     """
-    if (
-        isinstance(audio_stream_index, bool)
-        or not isinstance(audio_stream_index, int)
-        or audio_stream_index < 0
-    ):
-        raise RuntimeError("音频流索引必须是非负整数")
     payload = _probe(
         path,
         "-select_streams", f"a:{audio_stream_index}",

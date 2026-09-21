@@ -76,11 +76,15 @@ def test_no_key_is_explicit_unavailability_not_silence(monkeypatch, tmp_path):
 
 
 def test_no_duration_binds_extracted_audio_and_is_not_reusable(monkeypatch, tmp_path):
-    """Duration 0 writes an empty, evidence-bound result that never becomes a cache hit."""
+    """An unreadable duration writes an empty, evidence-bound result that never becomes a cache hit."""
     video = _video(tmp_path)
+
+    def no_duration(_path):
+        raise RuntimeError("ffprobe failed")
+
     monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "test-key")
     monkeypatch.setattr(asr, "run_cmd", _successful_extract())
-    monkeypatch.setattr(asr, "get_video_duration", lambda _path: 0.0)
+    monkeypatch.setattr(asr, "get_video_duration", no_duration)
     monkeypatch.setattr(
         asr, "_run_asr", lambda _path: pytest.fail("no transcription at zero duration")
     )
@@ -349,7 +353,7 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
         json.dumps([{"start": 0.0, "end": 1.0, "text": "changed"}]),
         encoding="utf-8",
     )
-    (tmp_path / "scenes.json").write_text(
+    (tmp_path / "vlm_analysis.json").write_text(
         json.dumps(
             [{"scene_id": 0, "start": 0.0, "end": 2.0, "description": "scene"}]
         ),

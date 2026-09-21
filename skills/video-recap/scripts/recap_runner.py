@@ -84,7 +84,7 @@ def _voiceover_args(work_dir, narration_path, args):
         result += ["--voice-ref", args.voice_ref]
     if args.allow_partial_tts:
         result.append("--allow-partial-tts")
-    if getattr(args, "preserve_approved_text", False):
+    if args.preserve_approved_text:
         result.append("--preserve-approved-text")
     return result
 
@@ -95,7 +95,7 @@ def _approved_validation_args(args):
 
 def _finish_recap(work_dir, final_output, args):
     final_qc_result = _write_final_qc_reports(work_dir, final_output)
-    if getattr(args, "require_final_qc", False):
+    if args.require_final_qc:
         _require_final_qc(final_qc_result, work_dir)
     print(f"[video-recap] ✅ 完成: {final_output}")
     _print_final_qc_pointer(final_qc_result)
@@ -398,8 +398,12 @@ def _run_multi_cut(videos, work_dir, args):
 def main():
     ap, args = parse_args()
 
-    if getattr(args, "require_final_qc", False) and args.edit_mode == "dub":
+    if args.require_final_qc and args.edit_mode == "dub":
         ap.error("--require-final-qc is only supported in full/cut modes, not dub")
+    # argparse `choices` does not cover the TTS_PROVIDER env default; source-owned audio and
+    # local adoption never synthesise, so an ambient provider is irrelevant there.
+    if (args.doctor or needs_voiceover(args)) and args.tts_provider not in TTS_PROVIDERS:
+        ap.error("TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS))
 
     if args.doctor:
         if any(
@@ -407,10 +411,6 @@ def main():
             for field in ("tts_meta", "narration_adoption", "audio_mix_adoption")
         ):
             ap.error("--doctor cannot be combined with local adoption inputs")
-        if args.tts_provider not in TTS_PROVIDERS:
-            ap.error(
-                "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
-            )
         doctor_args = []
         if args.tts_provider != "auto":
             doctor_args += ["--tts-provider", args.tts_provider]
@@ -421,14 +421,6 @@ def main():
     }:
         ap.error(
             "MIMO_QC/--mimo-qc must be one of: off, pre-assemble, post-render, both"
-        )
-    if (
-        not uses_local_adoption(args)
-        and uses_narration(args)
-        and args.tts_provider not in TTS_PROVIDERS
-    ):
-        ap.error(
-            "TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS)
         )
     if not args.video:
         ap.error("video is required (unless --doctor)")

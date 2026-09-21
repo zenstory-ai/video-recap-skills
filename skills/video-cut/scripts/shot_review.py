@@ -128,45 +128,38 @@ def probe_frame_clock(video):
     return pts, end, origin
 
 
-def _validate_scene_roi(roi, video=None):
-    """Validate an ROI in FFmpeg's auto-oriented, native-pixel coordinate space."""
-    if roi is None:
-        return None
-    if (not isinstance(roi, (list, tuple)) or len(roi) != 4
-            or any(type(value) is not int for value in roi)):
+def _validate_scene_roi(roi, video):
+    """Validate an ROI (four ints from the CLI) against the video's auto-oriented native frame."""
+    if len(roi) != 4:
         raise ValueError("scene ROI must contain exactly four integers")
     x, y, width, height = roi
     if x < 0 or y < 0 or width <= 0 or height <= 0:
         raise ValueError("scene ROI requires x/y >= 0 and width/height > 0")
-    normalized = [x, y, width, height]
-    if video is None:
-        return normalized
 
     from media_geometry import _probe_video_geometry
     facts = _probe_video_geometry(video).facts
     rotation = facts["rotation"]
-    if type(rotation) is not int or rotation not in {0, 90, 180, 270}:
+    if rotation not in {0, 90, 180, 270}:
         raise ValueError("scene ROI requires a right-angle video rotation")
-    coded_width, coded_height = facts["coded_width"], facts["coded_height"]
-    if (type(coded_width) is not int or type(coded_height) is not int
-            or coded_width <= 0 or coded_height <= 0):
-        raise ValueError("invalid coded video geometry for scene ROI")
     canvas_width, canvas_height = (
-        (coded_height, coded_width) if rotation in {90, 270}
-        else (coded_width, coded_height)
+        (facts["coded_height"], facts["coded_width"]) if rotation in {90, 270}
+        else (facts["coded_width"], facts["coded_height"])
     )
     if x + width > canvas_width or y + height > canvas_height:
         raise ValueError(
             f"scene ROI exceeds auto-oriented native frame {canvas_width}x{canvas_height}"
         )
-    return normalized
 
 
 def detect_scene_pts(video, threshold, roi=None):
-    """No seek or float pts_time: showinfo integer pts + its actual filter timebase."""
-    roi = _validate_scene_roi(roi, video)
+    """No seek or float pts_time: showinfo integer pts + its actual filter timebase.
+
+    The single library-side check of threshold/ROI; the CLIs pre-check with parser.error."""
+    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
+        raise ValueError("scene threshold must be finite and in [0,1]")
     filters = []
     if roi is not None:
+        _validate_scene_roi(roi, video)
         x, y, width, height = roi
         filters.append(f"crop={width}:{height}:{x}:{y}:exact=1")
     filters.extend([f"select='gt(scene,{threshold})'", "showinfo"])
@@ -243,15 +236,12 @@ def _associate_plan(report, plan, pts, end):
 
 
 def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
-    if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
-        raise ValueError("scene threshold must be finite and in [0,1]")
-    roi = _validate_scene_roi(roi)
     video = Path(video).resolve()
     before = sha256_file(video)
     plan_hash = sha256_file(plan_path) if plan_path is not None else None
     plan = load_bound_plan(video, plan_path) if plan_path is not None else None
     pts, end, origin = probe_frame_clock(video)
-    scenes = detect_scene_pts(video, threshold) if roi is None else detect_scene_pts(video, threshold, roi)
+    scenes = detect_scene_pts(video, threshold, roi)
     frames_by_pts = {p + origin: i for i, p in enumerate(pts)}
     if any(p not in frames_by_pts for p in scenes):
         raise ValueError("scene candidate does not match a unique decoded frame PTS")
@@ -272,7 +262,7 @@ def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
                       json.dumps([str(p) for p in [*pts, end]]).encode()).hexdigest()},
         "plan_binding": {"path": str(Path(plan_path).resolve()), "sha256": plan_hash} if plan is not None else None,
         "scene_threshold": threshold,
-        "scene_roi": roi,
+        "scene_roi": None if roi is None else list(roi),
         "limits": ["scene score is not a confirmed shot or flash-frame defect",
                    "source-origin confirmation requires independent source footage review",
                    "NO_CANDIDATES is not perceptual approval or listening evidence"],
@@ -343,12 +333,13 @@ class UnsafeReportTarget(ValueError):
 
 def write_scan(video, output, **options):
     target = _report_target(video, output, options.get("plan_path"))
+    roi = options.get("roi")
     base = {"schema_version": 1, "artifact": "shot_review", "scan_complete": False,
             "normal_speed_review": "NOT_CHECKED",
-            "scene_threshold": options.get("threshold", 0.35), "scene_roi": None}
+            "scene_threshold": options.get("threshold", 0.35),
+            "scene_roi": None if roi is None else list(roi)}
     try:
         _protect_declared_sources(video, options.get("plan_path"), target)
-        base["scene_roi"] = _validate_scene_roi(options.get("roi"))
         _atomic_json(output, {**base, "status": "SCANNING"})
         report = scan_video(video, **options)
     except UnsafeReportTarget:

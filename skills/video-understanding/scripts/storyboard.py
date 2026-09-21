@@ -24,7 +24,7 @@ import subprocess
 from pathlib import Path
 
 from extract import frame_number_for_time, parse_frame_number
-from lib import CONFIG, run_cmd, log
+from lib import CONFIG, run_cmd, log, get_video_duration
 
 try:  # file_fingerprint is the project's content-fingerprint helper; reuse when cheap.
     from lib import file_fingerprint
@@ -138,14 +138,11 @@ def _scene_anchor_timestamps(scenes, max_tiles):
     long. Total is capped at max_tiles by evenly subsampling the ordered anchor list, so the
     sheet stays legible (D2: one bounded contact sheet, not dozens of frame reads).
     """
-    long_scene_seconds = float(CONFIG.get("storyboard_long_scene_seconds", 6.0) or 6.0)
+    long_scene_seconds = float(CONFIG["storyboard_long_scene_seconds"])
     anchors = []
     for scene_id, scene in enumerate(scenes or []):
-        try:
-            start = float(scene["start"])
-            end = float(scene["end"])
-        except (KeyError, TypeError, ValueError):
-            continue
+        start = float(scene["start"])
+        end = float(scene["end"])
         if end <= start:
             continue
         mid = (start + end) / 2.0
@@ -205,7 +202,7 @@ def _tile_pages(frame_paths, columns, out_dir, out_stem, scratch_dir):
     spill into _001.jpg, _002.jpg… Returns [] on any ffmpeg failure (caller degrades to None).
     """
     columns = max(1, int(columns))
-    rows_per_page = max(1, int(CONFIG.get("storyboard_rows_per_page", 5) or 5))
+    rows_per_page = int(CONFIG["storyboard_rows_per_page"])
     per_page = columns * rows_per_page
     pages = []
     total = len(frame_paths)
@@ -234,13 +231,9 @@ def _tile_pages(frame_paths, columns, out_dir, out_stem, scratch_dir):
             "-vf", f"tile={cols}x{rows}",
             str(page_path),
         ]
-        try:
-            result = run_cmd(cmd)
-        except Exception as exc:  # noqa: BLE001
-            log(f"storyboard tile 异常: {exc}")
-            return []
+        result = run_cmd(cmd)
         if result.returncode != 0 or not page_path.exists():
-            log(f"storyboard tile 失败: {getattr(result, 'stderr', '')[-300:]}")
+            log(f"storyboard tile 失败: {result.stderr[-300:]}")
             return []
         pages.append(page_path)
     return pages
@@ -282,7 +275,7 @@ def _render_storyboard(work_dir, tiles, out_stem):
 
     try:
         pages = _tile_pages(
-            render_frames, CONFIG.get("storyboard_columns", 6),
+            render_frames, CONFIG["storyboard_columns"],
             storyboard_dir, out_stem, scratch_dir,
         )
     finally:
@@ -305,8 +298,8 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
         if not paths:
             log("storyboard 跳过 source：frames/ 为空或缺失")
             return None
-        max_tiles = int(CONFIG.get("storyboard_max_tiles", 30) or 30)
-        columns = int(CONFIG.get("storyboard_columns", 6) or 6)
+        max_tiles = int(CONFIG["storyboard_max_tiles"])
+        columns = int(CONFIG["storyboard_columns"])
         anchors = _scene_anchor_timestamps(scenes, max_tiles)
         if not anchors:
             log("storyboard 跳过 source：无可用场景锚点")
@@ -350,9 +343,10 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
             },
             "tiles": tiles,
         }
-        duration = get_video_duration_safe(video_path)
-        if duration:
-            payload["duration"] = round(duration, 3)
+        try:
+            payload["duration"] = round(get_video_duration(video_path), 3)
+        except RuntimeError as exc:
+            log(f"storyboard source：无法读取视频时长，sidecar 省略 duration（忽略）: {exc}")
         json_path = work_dir / "storyboard" / "source_storyboard.json"
         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         log(f"storyboard source: {len(tiles)} tiles → {len(pages)} page(s), labels_burned={labels_burned}")
@@ -360,32 +354,6 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
     except Exception as exc:  # noqa: BLE001 - advisory: never propagate
         log(f"storyboard source 失败（忽略）: {exc}")
         return None
-
-
-def get_video_duration_safe(video_path):
-    """Best-effort source duration via ffprobe; returns None on any failure (advisory)."""
-    if not shutil.which("ffprobe"):
-        return None
-    try:
-        result = subprocess.run(
-            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration",
-             "-of", "csv=p=0", str(video_path)],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode != 0:
-            return None
-        return float((result.stdout or "").strip())
-    except (ValueError, OSError, subprocess.SubprocessError):
-        return None
-
-
-def _clip_plan_clips(clip_plan_validated):
-    """Return the clips list from a validated plan (list or {"clips":[...]})."""
-    if isinstance(clip_plan_validated, dict):
-        clips = clip_plan_validated.get("clips", [])
-    else:
-        clips = clip_plan_validated
-    return clips if isinstance(clips, list) else []
 
 
 def _source_to_output(source_time, clip):
@@ -416,12 +384,12 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
         if not paths:
             log("storyboard 跳过 edited：frames/ 为空或缺失")
             return None
-        clips = _clip_plan_clips(clip_plan_validated)
+        clips = clip_plan_validated["clips"]
         if not clips:
             log("storyboard 跳过 edited：clip_plan_validated 无 clips")
             return None
-        columns = int(CONFIG.get("storyboard_columns", 6) or 6)
-        max_tiles = int(CONFIG.get("storyboard_max_tiles", 30) or 30)
+        columns = int(CONFIG["storyboard_columns"])
+        max_tiles = int(CONFIG["storyboard_max_tiles"])
 
         tiles = []
         seen_frames = set()  # frame-identity dedupe (NOT luma de-dupe; that stays deferred)

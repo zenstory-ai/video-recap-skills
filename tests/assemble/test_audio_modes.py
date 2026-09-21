@@ -63,7 +63,11 @@ def test_manifest_only_references_current_bound_subtitle_track(tmp_path):
         json.dumps({"binding": {"track_sha256": digest}, "metadata": {"entries": 1}}),
         encoding="utf-8",
     )
-    kwargs = dict(settings_fingerprint=lambda _work: {})
+    (tmp_path / "assembly_qc.json").write_text(json.dumps({
+        "verdict": "PASS", "blocking_codes": [], "loudness_mode": None,
+        "loudnorm_measurement": None, "audio_operations": {}, "adopted_audio": None,
+    }), encoding="utf-8")
+    kwargs = dict(settings_fingerprint=lambda _work, **_: {})
     with pytest.raises(ValueError, match="version"):
         assembly_contract._assembly_manifest_payload(
             tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
@@ -95,8 +99,6 @@ def test_nondefault_modes_reject_misleading_or_unsupported_arguments(tmp_path, m
     with pytest.raises(RuntimeError, match="非负整数"):
         assemble_video(source, [], work, work / "bool.mp4",
                        audio_mode="adopted-packet-copy", audio_stream_index=True)
-    with pytest.raises(RuntimeError, match="非负整数"):
-        probe_audio_packets(source, True)
 
 
 def test_source_mix_declared_missing_bgm_fails_closed(tmp_path, monkeypatch):

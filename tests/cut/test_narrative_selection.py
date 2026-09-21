@@ -29,7 +29,7 @@ def _clip(source_start, source_end, output_start, *, source_path=None, source_id
 
 def _check(contract, clips, source, *, source_audio=True):
     return check_required_evidence(contract, {"clips": clips}, input_video=source,
-                                   source_audio={str(source.resolve()): source_audio})
+                                   source_audio=lambda _path: source_audio)
 
 
 def _ordered_contract(source, premise, result):
@@ -109,7 +109,7 @@ def test_source_id_disambiguates_same_real_path(tmp_path):
     report = check_required_evidence(
         {"nodes": [_node(source, track="video", source_id="take-a")], "before": []},
         {"clips": [_clip(10.0, 12.0, 0.0, source_path=source, source_id="take-b")]},
-        input_video=source, source_audio={str(source.resolve()): True})
+        input_video=source, source_audio=lambda _path: True)
     assert report["selection_status"] == "BLOCK"
 
 
@@ -119,7 +119,7 @@ def test_node_without_source_id_cannot_stitch_different_source_identities(tmp_pa
         {"nodes": [_node(source, track="video")], "before": []},
         {"clips": [_clip(10.0, 11.0, 0.0, source_path=source, source_id="take-a"),
                    _clip(11.0, 12.0, 1.0, source_path=source, source_id="take-b")]},
-        input_video=source, source_audio={})
+        input_video=source, source_audio=lambda _path: False)
     assert report["selection_status"] == "BLOCK"
     assert report["nodes"][0]["occurrences"] == []
 

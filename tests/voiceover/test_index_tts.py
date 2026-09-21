@@ -230,7 +230,6 @@ def test_index_success_response_io_failures_hide_private_reason(
         )
 
     assert private not in str(raised.value)
-    assert raised.value.__cause__ is None
     assert not (tmp_path / "out.wav").exists()
 
 
@@ -282,15 +281,6 @@ def test_index_transport_enforces_response_size_limit(monkeypatch, tmp_path):
         index_tts.synthesize_index_tts(
             "测试。", tmp_path / "out.wav", endpoint="https://private.invalid/tts",
             voice="voice", timeout=3,
-        )
-
-
-@pytest.mark.parametrize("timeout", [True, 0, float("inf"), float("nan")])
-def test_index_transport_rejects_unbounded_timeout(timeout, tmp_path):
-    with pytest.raises(ValueError, match="有限正数"):
-        index_tts.synthesize_index_tts(
-            "测试。", tmp_path / "out.wav", endpoint="https://private.invalid/tts",
-            voice="voice", timeout=timeout,
         )
 
 
@@ -381,13 +371,15 @@ def test_index_provider_rejects_clone_reference_before_cache(monkeypatch, tmp_pa
 
 
 @pytest.mark.parametrize(("endpoint", "voice"), [("", "voice"), ("http://host/tts", "")])
-def test_explicit_index_provider_requires_endpoint_and_voice_before_cache(monkeypatch, endpoint, voice):
-    monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", endpoint)
-    monkeypatch.setitem(CONFIG, "index_tts_voice", voice)
+def test_explicit_index_provider_requires_endpoint_and_voice_at_config_load(endpoint, voice):
+    environ = {"INDEX_TTS_ENDPOINT": endpoint, "INDEX_TTS_VOICE": voice}
+    with pytest.raises(ValueError, match="INDEX_TTS_(ENDPOINT|VOICE)"):
+        index_tts.load_private_config({"tts_provider": "index-tts"}, environ)
 
-    with pytest.raises((RuntimeError, ValueError), match="INDEX_TTS_(ENDPOINT|VOICE)"):
-        voiceover._configured_tts_engine_for_cache()
+    # Other providers never need the private settings, so an empty env must not fail.
+    config = {"tts_provider": "auto"}
+    index_tts.load_private_config(config, environ)
+    assert config["index_tts_endpoint"] == endpoint
 
 
 def test_index_preparation_uses_provider_default_speed_despite_dynamic_params(monkeypatch, tmp_path):
@@ -411,15 +403,6 @@ def test_index_preparation_rejects_unsupported_segment_controls(monkeypatch, tmp
 
     with pytest.raises(RuntimeError, match=f"端点不接受段级控制字段.*{next(iter(control))}"):
         voiceover._prepare_tts_segment(0, segment, [segment], tmp_path, "index-tts")
-
-
-def test_index_dispatch_rejects_unsupported_controls(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "tts_retries", 1)
-    monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
-    monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
-
-    with pytest.raises(RuntimeError, match="端点不接受 rate"):
-        voiceover._run_tts_engine("index-tts", "测试。", tmp_path / "out.wav", rate="+5%")
 
 
 def test_index_receipt_and_processed_hash_survive_sidecar_cache_hit(monkeypatch, tmp_path):

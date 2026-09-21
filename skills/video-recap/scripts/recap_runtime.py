@@ -2,7 +2,6 @@
 
 import json
 import math
-import os
 import shlex
 import shutil
 import subprocess
@@ -11,7 +10,7 @@ from pathlib import Path
 
 import materials as material_lib
 from doctor import ffmpeg_has_subtitles_filter
-from lib import env_bool, load_json
+from lib import env_bool, env_int, load_json
 from recap_source import audio_binding
 
 BUNDLE = Path(__file__).resolve().parents[2]  # the skills/ directory
@@ -30,13 +29,8 @@ def _run(skill, script, *cli_args):
 
 
 def _optional_env_int(name):
-    raw = os.environ.get(name)
-    if raw is None or raw.strip() == "":
-        return None
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise ValueError(f"{name} must be an integer; got {raw!r}") from exc
+    """lib.env_int with -1 as the documented "unset" sentinel."""
+    value = env_int(name, None)
     return None if value == -1 else value
 
 

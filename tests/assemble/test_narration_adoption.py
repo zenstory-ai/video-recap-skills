@@ -19,6 +19,7 @@ sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import narration_binding  # noqa: E402
+from tts_fixtures import tts_segment
 
 
 HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
@@ -54,18 +55,18 @@ def _tone(path, frequency=997, *, seconds=1.0):
 
 
 def _segment(audio_path, *, seconds=1.0, with_hash=True, receipt=None):
-    segment = {
-        "index": 0,
-        "start": 0.25,
-        "end": 1.75,
-        "narration": "identity fixture",
-        "spoken_text": "identity fixture",
-        "audio_path": str(audio_path),
-        "audio_duration": seconds,
-        "pause_after_ms": 0,
-        "overlaps_speech": False,
-        "tts_rate_offset": 0.0,
-    }
+    segment = tts_segment(
+        index=0,
+        start=0.25,
+        end=1.75,
+        narration="identity fixture",
+        spoken_text="identity fixture",
+        audio_path=str(audio_path),
+        audio_duration=seconds,
+        pause_after_ms=0,
+        overlaps_speech=False,
+        tts_rate_offset=0.0,
+    )
     if with_hash:
         segment["processed_wav_sha256"] = _sha256(audio_path)
     if receipt is not None:

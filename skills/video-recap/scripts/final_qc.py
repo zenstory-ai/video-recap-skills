@@ -57,25 +57,12 @@ def _read_json_mapping(path: Path) -> Mapping[str, Any] | None:
     return data if isinstance(data, Mapping) else None
 
 
-def _candidate_final_outputs(work_dir: Path, final_output: str | Path | None) -> list[Path]:
-    candidates: list[Path] = []
-    if final_output is not None:
-        candidates.append(_resolve_in_work_dir(work_dir, final_output))
-    manifest_path = work_dir / "assembly_manifest.json"
-    if manifest_path.exists():
-        manifest = _read_json_mapping(manifest_path)
-        manifest_output = manifest.get("final_output") if manifest else None
-        if isinstance(manifest_output, str) and manifest_output:
-            candidates.append(_resolve_in_work_dir(work_dir, manifest_output))
-    candidates += [work_dir / name for name in ("output.mp4", "recap.mp4", "final.mp4")]
-    return list(dict.fromkeys(candidates))
-
-
-def _select_final_output(work_dir: Path, final_output: str | Path | None) -> Path:
-    candidates = _candidate_final_outputs(work_dir, final_output)
-    if final_output is not None:
-        return candidates[0]
-    return next((path for path in candidates if path.is_file() and path.stat().st_size > 0), candidates[0])
+def _final_output_path(work_dir: Path, final_output: str | Path | None) -> Path:
+    """The rendered final output: the caller's path, else assembly_manifest.final_output
+    (video-assemble always writes it; output.mp4 is only the assembler's intermediate)."""
+    if final_output is None:
+        final_output = load_json(work_dir / "assembly_manifest.json")["final_output"]
+    return _resolve_in_work_dir(work_dir, final_output)
 
 
 def _file_metadata(path: Path, work_dir: Path) -> dict[str, Any]:
@@ -298,27 +285,7 @@ def _upstream_blockers(work_dir: Path, artifact_name: str) -> list[dict[str, Any
         return []
     data = _read_json_mapping(path)
     fp = fingerprint_file(path)
-    invalid = data is None
-    codes = data.get("blocking_codes") if data is not None else None
-    if not invalid and codes is None:
-        findings = data.get("findings")
-        invalid = not isinstance(findings, list) or any(
-            not isinstance(finding, Mapping)
-            or not isinstance(finding.get("blocking"), bool)
-            or not isinstance(finding.get("code"), str)
-            or not finding["code"]
-            for finding in findings or []
-        )
-        if not invalid:
-            codes = [finding["code"] for finding in findings if finding["blocking"]]
-    elif isinstance(codes, str):
-        codes = [codes]
-    elif not invalid and (
-        not isinstance(codes, list)
-        or any(not isinstance(code, str) or not code for code in codes)
-    ):
-        invalid = True
-    if invalid:
+    if data is None:  # unreadable upstream QC is itself a deterministic blocker
         return [_finding(
             finding_id=f"final-qc-invalid-upstream-{artifact_name}",
             code=f"upstream_{artifact_name.replace('.', '_')}_schema_invalid",
@@ -334,18 +301,18 @@ def _upstream_blockers(work_dir: Path, artifact_name: str) -> list[dict[str, Any
             code=f"upstream_{artifact_name.replace('.', '_')}_{code}",
             message=f"{artifact_name} reported {code}",
             source={"artifact": artifact_name},
-            evidence={"upstream_code": code, "upstream_verdict": data.get("verdict")},
+            evidence={"upstream_code": code, "upstream_verdict": data["verdict"]},
             fingerprints={artifact_name: fp},
             next_action="fix_upstream_qc_blocker",
         )
-        for idx, code in enumerate(codes)
+        for idx, code in enumerate(data["blocking_codes"])
     ]
 
 
 def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = None,
                      probe_fixture: Any = None, probe_runner: ProbeRunner | None = None) -> dict[str, Any]:
     root = Path(work_dir)
-    selected = _select_final_output(root, final_output)
+    selected = _final_output_path(root, final_output)
     probe = probe_error = None
     final_meta = _file_metadata(selected, root)
     if final_meta["exists"] and final_meta["bytes"] > 0:
@@ -353,7 +320,6 @@ def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = 
     return {
         "work_dir": str(root),
         "final_output": final_meta,
-        "final_output_candidates": [_file_metadata(p, root) for p in _candidate_final_outputs(root, final_output)],
         "artifacts": {name: _artifact_summary(root, name) for name in _COLLECT_ARTIFACTS},
         "probe": probe,
         "probe_error": probe_error,
@@ -366,7 +332,7 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
                    probe_fixture: Any = None, probe_runner: ProbeRunner | None = None,
                    decode_runner: Callable[[Path], tuple[bool | None, str | None]] | None = None) -> dict[str, Any]:
     root = Path(work_dir)
-    selected = _select_final_output(root, final_output)
+    selected = _final_output_path(root, final_output)
     metadata = collect_metadata(root, final_output=final_output, probe_fixture=probe_fixture, probe_runner=probe_runner)
     final_meta = metadata["final_output"]
     findings: list[dict[str, Any]] = []

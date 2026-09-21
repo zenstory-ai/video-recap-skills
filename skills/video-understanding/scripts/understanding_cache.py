@@ -94,7 +94,7 @@ def _write_mimo_overview_status(
         "mimo_video_overview.status.json",
         {
             "stage": "mimo_video_overview",
-            "enabled": bool(CONFIG.get("mimo_video_overview", False))
+            "enabled": bool(CONFIG["mimo_video_overview"])
             if enabled is None
             else bool(enabled),
             "status": status,
@@ -117,23 +117,19 @@ def _merge_overview_into_scenes(scenes, overview_path):
     `frame_facts` is untouched, `assess_understanding_substrate` (which grades on frame_facts +
     ASR) cannot regress; richer descriptions can only help.
     """
-    overview = _load_json(overview_path) if Path(overview_path).exists() else None
-    if not isinstance(overview, dict):
+    if not Path(overview_path).exists():
         return scenes
+    overview = _load_json(overview_path)
     by_scene = {}
-    for chunk in overview.get("chunks") or []:
-        if not isinstance(chunk, dict):
-            continue
-        content = str(chunk.get("content", "")).strip()
-        if content and _is_mimo_chunk_usable(content):
-            by_scene.setdefault(chunk.get("scene_id"), []).append(content)
+    for chunk in overview["chunks"]:
+        content = chunk["content"].strip()
+        if _is_mimo_chunk_usable(content):
+            by_scene.setdefault(chunk["scene_id"], []).append(content)
     if not by_scene:
         return scenes
     enriched = 0
-    for scene in scenes or []:
-        if not isinstance(scene, dict):
-            continue
-        contents = by_scene.get(scene.get("scene_id"))
+    for scene in scenes:
+        contents = by_scene.get(scene["scene_id"])
         if not contents:
             continue
         scene.setdefault("frame_description", scene.get("description", ""))

@@ -29,7 +29,7 @@ DEFAULT_MIMO_ASR_MODEL = "mimo-v2.5-asr"  # speech-to-text
 
 def normalize_api_url(raw_url):
     """Normalize a MiMo (OpenAI-compatible) base URL or chat/completions endpoint."""
-    url = (raw_url or DEFAULT_MIMO_API_URL).rstrip("/")
+    url = raw_url.rstrip("/")
     if url.endswith("/chat/completions"):
         return url
     return f"{url}/chat/completions"
@@ -231,11 +231,25 @@ def get_video_duration(video_path):
            "-of", "csv=p=0", str(video_path)]
     result = run_cmd(cmd)
     if result.returncode != 0:
-        return 0.0
+        raise RuntimeError(f"ffprobe 无法读取时长 {video_path}: {result.stderr.strip()[-500:]}")
     try:
         return float(result.stdout.strip())
-    except (TypeError, ValueError):
-        return 0.0
+    except ValueError as exc:
+        raise RuntimeError(f"ffprobe 时长输出无法解析 {video_path}: {result.stdout.strip()[:100]!r}") from exc
+
+
+def load_background_research(work_dir):
+    """Load the agent-authored background_research.json: missing → {}, malformed → raise."""
+    path = Path(work_dir) / "background_research.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise ValueError(f"background_research.json 不是合法 JSON，请修复后重试: {exc}") from exc
+    if not isinstance(data, dict):
+        raise ValueError("background_research.json 顶层必须是 JSON 对象（{...}）")
+    return data
 
 def stable_json_dumps(value):
     """Serialize values deterministically for non-secret cache fingerprints."""
@@ -311,7 +325,7 @@ def _sanitize_api_error(value, limit=500):
 def _api_headers(api_provider=None, api_url=None, api_key=None):
     """Build MiMo auth headers (OpenAI-compatible chat/completions with an api-key header)."""
     del api_provider, api_url  # MiMo is the only provider; signature kept for call sites
-    key = CONFIG.get("api_key", "") if api_key is None else api_key
+    key = CONFIG["api_key"] if api_key is None else api_key
     return {
         "Content-Type": "application/json",
         "User-Agent": "video-recap/1.0",
@@ -326,7 +340,7 @@ def _prepare_api_payload(payload, api_provider=None, api_url=None):
         normalized["max_completion_tokens"] = normalized.pop("max_tokens")
     model = str(normalized.get("model") or "")
     if (
-        CONFIG.get("mimo_disable_thinking", True)
+        CONFIG["mimo_disable_thinking"]
         and not model.endswith(("-tts", "-asr"))
         and "thinking" not in normalized
     ):
@@ -394,7 +408,7 @@ def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key
                 wait = _retry_after_seconds(retry_after, max(wait, 10))
                 log(f"API 速率限制 (尝试 {attempt+1}/{max_retries}), 等待 {wait}s")
             elif e.code == 401:
-                key_name = api_key_source or CONFIG.get("api_key_source", "MIMO_API_KEY")
+                key_name = api_key_source or CONFIG["api_key_source"]
                 raise RuntimeError(f"API 认证失败 (401)。请检查 {key_name} 和 API URL 是否匹配。")
             elif e.code == 403:
                 hint = "API 访问被拒绝 (403)。"
@@ -428,9 +442,6 @@ def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key
                 time.sleep(wait)
             else:
                 raise RuntimeError(f"API 调用失败 {max_retries} 次: {safe_error}")
-    # Unreachable for max_retries >= 1; guards against a silent `None` return (and the
-    # TypeError it would cause at the caller's resp["choices"]) if a caller passes 0.
-    raise ValueError(f"max_retries must be >= 1, got {max_retries}")
 
 def load_prompt(name):
     """加载 prompt 模板"""

@@ -228,13 +228,17 @@ def main():
         # A prior rendered receipt must not survive a failed revision preflight.
         (work_dir / 'cut_delivery_qc.json').unlink(missing_ok=True)
         contract = raw_plan['required_evidence']
-        nodes = contract.get('nodes', []) if isinstance(contract, dict) else []
-        needs_audio = isinstance(nodes, list) and any(
-            isinstance(node, dict) and node.get('track') == 'audio' for node in nodes)
-        source_audio = {str(Path(path).resolve()): _has_audio_stream(path)
-                        for path in source_paths} if needs_audio else {}
+        plan_sources = {str(Path(path).resolve()): path for path in source_paths}
+        source_audio = {}
+
+        def has_source_audio(source):
+            # Probed lazily, once per source, only for validated audio nodes.
+            if source not in source_audio:
+                source_audio[source] = source in plan_sources and _has_audio_stream(plan_sources[source])
+            return source_audio[source]
+
         report = check_required_evidence(contract, validated_plan, input_video=args.video,
-                                         source_audio=source_audio)
+                                         source_audio=has_source_audio)
         validated_plan['qc']['required_evidence'] = {**report, 'contract': contract}
         if report['selection_status'] == 'BLOCK':
             validated_plan['qc'].setdefault('blocking', []).extend(report['findings'])

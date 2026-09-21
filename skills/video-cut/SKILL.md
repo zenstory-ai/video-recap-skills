@@ -32,8 +32,6 @@ description: >
 - 多视频项目的每个片段还必须填写 `source_id`。
 - `speech_boundary_anchors.json` 与 ASR 时间段由理解阶段提供；Agent 先写大致区间，工具会尝试吸附并把仍在讲话区间内的入/出点作为 blocker 返回。
 
-本工具不读取 `work_dir/narration.json`；旁白在剪辑完成后按输出时间线另行撰写。
-
 ## 3. 剪辑意图契约
 
 工具不会替 Agent 做创作选择。写片段前先完成本节的剪辑意图检查，并让每个区间映射到 `recap_story_plan.json` 的一个 beat。
@@ -65,7 +63,7 @@ beat_id | function | change | POV | preferred moment | 入点 reason | 出点 re
 
 工具在全部画面/句界吸附后检查每个必保时刻至少有一处完整连续保留、来源和先后；音频节点还检查源音轨是否存在。每次结果出现（包括局部片段）都需满足其声明的前提，不能用后面的完整段替开头缺前提的片段过关。结果写入 `clip_plan_validated.json.qc.required_evidence`；缺段、错序或无效声明会在预检、缓存复用和渲染前阻断，时长放宽选项不会跳过。该结果验证选段保留，实际语义与最终混音仍按审片步骤核对。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
 ## 4. 运行命令
 
@@ -102,10 +100,9 @@ ffmpeg -i input.mp4 -vf "select='gt(scene,0.35)',showinfo" -an -f null -
 
 需要精确到实际帧、检查长区间内部残镜并保存版本绑定证据时，使用
 `scripts/shot_review.py` 或 `cut.py --review-shots`（有黑边或包装时加 `--roi` / `--shot-roi`）；
-详见 `references/shot-review.md`。零候选不是“没有闪帧”的证明。
+详见 `references/shot-review.md`。
 
 ## 7. 能力边界
 
-- 不重新转写，也不做人物、剧情或情绪等语义理解；scene filter 只承担技术边界候选检测。
-- 不写旁白，也不替 Agent 选择片段；只消费 `clip_plan.json`。
+- 不做语义理解，不写旁白，不替 Agent 选择片段；scene filter 只承担技术边界候选检测。
 - 只做生成 `edited_source.mp4` 所需的剪切、拼接与一次中间编码，不承担字幕包装或最终交付压缩。

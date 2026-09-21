@@ -82,7 +82,7 @@ def test_bad_clock_and_frame_indices_fail(pts, end, cuts):
 @pytest.mark.parametrize("threshold", [-0.1, 1.1, float("nan"), True])
 def test_invalid_threshold_fails_before_media_tools(tmp_path, threshold):
     with pytest.raises(ValueError, match="threshold"):
-        shot_review.scan_video(tmp_path / "absent.mp4", threshold=threshold)
+        shot_review.detect_scene_pts(tmp_path / "absent.mp4", threshold)
 
 
 def test_supplied_mapping_requires_matching_render_metadata(tmp_path):

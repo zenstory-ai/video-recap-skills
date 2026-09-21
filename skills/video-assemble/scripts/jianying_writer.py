@@ -98,14 +98,10 @@ def _meta_value(material, relative_path, metetype, copied_path, timestamp_ms):
 
 def _material_sets(content):
     """Yield root and nested compound-draft material dictionaries."""
-    materials = content.get("materials")
-    if not isinstance(materials, dict):
-        return
+    materials = content["materials"]
     yield materials
-    for draft in materials.get("drafts", []):
-        nested = draft.get("draft") if isinstance(draft, dict) else None
-        if isinstance(nested, dict):
-            yield from _material_sets(nested)
+    for draft in materials["drafts"]:
+        yield from _material_sets(draft["draft"])
 
 
 def _replace_value(value, old, new):
@@ -184,13 +180,10 @@ def _is_packaged_path(value):
 
 
 def _descriptor(raw, default_kind, *, required):
-    if not isinstance(raw, dict):
-        raise ValueError("JianYing resources entries must be objects")
-    source = raw.get("source_path")
+    """`raw` is a contract-validated resource entry: an object with a non-empty source_path."""
+    source = raw["source_path"]
     resource_kind = raw.get("resource_kind", default_kind)
     target_path = raw.get("target_path")
-    if not isinstance(source, str) or not source:
-        raise ValueError("JianYing resource source_path must be a non-empty string")
     if not isinstance(resource_kind, str) or resource_kind not in {
         "audio", "effect", "fonts", "image", "lut", "mask", "sticker",
         "text", "text_template", "transition", "video",
@@ -321,11 +314,8 @@ def bundle_media(content, meta, draft_dir):
 def strip_internal_resource_fields(content):
     for materials in _material_sets(content):
         for entries in materials.values():
-            if not isinstance(entries, list):
-                continue
             for material in entries:
-                if isinstance(material, dict):
-                    material.pop("_bundle_resources", None)
+                material.pop("_bundle_resources", None)
 
 
 def draft_dir_has_user_content(draft_dir):

@@ -8,7 +8,7 @@ import re
 import tempfile
 from pathlib import Path
 
-from lib import file_fingerprint
+from lib import file_fingerprint, load_background_research
 
 
 EVIDENCE_FILENAME = "asr_timing_evidence.json"
@@ -49,13 +49,7 @@ def _fingerprint(path):
 
 def load_glossary_names(work_dir):
     """Return normalized names that can actually affect ASR correction."""
-    path = Path(work_dir) / "background_research.json"
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, TypeError):
-        return []
-    if not isinstance(data, dict):
-        return []
+    data = load_background_research(work_dir)
     names = set()
     characters = data.get("characters")
     if isinstance(characters, dict):

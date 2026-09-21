@@ -225,7 +225,7 @@ def _sanitize_api_error(value, limit=500):
 def _api_headers(api_provider=None, api_url=None, api_key=None):
     """Build MiMo auth headers (OpenAI-compatible chat/completions with an api-key header)."""
     del api_provider, api_url  # MiMo is the only provider; signature kept for call sites
-    key = CONFIG.get("api_key", "") if api_key is None else api_key
+    key = CONFIG["api_key"] if api_key is None else api_key
     return {
         "Content-Type": "application/json",
         "User-Agent": "video-recap/1.0",
@@ -238,9 +238,9 @@ def _prepare_api_payload(payload, api_provider=None, api_url=None):
     normalized = dict(payload)
     if "max_tokens" in normalized and "max_completion_tokens" not in normalized:
         normalized["max_completion_tokens"] = normalized.pop("max_tokens")
-    model = str(normalized.get("model") or "")
+    model = normalized["model"]
     if (
-        CONFIG.get("mimo_disable_thinking", True)
+        CONFIG["mimo_disable_thinking"]
         and not model.endswith(("-tts", "-asr"))
         and "thinking" not in normalized
     ):
@@ -272,7 +272,7 @@ def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key
                 wait = _retry_after_seconds(retry_after, max(wait, 10))
                 log(f"API 速率限制 (尝试 {attempt+1}/{max_retries}), 等待 {wait}s")
             elif e.code == 401:
-                key_name = api_key_source or CONFIG.get("api_key_source", "MIMO_API_KEY")
+                key_name = api_key_source or CONFIG["api_key_source"]
                 raise RuntimeError(f"API 认证失败 (401)。请检查 {key_name} 和 API URL 是否匹配。")
             elif e.code == 403:
                 hint = "API 访问被拒绝 (403)。"

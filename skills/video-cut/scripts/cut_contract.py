@@ -162,14 +162,11 @@ def _edited_source_meta_path(output_path):
 
 
 def _load_edited_source_meta(output_path):
+    """None when never rendered; a sidecar this skill wrote but cannot parse raises."""
     meta_path = _edited_source_meta_path(output_path)
     if not meta_path.exists():
         return None
-    try:
-        meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-    return meta if isinstance(meta, dict) else None
+    return json.loads(meta_path.read_text(encoding="utf-8"))
 
 
 def _source_fingerprints_for_plan(validated_plan, input_video=None):
@@ -223,17 +220,13 @@ def should_reuse_edited_source(output_path, validated_plan, input_video=None):
     if meta is None:
         return False
     if (
-        meta.get("clip_plan_fingerprint") != cut_plan_fingerprint(validated_plan)
-        or meta.get("render_fingerprint") != edited_source_render_fingerprint()
-        or meta.get("source_fingerprints")
+        meta["clip_plan_fingerprint"] != cut_plan_fingerprint(validated_plan)
+        or meta["render_fingerprint"] != edited_source_render_fingerprint()
+        or meta["source_fingerprints"]
         != _source_fingerprints_for_plan(validated_plan, input_video)
     ):
         return False
-    try:
-        output_fingerprint = file_fingerprint(output_path)
-    except OSError:
-        return False
-    return meta.get("edited_source_fingerprint") == output_fingerprint
+    return meta["edited_source_fingerprint"] == file_fingerprint(output_path)
 
 
 def _manifest_source_entries(sources_manifest):

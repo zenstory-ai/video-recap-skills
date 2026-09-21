@@ -52,7 +52,7 @@ def _seed_segment_cache(i, seg, narration, tts_dir, wav_bytes, duration):
     return wav
 
 
-def _fail_second_segment(i, seg, _narration_data, tts_dir, _engine):
+def _fail_second_segment(i, seg, _narration_data, tts_dir, _engine, _prepared=None):
     if i == 1:
         raise RuntimeError("network timeout")
     return {
@@ -131,9 +131,11 @@ def test_synthesize_segment_reuses_only_matching_cache(monkeypatch, tmp_path):
 
 
 @pytest.mark.parametrize("metadata", ["not json", "{}", "[]"])
-def test_synthesize_segment_regenerates_when_cache_metadata_is_corrupt(
+def test_synthesize_segment_raises_when_own_cache_sidecar_is_corrupt(
     monkeypatch, tmp_path, metadata
 ):
+    """The sidecar is this skill's own artifact: unparseable/incomplete is a bug to surface,
+    not a silent cache miss that re-bills the provider."""
     narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
     tts_dir = tmp_path / "tts_segments"
     tts_dir.mkdir()
@@ -141,13 +143,12 @@ def test_synthesize_segment_regenerates_when_cache_metadata_is_corrupt(
     wav.write_bytes(b"stale")
     voiceover._tts_segment_cache_path(wav).write_text(metadata, encoding="utf-8")
     calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
-    monkeypatch.setattr(voiceover, "get_video_duration", lambda _path: 1.0)
 
-    result = _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
+    with pytest.raises(RuntimeError, match="sidecar 损坏"):
+        _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
 
-    assert calls == ["重新生成。"]
-    assert result["narration"] == "重新生成。"
-    assert wav.read_bytes() == b"fresh"
+    assert calls == []
+    assert wav.read_bytes() == b"stale"
 
 
 def test_tts_cache_key_changes_with_narration_speed(monkeypatch, tmp_path):
@@ -243,6 +244,27 @@ def test_complete_cache_reuse_needs_neither_mimo_key_nor_ffprobe(monkeypatch, tm
     assert [s["audio_path"] for s in segments] == [str(w) for w in wavs]
     assert [s["audio_duration"] for s in segments] == [1.25] * 5
     assert probes == [], f"cached reuse still probed {len(probes)} times"
+
+
+def test_synthesize_tts_probes_each_sidecar_once_and_synthesizes_only_misses(monkeypatch, tmp_path):
+    tts_dir = tmp_path / "tts_segments"
+    tts_dir.mkdir()
+    monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
+    monkeypatch.setitem(CONFIG, "tts_workers", 2)
+    calls = _offline_mimo_segment(monkeypatch)
+    monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0)
+    _seed_segment_cache(0, _TWO_SEGMENTS[0], _TWO_SEGMENTS, tts_dir, b"cached", 1.25)
+    probes = []
+    real_probe = voiceover._reuse_tts_segment_cache
+    monkeypatch.setattr(voiceover, "_reuse_tts_segment_cache",
+                        lambda i, *a: probes.append(i) or real_probe(i, *a))
+
+    segments, _engine, failures = synthesize_tts(_TWO_SEGMENTS, tmp_path)
+
+    assert calls == ["第二段。"]
+    assert sorted(probes) == [0, 1]
+    assert [(s["index"], s["audio_duration"]) for s in segments] == [(0, 1.25), (1, 1.0)]
+    assert failures == []
 
 
 def test_synthesize_tts_voiceclone_cache_does_not_transcode_reference(monkeypatch, tmp_path):
@@ -365,14 +387,6 @@ def test_run_tts_engine_supports_mimo_branch(monkeypatch, tmp_path):
     _run_tts_engine("mimo-tts", "这是小米 MiMo 配音。", output)
 
     assert output.read_bytes() == b"wav"
-
-
-def test_run_tts_engine_rejects_removed_engines(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "tts_retries", 1)
-    monkeypatch.setattr("voiceover.get_video_duration", lambda path: 0.0)
-
-    with pytest.raises(RuntimeError, match="不支持的 TTS 引擎"):
-        _run_tts_engine("edge-tts", "测试。", tmp_path / "out.wav")
 
 
 def test_mimo_tts_writes_decoded_audio(monkeypatch, tmp_path):

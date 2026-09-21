@@ -106,24 +106,15 @@ def _print_grounding_qc_pointer(work_dir):
 def _print_narration_review_pointer(work_dir, *, review_ran=True):
     """Surface the advisory narration review produced by this run, if any.
 
-    Review is optional/fail-open. Avoid surfacing a stale narration_review.md from an
-    older run when review was disabled or failed before producing fresh artifacts.
+    Review is optional/fail-open: review_ran=False (disabled or failed) prints nothing so a
+    stale narration_review.md from an older run is never surfaced. When it ran, video-script's
+    review_runner has written both narration_review.json and .md.
     """
     _print_grounding_qc_pointer(work_dir)
     if not review_ran:
         return
     review_md = Path(work_dir) / "narration_review.md"
-    if not review_md.exists():
-        return
-    review_json = Path(work_dir) / "narration_review.json"
-    if not review_json.exists():
-        print(f"[video-recap] 📋 解说评审（建议性，不拦截）→ {review_md}")
-        return
-    try:
-        data = load_json(review_json)
-    except (OSError, ValueError):
-        print(f"[video-recap] 📋 解说评审（建议性，不拦截）→ {review_md}")
-        return
+    data = load_json(Path(work_dir) / "narration_review.json")
     n_err = sum(1 for f in data["findings"] if f["severity"] == "error")
     print(
         f"[video-recap] 📋 解说评审（建议性，不拦截）: {data['verdict']} · "
@@ -159,7 +150,7 @@ def _manifest_mismatches(work_dir, video, args):
     ]
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
-    actual_audio = actual.get("audio", {"mode": "narration", "selected_stream_index": 0})
+    actual_audio = actual["audio"]
     expected_audio = audio_binding(args)
     if actual_audio != expected_audio:
         mismatches.append(
@@ -185,7 +176,7 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         )
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
-    actual_audio = actual.get("audio", {"mode": "narration", "selected_stream_index": 0})
+    actual_audio = actual["audio"]
     expected_audio = audio_binding(args)
     if actual_audio != expected_audio:
         mismatches.append(
@@ -246,9 +237,9 @@ def _continuation_command(video, work_dir, args):
         parts += ["--style", args.style]
     if args.edit_mode != "full":
         parts += ["--edit-mode", args.edit_mode]
-    if getattr(args, "audio_mode", "narration") != "narration":
+    if args.audio_mode != "narration":
         parts += ["--audio-mode", args.audio_mode]
-    if getattr(args, "audio_stream_index", 0) != 0:
+    if args.audio_stream_index != 0:
         parts += ["--audio-stream-index", str(args.audio_stream_index)]
     if args.target_duration:
         parts += ["--target-duration", args.target_duration]
@@ -275,7 +266,7 @@ def _continuation_command(video, work_dir, args):
             parts += ["--voice-ref", args.voice_ref]
         if args.allow_partial_tts:
             parts.append("--allow-partial-tts")
-        if getattr(args, "preserve_approved_text", False):
+        if args.preserve_approved_text:
             parts.append("--preserve-approved-text")
     if args.burn_subtitles is not None:
         parts.append("--burn-subtitles" if args.burn_subtitles else "--no-burn-subtitles")
@@ -304,7 +295,7 @@ def _continuation_command(video, work_dir, args):
         parts.append("--use-materials")
     if args.save_materials:
         parts.append("--save-materials")
-    if getattr(args, "require_final_qc", False):
+    if args.require_final_qc:
         parts.append("--require-final-qc")
     return " ".join(shlex.quote(part) for part in parts)
 
@@ -473,11 +464,7 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             when = float(anchor["time"])
             if not (source_start - 0.05 <= when <= source_end + 0.05):
                 continue
-            try:
-                pause = float(anchor["pause_start"])
-            except (TypeError, ValueError):
-                pause = when
-            pause = max(source_start, min(pause, when))
+            pause = max(source_start, min(float(anchor["pause_start"]), when))
             item = dict(anchor)
             item.update(
                 source_id=source_id,

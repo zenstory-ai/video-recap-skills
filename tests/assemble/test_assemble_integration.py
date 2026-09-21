@@ -16,6 +16,7 @@ import pytest
 
 from assemble import assemble_video  # noqa: E402
 from lib import CONFIG  # noqa: E402
+from tts_fixtures import tts_segment
 
 _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 pytestmark = pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
@@ -50,11 +51,11 @@ def _stream_types(path):
 def _segment(work_dir, start, end, overlaps, dur=1.5):
     wav = work_dir / "narr_000.wav"
     _make_narration_wav(wav, dur)
-    return [{
-        "index": 0, "start": start, "end": end, "narration": "测试解说。",
-        "audio_path": str(wav), "audio_duration": dur,
-        "pause_after_ms": 250, "overlaps_speech": overlaps,
-    }]
+    return [tts_segment(
+        index=0, start=start, end=end, narration="测试解说。",
+        audio_path=str(wav), audio_duration=dur,
+        pause_after_ms=250, overlaps_speech=overlaps,
+    )]
 
 
 def test_assemble_video_runs_with_final_loudnorm(tmp_path, monkeypatch):

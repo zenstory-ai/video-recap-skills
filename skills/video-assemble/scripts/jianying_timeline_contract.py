@@ -45,6 +45,19 @@ def _validate_span(item, path, start_key="timeline_start", end_key="timeline_end
         _error(f"{path}.{end_key}", f"must be greater than {start_key}")
 
 
+def _validate_transform(item, path):
+    for field in ("scale", "position", "flip"):
+        if field in item and not isinstance(item[field], dict):
+            _error(f"{path}.{field}", "must be an object")
+
+
+def _validate_resources(resources, path):
+    if not isinstance(resources, list) or any(not isinstance(item, dict) for item in resources):
+        _error(path, "must contain source_path objects")
+    for index, item in enumerate(resources):
+        _require_string(item, "source_path", f"{path}[{index}]")
+
+
 def _validate_video_clip(clip, path):
     if not isinstance(clip, dict):
         _error(path, "must be an object")
@@ -68,18 +81,30 @@ def _validate_video_clip(clip, path):
             )
     if "reverse" in clip and not isinstance(clip["reverse"], bool):
         _error(f"{path}.reverse", "must be a boolean")
-    if clip.get("reverse"):
+    # A reversed clip may omit reverse_path: export_timeline_to_jianying generates it.
+    if "reverse_path" in clip:
         _require_string(clip, "reverse_path", path)
-    for field in ("scale", "position", "flip"):
-        if field in clip and not isinstance(clip[field], dict):
-            _error(f"{path}.{field}", "must be an object")
+    _validate_transform(clip, path)
     for field in ("transition", "mask", "lut", "chroma"):
-        if field in clip and not isinstance(clip[field], (dict, str)):
+        if field not in clip:
+            continue
+        spec = clip[field]
+        if isinstance(spec, dict):
+            if "resources" in spec:
+                _validate_resources(spec["resources"], f"{path}.{field}.resources")
+        elif not isinstance(spec, str):
             _error(f"{path}.{field}", "must be an object or resource-package name")
-    if "green_background" in clip and not isinstance(clip["green_background"], dict):
-        _error(f"{path}.green_background", "must be a local media object")
     if "compound" in clip and not isinstance(clip["compound"], bool):
         _error(f"{path}.compound", "must be a boolean")
+    if clip.get("compound") or "green_background" in clip or "chroma" in clip:
+        # Any one of these makes the clip a green-screen compound, which needs both.
+        background = clip.get("green_background")
+        if not isinstance(background, dict):
+            _error(f"{path}.green_background", "must be a local media object")
+        _require_string(background, "source_path", f"{path}.green_background")
+        _validate_transform(background, f"{path}.green_background")
+        if "chroma" not in clip:
+            _error(f"{path}.chroma", "compound green-screen clips require a chroma object")
 
 
 def _validate_resource_config(config, path):
@@ -87,18 +112,14 @@ def _validate_resource_config(config, path):
         _error(path, "must be an object")
     if not isinstance(config.get("main_config"), dict):
         _error(f"{path}.main_config", "must be an object")
-    resources = config.get("resources", [])
-    if not isinstance(resources, list) or any(
-        not isinstance(item, dict) or not isinstance(item.get("source_path"), str)
-        for item in resources
-    ):
-        _error(f"{path}.resources", "must contain source_path objects")
+    _validate_resources(config.get("resources", []), f"{path}.resources")
 
 
 def _validate_segment(segment, path, kind):
     if not isinstance(segment, dict):
         _error(path, "must be an object")
     _validate_span(segment, path)
+    _validate_transform(segment, path)
     if "speed" in segment:
         speed = _require_number(segment, "speed", path)
         if speed <= 0:

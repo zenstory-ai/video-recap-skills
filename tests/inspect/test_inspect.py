@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 # inspect.py shares its name with the stdlib `inspect` module, so it cannot be imported with a
 # bare `import inspect` (that would resolve the stdlib). Load it by explicit file path under a
 # private module name instead — this is the read-only advisory CLI under test.
@@ -284,29 +286,14 @@ def test_clip_map_no_window_specified_message(tmp_path):
     assert "error" in result
 
 
-def test_clip_map_malformed_json_no_traceback(tmp_path):
-    """A corrupt clip_plan_validated.json returns a clear message, never a traceback."""
+def test_clip_map_malformed_json_raises(tmp_path):
+    """A corrupt clip_plan_validated.json (written by video-cut) is a broken upstream
+    artifact and raises instead of being silently reported as "no clips"."""
     (tmp_path / "clip_plan_validated.json").write_text("{not json", encoding="utf-8")
-    result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=0.0, output_end=5.0,
-        source_start=None, source_end=None, compact=True)
-    assert "error" in result
-    md = recap_inspect._render_clip_map_md(result, compact=True)
-    assert "JSON" in md or "json" in md
-
-
-def test_clip_map_bare_list_plan_with_derived_output(tmp_path):
-    """A bare-list plan without output_start/end derives the output cursor the same way cut.py
-    does (durations accumulate), matching assemble._output_clip_spans."""
-    _write_plan(tmp_path, plan=[
-        {"source_start": 10.0, "source_end": 20.0},  # output 0-10
-        {"source_start": 50.0, "source_end": 56.0},  # output 10-16
-    ])
-    result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=None, output_end=None,
-        source_start=51.0, source_end=54.0, compact=True)
-    seg = result["queries"][0]["segments"][0]
-    assert seg["output"] == [11.0, 14.0]
+    with pytest.raises(ValueError):
+        recap_inspect.cmd_clip_map(
+            tmp_path, output_start=0.0, output_end=5.0,
+            source_start=None, source_end=None, compact=True)
 
 
 def test_state_surfaces_multi_source_manifest(tmp_path):
@@ -331,7 +318,8 @@ def test_clip_map_includes_multi_source_provenance(tmp_path):
     _write_plan(tmp_path, {
         "clips": [
             {"clip_id": 0, "source_id": "src_a", "source_path": "/videos/a.mp4",
-             "source_start": 10.0, "source_end": 12.0, "output_start": 0.0, "output_end": 2.0},
+             "source_start": 10.0, "source_end": 12.0, "output_start": 0.0, "output_end": 2.0,
+             "duration": 2.0, "reason": ""},
         ]
     })
     result = recap_inspect.cmd_clip_map(tmp_path, output_start=0.5, output_end=1.0,

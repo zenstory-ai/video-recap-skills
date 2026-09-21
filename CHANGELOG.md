@@ -12,6 +12,7 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- **第二轮去防御：消费方不再重验生产方契约。** 沿用 0.5.0 的"在边界校验一次，之后信任契约"：`validate.py` 不再复刻 `narration_lint` 的形状检查（lint 补上有限值与时间顺序检查，`invalid_approved_shape` 改为常规 lint 错误码）；review/brief 对自建 bundle、review、clip_plan_validated 直接取字段；assemble 对 tts_meta / assembly_qc / timeline 直接取字段，剪映 builder 不再重检 contract 已保证的字段，CLI 组合检查只在 API 层做一次；recap 的 final_qc / recap_review / recap_inspect / mimo_qc 不再为不存在的产物形态兜底；understanding 的 `get_video_duration` 在 ffprobe 失败时抛错而不是返回 0.0，损坏的自产 JSON 一律抛错而不是当作"缺失"或"缓存未命中"；voiceover dub 的 ffmpeg 失败、畸形 ASR 响应、损坏缓存 sidecar 不再被吞成空行或静默重合成。`CONFIG.get(key, default)` 对已声明的键改为 `CONFIG[key]`，删除过期默认值。SKILL.md 去掉跨技能复述的免责与禁令，共享规则只在拥有它的技能里写一次。
 - **skill 层瘦身。** SKILL.md 去掉跨技能重复的创作模式定义、密集切点规则和 TTS 供应商细节，各自只在拥有它的技能里写一次；recap 的参数清单改为指向 `--help`。长段落下沉到 `video-voiceover/references/index-tts.md`、`video-assemble/references/packaging.md`、`source-score.md` 与 `video-cut/references/shot-review.md`。`timeline-and-jianying.md` 移到 `docs/`，`env-inventory-v1.json` 移到 `tests/orchestrator/`。
 
 ### Removed

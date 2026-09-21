@@ -20,7 +20,7 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 
 画面流程 `--edit-mode full|cut|dub` 与声音策略分开：`--audio-mode narration` 保留上述解说流程；
 `source-mix` 不做配音；`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。使用原声模式时读
-`references/audio-routing.md`，不要为了运行工具而编造空解说。
+`references/audio-routing.md`。
 
 已有预制画面和本地采用的完整声音三件套时，可走严格 assembly-only 路径：
 
@@ -65,7 +65,7 @@ export MIMO_API_KEY=***
 - VLM：`mimo-v2.5`
 - TTS：`mimo-v2.5-tts`
 
-TTS 供应商由 `--tts-provider mimo-tts|fish-audio|index-tts`（或 `TTS_PROVIDER`）透传给配音技能；Fish Audio 与自托管 index-tts 各自的环境变量、默认音色和能力限制见该技能。ASR/VLM 始终使用 MiMo。`--doctor` 仅离线核配置，不证明服务可用或声线正确。
+TTS 供应商由 `--tts-provider mimo-tts|fish-audio|index-tts`（或 `TTS_PROVIDER`）透传给配音技能；Fish Audio 与自托管 index-tts 各自的环境变量、默认音色和能力限制见该技能。ASR/VLM 始终使用 MiMo。`--doctor` 只做离线配置检查。
 
 `tp-*` Token Plan 密钥默认使用中国区集群，可用 `MIMO_TOKEN_PLAN_CLUSTER` 覆盖。
 
@@ -140,8 +140,7 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --mimo-qc both
 
 合成前复核会读取脚本、计划和 TTS 元数据；成片后还会读取最多六张临时 JPEG。相同输入命中内容缓存，`--mimo-qc-refresh` 可强制刷新。帧的 base64 与凭证不会写入磁盘。
 
-已有批准解说稿时使用 `--preserve-approved-text`：编排器会在 full、单视频 cut 和多视频 cut 的 TTS 前把保护参数交给真实校验器，保留段落顺序、数量、时间、文本、停顿和扩展元数据；形状、来源边界和时长错误仍会失败，字符预算只形成预警，不能静默缩稿或降级为部分成功。
-这项策略只保护批准的时间线与文本；`overlaps_speech` 仍可依据已有声音证据更新，声音身份、后续 tempo、实际合成 WAV 是否装入时间窗及混音仍须单独核验。
+已有批准解说稿时加 `--preserve-approved-text`：校验与 TTS 原样保留批准稿（只更新 `overlaps_speech`），装不下时间窗即失败，不缩稿、不降级为部分成功。
 
 ### 4.5 字幕与克隆旁白
 
@@ -229,10 +228,6 @@ python3 scripts/recap.py --doctor
 
 ## 8. 能力边界
 
-- 编排器不代替 Agent 写 `narration.json` / `clip_plan.json`；具体写作遵循创作 brief 与写作阶段契约。
 - 语义评审默认建议型、失败开放；只有调用方显式启用严格解说评审时，事实矛盾、残句或评审不可用才会在 TTS 前阻断。确定性校验阶段始终负责硬校验。
 - MiMo QC 不能阻断、自动修复或改变退出状态，只提供定位建议。
-- 建立内容质量基线不依赖平台分析、留存遥测或发布接入。
-- 本技能不改宣发标题、花字或外部文案回填；入口见 `video-script` 的 references/promotional-copy.md。
-- 本技能不是无人值守调度器，不会向任何平台发布内容。
-- 各阶段技能不共享代码，只通过 `work_dir` 产物通信。
+- 宣发标题、花字或外部文案回填见 `video-script` 的 references/promotional-copy.md。

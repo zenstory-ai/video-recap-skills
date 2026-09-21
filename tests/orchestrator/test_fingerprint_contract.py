@@ -158,6 +158,11 @@ def test_recap_runtime_reuses_materials_fingerprint(monkeypatch, tmp_path):
                 "mimo_video_overview": False,
                 "consolidate": False,
                 "consolidate_asr": False,
+                "audio_mode": "narration",
+                "audio_stream_index": 0,
+                "tts_meta": None,
+                "narration_adoption": None,
+                "audio_mix_adoption": None,
             },
         )(),
     )["source_video_fingerprint"] == f"shared:{sample}"

@@ -128,21 +128,12 @@ def _collect_multi_source_asr(work_dir: Path) -> dict[str, Any]:
     manifest_path = work_dir / "multi_source_manifest.json"
     if not manifest_path.is_file():
         return {}
-    root = work_dir.resolve(strict=False)
     collected = {}
     for source in _load_json(manifest_path)["sources"]:
-        relative_dir = source["source_work_dir"]
-        source_dir = (root / relative_dir).resolve(strict=False)
-        if not source_dir.is_relative_to(root):
-            continue
-        name = _first_existing(source_dir, _SOURCE_ASR_ARTIFACTS)
+        relative_dir = source["source_work_dir"]  # recap writes sources/<source_id>
+        name = _first_existing(work_dir / relative_dir, _SOURCE_ASR_ARTIFACTS)
         if name is not None:
-            evidence_path = (source_dir / name).resolve(strict=False)
-            if not evidence_path.is_relative_to(root):
-                continue
-            collected[source["source_id"]] = _collect_file(
-                root, str(evidence_path.relative_to(root))
-            )
+            collected[source["source_id"]] = _collect_file(work_dir, f"{relative_dir}/{name}")
     return collected
 
 
@@ -151,55 +142,42 @@ def _resolve_candidate(work_dir: Path, candidate: str | Path) -> Path:
     return path if path.is_absolute() else work_dir / path
 
 
-def _final_output_candidates(
+def _final_output_path(
     work_dir: Path, final_output: str | Path | None
-) -> list[tuple[Path, str]]:
-    raw: list[str | Path] = []
-    if final_output:
-        raw.append(final_output)
-    manifest_path = work_dir / "assembly_manifest.json"
-    if manifest_path.is_file():
-        raw.append(_load_json(manifest_path)["final_output"])
-    raw.extend(("output.mp4", "recap.mp4", "final.mp4"))
-    seen: set[str] = set()
-    result = []
-    for item in raw:
-        path = _resolve_candidate(work_dir, item)
-        key = str(path.resolve(strict=False))
-        if key not in seen:
-            seen.add(key)
-            result.append((path, str(item)))
-    return result
+) -> tuple[Path, str] | None:
+    """(path, display) of the final output: the caller's, else assembly_manifest.final_output
+    (video-assemble always writes it); None before the assembler has run."""
+    if final_output is None:
+        manifest_path = work_dir / "assembly_manifest.json"
+        if not manifest_path.is_file():
+            return None
+        final_output = _load_json(manifest_path)["final_output"]
+    return _resolve_candidate(work_dir, final_output), str(final_output)
 
 
 def _final_output_metadata(
     work_dir: Path, final_output: str | Path | None = None
 ) -> dict[str, Any]:
-    outputs = []
-    for path, display in _final_output_candidates(work_dir, final_output):
-        item: dict[str, Any] = {"path": display, "exists": path.is_file()}
-        if item["exists"]:
-            item.update(
-                {
-                    "bytes": path.stat().st_size,
-                    "fingerprint": qc_contract.artifact_fingerprint(path),
-                }
-            )
-        outputs.append(item)
-    return {"candidates": outputs}
+    resolved = _final_output_path(work_dir, final_output)
+    if resolved is None:
+        return {"candidates": []}
+    path, display = resolved
+    item: dict[str, Any] = {"path": display, "exists": path.is_file()}
+    if item["exists"]:
+        item.update(
+            {
+                "bytes": path.stat().st_size,
+                "fingerprint": qc_contract.artifact_fingerprint(path),
+            }
+        )
+    return {"candidates": [item]}
 
 
 def _existing_final_output(
     work_dir: Path, final_output: str | Path | None
 ) -> Path | None:
-    return next(
-        (
-            path
-            for path, _display in _final_output_candidates(work_dir, final_output)
-            if path.is_file()
-        ),
-        None,
-    )
+    resolved = _final_output_path(work_dir, final_output)
+    return resolved[0] if resolved is not None and resolved[0].is_file() else None
 
 
 def collect_evidence(

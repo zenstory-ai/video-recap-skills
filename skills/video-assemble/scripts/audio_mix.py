@@ -172,7 +172,7 @@ def _handoff_speech_evidence(work_dir, payload):
         speech = _timed_rows(_asr_segments(work_dir))
     if not quiet:
         silence = _load_work_json(work_dir, "silence_periods.json") or []
-        quiet = _timed_rows(row for row in silence if not row.get("has_speech", False))
+        quiet = _timed_rows(row for row in silence if not row["has_speech"])
     return speech, quiet
 
 
@@ -278,7 +278,7 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
                 speech_spans,
                 quiet_windows,
                 anchors,
-                seg.get("overlaps_speech", True),
+                seg["overlaps_speech"],
                 require_measured=require_measured,
             )
             seg["overlaps_speech"] = measured
@@ -374,7 +374,7 @@ def _duck_envelope(tts_segments, idle, speech_vol, quiet_vol, fade, bridge):
             continue
         hold_end = max(narration_end, seg.get("source_duck_end", narration_end))
         restore_at = max(hold_end, seg.get("source_restore_at", hold_end + fade))
-        level = speech_vol if seg.get("overlaps_speech", True) else quiet_vol
+        level = speech_vol if seg["overlaps_speech"] else quiet_vol
         windows.append((start, hold_end, level, restore_at))
     return release_ducking_expression(windows, idle, fade, bridge=bridge)
 
@@ -455,7 +455,7 @@ def _build_audio_filter_complex(
     quiet_vol = CONFIG["zone_ducking_volume"]
     expr = _duck_envelope(tts_segments, idle, speech_vol, quiet_vol, fade, bridge)
     if expr:
-        n_overlap = sum(1 for s in tts_segments if s.get("overlaps_speech", True))
+        n_overlap = sum(1 for s in tts_segments if s["overlaps_speech"])
         n_quiet = len(tts_segments) - n_overlap
         log(f"gap-fill ducking: 间隙原声={idle}, 对白段={speech_vol}({n_overlap}), 安静段={quiet_vol}({n_quiet}), 桥接间隙<{bridge}s")
         orig = f"{original_in}volume='{expr}':eval=frame,aresample=48000[orig];"

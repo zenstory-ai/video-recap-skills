@@ -5,6 +5,7 @@ timing and text checks live here, and every later consumer trusts its result.
 """
 
 import json
+import math
 from pathlib import Path
 
 from lib import CONFIG, log
@@ -32,7 +33,11 @@ def _lint_issue(level, index, code, message, **extra):
 
 
 def _is_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 def _visual_overlay_issues(index, seg):
@@ -115,17 +120,13 @@ def _clip_span(clip):
     return clip["start"], clip["end"]
 
 
-def _clip_matches_for_segment(seg, clip_plan):
+def _clip_matches_for_segment(seg, clip_plan, requested_clip_id):
     if not clip_plan:
         return []
     clips = clip_plan["clips"]
     midpoint = (seg["start"] + seg["end"]) / 2
-    if seg.get("source_clip_id") is not None:
-        try:
-            requested = int(seg["source_clip_id"])
-        except (TypeError, ValueError):
-            return []
-        clips = [clip for clip in clips if clip.get("clip_id") == requested]
+    if requested_clip_id is not None:
+        clips = [clip for clip in clips if clip.get("clip_id") == requested_clip_id]
     return [
         clip
         for clip in clips
@@ -215,6 +216,7 @@ def lint_narration(
             )
         )
     else:
+        previous_start = None
         for idx, seg in enumerate(narration):
             if not isinstance(seg, dict):
                 errors.append(
@@ -230,33 +232,47 @@ def lint_narration(
             if not _is_number(start) or not _is_number(end):
                 errors.append(
                     _lint_issue(
-                        "error", idx, "invalid_time", "start/end must be numeric"
+                        "error", idx, "invalid_time", "start/end must be finite numbers"
                     )
                 )
                 continue
-            text = str(seg.get("narration", "")).strip()
-            try:
-                pause = int(seg.get("pause_after_ms", CONFIG["breath_ms"]))
-            except (TypeError, ValueError):
+            if previous_start is not None and start < previous_start:
+                errors.append(
+                    _lint_issue(
+                        "error",
+                        idx,
+                        "out_of_order",
+                        "Segments must be listed in chronological order",
+                        start=start,
+                        previous_start=previous_start,
+                    )
+                )
+            previous_start = start
+            text = seg.get("narration")
+            if not isinstance(text, str):
+                errors.append(
+                    _lint_issue(
+                        "error",
+                        idx,
+                        "invalid_narration",
+                        "narration must be a string",
+                        start=start,
+                        end=end,
+                    )
+                )
+                continue
+            text = text.strip()
+            pause = seg.get("pause_after_ms", CONFIG["breath_ms"])
+            if not isinstance(pause, int) or isinstance(pause, bool) or pause < 0:
                 errors.append(
                     _lint_issue(
                         "error",
                         idx,
                         "invalid_pause",
-                        "pause_after_ms must be an integer number of milliseconds",
+                        "pause_after_ms must be a non-negative integer number of milliseconds",
                     )
                 )
                 continue
-            if pause < 0:
-                warnings.append(
-                    _lint_issue(
-                        "warning",
-                        idx,
-                        "negative_pause",
-                        "pause_after_ms is negative; default should be used",
-                        pause_after_ms=pause,
-                    )
-                )
             errors.extend(_visual_overlay_issues(idx, seg))
             if end <= start:
                 errors.append(
@@ -388,7 +404,21 @@ def lint_narration(
                 )
 
             if mode == "cut":
-                matches = _clip_matches_for_segment(seg, clip_plan)
+                requested_clip_id = seg.get("source_clip_id")
+                if requested_clip_id is not None:
+                    try:
+                        requested_clip_id = int(requested_clip_id)
+                    except (TypeError, ValueError):
+                        errors.append(
+                            _lint_issue(
+                                "error",
+                                idx,
+                                "invalid_source_clip_id",
+                                "source_clip_id must be an integer",
+                            )
+                        )
+                        continue
+                matches = _clip_matches_for_segment(seg, clip_plan, requested_clip_id)
                 if not matches:
                     errors.append(
                         _lint_issue(
@@ -400,7 +430,7 @@ def lint_narration(
                             end=end,
                         )
                     )
-                elif len(matches) > 1 and seg.get("source_clip_id") is None:
+                elif len(matches) > 1 and requested_clip_id is None:
                     errors.append(
                         _lint_issue(
                             "error",
@@ -424,18 +454,6 @@ def lint_narration(
                                 end=end,
                                 clip_start=round(clip_start, 3),
                                 clip_end=round(clip_end, 3),
-                            )
-                        )
-                if seg.get("source_clip_id") is not None:
-                    try:
-                        int(seg["source_clip_id"])
-                    except (TypeError, ValueError):
-                        errors.append(
-                            _lint_issue(
-                                "error",
-                                idx,
-                                "invalid_source_clip_id",
-                                "source_clip_id must be an integer",
                             )
                         )
 

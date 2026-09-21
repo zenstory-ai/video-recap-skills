@@ -29,7 +29,6 @@ export TTS_PROVIDER=index-tts
 ```
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
-脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的稿件、音频、参数与 `work_dir` 产物。
 
 ## 3. 输入契约
 
@@ -85,9 +84,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 
 ## 7. 能力边界
 
-- 默认兼容旧流程：超窗时仍可能在句界自动缩稿并在 `spoken_text/truncated` 留痕。
-  对已批准、不可自动改写的文本必须显式使用 `--preserve-approved-text`；该策略只证明文本未被
-  创意删改，不代表已完成直接听审、音色锁定或发音质量验收。
+- 超窗时默认在句界自动缩稿并在 `spoken_text/truncated` 留痕；批准稿加 `--preserve-approved-text`。
 - 不混流、不压低原声、不渲染字幕。
 - 不分析视频，也不选择时间点；只为输入稿件中的既定分段配音。
 - Fish Audio 与 IndexTTS 路径都不接受本地 `--voice-ref`；前者用已创建的 `FISH_TTS_REFERENCE_ID` 选择音色。

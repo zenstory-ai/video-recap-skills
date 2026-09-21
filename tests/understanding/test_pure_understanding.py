@@ -29,6 +29,7 @@ from lib import (  # noqa: E402
     file_fingerprint,
     get_video_duration,
     is_mimo_token_plan_key,
+    load_background_research,
     normalize_api_url,
 )
 from understanding_brief import _research_context  # noqa: E402
@@ -40,12 +41,22 @@ from vlm import (  # noqa: E402
 )
 
 
-def test_get_video_duration_returns_zero_for_unparseable_output(monkeypatch):
+def test_get_video_duration_raises_for_unparseable_output(monkeypatch):
     def fake_run_cmd(cmd):
         return CompletedProcess(cmd, 0, stdout="N/A\n", stderr="")
 
     monkeypatch.setattr("lib.run_cmd", fake_run_cmd)
-    assert get_video_duration("bad.mp4") == 0.0
+    with pytest.raises(RuntimeError, match="无法解析"):
+        get_video_duration("bad.mp4")
+
+
+def test_get_video_duration_raises_with_ffprobe_stderr(monkeypatch):
+    def fake_run_cmd(cmd):
+        return CompletedProcess(cmd, 1, stdout="", stderr="bad.mp4: Invalid data found")
+
+    monkeypatch.setattr("lib.run_cmd", fake_run_cmd)
+    with pytest.raises(RuntimeError, match="Invalid data found"):
+        get_video_duration("bad.mp4")
 
 
 def test_retry_after_seconds_accepts_malformed_header():
@@ -307,3 +318,13 @@ def test_segment_and_transcribe_uses_configured_window(monkeypatch, tmp_path):
     assert segs[0]["start"] == 0 and segs[0]["end"] == 30
     assert segs[-1]["end"] == 100
     assert all(s["text"] == "对白" for s in segs)
+
+
+def test_load_background_research_missing_is_empty_and_malformed_raises(tmp_path):
+    assert load_background_research(tmp_path) == {}
+    (tmp_path / "background_research.json").write_text("{not json", encoding="utf-8")
+    with pytest.raises(ValueError, match="不是合法 JSON"):
+        load_background_research(tmp_path)
+    (tmp_path / "background_research.json").write_text("[1, 2]", encoding="utf-8")
+    with pytest.raises(ValueError, match="JSON 对象"):
+        load_background_research(tmp_path)

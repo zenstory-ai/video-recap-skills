@@ -1,9 +1,9 @@
 """Self-hosted index-tts JSON-to-WAV transport with no redirect forwarding."""
 
+import contextlib
 import hashlib
 import io
 import json
-import math
 import os
 import socket
 import urllib.error
@@ -61,28 +61,21 @@ def endpoint_fingerprint(endpoint):
     return hashlib.sha256(endpoint.encode("utf-8")).hexdigest()
 
 
-def configured_values(config):
-    return validate_index_tts_config(
-        config.get("index_tts_endpoint"), config.get("index_tts_voice")
-    )
-
-
 def load_private_config(config, environ):
-    config["index_tts_endpoint"] = environ.get("INDEX_TTS_ENDPOINT", "").strip()
-    config["index_tts_voice"] = environ.get("INDEX_TTS_VOICE", "").strip()
+    """Read the private index-tts settings; validate them once, only when that provider is selected."""
+    endpoint = environ.get("INDEX_TTS_ENDPOINT", "").strip()
+    voice = environ.get("INDEX_TTS_VOICE", "").strip()
+    if config["tts_provider"] == "index-tts":
+        endpoint, voice = validate_index_tts_config(endpoint, voice)
+    config["index_tts_endpoint"] = endpoint
+    config["index_tts_voice"] = voice
     config["index_tts_cache_revision"] = environ.get("INDEX_TTS_CACHE_REVISION", "").strip()
 
 
-def validate_cli_options(provider, mimo_voice, voice_ref):
-    if provider == "index-tts" and (mimo_voice or voice_ref):
-        raise ValueError("IndexTTS 不支持 --mimo-voice/--voice-ref 克隆或覆盖")
-
-
 def cache_settings(config):
-    endpoint, voice = configured_values(config)
     return {
-        "index_tts_endpoint_sha256": endpoint_fingerprint(endpoint),
-        "index_tts_voice": voice,
+        "index_tts_endpoint_sha256": endpoint_fingerprint(config["index_tts_endpoint"]),
+        "index_tts_voice": config["index_tts_voice"],
         "index_tts_speed_policy": SPEED_POLICY,
         "index_tts_cache_revision": config.get("index_tts_cache_revision", ""),
     }
@@ -98,15 +91,10 @@ def default_controls(segment):
     return "+0%", "+0Hz"
 
 
-def validate_controls(rate, pitch, emotion):
-    if rate != "+0%" or pitch != "+0Hz" or emotion:
-        raise RuntimeError("已配置的端点不接受 rate/pitch/emotion 控制，必须使用 provider 默认速度")
-
-
 def synthesize_configured(text, output_path, config):
-    endpoint, voice = configured_values(config)
     return synthesize_index_tts(
-        text, output_path, endpoint=endpoint, voice=voice, timeout=config["tts_timeout"]
+        text, output_path, endpoint=config["index_tts_endpoint"],
+        voice=config["index_tts_voice"], timeout=config["tts_timeout"],
     )
 
 
@@ -127,7 +115,7 @@ def valid_cached_receipt(cache_data, config):
         "receipt_schema": RECEIPT_SCHEMA,
         "receipt_version": RECEIPT_VERSION,
         "provider": "index-tts",
-        "requested_voice": configured_values(config)[1],
+        "requested_voice": config["index_tts_voice"],
         "speed_policy": SPEED_POLICY,
         "processed_wav_sha256": cache_data.get("audio_fingerprint"),
     }
@@ -150,14 +138,12 @@ def valid_cached_receipt(cache_data, config):
 
 
 def _discard_http_error_body(error):
-    try:
-        error.read(MAX_ERROR_BYTES)
-    except Exception:
-        pass
-    try:
-        error.close()
-    except Exception:
-        pass
+    """Drain a bounded slice and close; the body is never surfaced (it may echo private URLs)."""
+    with contextlib.suppress(Exception):
+        try:
+            error.read(MAX_ERROR_BYTES)
+        finally:
+            error.close()
 
 
 def _validate_wav(audio):
@@ -183,15 +169,9 @@ def _validate_wav(audio):
 
 
 def synthesize_index_tts(text, output_path, *, endpoint, voice, timeout):
-    """POST the exact {voice,text} contract and atomically persist an authentic WAV."""
-    endpoint, voice = validate_index_tts_config(endpoint, voice)
-    if (
-        isinstance(timeout, bool)
-        or not isinstance(timeout, (int, float))
-        or not math.isfinite(timeout)
-        or timeout <= 0
-    ):
-        raise ValueError("TTS timeout 必须是有限正数")
+    """POST the exact {voice,text} contract and atomically persist an authentic WAV.
+
+    endpoint/voice were validated by load_private_config; timeout by lib's env_int."""
     body = json.dumps({"voice": voice, "text": text}, ensure_ascii=False).encode("utf-8")
     request = urllib.request.Request(
         endpoint,

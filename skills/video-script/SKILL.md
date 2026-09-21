@@ -25,7 +25,7 @@ description: >
 
 Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理解索引做机械校验；full 模式默认还会执行预算整理并计算旁白的原声重叠。已有批准稿应加 `--preserve-approved-text`，保留段落顺序、数量、时间、文本、停顿和扩展元数据，仅允许依据现有声音证据更新 `overlaps_speech`。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。本技能不从其他技能目录读取参考文件或辅助脚本；外部输入只来自显式路径与 `work_dir` 产物。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
 ### 1.1 创作控制模式
 
@@ -247,8 +247,5 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full --preserve-approve
 
 ## 7. 能力边界
 
-- 不运行 ASR / VLM；只消费视频理解索引。
-- 不合成 TTS，也不渲染视频。
+- 不运行 ASR / VLM，不合成 TTS，不渲染视频；只消费视频理解索引。
 - 平台研究仅用于明确的宣发任务；不替代当前片内事实，也不默认改变解说和剪辑。
-- `review.py` 不改写 `narration.json`；是否采用严格门禁由调用方决定。
-- `validate.py --preserve-approved-text` 不会截短、丢弃、合并、重排或改写批准稿；未加该参数时保留原有预算整理行为。

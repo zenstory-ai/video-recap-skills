@@ -62,7 +62,7 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
             "source_path": seg["placed_audio_path"],
             "timeline_start": s, "timeline_end": e,
             "text": seg["narration"],
-            "overlaps_speech": seg.get("overlaps_speech", True),
+            "overlaps_speech": seg["overlaps_speech"],
             "gain": (
                 mix_by_index[seg["index"]]["gain"]
                 if explicit_audio_mix is not None else 1.0
@@ -72,7 +72,7 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
             if key in seg:
                 narration_item[key] = seg[key]
         narration_segments.append(narration_item)
-        placed_indices.append(seg.get("index"))
+        placed_indices.append(seg["index"])
     fade = CONFIG["duck_fade_seconds"]
     bgm = None
     if has_bgm and explicit_audio_mix is None:

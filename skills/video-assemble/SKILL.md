@@ -37,7 +37,7 @@ description: >
 - 已采用的配音使用显式 `--tts-meta` 和 `--narration-adoption`：后者由调用方独立确认文字、WAV 指纹、请求的引擎/声线和速度策略，不能从待消费元数据自动“批准”出来。完整格式与证据边界见 `references/narration-adoption.md`。
 - 已采用的完整声音底轨与逐段配音可再传 `--audio-mix-adoption`；严格格式、48 kHz 声道矩阵和双 binding 事务见 `references/explicit-audio-mix.md`。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
 ## 4. 运行命令
 
@@ -102,8 +102,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 
 ## 8. 能力边界
 
-- 不生成旁白文字，也不合成 TTS。
-- 不重新转写视频，不擅自改变 Agent 的时间决定。
+- 不生成旁白文字，不合成 TTS，不重新转写视频。
 - 字幕烧录默认开启；关闭时不会重编码绘制字幕区域。
 
 显式输出轴字幕轨的独立合同、完整替换语义和当前边界见 `references/subtitle-track.md`。

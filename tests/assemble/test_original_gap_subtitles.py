@@ -182,7 +182,7 @@ def test_combined_entries_sorted_no_overlap_with_narration(monkeypatch, tmp_path
     (tmp_path / "asr_result.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "原声"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说词内容",
-             "start": 5.0, "end": 8.0}]
+             "spoken_text": "解说词内容", "start": 5.0, "end": 8.0}]
     combined = source_subtitles._combined_subtitle_entries(segs, tmp_path, 10.0)
     assert combined[0]["start"] < 5.0  # original gap entry sorts first
     for e in combined:
@@ -195,7 +195,7 @@ def test_generate_ass_includes_original_gap_subtitles(monkeypatch, tmp_path):
     (tmp_path / "asr_result.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "原声台词"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说",
-             "start": 5.0, "end": 8.0}]
+             "spoken_text": "解说", "start": 5.0, "end": 8.0}]
     subtitle_render._generate_ass(segs, tmp_path, 10.0, {"width": 1280, "height": 720})
     ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
     assert "原声台词" in ass and "解说" in ass
@@ -293,7 +293,8 @@ def test_normalize_subtitle_text_collapses_em_dashes():
 def test_generated_srt_and_ass_normalize_em_dashes(monkeypatch, tmp_path):
     # narration text with a dash is normalized in BOTH generated srt and ass burned text
     segs = [{"actual_place_start": 1.0, "actual_place_end": 4.0,
-             "narration": "我回来了——这一次", "start": 1.0, "end": 4.0}]
+             "narration": "我回来了——这一次", "spoken_text": "我回来了——这一次",
+             "start": 1.0, "end": 4.0}]
     subtitle_render._generate_srt(segs, tmp_path, 4.0)
     subtitle_render._generate_ass(segs, tmp_path, 4.0, {"width": 1280, "height": 720})
     srt = (tmp_path / "subtitles.srt").read_text(encoding="utf-8")
@@ -309,7 +310,7 @@ def test_original_gap_text_normalizes_em_dashes(monkeypatch, tmp_path):
     (tmp_path / "original_subtitles.json").write_text(
         json.dumps([{"start": 1.0, "end": 4.0, "text": "活着——让我看看"}]), encoding="utf-8")
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说",
-             "start": 5.0, "end": 8.0}]
+             "spoken_text": "解说", "start": 5.0, "end": 8.0}]
     subtitle_render._generate_ass(segs, tmp_path, 10.0, {"width": 1280, "height": 720})
     ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
     assert "——" not in ass and "—" not in ass

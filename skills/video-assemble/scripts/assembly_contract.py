@@ -38,13 +38,10 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
     output_path = Path(output_path)
     source_video, source_video_fingerprint = _source_video_identity()
     qc_path = Path(work_dir) / ASSEMBLY_QC
-    qc = _load_work_json(work_dir, ASSEMBLY_QC) or {}
-    if audio_mode == "narration" and audio_stream_index == 0:
-        settings = settings_fingerprint(work_dir)
-    else:
-        settings = settings_fingerprint(
-            work_dir, audio_mode=audio_mode, audio_stream_index=audio_stream_index
-        )
+    qc = _load_work_json(work_dir, ASSEMBLY_QC)  # always written by publish_render first
+    settings = settings_fingerprint(
+        work_dir, audio_mode=audio_mode, audio_stream_index=audio_stream_index
+    )
     payload = {
         "schema_version": 2,
         "input_video": str(input_video.resolve()),
@@ -57,29 +54,34 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
         "assembly_settings": settings,
         "output_path": str(output_path.resolve()),
         "segment_audio_schema_version": SEGMENT_AUDIO_SCHEMA_VERSION,
-        "qc_path": str(qc_path.resolve()) if qc else None,
-        "qc_verdict": qc.get("verdict"),
-        "qc_blocking_codes": qc.get("blocking_codes", []),
+        "qc_path": str(qc_path.resolve()),
+        "qc_verdict": qc["verdict"],
+        "qc_blocking_codes": qc["blocking_codes"],
         # The settings fingerprint records the configured/fallback loudness policy; these QC
         # fields record what the just-finished render actually used after the loudnorm probe.
-        "qc_loudness_mode": qc.get("loudness_mode"),
-        "qc_loudnorm_measurement": qc.get("loudnorm_measurement"),
-        "audio_operations": qc.get("audio_operations", {}),
-        "adopted_audio": qc.get("adopted_audio"),
+        "qc_loudness_mode": qc["loudness_mode"],
+        "qc_loudnorm_measurement": qc["loudnorm_measurement"],
+        "audio_operations": qc["audio_operations"],
+        "adopted_audio": qc["adopted_audio"],
         "narration_input_binding": narration_input_binding,
         "audio_mix_binding": audio_mix_binding,
         "audio_segments": [
             {
                 "index": seg["index"],
-                "segment_audio_schema_version": seg.get("segment_audio_schema_version", SEGMENT_AUDIO_SCHEMA_VERSION),
+                # Informational manifest fields: a tts_meta without the schema marker is v1,
+                # and the loudness measurements are None whenever voiceover skipped
+                # normalization (strict adoption fixtures in tests/orchestrator omit both).
+                "segment_audio_schema_version": seg.get(
+                    "segment_audio_schema_version", SEGMENT_AUDIO_SCHEMA_VERSION
+                ),
                 "narration": seg["narration"],
-                "spoken_text": seg.get("spoken_text", seg["narration"]),
-                "truncated": seg.get("truncated", False),
-                "truncate_reason": seg.get("truncate_reason", "none"),
-                "fit_status": seg.get("fit_status"),
-                "blocking": seg.get("blocking", False),
-                "audio_duration": seg.get("audio_duration"),
-                "placed_audio_duration": seg.get("placed_audio_duration"),
+                "spoken_text": seg["spoken_text"],
+                "truncated": seg["truncated"],
+                "truncate_reason": seg["truncate_reason"],
+                "fit_status": seg["fit_status"],
+                "blocking": seg["blocking"],
+                "audio_duration": seg["audio_duration"],
+                "placed_audio_duration": seg["placed_audio_duration"],
                 "placed_audio_path": seg.get("placed_audio_path"),
                 "actual_place_start": seg.get("actual_place_start"),
                 "actual_place_end": seg.get("actual_place_end"),
@@ -87,9 +89,9 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                 "source_restore_at": seg.get("source_restore_at"),
                 "source_handoff_status": seg.get("source_handoff_status"),
                 "source_entry_status": seg.get("source_entry_status"),
-                "global_narration_speed": seg.get("global_narration_speed"),
-                "segment_tempo_factor": seg.get("segment_tempo_factor"),
-                "effective_tempo": seg.get("effective_tempo"),
+                "global_narration_speed": seg["global_narration_speed"],
+                "segment_tempo_factor": seg["segment_tempo_factor"],
+                "effective_tempo": seg["effective_tempo"],
                 "rms_dbfs_before": seg.get("rms_dbfs_before"),
                 "rms_dbfs_after": seg.get("rms_dbfs_after"),
                 "peak_after": seg.get("peak_after"),
@@ -139,8 +141,8 @@ def _visual_qc_rollup(visual_qc):
         "overlays": {
             "present": overlays["present"],
             "rendered": overlays["rendered"],
-            "unsupported": overlays.get("unsupported", []),
-            "overflow": overlays.get("overflow", []),
+            "unsupported": overlays["unsupported"],
+            "overflow": overlays["overflow"],
         },
     }
 
@@ -179,10 +181,10 @@ def _placed_audio_matches_timeline(seg):
     )
 
 
-def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
-                       source_has_audio=None, loudness_mode=None, loudnorm_measurement=None,
-                       visual_qc=None, render_delivery=None, audio_mode="narration",
-                       audio_operations=None, adopted_audio=None,
+def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render_delivery,
+                       output_path=None, source_has_audio=None, loudness_mode=None,
+                       loudnorm_measurement=None, visual_qc=None, audio_mode="narration",
+                       adopted_audio=None,
                        narration_input_binding=None, audio_mix_binding=None,
                        source_audio_status=None):
     """Machine-readable assembly release gate.
@@ -194,11 +196,11 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
     segments = tts_segments
     no_safe = [
         s["index"] for s in segments
-        if s.get("fit_status") == "no_safe_fit"
-        or s.get("truncate_reason") in {"no_safe_boundary", "no_room"}
-        or s.get("blocking", False)
+        if s["fit_status"] == "no_safe_fit"
+        or s["truncate_reason"] in {"no_safe_boundary", "no_room"}
+        or s["blocking"]
     ]
-    skipped = [s["index"] for s in segments if s.get("fit_status") == "skipped"]
+    skipped = [s["index"] for s in segments if s["fit_status"] == "skipped"]
     tempo_exceeded = []
     truncated = []
     handoff_failed = []
@@ -209,7 +211,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
         max_effective = max(max_effective, eff)
         if eff > hard_max + 1e-6:
             tempo_exceeded.append(s["index"])
-        if s.get("truncated", False) or s.get("truncate_reason") == "tail_trim_tolerance":
+        if s["truncated"] or s["truncate_reason"] == "tail_trim_tolerance":
             truncated.append(s["index"])
         if s.get("source_handoff_blocking", False):
             handoff_failed.append(s["index"])
@@ -262,7 +264,6 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
         if output_path.exists() and output["bytes"] <= 0:
             blocking_codes.append("empty_output")
 
-    delivery = render_delivery if render_delivery is not None else {}
     return {
         "schema_version": 1,
         "artifact": ASSEMBLY_QC,
@@ -271,7 +272,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
         "blocking_codes": blocking_codes,
         "duration": round(float(video_duration), 4),
         "audio_mode": audio_mode,
-        "audio_operations": audio_operations or {},
+        "audio_operations": audio_operations,
         "adopted_audio": adopted_audio,
         "narration_input_binding": narration_input_binding,
         "audio_mix_binding": audio_mix_binding,
@@ -286,10 +287,10 @@ def _build_assembly_qc(tts_segments, video_duration, *, output_path=None,
         },
         "visual_qc": visual_rollup,
         "delivery_qc": {
-            "video_encode_passes": delivery.get("video_encode_passes"),
-            "reencode_reason": delivery.get("reencode_reason"),
-            "audio_sample_rate": delivery.get("audio_sample_rate"),
-            "final_compat_notes": delivery.get("final_compat_notes", []),
+            "video_encode_passes": render_delivery["video_encode_passes"],
+            "reencode_reason": render_delivery["reencode_reason"],
+            "audio_sample_rate": render_delivery["audio_sample_rate"],
+            "final_compat_notes": render_delivery["final_compat_notes"],
         },
         "summary": {
             "segments": len(segments),

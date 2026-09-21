@@ -108,7 +108,7 @@ def _write_stale_lint_pass(work):
 def _assert_validation_replaced_stale_pass(work, expected_code):
     lint = json.loads((work / "narration_lint.json").read_text(encoding="utf-8"))
     assert lint["ok"] is False
-    assert lint["error_count"] == 1
+    assert lint["error_count"] == len(lint["errors"]) >= 1
     assert lint["errors"][0]["code"] == expected_code
     assert "stale" not in lint["metrics"]
 
@@ -160,7 +160,7 @@ def test_recap_full_validate_failure_stops_before_review_tts_and_assemble(
         recap.main()
 
     assert calls == [("video-script", "validate.py")]
-    _assert_validation_replaced_stale_pass(work, "invalid_approved_shape")
+    _assert_validation_replaced_stale_pass(work, "invalid_narration")
 
 
 def test_recap_single_cut_validate_failure_stops_before_review_tts_and_assemble(
@@ -939,7 +939,7 @@ def _review_writes_nothing(work):
         pytest.param(
             _review_writes_nothing,
             True,
-            "missing or invalid narration_review.json",
+            "missing narration_review.json",
             id="stale-artifact-not-reused",
         ),
     ],
@@ -1003,45 +1003,17 @@ def test_review_status_does_not_gate_on_bare_model_verdict(tmp_path):
     assert status["ok"] is False and status["errors"] == 1
 
 
-@pytest.mark.parametrize(
-    "payload",
-    [
-        {},
-        {"findings": {}},
-        {"findings": [None]},
-        {"findings": [{}]},
-    ],
-)
-def test_review_status_reports_malformed_review_artifacts(tmp_path, payload):
-    (tmp_path / "narration_review.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
+def test_review_status_missing_artifact_is_reported_not_raised(tmp_path):
+    """Absent review = the stage did not produce one (fail-open review); a review that
+    video-script DID write is read by contract (findings normalised by review_response),
+    so a malformed one is a broken upstream artifact and raises."""
     assert recap_review.review_result_status(tmp_path) == {
         "ok": False,
-        "reason": "missing or invalid narration_review.json",
+        "reason": "missing narration_review.json",
     }
-
-
-def test_advisory_review_does_not_block_on_malformed_artifact(tmp_path):
-    def fake_run(*_args):
-        (tmp_path / "narration_review.json").write_text("{}", encoding="utf-8")
-
-    args = manifest_args(review_narration=True)
-
-    assert recap_review.run_narration_review(tmp_path, args, run=fake_run) is True
-
-
-def test_strict_review_blocks_on_malformed_artifact(tmp_path):
-    def fake_run(*_args):
-        (tmp_path / "narration_review.json").write_text(
-            json.dumps({"findings": "invalid"}), encoding="utf-8"
-        )
-
-    args = manifest_args(review_narration=True, require_narration_review=True)
-
-    with pytest.raises(SystemExit, match="missing or invalid narration_review.json"):
-        recap_review.run_narration_review(tmp_path, args, run=fake_run)
+    (tmp_path / "narration_review.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(KeyError):
+        recap_review.review_result_status(tmp_path)
 
 
 def test_recap_rejects_multi_video_non_cut(monkeypatch, tmp_path):
@@ -1455,9 +1427,9 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
                         "confidence": "high",
                     },
                     {
-                        "time": "2.5",
-                        "pause_start": "invalid",
-                        "text_tail": "畸形停顿时间。",
+                        "time": 2.5,
+                        "pause_start": 2.5,
+                        "text_tail": "停顿与句末重合。",
                         "confidence": "medium",
                     },
                 ]

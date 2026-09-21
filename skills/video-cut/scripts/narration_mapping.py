@@ -16,7 +16,7 @@ def update_cut_qc(plan, *, allow_duration_drift=False, duration_drift_allowed_by
             "total_duration": round(total, 3),
         }
     else:
-        ratio = total / target if target > 0 else 0.0
+        ratio = total / target  # parse_duration_seconds guarantees target > 0
         if ratio < 0.85:
             target_status = "under"
         elif ratio > 1.15:

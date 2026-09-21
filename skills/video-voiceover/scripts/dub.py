@@ -208,32 +208,32 @@ def lint_dub_script(script, duration, work_dir=None):
 
 def build_dub_review(script, transcript, lint=None):
     """Script-level review scaffold: deterministic timing/naturalness signals for agent review."""
-    duration = float(transcript.get("duration", 0.0))
+    duration = float(transcript["duration"])
     lint = lint or lint_dub_script(script, duration)
     lines = _normalize_dub_script(script) if isinstance(script, list) else []
     edits = []
-    for issue in lint.get("issues", []):
+    for issue in lint["issues"]:
         if issue["severity"] in {"error", "warning"}:
             edits.append({
-                "line": issue.get("line"),
-                "start": issue.get("start"),
+                "line": issue["line"],
+                "start": issue.get("start"),  # _issue only records start when the line had one
                 "issue": f"{issue['code']}: {issue['message']}",
                 "suggestion": "缩短译文、调整 start/end，或回到 transcript 核对原句边界。",
             })
-    verdict = "FAIL" if lint.get("verdict") == "FAIL" else ("REVISE" if edits else "PASS")
+    verdict = "FAIL" if lint["verdict"] == "FAIL" else ("REVISE" if edits else "PASS")
     return {
         "schema_version": DUB_SCHEMA_VERSION,
         "verdict": verdict,
         "checks": {
             "faithful_to_source": "needs_agent_review",
-            "spoken_chinese": "REVISE" if any(i.get("code") == "fast_speech" for i in lint.get("issues", [])) else "PASS",
+            "spoken_chinese": "REVISE" if any(i["code"] == "fast_speech" for i in lint["issues"]) else "PASS",
             "speaker_tone": "needs_agent_review",
-            "timing_fit": "FAIL" if lint.get("verdict") == "FAIL" else ("REVISE" if edits else "PASS"),
+            "timing_fit": verdict,
             "platform_fit": "needs_agent_review",
         },
         "highest_return_edits": edits[:8],
         "notes": "Deterministic script-level review; an agent/human should fill semantic fidelity and tone judgments against dub_transcript.json.",
-        "coverage": {"transcript_windows": len(transcript.get("windows", [])), "script_lines": len(lines)},
+        "coverage": {"transcript_windows": len(transcript["windows"]), "script_lines": len(lines)},
     }
 
 
@@ -244,12 +244,19 @@ def _write_json(path, payload):
 
 # ── ffmpeg / wav helpers ─────────────────────────────────────────────
 
+def _ffmpeg(args):
+    """Run one ffmpeg command; a non-zero exit raises instead of leaving a silent gap."""
+    result = run_cmd(["ffmpeg", "-y", *args])
+    if result.returncode != 0:
+        raise RuntimeError(f"ffmpeg 失败 ({args[-1]}): {result.stderr.strip()[-2000:]}")
+
+
 def _ffmpeg_extract_wav(video, out_wav, sr=16000):
-    run_cmd(["ffmpeg", "-y", "-i", str(video), "-vn", "-ar", str(sr), "-ac", "1", str(out_wav)])
+    _ffmpeg(["-i", str(video), "-vn", "-ar", str(sr), "-ac", "1", str(out_wav)])
 
 
 def _cut_wav(src_wav, out_wav, start, dur, sr=16000):
-    run_cmd(["ffmpeg", "-y", "-i", str(src_wav), "-ss", str(start), "-t", str(dur),
+    _ffmpeg(["-i", str(src_wav), "-ss", str(start), "-t", str(dur),
              "-ar", str(sr), "-ac", "1", str(out_wav)])
 
 
@@ -285,18 +292,14 @@ def _strip_reasoning_residue(text):
 
 
 def _run_asr(wav_path, lang="en"):
-    try:
-        with wave.open(str(wav_path), "rb") as source:
-            if source.getnframes() <= 0:
-                return ""
-    except (OSError, EOFError, wave.Error):
-        return ""
-    raw = Path(wav_path).read_bytes()
-    if not raw:
-        return ""
-    b64 = base64.b64encode(raw).decode("ascii")
+    # The WAV was just cut by ffmpeg (which raised on failure); an unreadable file is a bug,
+    # not "no speech". A zero-frame window (audio shorter than the picture) is skipped.
+    with wave.open(str(wav_path), "rb") as source:
+        if source.getnframes() <= 0:
+            return ""
+    b64 = base64.b64encode(Path(wav_path).read_bytes()).decode("ascii")
     payload = {
-        "model": CONFIG.get("mimo_asr_model", "mimo-v2.5-asr"),
+        "model": CONFIG["mimo_asr_model"],
         "messages": [{"role": "user", "content": [
             {"type": "input_audio", "input_audio": {"data": f"data:{ASR_MIME};base64,{b64}"}},
         ]}],
@@ -305,8 +308,8 @@ def _run_asr(wav_path, lang="en"):
     resp = mimo_asr_api_call(payload)
     try:
         text = str(resp["choices"][0]["message"]["content"] or "").strip()
-    except (KeyError, IndexError, TypeError):
-        return ""
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("MiMo-ASR 响应缺少 choices[0].message.content") from exc
     return re.sub(r"<[^>]{1,20}>", "", _strip_reasoning_residue(text)).strip()  # strip reasoning + ASR markers like "<chinese>"
 
 
@@ -384,12 +387,12 @@ def _ensure_clone_tts(text, ref_b64, ref_bytes, raw_wav):
     raw_wav = Path(raw_wav)
     expected = _clone_cache_fingerprint(text, ref_bytes)
     meta_path = _clone_cache_meta_path(raw_wav)
-    try:
+    # Missing sidecar = never synthesized; a sidecar this skill wrote but cannot parse is a
+    # bug, not a reason to silently pay for re-synthesis.
+    if meta_path.exists():
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    except (FileNotFoundError, OSError, ValueError, TypeError):
-        meta = {}
-    if meta.get("fingerprint") == expected and _usable_clone_wav(raw_wav):
-        return True
+        if meta["fingerprint"] == expected and _usable_clone_wav(raw_wav):
+            return True
 
     _clone_tts(text, ref_b64, raw_wav)
     if not _usable_clone_wav(raw_wav):
@@ -403,17 +406,15 @@ def _time_fit(raw_wav, fitted_wav, room_seconds):
     the next line). Never globally speed up; a short dub keeps the natural pause. Returns the
     fitted duration."""
     dur = get_video_duration(raw_wav)
-    if dur <= 0:
-        return 0.0
     if dur <= room_seconds + 0.05:
-        run_cmd(["ffmpeg", "-y", "-i", str(raw_wav), "-ar", str(CLONE_SR), "-ac", "1", str(fitted_wav)])
+        _ffmpeg(["-i", str(raw_wav), "-ar", str(CLONE_SR), "-ac", "1", str(fitted_wav)])
         return dur
     factor = dur / room_seconds
     if factor <= ATEMPO_CAP:
-        run_cmd(["ffmpeg", "-y", "-i", str(raw_wav), "-filter:a", _atempo_chain(factor),
+        _ffmpeg(["-i", str(raw_wav), "-filter:a", _atempo_chain(factor),
                  "-ar", str(CLONE_SR), "-ac", "1", str(fitted_wav)])
         return get_video_duration(fitted_wav)
-    run_cmd(["ffmpeg", "-y", "-i", str(raw_wav),
+    _ffmpeg(["-i", str(raw_wav),
              "-filter:a", f"{_atempo_chain(ATEMPO_CAP)},atrim=0:{room_seconds:.3f},"
                           f"afade=t=out:st={max(0, room_seconds - 0.15):.3f}:d=0.15",
              "-ar", str(CLONE_SR), "-ac", "1", str(fitted_wav)])
@@ -423,12 +424,10 @@ def _time_fit(raw_wav, fitted_wav, room_seconds):
 def _build_dub_track(lines, duration, out_wav):
     canvas = bytearray(int(duration * CLONE_SR) * 2)  # 16-bit mono silence
     for ln in lines:
-        fw = ln.get("fitted_wav")
-        if not fw or not Path(fw).exists():
-            continue
-        sr, ch, frames = _wav_frames(fw)
+        # _time_fit always writes fitted_wav at CLONE_SR mono (and raised if ffmpeg failed).
+        sr, ch, frames = _wav_frames(ln["fitted_wav"])
         if sr != CLONE_SR or ch != 1:
-            continue
+            raise RuntimeError(f"fitted WAV {ln['fitted_wav']} is {sr}Hz/{ch}ch, expected {CLONE_SR}Hz mono")
         off = int(ln["start"] * CLONE_SR) * 2
         end = min(off + len(frames), len(canvas))
         canvas[off:end] = frames[: end - off]
@@ -440,7 +439,7 @@ def _build_dub_track(lines, duration, out_wav):
 
 
 def _mux(video, dub_wav, out_video):
-    run_cmd(["ffmpeg", "-y", "-i", str(video), "-i", str(dub_wav),
+    _ffmpeg(["-i", str(video), "-i", str(dub_wav),
              "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k",
              "-ar", str(DUB_DELIVERY_SR),

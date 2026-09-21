@@ -1,43 +1,29 @@
 """Apply the optional or strict narration-review gate before TTS."""
 
 import json
-import os
 from pathlib import Path
+
+from lib import env_bool
 
 
 def review_narration_enabled(args):
     if args.review_narration is not None:
         return args.review_narration
-    return _env_bool("REVIEW_NARRATION", True)
+    return env_bool("REVIEW_NARRATION", True)
 
 
 def require_narration_review(args):
-    return args.require_narration_review or _env_bool("REQUIRE_NARRATION_REVIEW", False)
-
-
-def _env_bool(name, default):
-    raw = os.environ.get(name)
-    return default if not raw else raw.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return args.require_narration_review or env_bool("REQUIRE_NARRATION_REVIEW", False)
 
 
 def review_result_status(work_dir):
+    """Gate on the review video-script wrote (findings: list of {severity in
+    error|warning|suggestion}, already normalised by review_response)."""
     path = Path(work_dir) / "narration_review.json"
     if not path.exists():
-        return {"ok": False, "reason": "missing or invalid narration_review.json"}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return {"ok": False, "reason": "missing or invalid narration_review.json"}
-    if not isinstance(data, dict):
-        return {"ok": False, "reason": "missing or invalid narration_review.json"}
-    findings = data.get("findings")
-    if not isinstance(findings, list) or any(
-        not isinstance(finding, dict)
-        or not isinstance(finding.get("severity"), str)
-        for finding in findings
-    ):
-        return {"ok": False, "reason": "missing or invalid narration_review.json"}
-    error_count = sum(1 for finding in findings if finding["severity"] == "error")
+        return {"ok": False, "reason": "missing narration_review.json"}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    error_count = sum(1 for finding in data["findings"] if finding["severity"] == "error")
     if data.get("parse_error"):
         return {"ok": False, "reason": "parse_error", "review": data, "errors": error_count}
     if error_count:

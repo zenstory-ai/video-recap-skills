@@ -16,9 +16,8 @@ from evidence_bundle import (
     build_evidence_bundle,
     build_review_coverage_metadata,
     render_evidence_bundle,
-    validate_public_evidence_contract,
 )
-from review_grounding import _load, _source_fingerprint
+from review_grounding import _load_agent_optional, _source_fingerprint
 
 CATEGORIES = [
     "hallucination",
@@ -92,23 +91,19 @@ def merge_review_findings(chunks):
     """Merge chunk review findings deterministically, keeping highest severity."""
     severity_rank = {"error": 3, "warning": 2, "suggestion": 1}
     by_key = {}
-    for chunk in chunks or []:
-        for f in (chunk or {}).get("findings", []) or []:
-            if not isinstance(f, dict):
-                continue
-            key = (f.get("segment"), f.get("category"), f.get("issue"))
+    for chunk in chunks:
+        for f in chunk["findings"]:
+            key = (f["segment"], f["category"], f["issue"])
             old = by_key.get(key)
-            if old is None or severity_rank.get(
-                f.get("severity"), 0
-            ) > severity_rank.get(old.get("severity"), 0):
+            if old is None or severity_rank[f["severity"]] > severity_rank[old["severity"]]:
                 by_key[key] = dict(f)
     return sorted(
         by_key.values(),
         key=lambda f: (
-            f.get("segment") is None,
-            f.get("segment") if f.get("segment") is not None else 10**9,
-            f.get("category") or "",
-            f.get("issue") or "",
+            f["segment"] is None,
+            f["segment"] if f["segment"] is not None else 10**9,
+            f["category"],
+            f["issue"],
         ),
     )
 
@@ -116,11 +111,11 @@ def merge_review_findings(chunks):
 def _bundle_fingerprint(bundle):
     return stable_hash(
         {
-            "schema_version": bundle.get("schema_version"),
-            "clock": bundle.get("clock"),
-            "coverage": bundle.get("coverage"),
-            "items": bundle.get("items"),
-            "context_items": bundle.get("context_items"),
+            "schema_version": bundle["schema_version"],
+            "clock": bundle["clock"],
+            "coverage": bundle["coverage"],
+            "items": bundle["items"],
+            "context_items": bundle["context_items"],
         }
     )
 
@@ -137,16 +132,15 @@ def _chunk_evidence_bundle(bundle, *, max_items=80, max_chars=12000):
     range. Context-only research remains advisory and is repeated in each chunk so the
     judge can still use alias/background hints without upgrading them to timeline facts.
     """
-    items = list(bundle.get("items") or [])
+    items = list(bundle["items"])
     if len(items) <= max_items and _bundle_prompt_size(bundle) <= max_chars:
+        fp = _bundle_fingerprint(bundle)
         one = dict(bundle)
         one["chunk_index"] = 0
         one["chunk_count"] = 1
-        one.setdefault("metadata", {})["evidence_bundle_fingerprint"] = (
-            _bundle_fingerprint(bundle)
-        )
+        one["metadata"] = {**bundle["metadata"], "evidence_bundle_fingerprint": fp}
         return [one]
-    ranges = bundle.get("coverage", {}).get("selected_ranges") or []
+    ranges = bundle["coverage"]["selected_ranges"]
     chunks = []
     used_ids = set()
     for r in ranges:
@@ -166,16 +160,14 @@ def _chunk_evidence_bundle(bundle, *, max_items=80, max_chars=12000):
             used_ids.update(id(item) for item in part)
             chunk = dict(bundle)
             chunk["items"] = part
-            chunk["coverage"] = dict(bundle.get("coverage") or {})
-            chunk["coverage"]["selected_ranges"] = [r]
+            chunk["coverage"] = {**bundle["coverage"], "selected_ranges": [r]}
             chunk["chunk_index"] = len(chunks)
             chunks.append(chunk)
     leftovers = [item for item in items if id(item) not in used_ids]
     for start in range(0, len(leftovers), max_items):
         chunk = dict(bundle)
         chunk["items"] = leftovers[start : start + max_items]
-        chunk["coverage"] = dict(bundle.get("coverage") or {})
-        chunk["coverage"]["selected_ranges"] = []
+        chunk["coverage"] = {**bundle["coverage"], "selected_ranges": []}
         chunk["chunk_index"] = len(chunks)
         chunks.append(chunk)
     if not chunks:
@@ -187,8 +179,11 @@ def _chunk_evidence_bundle(bundle, *, max_items=80, max_chars=12000):
     fp = _bundle_fingerprint(bundle)
     for chunk in chunks:
         chunk["chunk_count"] = count
-        chunk.setdefault("metadata", {})["chunked_review"] = count > 1
-        chunk["metadata"]["evidence_bundle_fingerprint"] = fp
+        chunk["metadata"] = {
+            **bundle["metadata"],
+            "chunked_review": count > 1,
+            "evidence_bundle_fingerprint": fp,
+        }
     return chunks
 
 
@@ -198,33 +193,24 @@ def _merge_chunk_reviews(chunk_reviews):
     if len(chunk_reviews) == 1:
         return chunk_reviews[0]
     verdict_rank = {"PASS": 0, "OK": 0, "REVISE": 1, "FAIL": 2}
-    best = max(chunk_reviews, key=lambda r: verdict_rank.get(r.get("verdict"), 1))
+    best = max(chunk_reviews, key=lambda r: verdict_rank[r["verdict"]])
     merged = dict(best)
     merged["findings"] = merge_review_findings(chunk_reviews)
-    if any(f.get("severity") == "error" for f in merged["findings"]):
-        merged["verdict"] = "FAIL" if best.get("verdict") == "FAIL" else "REVISE"
-    else:
-        merged["verdict"] = best.get("verdict", "REVISE")
-    summaries = [
-        str(r.get("summary", "")).strip()
-        for r in chunk_reviews
-        if str(r.get("summary", "")).strip()
-    ]
-    merged["summary"] = summaries[0] if summaries else merged.get("summary", "")
+    if any(f["severity"] == "error" for f in merged["findings"]):
+        merged["verdict"] = "FAIL" if best["verdict"] == "FAIL" else "REVISE"
+    summaries = [r["summary"] for r in chunk_reviews if r["summary"]]
+    merged["summary"] = summaries[0] if summaries else best["summary"]
     merged["chunked_review"] = {
         "chunk_count": len(chunk_reviews),
-        "findings_before_merge": sum(
-            len(r.get("findings") or []) for r in chunk_reviews
-        ),
-        "findings_after_merge": len(merged.get("findings") or []),
+        "findings_before_merge": sum(len(r["findings"]) for r in chunk_reviews),
+        "findings_after_merge": len(merged["findings"]),
     }
     return merged
 
 
 def _research_guardrail_qc(review, context_items):
-    assertions = [
-        a for a in (review.get("grounding_assertions") or []) if isinstance(a, dict)
-    ]
+    # Assertion keys are whatever the judge returned; only the list itself is normalized.
+    assertions = review["grounding_assertions"]
     research_context_assertions = [
         a
         for a in assertions
@@ -240,26 +226,22 @@ def _research_guardrail_qc(review, context_items):
         or "current-timeline" in str(a.get("risk", "")).lower()
     ]
     grounding_risk_findings = [
-        f
-        for f in (review.get("findings") or [])
-        if isinstance(f, dict) and f.get("category") == "grounding_risk"
+        f for f in review["findings"] if f["category"] == "grounding_risk"
     ]
     return {
-        "context_only_assertions": len(context_items or [])
-        + len(research_context_assertions),
+        "context_only_assertions": len(context_items) + len(research_context_assertions),
         "spoiler_risk_assertions": len(risk_assertions) + len(grounding_risk_findings),
         "policy": "research evidence is context_only unless visual/asr-supported",
     }
 
 
 def _load_review_research_context(work_dir):
+    """Agent-authored background_research.json: {} when absent; corrupt JSON raises
+    (same policy as the brief's loader), a non-object document fails open to {}."""
     path = Path(work_dir) / "background_research.json"
     if not path.exists():
         return {}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
-        return {}
+    data = json.loads(path.read_text(encoding="utf-8"))
     return data if isinstance(data, dict) else {}
 
 
@@ -344,16 +326,13 @@ def _format_review_research_context(research, limit=1200):
 def _load_optional_json(work_dir, name):
     if work_dir is None:
         return None
-    return _load(Path(work_dir), name)
+    return _load_agent_optional(Path(work_dir), name)
 
 
 def _format_json_context(title, value, limit=3000):
     if value is None:
         return f"## {title}\n(无)"
-    try:
-        text = json.dumps(value, ensure_ascii=False, indent=2)
-    except (TypeError, ValueError):
-        text = str(value)
+    text = json.dumps(value, ensure_ascii=False, indent=2)
     return f"## {title}\n{text[:limit]}"
 
 
@@ -494,13 +473,17 @@ def parse_review_response(text):
     try:
         data = json.loads(candidate)
     except ValueError:
+        # Same shape as a parsed review so every consumer reads one contract.
         return {
-            "verdict": "REVISE",
+            **_normalise_review({}),
             "summary": "评审输出无法解析为 JSON，请人工检查。",
-            "findings": [],
             "parse_error": True,
             "raw": raw[:2000],
         }
+    return _normalise_review(data)
+
+
+def _normalise_review(data):
     verdict = str(data.get("verdict", "REVISE")).upper()
     # PASS/REVISE/FAIL is the new vocabulary; OK is kept as a backward-compatible alias.
     if verdict not in ("PASS", "REVISE", "FAIL", "OK"):
@@ -564,10 +547,9 @@ def parse_review_response(text):
 
 
 def format_review_md(review):
+    """Render a parse_review_response() review; list-item keys stay judge-optional."""
     order = {"error": 0, "warning": 1, "suggestion": 2}
-    findings = sorted(
-        review.get("findings", []), key=lambda f: order.get(f["severity"], 3)
-    )
+    findings = sorted(review["findings"], key=lambda f: order[f["severity"]])
     counts = {
         s: sum(1 for f in findings if f["severity"] == s)
         for s in ("error", "warning", "suggestion")
@@ -575,25 +557,19 @@ def format_review_md(review):
     out = [
         "# Narration review",
         "",
-        f"Verdict: **{review.get('verdict', 'REVISE')}**  "
+        f"Verdict: **{review['verdict']}**  "
         f"(errors {counts['error']}, warnings {counts['warning']}, suggestions {counts['suggestion']})",
         "",
-        review.get("summary", "") or "_(no summary)_",
+        review["summary"] or "_(no summary)_",
         "",
         "## Scorecard",
     ]
-    scorecard = review.get("scorecard") or {}
-    if scorecard:
-        for key in SCORECARD_KEYS:
-            v = scorecard.get(key)
-            out.append(f"- {key}: {v}/5" if v is not None else f"- {key}: 未评分")
-    else:
-        out.append("- (none)")
+    for key, v in review["scorecard"].items():
+        out.append(f"- {key}: {v}/5" if v is not None else f"- {key}: 未评分")
     out.extend(["", "## Highest-return edits"])
-    edits = review.get("highest_return_edits") or []
-    out.extend([f"- {edit}" for edit in edits] or ["- (none)"])
+    out.extend([f"- {edit}" for edit in review["highest_return_edits"]] or ["- (none)"])
     out.extend(["", "## Retention risk points"])
-    risks = review.get("retention_risk_points") or []
+    risks = review["retention_risk_points"]
     if risks:
         for item in risks:
             out.append(
@@ -602,7 +578,7 @@ def format_review_md(review):
     else:
         out.append("- (none)")
     out.extend(["", "## Hook candidates review"])
-    hooks = review.get("hook_candidates_review") or []
+    hooks = review["hook_candidates_review"]
     if hooks:
         for item in hooks:
             out.append(
@@ -613,7 +589,7 @@ def format_review_md(review):
     out.extend(
         ["", "## Information gain / write-for-ear / grounding", "### Information gain"]
     )
-    notes = review.get("information_gain_notes") or []
+    notes = review["information_gain_notes"]
     out.extend(
         [
             f"- 段 {n.get('segment')}: {n.get('label')} — {n.get('note', '')} {n.get('rewrite', '')}"
@@ -622,7 +598,7 @@ def format_review_md(review):
         or ["- (none)"]
     )
     out.append("### Spoken rewrites")
-    rewrites = review.get("spoken_language_rewrites") or []
+    rewrites = review["spoken_language_rewrites"]
     out.extend(
         [
             f"- 段 {r.get('segment')}: {r.get('original', '')} → {r.get('rewrite', '')}（{r.get('why', '')}）"
@@ -631,7 +607,7 @@ def format_review_md(review):
         or ["- (none)"]
     )
     out.append("### Grounding assertions")
-    assertions = review.get("grounding_assertions") or []
+    assertions = review["grounding_assertions"]
     out.extend(
         [
             f"- 段 {a.get('segment')}: {a.get('assertion', '')} [{a.get('source', '')}] {a.get('risk', '')}"
@@ -657,21 +633,16 @@ def build_grounding_qc(work_dir, review, bundle, *, timeline="source"):
     contract, but has no side effects.
     """
     work_dir = Path(work_dir)
-    items = bundle.get("items") or []
-    context = bundle.get("context_items") or []
-    warnings = list(bundle.get("warnings") or []) + list(review.get("warnings") or [])
+    items = bundle["items"]
+    context = bundle["context_items"]
+    # The runner hands the same pipeline warnings to the bundle and the review.
+    warnings = list(bundle["warnings"])
     verdict = "warn" if warnings else "pass"
-    if any(
-        f.get("severity") == "error"
-        for f in (review.get("findings") or [])
-        if isinstance(f, dict)
-    ):
+    if any(f["severity"] == "error" for f in review["findings"]):
         verdict = "fail"
-    if any(item.get("clock") not in ("source", "output") for item in items):
-        verdict = "warn" if verdict == "pass" else verdict
     coverage_meta = build_review_coverage_metadata(bundle)
-    visual_items = [item for item in items if item.get("source") == "visual"]
-    asr_items = [item for item in items if item.get("source") == "asr"]
+    visual_items = [item for item in items if item["source"] == "visual"]
+    asr_items = [item for item in items if item["source"] == "asr"]
     visual_fp = _source_fingerprint(work_dir, "vlm_analysis.json") or (
         stable_hash(visual_items) if visual_items else ""
     )
@@ -696,13 +667,11 @@ def build_grounding_qc(work_dir, review, bundle, *, timeline="source"):
             "dropped_ranges": coverage_meta["dropped_ranges"],
         },
         "evidence_contract": {
-            "source_items": sum(1 for item in items if item.get("clock") == "source"),
-            "output_items": sum(1 for item in items if item.get("clock") == "output"),
-            "unclocked_items": sum(
-                1 for item in items if item.get("clock") not in ("source", "output")
-            ),
+            # Every timeline item carries the bundle clock; context items are unclocked.
+            "source_items": len(items) if bundle["clock"] == "source" else 0,
+            "output_items": len(items) if bundle["clock"] == "output" else 0,
+            "unclocked_items": 0,
             "context_only_items": len(context),
-            "validation": validate_public_evidence_contract(bundle),
         },
         "index_inputs": {
             "vlm": bool(visual_items),

@@ -264,17 +264,12 @@ def test_source_full_rejects_ambiguous_unbound_narration_workdir(monkeypatch, tm
         recap_runner.main()
 
 
-def test_audio_binding_rejects_mode_switch_but_legacy_manifest_defaults_to_narration(
-    tmp_path
-):
+def test_audio_binding_rejects_mode_switch_and_manifest_without_audio_raises(tmp_path):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     work = tmp_path / "work"
     work.mkdir()
     recap_runtime._write_run_manifest(work, video, _args(audio_mode="narration"))
-    manifest = json.loads((work / "recap_run_manifest.json").read_text(encoding="utf-8"))
-    manifest.pop("audio")
-    (work / "recap_run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     assert recap_timeline._manifest_mismatches(
         work, video, _args(audio_mode="narration")
@@ -285,6 +280,13 @@ def test_audio_binding_rejects_mode_switch_but_legacy_manifest_defaults_to_narra
             work, video, _args(audio_mode="source-mix")
         )
     )
+
+    # recap_runtime always writes `audio`; a manifest lacking it is corrupt, not legacy.
+    manifest = json.loads((work / "recap_run_manifest.json").read_text(encoding="utf-8"))
+    manifest.pop("audio")
+    (work / "recap_run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(KeyError, match="audio"):
+        recap_timeline._manifest_mismatches(work, video, _args(audio_mode="narration"))
 
 
 @pytest.mark.parametrize(

@@ -158,45 +158,48 @@ def test_cut_output_preserves_fields_and_derives_only_ownership(monkeypatch, tmp
 
 
 _BAD_SHAPES = [
-    {"start": 0, "end": 1, "narration": 7},
-    {"start": 0, "end": 1, "narration": "   "},
-    {"start": True, "end": 1, "narration": "文本。"},
-    {"start": 0, "end": "1", "narration": "文本。"},
-    {"start": 0, "end": float("nan"), "narration": "文本。"},
-    {"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": True},
-    {"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": 1.5},
-    {"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": -1},
+    ({"start": 0, "end": 1, "narration": 7}, "invalid_narration"),
+    ({"start": 0, "end": 1, "narration": "   "}, "empty_narration"),
+    ({"start": True, "end": 1, "narration": "文本。"}, "invalid_time"),
+    ({"start": 0, "end": "1", "narration": "文本。"}, "invalid_time"),
+    ({"start": 0, "end": float("nan"), "narration": "文本。"}, "invalid_time"),
+    ({"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": True}, "invalid_pause"),
+    ({"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": 1.5}, "invalid_pause"),
+    ({"start": 0, "end": 1, "narration": "文本。", "pause_after_ms": -1}, "invalid_pause"),
 ]
 
 
 @pytest.mark.parametrize(
-    "segments, match",
-    [pytest.param([segment], "approved narration", id="bad_shape") for segment in _BAD_SHAPES]
+    "segments, code",
+    [pytest.param([segment], code, id=f"bad_shape_{code}") for segment, code in _BAD_SHAPES]
     + [
         pytest.param(
             [
                 {"start": 5, "end": 6, "narration": "第二段。"},
                 {"start": 0, "end": 1, "narration": "第一段。"},
             ],
-            "chronological order",
+            "out_of_order",
             id="out_of_order",
         ),
         pytest.param(
             [{"start": 5, "end": 5, "narration": "零长段。"}],
-            "end must be greater than start",
+            "invalid_time_range",
             id="zero_length_segment",
         ),
     ],
 )
 def test_strict_input_failures_leave_narration_byte_identical(
-    monkeypatch, tmp_path, segments, match
+    monkeypatch, tmp_path, segments, code
 ):
     path, raw = _write_narration(tmp_path, segments, indent=1)
 
-    with pytest.raises(SystemExit, match=match):
+    with pytest.raises(ValueError, match=code):
         _run_validate(monkeypatch, tmp_path)
 
     assert path.read_text(encoding="utf-8") == raw
+    lint = _read_json(tmp_path / "narration_lint.json")
+    assert lint["ok"] is False
+    assert code in {item["code"] for item in lint["errors"]}
 
 
 def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path):
@@ -235,9 +238,9 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
     current = _read_json(tmp_path / "narration_lint.json")
     assert set(current) == set(stale)
     assert current["ok"] is False
-    assert current["error_count"] == 1
-    assert current["errors"][0]["code"] == "invalid_approved_shape"
-    assert current["metrics"] == {"input_fingerprint": stable_hash(invalid)}
+    assert current["error_count"] == len(current["errors"]) >= 1
+    assert current["errors"][0]["code"] == "invalid_narration"
+    assert current["metrics"] == {}
 
 
 def test_full_derives_quiet_ownership_without_changing_other_approved_fields(

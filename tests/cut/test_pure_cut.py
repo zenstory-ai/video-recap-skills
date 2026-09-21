@@ -60,6 +60,13 @@ def _fake_detector(changes):
     return detect
 
 
+def _with_geometry(plan, source_paths):
+    """cut_cli selects the output canvas before rendering; direct render calls must do the same."""
+    _, _, _, geometry_qc = media_geometry._select_output_geometry(source_paths, plan["clips"])
+    plan.setdefault("qc", {})["output_geometry"] = geometry_qc
+    return plan
+
+
 def _capture_render(monkeypatch, tmp_path, raw_clips, video_duration, *, config=None, probe=None):
     """Render a single-source plan with ffmpeg/ffprobe faked; return (output, plan, commands)."""
     video = tmp_path / "video.mp4"
@@ -83,7 +90,7 @@ def _capture_render(monkeypatch, tmp_path, raw_clips, video_duration, *, config=
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 2.0)
     if config:
         monkeypatch.setattr("cut_render.CONFIG", {**cut_render.CONFIG, **config})
-    output = build_edited_source_video(video, plan, work_dir)
+    output = build_edited_source_video(video, _with_geometry(plan, [str(video)]), work_dir)
     return output, plan, commands
 
 
@@ -362,14 +369,25 @@ def test_edited_source_cache_fingerprint_includes_render_affecting_config(monkey
 
 
 @pytest.mark.parametrize("metadata", ["not json", "{}", "[]"])
-def test_edited_source_cache_treats_corrupt_metadata_as_a_miss(tmp_path, metadata):
+def test_edited_source_cache_corrupt_own_metadata_raises(tmp_path, metadata):
+    """edited_source.mp4.meta.json is this skill's own artifact: unparseable or incomplete is a
+    bug to surface, not a silent full re-render. A missing sidecar stays a plain miss."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
     edited.write_bytes(b"edited")
-    Path(f"{edited}.meta.json").write_text(metadata, encoding="utf-8")
     plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
     assert cut.should_reuse_edited_source(edited, plan, video) is False
+    Path(f"{edited}.meta.json").write_text(metadata, encoding="utf-8")
+    with pytest.raises((ValueError, LookupError, TypeError)):
+        cut.should_reuse_edited_source(edited, plan, video)
+
+
+def test_build_edited_source_video_requires_selected_output_geometry(tmp_path):
+    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    plan["qc"] = {}
+    with pytest.raises(KeyError, match="output_geometry"):
+        cut.build_edited_source_video(tmp_path / "video.mp4", plan, tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -582,7 +600,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
     monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 3.0)
 
-    out = cut.build_edited_source_video("ignored.mp4", plan, work_dir)
+    out = cut.build_edited_source_video("ignored.mp4", _with_geometry(plan, [str(a), str(b)]), work_dir)
 
     ffmpeg_cmd = [cmd for cmd in commands if cmd[0] == "ffmpeg"][0]
     # Only the two media inputs: audio is synthesized per-clip inside filter_complex.
@@ -635,7 +653,7 @@ def test_build_edited_source_video_multi_resolution_mixed_audio_real_render(tmp_
                      {"source_id": "b", "source_path": str(b), "duration": 2.0}]},
     )
 
-    out = cut.build_edited_source_video(str(a), plan, work)
+    out = cut.build_edited_source_video(str(a), _with_geometry(plan, [str(a), str(b)]), work)
     assert out.exists() and out.stat().st_size > 0
 
     def _has_stream(kind):

@@ -66,7 +66,7 @@ def _mock_run_cmd_makes_output(monkeypatch):
 
     monkeypatch.setattr("storyboard.run_cmd", fake_run_cmd)
     monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
-    monkeypatch.setattr("storyboard.get_video_duration_safe", lambda v: 30.0)
+    monkeypatch.setattr("storyboard.get_video_duration", lambda v: 30.0)
     return calls
 
 

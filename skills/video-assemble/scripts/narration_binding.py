@@ -150,12 +150,12 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
     )
     if not adoption and not any_hash:
         originals = []
-        for position, segment in enumerate(tts_segments):
-            path = Path(str(segment.get("audio_path", ""))).resolve()
+        for segment in tts_segments:
+            path = Path(segment["audio_path"]).resolve()
             originals.append({
-                "index": segment.get("index", position), "source": path,
+                "index": segment["index"], "source": path,
                 "sha256": sha256_file(path) if path.is_file() else None,
-                "spoken_text": segment.get("spoken_text", segment.get("narration")),
+                "spoken_text": segment["spoken_text"],
             })
         return {
             "identity_status": identity_status, "adoption": None, "tempo_policy": None,
@@ -175,7 +175,7 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
             require_digest(declared, "processed_wav_sha256")
         if adopted and declared != adopted["processed_wav_sha256"]:
             raise ValueError("tts_meta processed hash differs from narration adoption")
-        source = require_local_path(segment.get("audio_path"), "narration audio")
+        source = require_local_path(segment["audio_path"], "narration audio")
         actual_hash = sha256_file(source)
         if declared is not None and actual_hash != declared:
             raise ValueError("narration audio hash identity mismatch")
@@ -183,7 +183,7 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
             raise ValueError("adopted narration audio hash identity mismatch")
         originals.append({
             "index": segment["index"], "source": source, "sha256": actual_hash,
-            "spoken_text": segment.get("spoken_text", segment.get("narration")),
+            "spoken_text": segment["spoken_text"],
             "requested_provider": adopted["requested_provider"] if adopted else None,
             "requested_voice": adopted["requested_voice"] if adopted else None,
             "request_evidence": _receipt_evidence(segment, adopted),
@@ -278,8 +278,7 @@ def seal_render_inputs(context, tts_segments, narration_wav):
     """Seal every derived audio byte that the final FFmpeg command will consume."""
     if not context.get("active"):
         return None
-    by_index = {segment.get("index", position): segment
-                for position, segment in enumerate(tts_segments)}
+    by_index = {segment["index"]: segment for segment in tts_segments}
     sealed_segments = []
     for item in context["segments"]:
         segment = by_index[item["index"]]

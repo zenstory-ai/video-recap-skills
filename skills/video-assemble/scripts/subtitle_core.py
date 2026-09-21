@@ -284,7 +284,7 @@ def _subtitle_entries(narration):
     max_chars = CONFIG["subtitle_max_chars"]
     entries = []
     for seg in narration:
-        text = seg.get("spoken_text", seg["narration"])
+        text = seg["spoken_text"]
         start, end = float(seg["actual_place_start"]), float(seg["actual_place_end"])
         entries.extend(_distribute_chunks(_split_subtitle_chunks(text, max_chars), start, end))
     return entries

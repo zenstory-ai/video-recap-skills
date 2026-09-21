@@ -16,6 +16,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import assemble  # noqa: E402
 from lib import CONFIG  # noqa: E402
+from tts_fixtures import tts_segment
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
@@ -67,13 +68,13 @@ def media(tmp_path, monkeypatch):
 
 
 def _segment(audio_path, declared_audio):
-    return {
-        "index": 0, "start": 0.25, "end": 1.75,
-        "narration": "offline audio identity test", "spoken_text": "offline audio identity test",
-        "audio_path": str(audio_path), "audio_duration": 1.0,
-        "pause_after_ms": 0, "overlaps_speech": False,
-        "processed_wav_sha256": _sha256(declared_audio),
-    }
+    return tts_segment(
+        index=0, start=0.25, end=1.75,
+        narration="offline audio identity test", spoken_text="offline audio identity test",
+        audio_path=str(audio_path), audio_duration=1.0,
+        pause_after_ms=0, overlaps_speech=False,
+        processed_wav_sha256=_sha256(declared_audio),
+    )
 
 
 def _amplitudes(video):

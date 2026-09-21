@@ -15,8 +15,6 @@ from subtitle_core import _subtitle_style_config
 from narration_binding import binding_fingerprint
 from audio_mix_binding import binding_fingerprint as audio_mix_binding_fingerprint
 
-AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
-
 
 def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
     """Settings that affect the rendered video, used by pipeline resume cache. When work_dir is
@@ -32,8 +30,6 @@ def assembly_settings_fingerprint(work_dir=None, *, audio_mode="narration", audi
         _artifact_fingerprint(Path(work_dir) / "subtitle_track.json")
         if work_dir is not None else None
     )
-    if audio_mode not in AUDIO_MODES:
-        raise ValueError(f"unsupported audio mode: {audio_mode}")
     fingerprint = {
         "version": SUBTITLE_RENDER_VERSION,
         "subtitle_text_normalize": SUBTITLE_TEXT_NORMALIZE_VERSION,

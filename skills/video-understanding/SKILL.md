@@ -40,7 +40,7 @@ ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对�
 
 若 `work_dir/background_research.json` 存在，本技能会把剧情梗概和角色名折入 VLM 上下文；`--context` 可补充一条简短提示。
 
-下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本不从其他技能目录读取文件；外部输入仅限命令显式传入的视频、参数与 `work_dir` 产物。
+下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
 ## 4. 运行命令
 
@@ -72,12 +72,6 @@ python3 scripts/understand.py <video> --work-dir <work_dir> \
 ## 7. 能力边界
 
 - 不写解说词，也不做解说评分；只负责生成理解索引与创作简报。
-- 不剪辑、不配音、不合成视频。
 - 不编造信号无法支持的剧情；当 ASR / VLM 过薄时输出素材警告。
-- MiMo ASR 的 `start/end` 是固定分片形成的**粗窗口**，不是词级对齐，也不是经验证的对白边界；
-  `word_alignment` 固定为 `NOT_PERFORMED`。空文本只表示原因未知，不能当作已证实静音。
-- `asr_timing_evidence.json` 区分显式跳过、缺 key、缺时长、提取/API 失败、未知空文本与
-  `LEGACY_UNVERIFIED` 旧缓存，并分别保留 provider observed text 与 post-glossary text，绑定
-  归一化名字集合和修正规则版本。brief 只显示经当前源视频与 ASR 结果验证的状态/sidecar 指纹；
-  缺失或陈旧时显示 `MISSING_OR_STALE`。
-- 不发布、不调度，只向 `work_dir` 写产物并停止。
+- MiMo ASR 的 `start/end` 是固定分片形成的**粗窗口**，不是词级对齐；空文本只表示原因未知，
+  不能当作已证实静音。`asr_timing_evidence.json` 的状态字段见 `references/data-schema.md`。

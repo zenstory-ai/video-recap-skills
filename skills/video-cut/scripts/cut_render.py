@@ -8,7 +8,7 @@ from pathlib import Path
 from lib import CONFIG, get_video_duration, log, run_cmd
 
 from cut_contract import _write_edited_source_meta
-from media_geometry import _has_audio_stream, _select_output_geometry
+from media_geometry import _has_audio_stream
 from sentence_boundaries import _continuous_source_join
 
 
@@ -129,10 +129,20 @@ def write_cut_delivery_qc(work_dir, validated_plan):
 
 
 def build_edited_source_video(input_video, validated_plan, work_dir, output_path=None):
-    """Build `edited_source.mp4` by concatenating validated source ranges."""
+    """Build `edited_source.mp4` by concatenating validated source ranges.
+
+    `validated_plan["qc"]["output_geometry"]` is required: the caller (cut_cli, or any
+    public user of this API) selects the canvas with `_select_output_geometry` first, so the
+    same geometry is recorded in clip_plan_validated.json and used for the render."""
     work_dir = Path(work_dir)
     output_path = Path(output_path or work_dir / "edited_source.mp4")
     clips = validated_plan["clips"]
+    qc = validated_plan["qc"]
+    if "output_geometry" not in qc:
+        raise KeyError(
+            "validated_plan['qc']['output_geometry'] is required: select the canvas with "
+            "media_geometry._select_output_geometry before build_edited_source_video"
+        )
 
     source_paths = []
     for clip in clips:
@@ -142,12 +152,7 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     source_index = {path: idx for idx, path in enumerate(source_paths)}
     audio_by_input = {path: _has_audio_stream(path) for path in source_paths}
     join_fade_ms = CONFIG["clip_join_audio_fade_ms"]
-    qc = validated_plan.setdefault("qc", {})
     qc["join_fade_ms"] = round(join_fade_ms, 3)
-    if "output_geometry" not in qc:
-        _, _, _, geometry_qc = _select_output_geometry(source_paths, clips)
-        qc["output_geometry"] = geometry_qc
-        qc["output_geometry_reason"] = geometry_qc["reason"]
 
     parts = []
     concat_inputs = []

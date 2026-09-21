@@ -1,22 +1,35 @@
 """Load and remap source evidence for narration review."""
 
 import json
-
-import math
-
-
 from pathlib import Path
 
 from lib import stable_hash
 
 
 def _load(work_dir, name):
+    """Pipeline-written artifact: None when never written; corrupt JSON raises."""
+    path = Path(work_dir) / name
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_required(work_dir, name, hint):
+    """Pipeline-written artifact the stage cannot run without; corrupt JSON raises."""
+    path = Path(work_dir) / name
+    if not path.exists():
+        raise SystemExit(f"缺少 {path}；{hint}")
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _load_agent_optional(work_dir, name):
+    """Optional agent-authored artifact: missing or unparseable both fail open to None."""
     path = Path(work_dir) / name
     if not path.exists():
         return None
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError):
+    except ValueError:
         return None
 
 
@@ -102,50 +115,26 @@ def _load_cut_clip_spans(work_dir):
     """
     work_dir = Path(work_dir)
     plan = _load(work_dir, "clip_plan_validated.json")
-    if not isinstance(plan, dict):
+    if plan is None:
         return None
     raw_plan = _load(work_dir, "clip_plan.json")
     if raw_plan is not None and plan.get("raw_plan_fingerprint") != stable_hash(
         raw_plan
     ):
         return None
-    clips = plan.get("clips")
-    if not isinstance(clips, list):
-        return None
-    spans = []
-    for clip in clips:
-        if not isinstance(clip, dict):
-            continue
-        if not all(
-            key in clip
-            for key in ("source_start", "source_end", "output_start", "output_end")
-        ):
-            return None
-        try:
-            source_start = float(clip["source_start"])
-            source_end = float(clip["source_end"])
-            output_start = float(clip["output_start"])
-            output_end = float(clip["output_end"])
-        except (TypeError, ValueError):
-            return None
-        values = (source_start, source_end, output_start, output_end)
-        if not all(math.isfinite(value) for value in values):
-            return None
-        if source_end <= source_start or output_end <= output_start:
-            return None
-        spans.append(
-            {
-                "source_start": source_start,
-                "source_end": source_end,
-                "output_start": output_start,
-                "output_end": output_end,
-                "source_id": str(clip.get("source_id", clip.get("source", "0"))),
-                "source_clip_id": clip.get(
-                    "source_clip_id", clip.get("id", clip.get("clip_id"))
-                ),
-                "output_segment_index": len(spans),
-            }
-        )
+    spans = [
+        {
+            "source_start": clip["source_start"],
+            "source_end": clip["source_end"],
+            "output_start": clip["output_start"],
+            "output_end": clip["output_end"],
+            # video-cut labels source_id only for multi-source plans.
+            "source_id": str(clip.get("source_id", "0")),
+            "source_clip_id": clip["clip_id"],
+            "output_segment_index": index,
+        }
+        for index, clip in enumerate(plan["clips"])
+    ]
     return spans or None
 
 

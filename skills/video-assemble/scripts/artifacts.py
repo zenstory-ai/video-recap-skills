@@ -57,7 +57,7 @@ def _artifact_fingerprint(path):
 
 def _explicit_source_video():
     """Return the cut-mode source video only when the caller opted in explicitly."""
-    if not CONFIG.get("source_video_explicit", False):
+    if not CONFIG["source_video_explicit"]:
         return ""
     return CONFIG["source_video"]
 

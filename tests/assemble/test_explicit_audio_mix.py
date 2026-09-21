@@ -20,6 +20,7 @@ sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
 import audio_mix_binding  # noqa: E402
 from lib import CONFIG  # noqa: E402
+from tts_fixtures import tts_segment
 import source_score  # noqa: E402
 
 
@@ -97,12 +98,12 @@ def explicit_case(tmp_path):
         "outputs": identities,
     }))
     voice = _wav(tmp_path / "voice.wav", 997)
-    segment = {
-        "index": 0, "start": 0.25, "end": 1.0, "narration": "bound voice",
-        "spoken_text": "bound voice", "audio_path": str(voice),
-        "audio_duration": 0.4, "pause_after_ms": 0, "overlaps_speech": False,
-        "tts_rate_offset": 0.0, "processed_wav_sha256": _sha(voice),
-    }
+    segment = tts_segment(
+        index=0, start=0.25, end=1.0, narration="bound voice",
+        spoken_text="bound voice", audio_path=str(voice),
+        audio_duration=0.4, pause_after_ms=0, overlaps_speech=False,
+        tts_rate_offset=0.0, processed_wav_sha256=_sha(voice),
+    )
     meta = tmp_path / "tts_meta.json"
     meta.write_text(json.dumps({"segments": [segment]}))
     narration = tmp_path / "narration_adoption.json"

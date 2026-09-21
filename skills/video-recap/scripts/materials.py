@@ -199,13 +199,12 @@ def summarize_work_dir(work_dir: str | Path, *, source_name: str = "") -> dict:
     tags = []
     index_path = work / "understanding_index.json"
     if index_path.exists():
+        # consolidate.py writes {characters, relationships, plot_points, entities,
+        # research_glossary} and no prose summary. The list ITEMS are MiMo output that
+        # consolidate only list-checks, so their shape is still tolerated here.
         index = load_json(index_path)
-        for key in ("summary", "story_summary", "overall_summary", "one_sentence"):
-            if index.get(key):
-                summary = _redact_text(str(index[key]))[:600]
-                break
-        for key in ("characters", "entities", "keywords", "tags"):
-            for item in index.get(key, [])[:12]:
+        for key in ("characters", "entities"):
+            for item in index[key][:12]:
                 text = item.get("name", "") if isinstance(item, dict) else item
                 tags.append(_redact_text(str(text))[:80])
     for name, label in (("scenes.json", "scenes"), ("asr_result.json", "asr")):
@@ -397,11 +396,7 @@ def restore_material(
     dest.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=".material_restore_", dir=str(dest)) as tmp_name:
         tmp = Path(tmp_name)
-        staged = [
-            artifact["name"]
-            for artifact in meta["artifacts"]
-            if isinstance(artifact, dict) and artifact.get("name") in ALLOWED_ARTIFACTS
-        ]
+        staged = [artifact["name"] for artifact in meta["artifacts"]]  # save_material's own list
         if not staged or any(not (src_dir / name).is_file() for name in staged):
             return {"restored": False, "reason": "material artifacts missing", "material_id": meta["material_id"]}
         for name in staged:

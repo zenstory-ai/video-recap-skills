@@ -45,7 +45,10 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     work.mkdir()
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
     (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "clean"}]}), encoding="utf-8")
-    (work / "understanding_index.json").write_text(json.dumps({"summary": "英雄入场", "tags": ["hero"]}), encoding="utf-8")
+    (work / "understanding_index.json").write_text(json.dumps({
+        "characters": [{"name": "英雄"}], "relationships": [], "plot_points": [],
+        "entities": [{"name": "hero-sword"}], "research_glossary": [],
+    }), encoding="utf-8")
     (work / "audio.wav").write_bytes(b"raw audio should not copy")
     (work / "secret.json").write_text("tp-secret", encoding="utf-8")
 
@@ -62,8 +65,8 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     assert len(lines) == 1
     rec = json.loads(lines[0])
     assert rec["event"] == "saved"
-    assert rec["summary"] == "英雄入场"
-    assert "hero" in rec["tags"]
+    assert rec["summary"].startswith("Analyzed video material: ep1.mp4")
+    assert "英雄" in rec["tags"] and "hero-sword" in rec["tags"]
 
     materials.save_material(lib, work, tmp_path / "ep1.mp4", "f" * 64, "settings", source_id="src_ffffffffffff")
     assert len((lib / "materials_index.jsonl").read_text(encoding="utf-8").splitlines()) == 2
@@ -126,6 +129,8 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     work.mkdir()
     (work / "understanding_index.json").write_text(
         json.dumps({
+            "characters": [], "relationships": [], "plot_points": [], "entities": [],
+            "research_glossary": [],
             "summary": "主角发现了一个秘密 secret，一枚 token 在黑市流通",   # legit words -> must survive
             "api_key": "tp-abcdef12345678",                                  # credential key -> value dropped
             "token_economy": "影片解释 token 的发行机制",                     # benign name containing 'token' -> kept

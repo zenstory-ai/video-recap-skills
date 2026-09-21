@@ -2,6 +2,7 @@ import json
 import sys
 import wave
 from pathlib import Path
+from subprocess import CompletedProcess
 
 import pytest
 
@@ -106,21 +107,50 @@ def test_build_dub_track_anchors_line_at_its_start(tmp_path):
     )  # the line lands exactly at 1.0s
 
 
-def test_build_dub_track_skips_missing_and_mismatched(tmp_path):
-    """A line with no fitted wav, or a wrong-rate wav, is skipped (never crashes the render)."""
+def test_build_dub_track_raises_on_missing_or_mismatched_fitted_wav(tmp_path):
+    """_time_fit always writes fitted_wav at CLONE_SR mono; a missing or wrong-rate file is a
+    broken render, never a silently missing line."""
     bad = tmp_path / "bad.wav"
     with wave.open(str(bad), "wb") as w:
         w.setnchannels(1)
         w.setsampwidth(2)
-        w.setframerate(16000)  # not CLONE_SR → must be skipped
+        w.setframerate(16000)  # not CLONE_SR
         w.writeframes(b"\x20\x20" * 1000)
     out = tmp_path / "track.wav"
-    dub._build_dub_track(
-        [{"start": 0.0}, {"start": 0.5, "fitted_wav": str(bad)}], 2.0, out
+    with pytest.raises(RuntimeError, match="expected 24000Hz mono"):
+        dub._build_dub_track([{"start": 0.5, "fitted_wav": str(bad)}], 2.0, out)
+    with pytest.raises(FileNotFoundError):
+        dub._build_dub_track([{"start": 0.0, "fitted_wav": str(tmp_path / "absent.wav")}], 2.0, out)
+
+
+def test_ffmpeg_failure_raises_with_stderr(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        dub, "run_cmd", lambda cmd, **kwargs: CompletedProcess(cmd, 1, stdout="", stderr="boom")
     )
-    with wave.open(str(out), "rb") as w:
-        frames = w.readframes(w.getnframes())
-    assert frames == b"\x00" * len(frames)  # nothing placed → full silence
+    with pytest.raises(RuntimeError, match="ffmpeg 失败.*boom"):
+        dub._cut_wav(tmp_path / "src.wav", tmp_path / "out.wav", 0.0, 1.0)
+
+
+def test_dub_asr_malformed_api_response_raises(monkeypatch, tmp_path):
+    wav = tmp_path / "seg.wav"
+    with wave.open(str(wav), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(16000)
+        out.writeframes(b"\x00\x00" * 16)
+    monkeypatch.setattr(dub, "mimo_asr_api_call", lambda _payload: {"choices": []})
+    with pytest.raises(RuntimeError, match="MiMo-ASR"):
+        dub._run_asr(wav)
+
+
+def test_dub_render_corrupt_clone_cache_meta_raises(monkeypatch, tmp_path):
+    """A .meta.json this skill wrote but cannot parse is a bug, not a paid re-synthesis."""
+    _, raw = _prepare_render_cache_fixture(tmp_path)
+    dub._clone_cache_meta_path(raw).write_text("not json", encoding="utf-8")
+    _stub_render_pipeline(monkeypatch)
+    monkeypatch.setattr(dub, "_clone_tts", lambda *_a, **_k: pytest.fail("must not re-synthesize"))
+    with pytest.raises(ValueError):
+        dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
 
 
 def test_brief_lists_windows_for_the_agent():
@@ -328,7 +358,10 @@ def test_dub_render_invalidates_voiceclone_cache_when_text_changes(
 
 def test_dub_mux_pins_delivery_sample_rate_after_loudnorm(monkeypatch, tmp_path):
     commands = []
-    monkeypatch.setattr(dub, "run_cmd", lambda cmd, **kwargs: commands.append(cmd))
+    monkeypatch.setattr(
+        dub, "run_cmd",
+        lambda cmd, **kwargs: commands.append(cmd) or CompletedProcess(cmd, 0, stdout="", stderr=""),
+    )
 
     dub._mux(tmp_path / "source.mp4", tmp_path / "dub.wav", tmp_path / "dubbed.mp4")
 

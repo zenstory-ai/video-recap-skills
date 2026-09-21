@@ -28,23 +28,15 @@ def _probe(duration=12.5, codec="h264"):
     }
 
 
-def _upstream_blocker(stage="post_render", artifact="assembly_qc.json"):
-    finding = qc.build_finding(
-        finding_id=f"{artifact}-blocker",
-        stage=stage,
-        severity="blocker",
-        confidence="objective",
-        sample_policy="deterministic",
-        category="schema_invalid",
-        code="bad_upstream",
-        message="upstream deterministic failure",
-        deterministic=True,
-        source={"artifact": artifact},
-        evidence={"detail": "bad"},
-    )
-    return qc.build_report(
-        artifact="final_qc.json", stage=stage, findings=[finding]
-    ) | {"artifact": artifact}
+def _upstream_blocker(artifact="assembly_qc.json"):
+    """What video-assemble's assembly_contract / visual_render emit."""
+    return {
+        "schema_version": 1,
+        "artifact": artifact,
+        "verdict": "FAIL",
+        "blocking": True,
+        "blocking_codes": ["bad_upstream"],
+    }
 
 
 @pytest.mark.parametrize(
@@ -239,17 +231,27 @@ def test_corrupt_upstream_qc_becomes_schema_invalid_blocker(tmp_path):
     }
 
 
-def test_corrupt_assembly_manifest_falls_back_to_known_output(tmp_path):
-    output = tmp_path / "output.mp4"
+def test_final_output_comes_from_caller_or_assembly_manifest_only(tmp_path):
+    """No guessing: without an explicit final_output the assembler's manifest is the only
+    source, so a corrupt manifest raises instead of QC-ing some other mp4 (output.mp4 is
+    the assembler's intermediate). With an explicit path the manifest is still summarised."""
+    output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
+    (tmp_path / "output.mp4").write_bytes(b"intermediate, must not be selected")
     (tmp_path / "assembly_manifest.json").write_text("not json", encoding="utf-8")
 
-    report = final_qc.build_final_qc(tmp_path, probe_fixture=_probe())
+    with pytest.raises(ValueError):
+        final_qc.build_final_qc(tmp_path, probe_fixture=_probe())
 
-    assert report["metadata"]["final_output"]["path"] == "output.mp4"
+    report = final_qc.build_final_qc(tmp_path, final_output=output, probe_fixture=_probe())
+    assert report["metadata"]["final_output"]["path"] == "recap.mp4"
     assert report["metadata"]["artifacts"]["assembly_manifest.json"]["summary"] == {
         "invalid": True
     }
+
+    _write_json(tmp_path / "assembly_manifest.json", {"final_output": str(output)})
+    report = final_qc.build_final_qc(tmp_path, probe_fixture=_probe())
+    assert report["metadata"]["final_output"]["path"] == "recap.mp4"
 
 
 def test_assembly_and_visual_qc_blocking_are_rolled_into_deterministic_blockers(
@@ -296,7 +298,7 @@ def test_assembly_and_visual_qc_artifact_verdict_blocking_codes_are_blockers(tmp
             "artifact": "visual_qc.json",
             "verdict": "failed",
             "blocking": False,
-            "blocking_codes": "black_frames",
+            "blocking_codes": ["black_frames"],
         },
     )
 

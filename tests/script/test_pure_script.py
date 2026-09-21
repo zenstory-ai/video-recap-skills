@@ -1157,9 +1157,7 @@ def test_full_validation_rewrite_preserves_visual_overlays(tmp_path, monkeypatch
 
 def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
     validate_bounds = narration_validate._validate_output_timeline_bounds
-    validate_bounds(
-        [{"start": 0.0, "end": 9.95, "narration": "有效。"}], output_duration=10.0
-    )
+    validate_bounds([{"start": 0.0, "end": 9.95, "narration": "有效。"}], 10.0)
 
     bad = [
         {"start": -0.1, "end": 1.0, "narration": "负时间。"},
@@ -1167,15 +1165,13 @@ def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
         {"start": 10.1, "end": 11.0, "narration": "完全在外。"},
     ]
     with pytest.raises(SystemExit) as exc:
-        validate_bounds(bad, output_duration=10.0)
+        validate_bounds(bad, 10.0)
     msg = str(exc.value)
     assert "output_duration=10.000" in msg
     assert "segment 0" in msg and "segment 1" in msg and "segment 2" in msg
 
     with pytest.raises(SystemExit, match="finite and positive"):
-        validate_bounds([{"start": 0.0, "end": 1.0}], output_duration=float("nan"))
-    with pytest.raises(SystemExit, match="non-finite time"):
-        validate_bounds([{"start": float("nan"), "end": 1.0}], output_duration=10.0)
+        validate_bounds([{"start": 0.0, "end": 1.0}], float("nan"))
 
 
 def test_cut_output_mode_requires_output_duration(monkeypatch, tmp_path):

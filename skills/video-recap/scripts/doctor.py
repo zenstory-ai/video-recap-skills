@@ -28,6 +28,10 @@ def _command_path(name: str) -> str | None:
 
 
 def _ffmpeg_filters() -> set[str]:
+    """Filters the installed ffmpeg lists; empty when ffmpeg is absent.
+
+    A present ffmpeg whose `-filters` fails or hangs is an environment fault and raises,
+    so it is never misreported downstream as "filter absent"."""
     ffmpeg = _command_path("ffmpeg")
     if not ffmpeg:
         return set()
@@ -35,10 +39,11 @@ def _ffmpeg_filters() -> set[str]:
         result = subprocess.run(
             [ffmpeg, "-hide_banner", "-filters"], text=True, capture_output=True, timeout=20
         )
-    except (OSError, subprocess.SubprocessError):
-        return set()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"`ffmpeg -filters` failed or hung: {exc}") from exc
     if result.returncode != 0:
-        return set()
+        detail = (result.stderr or result.stdout or "").strip()[:300]
+        raise RuntimeError(f"`ffmpeg -filters` failed (exit {result.returncode}): {detail}")
     filters = set()
     for line in result.stdout.splitlines():
         parts = line.split()

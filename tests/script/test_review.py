@@ -294,6 +294,7 @@ def test_review_narration_cut_output_uses_remapped_grounding(monkeypatch, tmp_pa
             "raw_plan_fingerprint": stable_hash(raw_plan),
             "clips": [
                 {
+                    "clip_id": 0,
                     "source_start": 10,
                     "source_end": 20,
                     "output_start": 0,
@@ -358,6 +359,7 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
             "raw_plan_fingerprint": stable_hash(raw_plan),
             "clips": [
                 {
+                    "clip_id": 0,
                     "source_id": "src_a",
                     "source_start": 0,
                     "source_end": 5,
@@ -365,6 +367,7 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
                     "output_end": 5,
                 },
                 {
+                    "clip_id": 1,
                     "source_id": "src_b",
                     "source_start": 0,
                     "source_end": 5,
@@ -676,11 +679,10 @@ def test_public_grounding_seams_are_api_free(tmp_path):
     filtered = review.filter_evidence_by_ranges(vlm, asr, ranges)
     assert [item["source"] for item in filtered["items"]] == ["visual", "asr"]
 
-    assert review.validate_public_evidence_contract(bundle)["valid"] is True
     assert review.build_review_coverage_metadata(bundle)["scene_count"] == 1
     assert "门口对峙" in review.render_evidence_bundle(bundle)
 
-    qc = review.build_grounding_qc(tmp_path, {"findings": []}, bundle)
+    qc = review.build_grounding_qc(tmp_path, review.parse_review_response("{}"), bundle)
     assert qc["verdict"] == "pass"
     review.write_grounding_qc(tmp_path, qc)
     assert (

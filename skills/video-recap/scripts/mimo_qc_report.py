@@ -158,23 +158,13 @@ def _cache_input(
 
 
 def _stage_reports(path: Path) -> dict[str, dict[str, Any]]:
-    """Per-stage reports from an existing aggregate mimo_qc.json, or {} before the first stage."""
+    """Per-stage reports from an existing aggregate mimo_qc.json, or {} before the first stage.
+
+    The aggregate is this module's own atomically written, contract-validated report, so a
+    corrupt one raises (recap_stage_qc keeps the pipeline fail-open around the whole stage)."""
     if not path.is_file():
         return {}
-    try:
-        stages = json.loads(path.read_text(encoding="utf-8"))["metadata"]["stages"]
-        for report in stages.values():
-            qc_contract.validate_report(report)
-        return dict(stages)
-    except (
-        OSError,
-        ValueError,
-        TypeError,
-        KeyError,
-        AttributeError,
-        qc_contract.QCContractError,
-    ):
-        return {}
+    return dict(json.loads(path.read_text(encoding="utf-8"))["metadata"]["stages"])
 
 
 def _error_name(exc: Exception) -> str:
@@ -216,7 +206,7 @@ def build_report(
     if (
         not refresh
         and existing is not None
-        and existing.get("metadata", {}).get("cache_key") == cache_key
+        and existing["metadata"]["cache_key"] == cache_key
     ):
         cached = json.loads(json.dumps(existing))
         cached["metadata"].update(status="cached", mode="live_cache", request_count=0)

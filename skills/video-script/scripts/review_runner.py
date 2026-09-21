@@ -11,8 +11,8 @@ from lib import CONFIG, log, api_call
 
 from evidence_bundle import build_evidence_bundle
 from review_grounding import (
-    _load,
     _load_cut_clip_spans,
+    _load_required,
     _load_review_grounding,
     remap_grounding_to_output_timeline,
 )
@@ -34,9 +34,7 @@ COVERAGE_POLICY_VERSION = "coverage_policy_v1"
 
 def review_narration(work_dir, *, timeline="source", strict_evidence=False):
     work_dir = Path(work_dir)
-    narration = _load(work_dir, "narration.json")
-    if narration is None:
-        raise SystemExit(f"缺少 {work_dir / 'narration.json'}；先写解说草稿再评审")
+    narration = _load_required(work_dir, "narration.json", "先写解说草稿再评审")
     vlm_analysis, asr_result = _load_review_grounding(work_dir)
     warnings = []
     if timeline == "cut_output":
@@ -75,11 +73,11 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
         )
         resp = api_call(
             {
-                "model": CONFIG.get("vlm_model", ""),
+                "model": CONFIG["vlm_model"],
                 "messages": messages,
                 "max_tokens": 2000 if len(chunks) == 1 else 1600,
                 "temperature": 0,
-                "seed": 7 + int(chunk.get("chunk_index", 0)),
+                "seed": 7 + chunk["chunk_index"],
             }
         )
         content = ""
@@ -88,8 +86,8 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
         except (KeyError, IndexError, TypeError):
             log("评审 API 返回结构异常")
         parsed = parse_review_response(content)
-        parsed["chunk_index"] = chunk.get("chunk_index", 0)
-        parsed["chunk_count"] = chunk.get("chunk_count", len(chunks))
+        parsed["chunk_index"] = chunk["chunk_index"]
+        parsed["chunk_count"] = chunk["chunk_count"]
         chunk_reviews.append(parsed)
     review = _merge_chunk_reviews(chunk_reviews)
     if warnings:
@@ -97,9 +95,9 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
     review["evidence_contract"] = {
         "schema_version": EVIDENCE_CONTRACT_VERSION,
         "timeline": timeline,
-        "clock": bundle.get("clock"),
+        "clock": bundle["clock"],
         "coverage_policy_version": COVERAGE_POLICY_VERSION,
-        "selected_ranges": bundle.get("coverage", {}).get("selected_ranges", []),
+        "selected_ranges": bundle["coverage"]["selected_ranges"],
         "evidence_bundle_fingerprint": bundle_fp,
         "chunk_count": len(chunks),
         "warnings": warnings,

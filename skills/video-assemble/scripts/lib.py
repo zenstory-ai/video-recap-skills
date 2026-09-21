@@ -52,7 +52,6 @@ _foreign_under_narration_volume = 0.05  # original volume under narration when s
 
 CONFIG = {
     "fade_ms": env_int("FADE_MS", 120, minimum=0),  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
-    "breath_ms": 250,  # 段间呼吸空间(ms)；block recap 块内连贯、块间留原声呼吸
     "ducking_mode": "fixed",  # fixed | sidechaincompress | none
     "ducking_threshold": 0.15,
     "ducking_ratio": 3,
@@ -72,6 +71,7 @@ CONFIG = {
     "duck_bridge_seconds": env_float("DUCK_BRIDGE_SECONDS", 1.5, minimum=0.0),  # 仅把间隔小于此值的相邻解说窗口并成一段压低；超过则视为作者特意留的"原声块"，原声放回满音量。默认 1.5s：解说块内部连续压低，块与块之间的留白放出满音量原声。该值只控制短间隔合并，不设定旁白/原声配额。调大→更连续铺底、原声块更少；调小→更碎
     "bgm_path": os.environ.get("BGM_PATH", "").strip(),  # 背景音乐文件(可选)，留空则不加 BGM
     "source_video": os.environ.get("SOURCE_VIDEO", "").strip(),  # 剪辑模式下的原始视频(可选)，用于时间线/剪映导出引用原片片段
+    "source_video_explicit": False,  # 仅 assemble.py --source-video 显式传入时为 True；环境变量 SOURCE_VIDEO 不算显式
     "export_jianying": env_bool("EXPORT_JIANYING", False),  # 渲染后可选导出剪映草稿(默认关；与核心解耦)
     "jianying_draft_dir": os.environ.get("JIANYING_DRAFT_DIR", "").strip(),  # 剪映草稿输出父目录(留空=work_dir)
     "jianying_bundle_media": env_bool("JIANYING_BUNDLE_MEDIA", True),  # 默认开：macOS 剪映沙箱读不到外部路径，须把素材拷进草稿目录

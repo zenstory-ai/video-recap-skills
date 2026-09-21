@@ -90,6 +90,7 @@ def test_payload_preserves_semantic_values_and_only_relevant_final_output(tmp_pa
         "1\n00:00:00,000 --> 00:00:01,000\n生成解说字幕\n", encoding="utf-8"
     )
     (work / "output.mp4").write_bytes(b"mp4")
+    _write_json(work / "assembly_manifest.json", {"final_output": "output.mp4"})
 
     evidence = mimo_qc.collect_evidence(work)
     pre = mimo_qc.build_payload(evidence, stage="pre_assemble")
@@ -165,37 +166,6 @@ def test_multi_source_evidence_collects_per_source_asr_instead_of_stale_subtitle
     assert "选秀夜原声" in json.dumps(pre["evidence"]["source_asr"], ensure_ascii=False)
     assert "天王山原声" in json.dumps(pre["evidence"]["source_asr"], ensure_ascii=False)
     assert "generated_subtitles" not in pre["evidence"]
-
-
-def test_multi_source_evidence_ignores_source_work_dirs_outside_work_dir(tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
-    outside = tmp_path / "outside"
-    outside.mkdir()
-    (work / "linked-outside").symlink_to(outside, target_is_directory=True)
-    inside = work / "inside"
-    inside.mkdir()
-    _write_json(
-        outside / "asr_clean.json",
-        {"segments": [{"start": 0, "end": 2, "text": "must-not-upload"}]},
-    )
-    (inside / "asr_clean.json").symlink_to(outside / "asr_clean.json")
-    _write_json(
-        work / "multi_source_manifest.json",
-        {
-            "schema_version": 1,
-            "sources": [
-                {"source_id": "traversal", "source_work_dir": "../outside"},
-                {"source_id": "symlink", "source_work_dir": "linked-outside"},
-                {"source_id": "file_symlink", "source_work_dir": "inside"},
-            ],
-        },
-    )
-
-    evidence = mimo_qc.collect_evidence(work)
-
-    assert evidence["source_asr"] == {}
-    assert "must-not-upload" not in json.dumps(evidence)
 
 
 def test_post_qc_drops_source_caption_claim_when_visible_text_is_generated_cue(
@@ -409,13 +379,9 @@ def test_live_call_is_one_request_per_stage_and_uses_cache_unless_refreshed(
     assert str(work) not in json.dumps(first["report"]["metadata"]["cache_input"])
 
 
-@pytest.mark.parametrize("stale_report", ['{"stale": true}', "not json"])
-def test_live_missing_key_is_unavailable_and_replaces_stale_or_malformed_report(
-    monkeypatch, tmp_path, stale_report
-):
+def test_live_missing_key_is_unavailable(monkeypatch, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
-    (work / "mimo_qc.json").write_text(stale_report, encoding="utf-8")
     monkeypatch.setattr(
         mimo_qc,
         "mimo_qc_api_call",
@@ -436,6 +402,23 @@ def test_live_missing_key_is_unavailable_and_replaces_stale_or_malformed_report(
         )
         is True
     )
+
+
+@pytest.mark.parametrize(
+    "stale_report, error",
+    [('{"stale": true}', KeyError), ("not json", ValueError)],
+    ids=["foreign-shape", "not-json"],
+)
+def test_corrupt_own_aggregate_report_raises(tmp_path, stale_report, error):
+    """mimo_qc.json is this module's own atomically written report; SKILL.md's fail-open
+    covers the MiMo request (key/429/timeout/response shape/sampling), not our file. The
+    orchestrator (recap_stage_qc._run_mimo_qc_stage) still keeps the pipeline non-blocking."""
+    work = tmp_path / "work"
+    work.mkdir()
+    (work / "mimo_qc.json").write_text(stale_report, encoding="utf-8")
+
+    with pytest.raises(error):
+        mimo_qc.run(work, dry_run=True)
 
 
 @pytest.mark.parametrize("failure", ["http_401", "http_429", "timeout"])

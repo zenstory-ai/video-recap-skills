@@ -214,7 +214,7 @@ def _build_timed_narration(
 
     for seg in tts_segments:
         wav_path = seg["audio_path"]
-        pause_samples = int(seg.get("pause_after_ms", CONFIG["breath_ms"]) * sample_rate / 1000)
+        pause_samples = int(seg["pause_after_ms"] * sample_rate / 1000)
         # 段落收紧：同一段落内（与上一句作者留白 <= run_gap）把这一句紧贴上一句的实际收尾播放，
         # 句间间隔固定为 tight_pause，不受 slot 内居中延迟 / TTS 时长波动影响。段落之间（作者特意留
         # 的大留白，让精彩原声透出）才放回原声。这样句间间隔稳定、不会出现"一句解说一段空白"。
@@ -240,7 +240,7 @@ def _build_timed_narration(
             # reader does not support. FFmpeg performs the explicit PCM conversion.
             needs_resample = True
 
-        tts_rate_offset = seg.get("tts_rate_offset", 0.0)
+        tts_rate_offset = seg["tts_rate_offset"]
         tts_dur = seg["audio_duration"]
 
         slot_duration = max(0.0, float(seg["end"]) - float(seg["start"]))
