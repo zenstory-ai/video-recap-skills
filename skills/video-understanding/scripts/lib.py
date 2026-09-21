@@ -116,14 +116,14 @@ _raw_mimo_asr_api_url = (
 CONFIG = {
     "api_url": normalize_api_url(_raw_api_url),
     "api_key": _mimo_api_key,
-    "api_key_source": "MIMO_API_KEY",
+    "api_env_var": "MIMO_API_KEY",
     "mimo_api_url": normalize_api_url(_raw_api_url),
     "mimo_api_key": _mimo_api_key,
     "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
     "mimo_video_api_key": _mimo_video_api_key,
     "mimo_asr_api_url": normalize_api_url(_raw_mimo_asr_api_url),
     "mimo_asr_api_key": _mimo_asr_api_key,
-    "mimo_asr_api_key_source": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
+    "mimo_asr_env_var": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
     "mimo_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "vlm_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
@@ -316,9 +316,9 @@ def _prepare_api_payload(payload, api_provider=None, api_url=None):
 def _mimo_endpoint(kind):
     """Return per-capability MiMo endpoint settings (video understanding / TTS / ASR)."""
     by_kind = {
-        "video": ("mimo_video_api_url", "mimo_video_api_key", "mimo_video_api_key_source"),
-        "tts": ("mimo_tts_api_url", "mimo_tts_api_key", "mimo_tts_api_key_source"),
-        "asr": ("mimo_asr_api_url", "mimo_asr_api_key", "mimo_asr_api_key_source"),
+        "video": ("mimo_video_api_url", "mimo_video_api_key", "mimo_video_env_var"),
+        "tts": ("mimo_tts_api_url", "mimo_tts_api_key", "mimo_tts_env_var"),
+        "asr": ("mimo_asr_api_url", "mimo_asr_api_key", "mimo_asr_env_var"),
     }
     if kind not in by_kind:
         raise ValueError(f"Unsupported MiMo endpoint kind: {kind}")
@@ -326,7 +326,7 @@ def _mimo_endpoint(kind):
     return {
         "api_url": CONFIG.get(url_key) or CONFIG.get("mimo_api_url"),
         "api_key": CONFIG.get(key_key) or CONFIG.get("mimo_api_key"),
-        "api_key_source": CONFIG.get(src_key, "MIMO_API_KEY"),
+        "api_env_var": CONFIG.get(src_key, "MIMO_API_KEY"),
     }
 
 def _call_mimo_endpoint(kind, payload, max_retries=10):
@@ -337,7 +337,7 @@ def _call_mimo_endpoint(kind, payload, max_retries=10):
         api_provider="mimo",
         api_url=settings["api_url"],
         api_key=settings["api_key"],
-        api_key_source=settings["api_key_source"],
+        api_env_var=settings["api_env_var"],
     )
 
 def mimo_video_api_call(payload, max_retries=10):
@@ -348,7 +348,7 @@ def mimo_asr_api_call(payload, max_retries=10):
     """Call the MiMo speech-recognition (ASR) endpoint."""
     return _call_mimo_endpoint("asr", payload, max_retries=max_retries)
 
-def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key=None, api_key_source=None):
+def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key=None, api_env_var=None):
     """调用 OpenAI-compatible API，带重试。
 
     长视频理解会发出数百次 VLM/ASR 调用，集群的 429 限流是常态而非错误，所以重试更耐心
@@ -372,7 +372,7 @@ def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key
                 wait = _retry_after_seconds(retry_after, max(wait, 10))
                 log(f"API 速率限制 (尝试 {attempt+1}/{max_retries}), 等待 {wait}s")
             elif e.code == 401:
-                key_name = api_key_source or CONFIG["api_key_source"]
+                key_name = api_env_var or CONFIG["api_env_var"]
                 raise RuntimeError(f"API 认证失败 (401)。请检查 {key_name} 和 API URL 是否匹配。")
             elif e.code == 403:
                 hint = "API 访问被拒绝 (403)。"

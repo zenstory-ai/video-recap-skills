@@ -92,7 +92,7 @@ def transcribe_audio(video_path, work_dir):
     (work_dir / EVIDENCE_FILENAME).unlink(missing_ok=True)
 
     if not CONFIG["mimo_asr_api_key"]:
-        key_name = CONFIG["mimo_asr_api_key_source"]
+        key_name = CONFIG["mimo_asr_env_var"]
         log(f"ASR 跳过：未设置 {key_name}（MiMo ASR 需要；VLM/TTS 也需要同一个 key）。"
             f"如不需要对白可加 --skip-asr")
         asr_file.write_text(json.dumps([], ensure_ascii=False, indent=2), encoding="utf-8")

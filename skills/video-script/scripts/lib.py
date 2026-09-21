@@ -107,7 +107,7 @@ _raw_mimo_video_api_url = (
 CONFIG = {
     "api_url": normalize_api_url(_raw_api_url),
     "api_key": _mimo_api_key,
-    "api_key_source": "MIMO_API_KEY",
+    "api_env_var": "MIMO_API_KEY",
     "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
     "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "vlm_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
@@ -214,7 +214,7 @@ def _prepare_api_payload(payload, api_provider=None, api_url=None):
         normalized["thinking"] = {"type": "disabled"}
     return normalized
 
-def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key=None, api_key_source=None):
+def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key=None, api_env_var=None):
     """调用 OpenAI-compatible API，带重试。
 
     集群的 429 限流是常态而非错误，所以重试更耐心（更多次数 + 退避封顶 60s + 遵从 Retry-After），
@@ -237,7 +237,7 @@ def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key
                 wait = _retry_after_seconds(retry_after, max(wait, 10))
                 log(f"API 速率限制 (尝试 {attempt+1}/{max_retries}), 等待 {wait}s")
             elif e.code == 401:
-                key_name = api_key_source or CONFIG["api_key_source"]
+                key_name = api_env_var or CONFIG["api_env_var"]
                 raise RuntimeError(f"API 认证失败 (401)。请检查 {key_name} 和 API URL 是否匹配。")
             elif e.code == 403:
                 hint = "API 访问被拒绝 (403)。"

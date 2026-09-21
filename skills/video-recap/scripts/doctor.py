@@ -70,7 +70,7 @@ def _asr_status() -> dict[str, object]:
         "mimo_asr_api_url": CONFIG["mimo_asr_api_url"],
         "mimo_asr_api_url_source": CONFIG["mimo_asr_api_url_source"],
         "mimo_asr_language": CONFIG["mimo_asr_language"],
-        "mimo_asr_api_key_source": CONFIG["mimo_asr_api_key_source"],
+        "mimo_asr_env_var": CONFIG["mimo_asr_env_var"],
         "note": "ASR uses MiMo (mimo-v2.5-asr); set MIMO_API_KEY, or run with --skip-asr.",
     }
 
@@ -167,7 +167,7 @@ def _build_capability_menu(checks: dict) -> dict[str, list[dict[str, str]]]:
             _capability(
                 "mimo_credentials",
                 "MiMo API key is configured",
-                detail=f"Source: {api['api_key_source']}",
+                detail=f"Source: {api['api_env_var']}",
             )
         )
     else:
@@ -379,7 +379,7 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             "api_provider": CONFIG["api_provider"],
             "api_url": CONFIG["api_url"],
             "api_url_source": CONFIG["api_url_source"],
-            "api_key_source": CONFIG["api_key_source"],
+            "api_env_var": CONFIG["api_env_var"],
             "api_key_set": bool(CONFIG["api_key"]),
             "vlm_model": CONFIG["vlm_model"],
             "vlm_model_source": CONFIG["vlm_model_source"],
@@ -457,7 +457,7 @@ def _print_human(report: dict) -> None:
     print(f"✓ API URL: {api['api_url']} (source: {api['api_url_source']})")
     print(
         f"{_status_icon(api['api_key_set'])} "
-        f"{api['api_key_source']}: {'set' if api['api_key_set'] else 'not set'}"
+        f"{api['api_env_var']}: {'set' if api['api_key_set'] else 'not set'}"
     )
     print(f"✓ VLM model: {api['vlm_model']} (source: {api['vlm_model_source']})")
     print(f"✓ VLM_WORKERS: {api['vlm_workers']}")
@@ -467,7 +467,7 @@ def _print_human(report: dict) -> None:
     print(
         f"{_status_icon(asr['available'], warning=True)} "
         f"MiMo ASR: {'configured' if asr['available'] else 'not configured'} "
-        f"(key: {asr['mimo_asr_api_key_source']})"
+        f"(key: {asr['mimo_asr_env_var']})"
     )
     print(f"✓ ASR model: {asr['mimo_asr_model']}")
     print(f"✓ ASR API URL: {asr['mimo_asr_api_url']} (source: {asr['mimo_asr_api_url_source']})")

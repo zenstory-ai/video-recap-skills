@@ -531,7 +531,7 @@ def resolve_tts_engine():
     if CONFIG["mimo_tts_api_key"]:
         return engine
     raise RuntimeError(
-        f"没有可用的 TTS 引擎：请设置 {CONFIG['mimo_tts_api_key_source']}（MiMo TTS 需要）。"
+        f"没有可用的 TTS 引擎：请设置 {CONFIG['mimo_tts_env_var']}（MiMo TTS 需要）。"
     )
 
 

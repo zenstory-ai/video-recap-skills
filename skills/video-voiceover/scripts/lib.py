@@ -115,7 +115,7 @@ CONFIG = {
     "mimo_api_key": _mimo_api_key,
     "mimo_tts_api_url": normalize_api_url(_raw_mimo_tts_api_url),
     "mimo_tts_api_key": _mimo_tts_api_key,
-    "mimo_tts_api_key_source": "MIMO_TTS_API_KEY" if os.environ.get("MIMO_TTS_API_KEY") else "MIMO_API_KEY",
+    "mimo_tts_env_var": "MIMO_TTS_API_KEY" if os.environ.get("MIMO_TTS_API_KEY") else "MIMO_API_KEY",
     "mimo_asr_model": os.environ.get("MIMO_ASR_MODEL", DEFAULT_MIMO_ASR_MODEL),
     "mimo_tts_model": os.environ.get("MIMO_TTS_MODEL", DEFAULT_MIMO_TTS_MODEL),
     "mimo_tts_voice": os.environ.get("MIMO_TTS_VOICE", "冰糖"),
@@ -252,7 +252,7 @@ def mimo_tts_api_call(payload):
         max_retries=10,
         api_url=CONFIG["mimo_tts_api_url"],
         api_key=CONFIG["mimo_tts_api_key"],
-        api_key_source=CONFIG["mimo_tts_api_key_source"],
+        api_env_var=CONFIG["mimo_tts_env_var"],
     )
 
 
@@ -263,11 +263,11 @@ def mimo_asr_api_call(payload):
         max_retries=10,
         api_url=CONFIG["mimo_api_url"],
         api_key=CONFIG["mimo_api_key"],
-        api_key_source="MIMO_API_KEY",
+        api_env_var="MIMO_API_KEY",
     )
 
 
-def api_call(payload, *, api_url, api_key, api_key_source, max_retries=8):
+def api_call(payload, *, api_url, api_key, api_env_var, max_retries=8):
     """调用 OpenAI-compatible API，带重试。
 
     集群的 429 限流是常态而非错误，所以重试更耐心（更多次数 + 退避封顶 60s + 遵从 Retry-After），
@@ -294,7 +294,7 @@ def api_call(payload, *, api_url, api_key, api_key_source, max_retries=8):
                 wait = _retry_after_seconds(retry_after, max(wait, 10))
                 log(f"API 速率限制 (尝试 {attempt+1}/{max_retries}), 等待 {wait}s")
             elif e.code == 401:
-                raise RuntimeError(f"API 认证失败 (401)。请检查 {api_key_source} 和 API URL 是否匹配。")
+                raise RuntimeError(f"API 认证失败 (401)。请检查 {api_env_var} 和 API URL 是否匹配。")
             elif e.code == 403:
                 hint = "API 访问被拒绝 (403)。"
                 if "1010" in body or "cloudflare" in body.lower():

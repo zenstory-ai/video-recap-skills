@@ -208,7 +208,7 @@ def main():
         log(f"跳过 VLM 分析（已存在 {len(vlm_analysis)} 个场景）")
     else:
         if not CONFIG["api_key"]:
-            key_name = CONFIG["api_key_source"]
+            key_name = CONFIG["api_env_var"]
             raise SystemExit(f"请设置 {key_name} 环境变量（VLM 画面分析需要）")
         log("VLM API 连通性预检...")
         api_call(
