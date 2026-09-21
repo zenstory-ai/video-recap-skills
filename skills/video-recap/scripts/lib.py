@@ -114,7 +114,7 @@ CONFIG = {
     "api_url_source": "env" if os.environ.get("MIMO_API_URL") else "default",
     "api_key": _mimo_api_key,
     "api_env_var": "MIMO_API_KEY",
-    # Read through a COPY of CONFIG by mimo_qc_evidence._effective_config /
+    # Read through a COPY of CONFIG by qc.mimo_evidence._effective_config /
     # safe_mimo_config, which is why neither a `CONFIG.get(...)` grep nor live-dict
     # instrumentation sees them. They drive the QC model fallback chain and the
     # provenance recorded in the QC report.

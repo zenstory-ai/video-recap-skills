@@ -11,7 +11,7 @@ sys.path.insert(
     str(Path(__file__).resolve().parents[2] / "skills" / "video-voiceover" / "scripts"),
 )
 
-import fish_audio
+import providers.fish_audio as fish_audio
 import voiceover
 from lib import CONFIG, DEFAULT_FISH_TTS_REFERENCE_ID
 

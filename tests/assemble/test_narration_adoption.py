@@ -17,7 +17,7 @@ sys.path.insert(0, str(SCRIPTS))
 
 import assemble  # noqa: E402
 from lib import CONFIG  # noqa: E402
-import narration_binding  # noqa: E402
+import adoption.narration_binding as narration_binding  # noqa: E402
 from tts_fixtures import tts_segment
 
 

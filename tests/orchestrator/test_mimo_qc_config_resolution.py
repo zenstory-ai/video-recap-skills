@@ -20,7 +20,7 @@ import importlib.util
 import pytest
 
 from _helpers import SCRIPTS as RECAP_SCRIPTS
-from mimo_qc_evidence import safe_mimo_config
+from qc.mimo_evidence import safe_mimo_config
 
 MODEL_ENV_VARS = ("MIMO_QC_MODEL", "MIMO_MODEL", "MIMO_VIDEO_MODEL")
 

@@ -411,7 +411,7 @@ No. VLM scene analysis resumes from where it stopped and recovers from rate limi
 
 ### The VLM can't tell who is who and the narration is all "a man in black"?
 
-When the title or plot is known, have the agent research first and write `background_research.json`; character names and relationships are folded into the VLM context. See the [research guide](skills/video-recap/references/research-guide.md) (Chinese).
+When the title or plot is known, have the agent research first and write `background_research.json`; character names and relationships are folded into the VLM context. See the [research guide](skills/video-understanding/references/research-guide.md) (Chinese).
 
 ## Further reading
 
@@ -420,7 +420,7 @@ When the title or plot is known, have the agent research first and write `backgr
 - [JianYing / CapCut draft export](https://zenstory.ai/video-recap/capcut-draft) — export independently from a real `timeline.json`
 - [JianYing draft export and cost](docs/capcut-jianying-draft-export.md) — in-repo document (Chinese): what is in the draft, and how self-hosting bills differ from SaaS
 - [Guohuo case runbook](examples/guohuo-60s/skill-runbook.md) · [decision chain from content lock to final](examples/guohuo-60s/iteration-notes.md) (both in Chinese)
-- Per-skill contracts in each `skills/<skill>/SKILL.md`; [data schema](skills/video-recap/references/data-schema.md) · [config playbook](skills/video-recap/references/config-playbook.md) · [multi-track timeline / JianYing export](docs/timeline-and-jianying.md) · [creative editing playbook](skills/video-recap/references/creative-editing-playbook.md)
+- Per-skill contracts in each `skills/<skill>/SKILL.md`; [data schema](skills/video-recap/references/data-schema.md) · [config playbook](skills/video-recap/references/config-playbook.md) · [multi-track timeline / JianYing export](docs/timeline-and-jianying.md) · [creative editing playbook](skills/video-script/references/creative-editing-playbook.md)
 
 ## Acknowledgements
 

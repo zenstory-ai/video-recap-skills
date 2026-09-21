@@ -79,8 +79,8 @@ def _readable_source(path, *, include_lib=True):
     scripts = path.parent
     parts = [
         p.read_text(encoding="utf-8")
-        for p in sorted(scripts.glob("*.py"))
-        if p.name != "lib.py"
+        for p in sorted(scripts.rglob("*.py"))
+        if p.name != "lib.py" and "__pycache__" not in p.parts
     ]
     if include_lib:
         lib_source = path.read_text(encoding="utf-8")

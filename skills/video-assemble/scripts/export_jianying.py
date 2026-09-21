@@ -26,13 +26,13 @@ import subprocess
 import tempfile
 import uuid
 
-from jianying_builders import build_timeline_track as _build_timeline_track
-from jianying_model import DraftBuildContext as _DraftBuildContext
-from jianying_schema import draft_content_skeleton as _draft_content_skeleton
-from jianying_schema import meta_info as _meta_info
-from jianying_schema import us
-from jianying_timeline_contract import normalize_timeline as _normalize_timeline
-from jianying_writer import write_draft as _write_draft
+from jianying.builders import build_timeline_track as _build_timeline_track
+from jianying.model import DraftBuildContext as _DraftBuildContext
+from jianying.schema import draft_content_skeleton as _draft_content_skeleton
+from jianying.schema import meta_info as _meta_info
+from jianying.schema import us
+from jianying.timeline_contract import normalize_timeline as _normalize_timeline
+from jianying.writer import write_draft as _write_draft
 
 __all__ = ["us", "build_draft", "export_timeline_to_jianying", "main"]
 
@@ -81,7 +81,7 @@ def build_draft(timeline, new_id=None, probe=None):
 
 
 def _build_normalized_draft(timeline, new_id=None, probe=None):
-    """`timeline` has already passed jianying_timeline_contract.normalize_timeline."""
+    """`timeline` has already passed jianying.timeline_contract.normalize_timeline."""
     new_id = new_id or _default_id
     probe = probe or _probe_media
     ctx = _DraftBuildContext.from_timeline(timeline, new_id, probe)

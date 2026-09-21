@@ -12,7 +12,6 @@ PUBLIC_ENTRYPOINTS = (
     "skills/video-cut/scripts/cut.py",
     "skills/video-recap/scripts/mimo_qc.py",
     "skills/video-recap/scripts/recap.py",
-    "skills/video-script/scripts/narration.py",
     "skills/video-script/scripts/review.py",
     "skills/video-understanding/scripts/brief.py",
     "skills/video-understanding/scripts/understand.py",
@@ -90,7 +89,23 @@ def test_canonical_runner_includes_every_test_group():
 
 
 def _script_modules():
-    return sorted((ROOT / "skills").glob("*/scripts/*.py"))
+    return sorted(
+        path
+        for path in (ROOT / "skills").glob("*/scripts/**/*.py")
+        if "__pycache__" not in path.parts
+    )
+
+
+def _module_name(scripts_dir: Path, path: Path) -> str:
+    """Dotted module name of ``path`` relative to ``scripts_dir``.
+
+    ``jianying/schema.py`` -> ``jianying.schema``; ``jianying/__init__.py`` ->
+    ``jianying``.
+    """
+    parts = path.relative_to(scripts_dir).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
 
 
 def _line_count(path: Path) -> int:
@@ -117,19 +132,24 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
         scripts_dir = skill_dir / "scripts"
         if not scripts_dir.is_dir():
             continue
-        local_modules = {path.stem for path in scripts_dir.glob("*.py")}
-        skill_script_dirs[skill_dir.name] = (scripts_dir, local_modules)
-        for module in local_modules:
+        paths = sorted(
+            p for p in scripts_dir.rglob("*.py") if "__pycache__" not in p.parts
+        )
+        dotted_modules = {_module_name(scripts_dir, p) for p in paths}
+        top_level_modules = {name.split(".", 1)[0] for name in dotted_modules}
+        local_modules = dotted_modules | top_level_modules
+        skill_script_dirs[skill_dir.name] = (scripts_dir, local_modules, paths)
+        for module in top_level_modules:
             module_owners[module].add(skill_dir.name)
 
     violations = []
-    for skill_name, (scripts_dir, local_modules) in skill_script_dirs.items():
+    for skill_name, (scripts_dir, local_modules, paths) in skill_script_dirs.items():
         other_script_paths = {
             f"skills/{other_skill}/scripts"
             for other_skill in skill_script_dirs
             if other_skill != skill_name
         }
-        for path in sorted(scripts_dir.glob("*.py")):
+        for path in paths:
             source = path.read_text(encoding="utf-8")
             for other_path in sorted(other_script_paths):
                 if other_path in source:
@@ -163,19 +183,26 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
 def test_skill_local_import_graphs_are_acyclic():
     cycles = []
     for scripts_dir in sorted((ROOT / "skills").glob("*/scripts")):
-        modules = {path.stem: path for path in scripts_dir.glob("*.py")}
+        paths = [p for p in scripts_dir.rglob("*.py") if "__pycache__" not in p.parts]
+        modules = {_module_name(scripts_dir, p): p for p in paths}
         graph = {name: set() for name in modules}
         for name, path in modules.items():
             tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
             for node in ast.walk(tree):
                 imported = []
                 if isinstance(node, ast.Import):
-                    imported = [alias.name.split(".", 1)[0] for alias in node.names]
+                    imported = [alias.name for alias in node.names]
                 elif (
                     isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
                 ):
-                    imported = [node.module.split(".", 1)[0]]
-                graph[name].update(module for module in imported if module in modules)
+                    imported = [node.module]
+                for full_name in imported:
+                    if full_name in modules:
+                        graph[name].add(full_name)
+                    else:
+                        top_level = full_name.split(".", 1)[0]
+                        if top_level in modules:
+                            graph[name].add(top_level)
 
         visited = set()
         active = []

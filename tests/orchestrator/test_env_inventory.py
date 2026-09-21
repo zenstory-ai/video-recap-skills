@@ -22,7 +22,9 @@ def _skill_script_trees():
 
 def _literal_env_reads(tree):
     reads = set()
-    for path in tree.glob("*.py"):
+    for path in tree.rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
         parsed = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(parsed):
             if (

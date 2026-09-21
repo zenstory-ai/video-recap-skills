@@ -9,16 +9,16 @@ import assemble_constants as constants
 import assembly_contract
 import assembly_settings
 import audio_mix
-import audio_mix_binding
-import frozen_audio
+import adoption.audio_mix_binding as audio_mix_binding
+import adoption.frozen_audio as frozen_audio
 import media
 import narration_audio
-import narration_binding
+import adoption.narration_binding as narration_binding
 import pair_media
 import render_preflight
-import strict_publish
-import subtitle_render
-import subtitle_track_binding
+import adoption.strict_publish as strict_publish
+import subtitles.render as subtitle_render
+import subtitles.track_binding as subtitle_track_binding
 import timeline_emit
 import visual_render
 import lib
@@ -578,8 +578,8 @@ def main():
     # OPTIONAL, decoupled: export a 剪映 draft from the timeline (lazy import; never
     # required by the core render path).
     if lib.CONFIG["export_jianying"]:
-        from jianying_optional import _maybe_export_jianying
-        _maybe_export_jianying(work_dir, args.jianying_out, stem)
+        from jianying.optional import maybe_export_jianying
+        maybe_export_jianying(work_dir, args.jianying_out, stem)
 
     print(json.dumps({"status": "assembled", "output": str(final_output), "work_dir": str(work_dir)},
                      ensure_ascii=False))

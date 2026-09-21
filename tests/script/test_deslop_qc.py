@@ -5,7 +5,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts"))
 
 from deslop_qc import analyze_deslop_qc
-from narration import build_agent_brief as build_script_agent_brief, lint_narration
+from narration_lint import lint_narration
 
 
 def _write_deslop_requirements(work_dir):
@@ -67,22 +67,6 @@ def test_prompt_style_card_mention_without_requirements_does_not_gate(tmp_path):
     assert "missing_style_card" not in codes
     assert report["deslop_qc"]["style_card_required"] is False
     assert report["deslop_qc"]["style_card_requirement_source"] == "legacy_default"
-
-
-def test_script_narration_brief_does_not_leak_hardcoded_example_entities(tmp_path):
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
-    asr = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
-    silence = [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}]
-
-    text = build_script_agent_brief(scenes, asr, silence, 6.0, tmp_path, style="纪实复盘").read_text(encoding="utf-8")
-    requirements = json.loads((tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8"))
-
-    assert requirements == {
-        "schema_version": 1,
-        "style_card_required": False,
-    }
-    for leaked in ["范闲", "监察院", "五竹", "京都"]:
-        assert leaked not in text
 
 
 def test_deslop_qc_is_report_only_with_blocker_advisory_split(tmp_path):

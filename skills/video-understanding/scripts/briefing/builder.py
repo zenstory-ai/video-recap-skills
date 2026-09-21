@@ -5,7 +5,7 @@ from pathlib import Path
 from lib import CONFIG, log
 
 from agent_text import _chunk_asr_for_writing, _format_frame_facts
-from brief_context import (
+from briefing.context import (
     _format_asr_chunks_for_brief,
     _format_background_research,
     _format_consolidation,
@@ -16,12 +16,12 @@ from brief_context import (
     _write_json_artifact,
     assess_understanding_substrate,
 )
-from brief_inputs import (
+from briefing.inputs import (
     _format_optional_stage_warnings,
     _load_clean_asr,
     _load_mimo_overview_for_brief,
 )
-from brief_timeline import (
+from briefing.timeline import (
     _format_output_clip_list,
     _format_research_directive,
     _format_sentence_entry_anchors_for_brief,

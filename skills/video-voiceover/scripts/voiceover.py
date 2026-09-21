@@ -18,8 +18,8 @@ from approved_text_policy import (
     validate_required_texts,
     write_json_atomically as _write_tts_meta_atomically,
 )
-from fish_audio import synthesize_fish_audio
-import index_tts as index_provider
+from providers.fish_audio import synthesize_fish_audio
+import providers.index_tts as index_provider
 from lib import (
     CONFIG,
     _text_char_count,

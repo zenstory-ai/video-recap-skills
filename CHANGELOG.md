@@ -12,11 +12,13 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- **skill 脚本按功能族分包。** video-assemble 新增 `scripts/adoption/`（narration_binding、audio_mix_binding、strict_inputs、strict_publish、frozen_audio）、`scripts/jianying/`（原 `jianying_*`）、`scripts/subtitles/`（原 `subtitle_*`；引用方改为 `subtitles.track` / `subtitles.track_binding`）；video-recap 新增 `scripts/qc/`（原 `mimo_qc_*`）；video-understanding 新增 `scripts/briefing/`（原 `agent_brief` / `brief_*`）；video-voiceover 新增 `scripts/providers/`（fish_audio、index_tts）。公开入口脚本仍在各 skill 的 `scripts/` 顶层；`recap.py --help` 按功能族分组显示参数。
 - **第二轮去防御：消费方不再重验生产方契约。** 沿用 0.5.0 的"在边界校验一次，之后信任契约"：`validate.py` 不再复刻 `narration_lint` 的形状检查（lint 补上有限值与时间顺序检查，`invalid_approved_shape` 改为常规 lint 错误码）；review/brief 对自建 bundle、review、clip_plan_validated 直接取字段；assemble 对 tts_meta / assembly_qc / timeline 直接取字段，剪映 builder 不再重检 contract 已保证的字段，CLI 组合检查只在 API 层做一次；recap 的 final_qc / recap_review / recap_inspect / mimo_qc 不再为不存在的产物形态兜底；understanding 的 `get_video_duration` 在 ffprobe 失败时抛错而不是返回 0.0，损坏的自产 JSON 一律抛错而不是当作"缺失"或"缓存未命中"；voiceover dub 的 ffmpeg 失败、畸形 ASR 响应、损坏缓存 sidecar 不再被吞成空行或静默重合成。`CONFIG.get(key, default)` 对已声明的键改为 `CONFIG[key]`，删除过期默认值。SKILL.md 去掉跨技能复述的免责与禁令，共享规则只在拥有它的技能里写一次。
 - **skill 层瘦身。** SKILL.md 去掉跨技能重复的创作模式定义、密集切点规则和 TTS 供应商细节，各自只在拥有它的技能里写一次；recap 的参数清单改为指向 `--help`。长段落下沉到 `video-voiceover/references/index-tts.md`、`video-assemble/references/packaging.md`、`source-score.md` 与 `video-cut/references/shot-review.md`。`timeline-and-jianying.md` 移到 `docs/`，`env-inventory-v1.json` 移到 `tests/orchestrator/`。
 
 ### Removed
 
+- video-script 删除无人调用的 brief 生成链（narration.py / agent_brief.py / brief_*.py，约 1,300 行）及其专属 CONFIG 键，brief 行为测试移到 understanding 组；video-recap 删除与 video-script 字节相同的 creative-editing-playbook.md 副本与和 video-understanding 近重复的 research-guide.md，README / data-schema 改指拥有它们的技能。
 - `video-understanding/references/data-schema.md` 只保留本技能产出的产物（vlm、asr、asr_timing_evidence、asr_writing_chunks、silence、timeline_fusion、deslop_qc_requirements）与输入 `background_research.json`；narration / clip_plan / style_card / deslop_qc 等段落改由 video-recap 的完整契约与创作简报说明，减少约 135 行重复。
 - **video-cut 旧版单阶段旁白映射路径。** `cut.py` 不再读取 `narration.json`、不再把原片时间的旁白映射为 `narration_mapped.json`，`--narration` / `--no-narration-map` / `--allow-sparse-cut` 参数随之删除；`recap.py --allow-sparse-cut` 同步移除。唯一支持的 cut 流程是先剪后配：Agent 对着 `edited_source.mp4` 按输出时间线写 `narration.json`。
 

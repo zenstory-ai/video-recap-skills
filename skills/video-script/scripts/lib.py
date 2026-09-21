@@ -96,32 +96,13 @@ def env_float(name, default, *, minimum=None):
 # are optional and fall back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-
 # route to the Token-Plan cluster base URL; pay-as-you-go keys use api.xiaomimimo.com.
 _mimo_api_key = os.environ.get("MIMO_API_KEY", "")
-_mimo_video_api_key = os.environ.get("MIMO_VIDEO_API_KEY", "") or _mimo_api_key
 _raw_api_url = os.environ.get("MIMO_API_URL") or default_mimo_api_url(is_mimo_token_plan_key(_mimo_api_key))
-_raw_mimo_video_api_url = (
-    os.environ.get("MIMO_VIDEO_API_URL")
-    or os.environ.get("MIMO_API_URL")
-    or default_mimo_api_url(is_mimo_token_plan_key(_mimo_video_api_key))
-)
 
 CONFIG = {
     "api_url": normalize_api_url(_raw_api_url),
     "api_key": _mimo_api_key,
     "api_env_var": "MIMO_API_KEY",
-    "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
-    "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "vlm_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
-    "mimo_media_resolution": os.environ.get("MIMO_MEDIA_RESOLUTION", "default"),
-    "mimo_video_overview": env_bool("MIMO_VIDEO_OVERVIEW", False),  # opt-in (--mimo-video-overview / =1); when on it becomes the PRIMARY per-scene description, frames stay the anchor/fallback
-    "mimo_video_fps": env_float("MIMO_VIDEO_FPS", 3.0, minimum=0.1),
-    "mimo_video_chunk_max_seconds": env_float("MIMO_VIDEO_CHUNK_MAX_SECONDS", 20.0, minimum=1.0),
-    "mimo_video_chunk_min_seconds": env_float("MIMO_VIDEO_CHUNK_MIN_SECONDS", 1.0, minimum=0.2),
-    "mimo_video_base64_max_mb": env_float("MIMO_VIDEO_BASE64_MAX_MB", 45.0, minimum=1.0),
-    "mimo_video_prompt": os.environ.get(
-        "MIMO_VIDEO_PROMPT",
-        "请用中文分析这个视频分片的主要人物、场景变化、关键动作、情绪走向和剧情冲突，"
-        "重点提取适合写短视频解说的故事线索。不要泛泛复述画面，要标出对后续写稿有用的信息。",
-    ),
     "mimo_disable_thinking": env_bool("MIMO_DISABLE_THINKING", True),
     # TTS 语速（字符/秒）。实测 mimo-tts 冰糖音色中位 ~3.9 字/秒，可用 SPEECH_RATE 覆盖
     # 生成解说时使用 speech_rate * safety_margin 作为约束
@@ -131,7 +112,6 @@ CONFIG = {
     "narration_coverage_target": 0.7,   # rough first-draft/diagnostic fallback; content-led audio decisions may differ (not a quota)
     "narration_coverage_max": 0.85,     # above this coverage → no_original_blocks (narration is wall-to-wall)
     "narration_coverage_min": 0.5,      # below this coverage → under_narrated
-    "narration_block_seconds": 9.0,     # block cadence used to derive target block count
     "original_block_min_seconds": 2.5,  # a deliberate original-audio gap must be at least this long
     "narration_block_min_chars": 16,    # below this avg block size → fragmented_beats
     "breath_ms": 250,  # 段间呼吸空间(ms)；block recap 块内连贯、块间留原声呼吸
@@ -142,9 +122,7 @@ CONFIG = {
     "visual_beat_max_facts": 3,  # 单段解说最多建议覆盖的 frame_facts 锚点数量
     "asr_chunk_min_chars": env_int("ASR_CHUNK_MIN_CHARS", 500, minimum=1),  # brief 中 ASR 写作分块最小字数/词数
     "asr_chunk_max_chars": env_int("ASR_CHUNK_MAX_CHARS", 800, minimum=1),  # brief 中 ASR 写作分块最大字数/词数
-    "context_info": "",              # 额外上下文（节目名、角色名等）
     "edit_mode": os.environ.get("EDIT_MODE", "full"),  # full | cut
-    "target_duration": os.environ.get("TARGET_DURATION", ""),  # cut 模式目标成片时长，如 10m
 }
 
 def log(msg):

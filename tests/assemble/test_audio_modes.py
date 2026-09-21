@@ -15,8 +15,8 @@ sys.path.insert(0, str(SCRIPTS))
 from assemble import assemble_video  # noqa: E402
 import assembly_contract  # noqa: E402
 from assembly_settings import assembly_settings_payload  # noqa: E402
-import frozen_audio  # noqa: E402
-from frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
+import adoption.frozen_audio as frozen_audio  # noqa: E402
+from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import timeline_emit  # noqa: E402
 

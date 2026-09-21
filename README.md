@@ -400,7 +400,7 @@ MiMo 复核每个阶段最多一次请求，只给建议，失败也不阻断出
 
 ### VLM 认不出谁是谁，解说里全是"黑衣男子"？
 
-片名或剧情明确时，先让 Agent 做背景调研写进 `background_research.json`，人物名和关系会折入 VLM 上下文；见[背景调研指南](skills/video-recap/references/research-guide.md)。
+片名或剧情明确时，先让 Agent 做背景调研写进 `background_research.json`，人物名和关系会折入 VLM 上下文；见[背景调研指南](skills/video-understanding/references/research-guide.md)。
 
 ## 延伸阅读
 
@@ -410,7 +410,7 @@ MiMo 复核每个阶段最多一次请求，只给建议，失败也不阻断出
 - [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md) — 仓库内文档：草稿里有什么、自建与 SaaS 的账单差别
 - [能力边界与验收原则](docs/production-boundaries.md) — 仓库内文档：哪些交付规则进通用库、哪些属于单个项目；三类验收不能互相冒充
 - [《这一秒过火》案例复现 runbook](examples/guohuo-60s/skill-runbook.md) · [从内容锁定到最终版的决策链](examples/guohuo-60s/iteration-notes.md)
-- 各技能契约：每个 `skills/<skill>/SKILL.md`；[数据结构](skills/video-recap/references/data-schema.md) · [配置手册](skills/video-recap/references/config-playbook.md) · [多轨时间线 / 剪映导出](docs/timeline-and-jianying.md) · [创作剪辑手册](skills/video-recap/references/creative-editing-playbook.md)
+- 各技能契约：每个 `skills/<skill>/SKILL.md`；[数据结构](skills/video-recap/references/data-schema.md) · [配置手册](skills/video-recap/references/config-playbook.md) · [多轨时间线 / 剪映导出](docs/timeline-and-jianying.md) · [创作剪辑手册](skills/video-script/references/creative-editing-playbook.md)
 
 ## 致谢
 

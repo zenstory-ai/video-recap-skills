@@ -82,7 +82,7 @@ def test_creative_roles_and_artifact_examples_form_a_structured_contract():
     )
     assert script_roles == ["导演", "故事编辑", "画面剪辑师", "声音/旁白编辑", "第一次观看的观众"]
 
-    for skill_name in ("video-recap", "video-script"):
+    for skill_name in ("video-script",):
         playbook = ROOT / "skills" / skill_name / "references" / "creative-editing-playbook.md"
         examples = _json_fences(playbook)
         story_plan = next(item for item in examples if isinstance(item, dict) and "director_intent" in item)
@@ -125,12 +125,12 @@ def test_creative_roles_and_artifact_examples_form_a_structured_contract():
 
 def test_shared_craft_guide_includes_required_evidence():
     """The runtime side is covered by test_io_fixes::test_multi_source_briefs_include_clip_and_narration_craft."""
-    playbook = SKILLS_ROOT / 'video-recap/references/creative-editing-playbook.md'
+    playbook = SKILLS_ROOT / 'video-script/references/creative-editing-playbook.md'
     assert 'clip_plan.json.required_evidence' in playbook.read_text(encoding='utf-8')
 
 
 def test_research_guides_match_their_own_stage_timing():
-    recap_guide = (SKILLS_ROOT / "video-recap" / "references" / "research-guide.md").read_text(encoding="utf-8")
+    recap_guide = (SKILLS_ROOT / "video-understanding" / "references" / "research-guide.md").read_text(encoding="utf-8")
     script_guide = (SKILLS_ROOT / "video-script" / "references" / "research-guide.md").read_text(encoding="utf-8")
 
     assert "开始视频理解**之前**" in recap_guide
@@ -147,7 +147,7 @@ def test_research_guides_match_their_own_stage_timing():
 
 
 def test_dense_scene_cut_policy_distinguishes_source_and_edit_created_cuts():
-    for skill_name in ("video-recap", "video-script"):
+    for skill_name in ("video-script",):
         playbook = (
             SKILLS_ROOT
             / skill_name
@@ -165,9 +165,9 @@ def test_dense_scene_cut_policy_distinguishes_source_and_edit_created_cuts():
     assert "原片自带的无关短镜头整段删除" in cut_skill
     assert "由本次拼接制造的切点" in cut_skill
 
-    for skill_name in ("video-understanding", "video-script"):
+    for skill_name in ("video-understanding",):
         brief = (
-            SKILLS_ROOT / skill_name / "scripts" / "agent_brief.py"
+            SKILLS_ROOT / skill_name / "scripts" / "briefing" / "builder.py"
         ).read_text(encoding="utf-8")
         assert "Inspect dense scene-change candidates" in brief
         assert "restore same-source motion" in brief
@@ -251,6 +251,15 @@ def test_markdown_references_are_local_and_resolve_inside_each_skill():
             for script_name in re.findall(r"`([A-Za-z0-9_.-]+\.py)`", text):
                 assert (skill_dir / "scripts" / script_name).is_file(), (markdown_path, script_name)
 
+            # A backticked path rooted at `scripts/` with a subdirectory (e.g.
+            # `scripts/subtitles/track.py`) names a script inside a subpackage of THIS
+            # skill. It must resolve relative to the skill directory rather than silently
+            # pointing nowhere. A bare `scripts/name.py` is left alone: prose elsewhere
+            # legitimately uses that shape to point at another skill's own script (e.g.
+            # "that skill's own `scripts/cut.py`").
+            for script_path in re.findall(r"`(scripts/[A-Za-z0-9_.-]+/[A-Za-z0-9_./-]+\.py)`", text):
+                assert (skill_dir / script_path).is_file(), (markdown_path, script_path)
+
 
 def test_stage_sources_never_point_to_a_sibling_skill_path():
     paths = [
@@ -261,7 +270,8 @@ def test_stage_sources_never_point_to_a_sibling_skill_path():
     paths.extend(
         source_path
         for skill_name in STAGE_SKILL_NAMES
-        for source_path in (ROOT / "skills" / skill_name / "scripts").glob("*.py")
+        for source_path in (ROOT / "skills" / skill_name / "scripts").rglob("*.py")
+        if "__pycache__" not in source_path.parts
     )
 
     for path in paths:
@@ -293,7 +303,9 @@ def test_all_literal_prompt_anchors_resolve_in_the_owning_skill():
     for skill_name in SKILL_NAMES:
         skill_dir = SKILLS_ROOT / skill_name
         anchors = set()
-        for source_path in (skill_dir / "scripts").glob("*.py"):
+        for source_path in (skill_dir / "scripts").rglob("*.py"):
+            if "__pycache__" in source_path.parts:
+                continue
             tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call) or not node.args:
@@ -326,7 +338,22 @@ import sys
 
 scripts_dir = Path.cwd().resolve()
 sys.path.insert(0, str(scripts_dir))
-names = sorted(path.stem for path in scripts_dir.glob("*.py") if path.stem != "__init__")
+
+def module_name(path):
+    parts = path.relative_to(scripts_dir).with_suffix("").parts
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(parts)
+
+names = sorted(
+    name
+    for name in (
+        module_name(path)
+        for path in scripts_dir.rglob("*.py")
+        if "__pycache__" not in path.parts
+    )
+    if name
+)
 for name in names:
     module = importlib.import_module(name)
     module_path = Path(module.__file__).resolve()
@@ -343,4 +370,20 @@ print(json.dumps(names))
     )
 
     assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == sorted(path.stem for path in scripts_dir.glob("*.py"))
+
+    def _module_name(path):
+        parts = path.relative_to(scripts_dir).with_suffix("").parts
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+        return ".".join(parts)
+
+    expected = sorted(
+        name
+        for name in (
+            _module_name(path)
+            for path in scripts_dir.rglob("*.py")
+            if "__pycache__" not in path.parts
+        )
+        if name
+    )
+    assert json.loads(result.stdout) == expected

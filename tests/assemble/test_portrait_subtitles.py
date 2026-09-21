@@ -11,8 +11,8 @@ stay byte-identical; portrait must use a frame-matching PlayRes that fits the wi
 import json  # noqa: E402
 from subprocess import CompletedProcess  # noqa: E402
 import media  # noqa: E402
-from subtitle_core import _subtitle_style_config  # noqa: E402
-from subtitle_render import _generate_ass  # noqa: E402
+from subtitles.core import _subtitle_style_config  # noqa: E402
+from subtitles.render import _generate_ass  # noqa: E402
 from visual_render import _subtitle_layout_qc  # noqa: E402
 
 

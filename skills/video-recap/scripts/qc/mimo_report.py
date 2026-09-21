@@ -13,17 +13,17 @@ from typing import Any
 from collections.abc import Callable, Mapping, Sequence
 
 import qc_contract
-from mimo_qc_client import mimo_qc_api_call
-from mimo_qc_evidence import (
+from qc.mimo_client import mimo_qc_api_call
+from qc.mimo_evidence import (
     _cache_evidence,
     _effective_config,
     _existing_final_output,
     collect_evidence,
     safe_mimo_config,
 )
-from mimo_qc_observations import normalize_observations
-from mimo_qc_payload import _request_payload, _validated_live_output, build_payload
-from mimo_qc_contract import (
+from qc.mimo_observations import normalize_observations
+from qc.mimo_payload import _request_payload, _validated_live_output, build_payload
+from qc.mimo_contract import (
     ARTIFACT_NAME,
     DEFAULT_STAGE,
     FRAME_SAMPLER_VERSION,

@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
-import subtitle_track_binding as binding
+import subtitles.track_binding as binding
 import source_subtitles
-import subtitle_render
+import subtitles.render as subtitle_render
 
 
 def _media(path):

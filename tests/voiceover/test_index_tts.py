@@ -15,7 +15,7 @@ sys.path.insert(
     str(Path(__file__).resolve().parents[2] / "skills" / "video-voiceover" / "scripts"),
 )
 
-import index_tts
+import providers.index_tts as index_tts
 import voiceover
 from lib import CONFIG
 

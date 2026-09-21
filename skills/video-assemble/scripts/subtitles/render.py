@@ -1,7 +1,7 @@
 """SRT/ASS serialization for narration and original-dialogue subtitles."""
 
 from source_subtitles import _combined_subtitle_entries
-from subtitle_core import (
+from subtitles.core import (
     _normalize_subtitle_text,
     _seconds_to_ass_time,
     _seconds_to_srt_time,

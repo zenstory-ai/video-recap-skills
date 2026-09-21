@@ -10,8 +10,8 @@ import pytest  # noqa: E402
 import assembly_settings  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import source_subtitles  # noqa: E402
-import subtitle_core  # noqa: E402
-import subtitle_render  # noqa: E402
+import subtitles.core as subtitle_core  # noqa: E402
+import subtitles.render as subtitle_render  # noqa: E402
 
 
 def _burn_on(monkeypatch):

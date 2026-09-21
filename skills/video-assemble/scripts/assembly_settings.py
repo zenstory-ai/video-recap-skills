@@ -7,9 +7,9 @@ from assemble_constants import VISUAL_OVERLAYS
 from audio_mix import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
-from subtitle_core import _subtitle_style_config
-from narration_binding import binding_record
-from audio_mix_binding import binding_record as audio_mix_binding_record
+from subtitles.core import _subtitle_style_config
+from adoption.narration_binding import binding_record
+from adoption.audio_mix_binding import binding_record as audio_mix_binding_record
 
 
 def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_stream_index=0):

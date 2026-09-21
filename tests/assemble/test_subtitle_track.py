@@ -12,7 +12,8 @@ MODULE_PATH = (
     / "skills"
     / "video-assemble"
     / "scripts"
-    / "subtitle_track.py"
+    / "subtitles"
+    / "track.py"
 )
 SPEC = importlib.util.spec_from_file_location("subtitle_track_standalone", MODULE_PATH)
 subtitle_track = importlib.util.module_from_spec(SPEC)

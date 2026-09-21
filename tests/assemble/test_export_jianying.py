@@ -8,13 +8,13 @@ sys.path.insert(
 import json  # noqa: E402
 import pytest  # noqa: E402
 from export_jianying import build_draft, export_timeline_to_jianying, us  # noqa: E402
-from jianying_schema import (  # noqa: E402
+from jianying.schema import (  # noqa: E402
     MATERIAL_KEYS,
     material_category_registry,
     validate_material_category,
 )
-from jianying_tracks import TRACK_LAYOUT_BANDS, TrackAllocator  # noqa: E402
-import jianying_writer  # noqa: E402
+from jianying.tracks import TRACK_LAYOUT_BANDS, TrackAllocator  # noqa: E402
+import jianying.writer as jianying_writer  # noqa: E402
 from timeline import build_timeline  # noqa: E402
 
 

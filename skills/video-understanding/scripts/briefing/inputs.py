@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 from lib import CONFIG, file_identity
-from brief_context import _consolidation_model
+from briefing.context import _consolidation_model
 
 # Shared with consolidate.py, which this byte-identical copy cannot import (the sibling
 # skill ships no consolidate.py). Keep both literals in sync.

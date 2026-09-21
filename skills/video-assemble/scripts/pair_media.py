@@ -13,8 +13,8 @@ from pathlib import Path
 import subprocess
 
 from assemble_constants import SUPPORTED_PICTURE_CODECS
-from frozen_audio import probe_audio_packets, verify_adopted_audio
-from strict_inputs import (
+from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio
+from adoption.strict_inputs import (
     probe_json, require_declared_path, require_fields, require_integer, run_logged,
     without_digests, write_json_atomic,
 )

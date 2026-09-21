@@ -5,11 +5,11 @@ from pathlib import Path
 import subprocess
 
 from assemble_constants import frame_clock_samples
-from frozen_audio import probe_audio_packets
-import narration_binding
+from adoption.frozen_audio import probe_audio_packets
+import adoption.narration_binding as narration_binding
 from pair_media import probe_picture, validate_pair_timing
 import source_score
-from strict_inputs import (
+from adoption.strict_inputs import (
     read_json_bytes, require_fields, require_integer, require_local_path, require_number,
     run_logged, without_digests, write_json_atomic,
 )
