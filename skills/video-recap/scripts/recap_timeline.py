@@ -149,7 +149,7 @@ def _manifest_mismatches(work_dir, video, args):
     ]
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
-    actual_audio = actual["audio"]
+    actual_audio = actual.get("audio")
     expected_audio = audio_binding(args)
     if actual_audio != expected_audio:
         mismatches.append(
@@ -175,7 +175,7 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         )
     if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
-    actual_audio = actual["audio"]
+    actual_audio = actual.get("audio")
     expected_audio = audio_binding(args)
     if actual_audio != expected_audio:
         mismatches.append(

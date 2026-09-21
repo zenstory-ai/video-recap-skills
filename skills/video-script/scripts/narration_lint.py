@@ -197,9 +197,13 @@ def _has_connected_predecessor(narration, idx, start):
 
 
 def lint_narration(
-    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None
+    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
+    require_chronological=False,
 ):
-    """Preflight-check agent narration before TTS; write narration_lint.json when work_dir is set."""
+    """Preflight-check agent narration before TTS; write narration_lint.json when work_dir is set.
+
+    Segments are sorted by start for the timing checks; ``require_chronological`` (the
+    --preserve-approved-text contract) additionally rejects input that is not already in order."""
     scenes_analysis = scenes_analysis or []
     errors = []
     warnings = []
@@ -236,7 +240,7 @@ def lint_narration(
                     )
                 )
                 continue
-            if previous_start is not None and start < previous_start:
+            if require_chronological and previous_start is not None and start < previous_start:
                 errors.append(
                     _lint_issue(
                         "error",
@@ -638,10 +642,12 @@ def lint_narration(
 
 
 def validate_narration_or_raise(
-    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None
+    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
+    require_chronological=False,
 ):
     report = lint_narration(
-        narration, scenes_analysis, clip_plan=clip_plan, mode=mode, work_dir=work_dir
+        narration, scenes_analysis, clip_plan=clip_plan, mode=mode, work_dir=work_dir,
+        require_chronological=require_chronological,
     )
     if report["errors"]:
         sample = "; ".join(

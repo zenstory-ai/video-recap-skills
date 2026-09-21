@@ -108,7 +108,8 @@ def main():
         # ownership from the mapped output evidence and persist that measured flag for
         # voiceover/assemble instead of trusting JSON.
         report = validate_narration_or_raise(
-            narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir
+            narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir,
+            require_chronological=args.preserve_approved_text,
         )
         narration = measure_narration_speech_ownership(
             narration, work_dir, mode="cut_output"
@@ -142,7 +143,8 @@ def main():
             narration = _validate_narration_budget(narration, vlm_analysis)
     else:
         validate_narration_or_raise(
-            narration, vlm_analysis, clip_plan=None, mode="full", work_dir=work_dir
+            narration, vlm_analysis, clip_plan=None, mode="full", work_dir=work_dir,
+            require_chronological=args.preserve_approved_text,
         )
         if args.preserve_approved_text:
             narration = measure_narration_speech_ownership(

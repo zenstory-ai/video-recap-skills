@@ -142,8 +142,8 @@ def should_reuse_edited_source(output_path, validated_plan, input_video=None):
     if not output_path.exists() or output_path.stat().st_size == 0:
         return False
     meta = _load_edited_source_meta(output_path)
-    if meta is None:
-        return False
+    if not isinstance(meta, dict) or meta.get("schema_version") != 3:
+        return False  # never rendered, or a sidecar from an older schema: re-render
     return (
         meta["plan"] == validated_plan["clips"]
         and meta["render_cache"] == edited_source_render_cache_payload()

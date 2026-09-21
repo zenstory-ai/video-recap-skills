@@ -396,3 +396,23 @@ def test_p0_dub_lint_warns_near_trim_risk_before_hard_cut():
     assert "trim_risk" in codes
     assert lint["summary"]["trim_risk_lines"] == [0]
     assert lint["summary"]["max_chars_per_second"] == pytest.approx(7.0)
+
+
+def test_clone_cache_meta_from_content_hash_schema_is_a_miss(monkeypatch, tmp_path):
+    """A .meta.json from the fingerprint schema has no `inputs`: re-synthesize once, don't crash."""
+    raw = tmp_path / "line_000_raw.wav"
+    raw.write_bytes(b"old")
+    dub._clone_cache_meta_path(raw).write_text(
+        json.dumps({"schema_version": 1, "fingerprint": "a" * 64, "model": dub.CLONE_MODEL}),
+        encoding="utf-8",
+    )
+    synthesized = []
+    monkeypatch.setattr(dub, "_clone_tts", lambda text, ref, out: (synthesized.append(text), Path(out).write_bytes(b"new")))
+    monkeypatch.setattr(dub, "_usable_clone_wav", lambda path: Path(path).read_bytes() == b"new")
+
+    hit = dub._ensure_clone_tts("你好", "b64", {"size": 3, "mtime_ns": 1}, raw)
+
+    assert hit is False
+    assert synthesized == ["你好"]
+    meta = json.loads(dub._clone_cache_meta_path(raw).read_text(encoding="utf-8"))
+    assert meta["inputs"]["text"] == "你好"

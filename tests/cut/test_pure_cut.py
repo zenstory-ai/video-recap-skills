@@ -360,10 +360,10 @@ def test_edited_source_cache_settings_include_render_affecting_config(monkeypatc
     assert cut.should_reuse_edited_source(edited, plan, video) is False
 
 
-@pytest.mark.parametrize("metadata", ["not json", "{}", "[]"])
+@pytest.mark.parametrize("metadata", ["not json"])
 def test_edited_source_cache_corrupt_own_metadata_raises(tmp_path, metadata):
-    """edited_source.mp4.meta.json is this skill's own artifact: unparseable or incomplete is a
-    bug to surface, not a silent full re-render. A missing sidecar stays a plain miss."""
+    """edited_source.mp4.meta.json is this skill's own artifact: unparseable is a bug to
+    surface. A missing sidecar, or one from an older schema, stays a plain miss."""
     video = tmp_path / "video.mp4"
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
@@ -901,3 +901,22 @@ def test_update_cut_qc_duration_status_and_allow_drift(kwargs, allowed_by):
     else:
         assert "blocking" not in plan["qc"]
         assert plan["qc"]["target_duration"]["duration_drift_allowed_by"] == allowed_by
+
+
+def test_edited_source_cache_from_content_hash_schema_is_a_miss(tmp_path):
+    """A schema_version 2 sidecar (clip_plan_fingerprint/source_fingerprints), or an empty
+    one, simply re-renders."""
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    edited = tmp_path / "edited_source.mp4"
+    edited.write_bytes(b"edited")
+    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    Path(f"{edited}.meta.json").write_text(json.dumps({
+        "schema_version": 2, "clip_plan_fingerprint": "a" * 32, "render_fingerprint": "b" * 32,
+        "render_cache": {}, "source_fingerprints": {str(video): "c" * 64},
+        "edited_source_fingerprint": "d" * 64, "total_duration": 1.0, "clip_count": 1,
+    }), encoding="utf-8")
+    assert cut.should_reuse_edited_source(edited, plan, video) is False
+    for empty in ("{}", "[]"):
+        Path(f"{edited}.meta.json").write_text(empty, encoding="utf-8")
+        assert cut.should_reuse_edited_source(edited, plan, video) is False

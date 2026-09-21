@@ -451,3 +451,17 @@ def test_recap_shift_left_redacts_direct_tts_and_assembly_metadata(tmp_path):
     assert "plain-assembly-password" not in text
     assert "https://example.test/render" in text
     assert qc.validate_report(report) is True
+
+
+def test_missing_assembly_manifest_without_explicit_output_is_a_blocker(tmp_path):
+    """No --final-output and no assembly_manifest.json: report a missing final output,
+    never a traceback (the --require-final-qc contract keeps the report)."""
+    report = final_qc.build_final_qc(
+        tmp_path,
+        probe_runner=lambda p: (_ for _ in ()).throw(AssertionError("no probe")),
+    )
+
+    assert report["ok"] is False
+    assert report["findings"][0]["code"] == "missing_final_output"
+    assert report["metadata"]["final_output"]["exists"] is False
+    assert qc.validate_report(report) is True

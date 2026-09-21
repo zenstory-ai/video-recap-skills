@@ -367,3 +367,20 @@ def test_cut_output_retry_clears_failure_and_keeps_duration_tolerance(monkeypatc
     assert current["ok"] is True
     assert current["errors"] == [] and current["error_count"] == 0
     assert _approved_fields(_read_json(path)[0]) == narration[0]
+
+
+def test_chronological_order_is_only_required_by_the_approved_text_policy(tmp_path):
+    """Lint sorts segments for its timing checks; only --preserve-approved-text rejects
+    input that is not already in order (the approved timeline must stay byte-identical)."""
+    from narration_lint import lint_narration
+
+    unsorted = [
+        {"start": 5.0, "end": 6.0, "narration": "第二段。"},
+        {"start": 0.0, "end": 1.0, "narration": "第一段。"},
+    ]
+    relaxed = lint_narration(unsorted, [], mode="full", work_dir=tmp_path)
+    assert "out_of_order" not in {item["code"] for item in relaxed["errors"]}
+    strict = lint_narration(
+        unsorted, [], mode="full", work_dir=tmp_path, require_chronological=True
+    )
+    assert "out_of_order" in {item["code"] for item in strict["errors"]}

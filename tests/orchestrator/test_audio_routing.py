@@ -264,7 +264,7 @@ def test_source_full_rejects_ambiguous_unbound_narration_workdir(monkeypatch, tm
         recap_runner.main()
 
 
-def test_audio_binding_rejects_mode_switch_and_manifest_without_audio_raises(tmp_path):
+def test_audio_binding_rejects_mode_switch_and_manifest_without_audio(tmp_path):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     work = tmp_path / "work"
@@ -281,12 +281,15 @@ def test_audio_binding_rejects_mode_switch_and_manifest_without_audio_raises(tmp
         )
     )
 
-    # recap_runtime always writes `audio`; a manifest lacking it is corrupt, not legacy.
+    # A manifest lacking `audio` (older or hand-edited) is reported as a mismatch so the
+    # user gets the "use a new --work-dir" message, not a traceback.
     manifest = json.loads((work / "recap_run_manifest.json").read_text(encoding="utf-8"))
     manifest.pop("audio")
     (work / "recap_run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(KeyError, match="audio"):
-        recap_timeline._manifest_mismatches(work, video, _args(audio_mode="narration"))
+    assert any(
+        mismatch.startswith("audio:")
+        for mismatch in recap_timeline._manifest_mismatches(work, video, _args(audio_mode="narration"))
+    )
 
 
 @pytest.mark.parametrize(

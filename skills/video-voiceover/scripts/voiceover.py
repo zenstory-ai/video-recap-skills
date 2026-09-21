@@ -472,13 +472,16 @@ def _load_tts_segment_cache(output_wav, cache_inputs):
     cache_path = _tts_segment_cache_path(output_wav)
     if not output_wav.exists() or output_wav.stat().st_size == 0 or not cache_path.exists():
         return None
-    # This skill wrote the sidecar (_write_tts_segment_cache): one it cannot parse or that
-    # lacks its fields is a bug to surface, not a silent cache miss and paid re-synthesis.
+    # This skill wrote the sidecar (_write_tts_segment_cache): one it cannot parse is a bug
+    # to surface. One from the earlier content-hash schema (cache_key/audio_fingerprint,
+    # no settings/audio) is a plain miss: the segment is re-synthesized once.
     try:
         data = json.loads(cache_path.read_text(encoding="utf-8"))
-        stale = data["settings"] != cache_inputs or data["audio"] != file_identity(output_wav)
-    except (ValueError, LookupError, TypeError) as exc:
+    except ValueError as exc:
         raise RuntimeError(f"TTS 缓存 sidecar 损坏: {cache_path}") from exc
+    if not isinstance(data, dict) or "settings" not in data or "audio" not in data:
+        return None
+    stale = data["settings"] != cache_inputs or data["audio"] != file_identity(output_wav)
     return None if stale else data
 
 

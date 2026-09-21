@@ -383,7 +383,8 @@ def _ensure_clone_tts(text, ref_b64, ref_identity, raw_wav):
     # bug, not a reason to silently pay for re-synthesis.
     if meta_path.exists():
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
-        if meta["inputs"] == expected and _usable_clone_wav(raw_wav):
+        # A meta from the content-hash schema has no "inputs" and is simply a miss.
+        if meta.get("inputs") == expected and _usable_clone_wav(raw_wav):
             return True
 
     _clone_tts(text, ref_b64, raw_wav)

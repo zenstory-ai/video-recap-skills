@@ -53,15 +53,21 @@ def _read_json_mapping(path: Path) -> Mapping[str, Any] | None:
     return data if isinstance(data, Mapping) else None
 
 
-def _final_output_path(work_dir: Path, final_output: str | Path | None) -> Path:
+def _final_output_path(work_dir: Path, final_output: str | Path | None) -> Path | None:
     """The rendered final output: the caller's path, else assembly_manifest.final_output
-    (video-assemble always writes it; output.mp4 is only the assembler's intermediate)."""
+    (video-assemble always writes it; output.mp4 is only the assembler's intermediate).
+    None when neither exists yet, which the report surfaces as a missing final output."""
     if final_output is None:
-        final_output = load_json(work_dir / "assembly_manifest.json")["final_output"]
+        manifest = work_dir / "assembly_manifest.json"
+        if not manifest.is_file():
+            return None
+        final_output = load_json(manifest)["final_output"]
     return _resolve_in_work_dir(work_dir, final_output)
 
 
-def _file_metadata(path: Path, work_dir: Path) -> dict[str, Any]:
+def _file_metadata(path: Path | None, work_dir: Path) -> dict[str, Any]:
+    if path is None:
+        return {"path": "(assembly_manifest.json missing)", "exists": False, "bytes": 0}
     try:
         display = path.relative_to(work_dir).as_posix()
     except ValueError:  # final outputs normally live next to work_dir, not inside it

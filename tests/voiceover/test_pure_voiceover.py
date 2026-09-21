@@ -130,12 +130,12 @@ def test_synthesize_segment_reuses_only_matching_cache(monkeypatch, tmp_path):
     assert (tts_dir / "narr_000.wav").read_text(encoding="utf-8") == "audio:第二版。"
 
 
-@pytest.mark.parametrize("metadata", ["not json", "{}", "[]"])
+@pytest.mark.parametrize("metadata", ["not json"])
 def test_synthesize_segment_raises_when_own_cache_sidecar_is_corrupt(
     monkeypatch, tmp_path, metadata
 ):
-    """The sidecar is this skill's own artifact: unparseable/incomplete is a bug to surface,
-    not a silent cache miss that re-bills the provider."""
+    """The sidecar is this skill's own artifact: unparseable is a bug to surface, not a silent
+    cache miss that re-bills the provider (an older-schema sidecar is a miss, see below)."""
     narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
     tts_dir = tmp_path / "tts_segments"
     tts_dir.mkdir()
@@ -757,3 +757,27 @@ def test_tts_rms_normalization_passes_through_a_silent_block(tmp_path):
         "peak_after": 0.0,
         "gain_db": 0.0,
     }
+
+
+def test_sidecar_from_content_hash_schema_is_a_plain_miss(monkeypatch, tmp_path):
+    """A sidecar written before the size/mtime identity schema (cache_key/audio_fingerprint,
+    no settings/audio) is re-synthesized once, not reported as corruption."""
+    narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
+    tts_dir = tmp_path / "tts_segments"
+    tts_dir.mkdir()
+    wav = tts_dir / "narr_000.wav"
+    wav.write_bytes(b"stale")
+    voiceover._tts_segment_cache_path(wav).write_text(json.dumps({
+        "version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64,
+        "spoken_text": "重新生成。", "audio_duration": 1.0, "tts_rate_offset": 0.0,
+        "truncated": False, "truncate_reason": "none", "normalization": None,
+    }), encoding="utf-8")
+    calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
+    monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0)
+
+    for old in ({}, [], {"version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64}):
+        voiceover._tts_segment_cache_path(wav).write_text(json.dumps(old), encoding="utf-8")
+        result = _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
+        assert result is not None
+    assert len(calls) == 3
+    assert wav.read_bytes() == b"fresh"
