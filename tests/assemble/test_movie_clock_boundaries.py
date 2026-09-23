@@ -109,16 +109,18 @@ def test_adopted_assemble_rejects_quantized_new_output_without_publishing(
     changed = []
 
     def drop_timescale(command, *args, **kwargs):
+        # Force the pre-FFmpeg-9 default; 9 defaults to the track LCM, which is exact.
         command = list(command)
         if '-movie_timescale' in command:
-            index = command.index('-movie_timescale')
-            del command[index:index + 2]
+            command[command.index('-movie_timescale') + 1] = '1000'
             changed.append(True)
         return original(command, *args, **kwargs)
 
     monkeypatch.setattr(lib, 'run_cmd', drop_timescale)
     output = work / 'bad_output.mp4'
-    with pytest.raises(ValueError, match='packet clock'):
+    # FFmpeg 9 exports the rounded edit-list tail as packet side data, so the packet
+    # comparison rejects it before the clock check does; older ffmpeg reaches the clock check.
+    with pytest.raises((ValueError, RuntimeError), match='packet clock|side data'):
         assemble.assemble_video(base, [], work, output, audio_mode='adopted-packet-copy')
     assert changed == [True]
     assert not output.exists()
@@ -154,10 +156,10 @@ def test_explicit_mix_produces_sample_accurate_fractional_movie_clock(
         original = lib.run_cmd
 
         def lose_container_precision(command, *args, **kwargs):
+            # Force the pre-FFmpeg-9 default; 9 defaults to the track LCM, which is exact.
             command = list(command)
             if '-movie_timescale' in command:
-                index = command.index('-movie_timescale')
-                del command[index:index + 2]
+                command[command.index('-movie_timescale') + 1] = '1000'
             return original(command, *args, **kwargs)
 
         monkeypatch.setattr(lib, 'run_cmd', lose_container_precision)
@@ -177,10 +179,15 @@ def test_explicit_mix_produces_sample_accurate_fractional_movie_clock(
     assert_sample_clock(output)
 
 
-def test_old_millisecond_quantized_header_still_fails_original_gate(tmp_path):
+def test_millisecond_quantized_header_is_rejected(tmp_path):
     base = base_media(tmp_path, 48000)
     bad = tmp_path / 'coarse_header.mp4'
     run('ffmpeg', '-v', 'error', '-i', base, '-c', 'copy', '-movie_timescale', '1000', bad)
-    verify_adopted_audio(base, bad, 0, 0)
+    # FFmpeg 9 already rejects it here (the rounded tail becomes last-packet side data);
+    # older ffmpeg passes the packet comparison and relies on the clock gate below.
+    try:
+        verify_adopted_audio(base, bad, 0, 0)
+    except RuntimeError as exc:
+        assert 'side data' in str(exc)
     with pytest.raises(ValueError, match='packet clock'):
         pair_media.validate_pair_timing(pair_media.probe_picture(bad), probe_audio_packets(bad, 0))

@@ -292,6 +292,28 @@ def test_audio_binding_rejects_mode_switch_and_manifest_without_audio(tmp_path):
     )
 
 
+def test_multi_source_manifest_from_older_release_is_a_mismatch_not_a_crash(tmp_path):
+    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
+    for video in videos:
+        video.write_bytes(video.stem.encode())
+    work = tmp_path / "work"
+    work.mkdir()
+    args = _args(edit_mode="cut")
+    records = recap_runtime._build_multi_source_records(videos, args)
+    recap_runtime._write_project_run_manifest(work, videos, args, records)
+    assert recap_timeline._multi_manifest_mismatches(work, videos, args, records) == []
+
+    # 0.5.0 recorded a content fingerprint where the manifest now keeps a file identity.
+    manifest = json.loads((work / "recap_run_manifest.json").read_text(encoding="utf-8"))
+    for source in manifest["sources"]:
+        source["source_video_fingerprint"] = "0" * 64
+        del source["source_video_identity"]
+    (work / "recap_run_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    with pytest.raises(SystemExit, match="新的 --work-dir"):
+        recap_runner._reject_stale_multi_manifest(work, videos, args, records)
+
+
 @pytest.mark.parametrize(
     "extra",
     [

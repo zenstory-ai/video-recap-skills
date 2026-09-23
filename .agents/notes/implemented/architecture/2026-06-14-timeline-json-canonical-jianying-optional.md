@@ -9,7 +9,7 @@ Status: implemented
 ## Decision
 
 - `video-assemble` 每次渲染都写 `work_dir/timeline.json`（schema v2，秒与增益，无剪映专有单位），ffmpeg 渲染的 `recap_<stem>.mp4` 是最终成片的判定标准。
-- 剪映导出只在 `--export-jianying` / `EXPORT_JIANYING=1` 时由 `jianying_optional.py` 懒加载 `export_jianying`；渲染路径 never import 任何 `jianying_*` 模块（`test_core_assemble_does_not_import_exporter` 在干净解释器里断言）。导出失败只记日志，never 使已渲染的 mp4 失效。
+- 剪映导出只在 `--export-jianying` / `EXPORT_JIANYING=1` 时由 `jianying/optional.py` 懒加载 `export_jianying`；渲染路径 never import `jianying` 包内任何模块（`test_core_assemble_does_not_import_exporter` 在干净解释器里断言）。导出失败只记日志，never 使已渲染的 mp4 失效。
 - 导出器只依赖 Python stdlib + ffprobe。协议 JSON 模板钉在 duo-video `ef4eb46`（MIT，`references/jianying/SOURCE.md`），builder 本地实现；never vendor 上游可执行代码、资源包或示例凭证。需要官方资源包的能力标记为 `supported_offline_payload`，只接受调用方合法提供的离线资源。
 - 写入安全：`validate_draft_name` 拒绝空名、绝对路径、`..` 与路径分隔符；非空目标目录不覆盖而创建编号兄弟目录；整个草稿先写临时目录再 `os.replace` 原子发布。
 - `jianying_bundle_media` 默认 `True`：视频 / 音频 / 图片复制进 `Resources/local/{video,audio,image}` 并写 `draft_meta_info.json` 索引；`--jianying-no-bundle-media` 只适合剪映能直接访问原路径的环境。

@@ -457,6 +457,8 @@ def main():
         ap.error(
             "--subtitle-y-top/--subtitle-y-bot are only supported in full/cut modes"
         )
+    if args.edit_mode == "dub" and args.burn_subtitles:
+        ap.error("--burn-subtitles is only supported in full/cut modes; dub never burns subtitles")
     if (args.subtitle_y_top is None) != (args.subtitle_y_bot is None):
         ap.error("--subtitle-y-top and --subtitle-y-bot must be provided together")
     if args.subtitle_y_top is not None:

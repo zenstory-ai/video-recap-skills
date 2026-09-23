@@ -14,18 +14,19 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | ASR model | `MIMO_ASR_MODEL` | `mimo-v2.5-asr` | speech-to-text |
 | ASR language | `MIMO_ASR_LANGUAGE` | `auto` | `auto` / `zh` / `en` |
 | ASR window | `ASR_SEGMENT_SECONDS` | `15` | smaller → finer dialogue timestamps (stays under MiMo's 10MB base64 cap) |
-| TTS provider | `TTS_PROVIDER` / `--tts-provider {auto,mimo-tts,fish-audio}` | `auto` | `auto` prefers configured MiMo, then Fish Audio; explicit selection is recommended for repeatable runs |
+| TTS provider | `TTS_PROVIDER` / `--tts-provider {auto,mimo-tts,fish-audio,index-tts}` | `auto` | `auto` prefers configured MiMo, then Fish Audio, and never picks index-tts; explicit selection is recommended for repeatable runs |
 | MiMo TTS model | `MIMO_TTS_MODEL` | `mimo-v2.5-tts` | MiMo provider only |
 | MiMo voice | `MIMO_TTS_VOICE` / `--mimo-tts-voice` | `冰糖` | |
 | Cloned narration voice | `VOICE_REF` / `--voice-ref` | off | MiMo full/cut only; lazily normalize once, then use `mimo-v2.5-tts-voiceclone`; mutually exclusive with `--mimo-tts-voice`; requires authorization and sends the reference to MiMo |
 | Fish Audio key | `FISH_API_KEY` | — | required when Fish Audio is selected; never written to artifacts or cache metadata |
-| Fish Audio model | `FISH_TTS_MODEL` | `s2.1-pro-free` | current free model; Fair Use/no SLA and free availability is currently announced through 2026-08-31 |
+| Fish Audio model | `FISH_TTS_MODEL` | `s2.1-pro-free` | free model under Fair Use, no SLA; check Fish Audio's current policy |
 | Fish Audio voice | `FISH_TTS_REFERENCE_ID` | `5653cea4ac83480aaf2bf45406556185`（娱乐扒妹） | optional override for the built-in narration voice; part of the per-segment cache settings |
 | Fish Audio endpoint | `FISH_TTS_API_URL` | `https://api.fish.audio/v1/tts` | returns WAV directly to the existing voiceover pipeline |
-| TTS transport | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | request timeout, parallel segments, and per-segment retries for both providers |
+| Self-hosted TTS | `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` | — | explicit `--tts-provider index-tts` only; the endpoint is never written to disk, and segment `emotion`/style is rejected |
+| TTS transport | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | request timeout, parallel segments, and per-segment retries for all providers |
 | Advisory MiMo QC | `MIMO_QC` / `--mimo-qc {off,pre-assemble,post-render,both}` | `off` | optional subjective review at the selected stage(s), one request per stage. Always fail-open: results only point the agent/user to `mimo_qc.json`, never block or auto-repair |
 | MiMo QC refresh/model | `MIMO_QC_REFRESH` / `--mimo-qc-refresh`; `MIMO_QC_MODEL` | cache on / VLM fallback | the reuse check compares evidence file sizes/mtimes, model and prompt, never absolute paths. Post-render temporarily samples at most 6 JPEGs (≤768px); base64 is never persisted. The standalone adapter requires explicit `mimo_qc.py --live` for network access |
-| Narration block coverage | `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` | `0.7` / `9.0` | current block-recap density controls; old `TARGET_SEGMENTS_PER_MINUTE` applies only to legacy single-pass cut mapping reports |
+| Narration block coverage | `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` | `0.7` / `9.0` | current block-recap density controls |
 | Narration speed | `NARRATION_SPEED` | `1.15` | global atempo on the voiceover; set `1.0` for long-form/documentary |
 | Narration authored start | `NARRATION_DELAY_SECONDS` | `0` | the renderer uses the Agent-authored `start` exactly. Set a non-zero value only for legacy drafts; hidden delay can move a validated sentence-boundary entry back into source speech |
 | Source sentence boundary detector | `SOURCE_BOUNDARY_NOISE_THRESHOLD` / `SOURCE_BOUNDARY_MIN_PAUSE` / `SOURCE_BOUNDARY_MAX_ALIGNMENT_ERROR` | `-18dB` / `0.12` / `2.1` | aligns ASR terminal punctuation to short acoustic pauses and writes `speech_boundary_anchors.json`; unsafe narration entries and cut in/out points are blocked. There is no intentional-interrupt override |

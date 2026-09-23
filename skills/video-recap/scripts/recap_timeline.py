@@ -167,7 +167,9 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         return [f"mode: expected 'multi_source', got {actual.get('mode')!r}"]
     mismatches = []
     identity = ("source_id", "source_path", "source_video_identity")
-    if [{k: s[k] for k in identity} for s in actual["sources"]] != [
+    # A 0.5.0 manifest carries `source_video_fingerprint` instead of `source_video_identity`;
+    # .get() reports it as a mismatch rather than a crash.
+    if [{k: s.get(k) for k in identity} for s in actual["sources"]] != [
         {k: s[k] for k in identity} for s in expected["sources"]
     ]:
         mismatches.append(

@@ -10,7 +10,7 @@ from audio_automation import (
     ducking_expression,
     release_ducking_expression,
 )
-from lib import CONFIG, log, run_cmd
+from lib import CONFIG, filter_file_args, log, run_cmd
 
 def _limiter_filter():
     return f"alimiter=limit={CONFIG['final_limiter_peak']:.2f}:level=false"
@@ -92,7 +92,7 @@ def _run_loudnorm_first_pass(input_video, narration_wav, original_audio_input,
         "-i", str(narration_wav),
         *original_audio_input,
         *bgm_input,
-        "-filter_complex_script", str(probe_script),
+        *filter_file_args("filter_complex", probe_script),
         "-map", "[lnprobe]",
         "-f", "null", "-",
     ]

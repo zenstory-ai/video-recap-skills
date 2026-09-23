@@ -15,7 +15,7 @@ compose_foreground、字幕轨、shot_review 计划绑定、recap manifest 交�
 ## Decision
 
 - skills/*/scripts 不再 import hashlib、不再定义 `file_fingerprint` / `stable_hash` / `sha256_file` /
-  `artifact_fingerprint` 及其同类；唯一例外是 `jianying_writer._md5`（剪映草稿格式要求的字段）。
+  `artifact_fingerprint` 及其同类；唯一例外是 `jianying/writer.py` 的 `_md5`（剪映草稿格式要求的字段）。
 - 缓存复用 = 输出存在非空 + 输入文件 `file_identity(path) -> {size, mtime_ns}` 相等 + 设置字典相等
   （+ 文本相等，如 TTS 的 `spoken_text`）。各 skill 自带一份 `file_identity`，不共享。
 - agent 手写产物与工具校验产物之间的陈旧判断用 `st_mtime_ns(validated) >= st_mtime_ns(raw)`。

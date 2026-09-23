@@ -728,6 +728,7 @@ def test_recap_forwards_explicit_tts_provider_to_doctor(monkeypatch):
             ["--subtitle-y-top", "610", "--subtitle-y-bot", "660"],
             "--subtitle-y-top/--subtitle-y-bot are only supported in full/cut modes",
         ),
+        (["--burn-subtitles"], "--burn-subtitles is only supported in full/cut modes"),
     ],
 )
 def test_recap_rejects_flags_that_dub_mode_would_ignore(

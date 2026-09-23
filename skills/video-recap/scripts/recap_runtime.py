@@ -238,8 +238,9 @@ def _ffmpeg_present_but_cannot_burn():
 def _preflight_burn_subtitles(args):
     """Fail fast BEFORE any understanding/VLM/ASR/TTS spend when subtitle burn-in is on but
     this ffmpeg can't burn it. Without it the run only dies at the final assemble
-    `-vf subtitles=` step — after the whole expensive pipeline has run."""
-    if not _burn_subtitles_intended(args):
+    `-vf subtitles=` step — after the whole expensive pipeline has run. Dub renders through
+    dub.py, which never burns subtitles, so it is exempt."""
+    if args.edit_mode == "dub" or not _burn_subtitles_intended(args):
         return
     if _ffmpeg_present_but_cannot_burn():
         raise SystemExit(
