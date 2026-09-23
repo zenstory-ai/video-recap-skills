@@ -76,7 +76,10 @@ def run_cmd(cmd, **kwargs):
 
 # ffmpeg 7 added `-/option path` to read any option's value from a file; ffmpeg 9 removed the
 # older `-filter_complex_script` / `-filter_script` spellings, which are all ffmpeg <= 6 knows.
-_LEGACY_FILTER_FILE_OPTIONS = {"filter_complex": "-filter_complex_script"}
+_LEGACY_FILTER_FILE_OPTIONS = {
+    "filter_complex": "-filter_complex_script",
+    "filter:v:0": "-filter_script:v:0",
+}
 
 
 @functools.lru_cache(maxsize=None)
@@ -89,7 +92,8 @@ def _ffmpeg_reads_option_files():
         with open(graph, "w", encoding="utf-8") as fh:
             fh.write("null")
         result = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", graph],
-                                capture_output=True, text=True, timeout=20)
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=20)
     return "Unrecognized option" not in result.stderr
 
 

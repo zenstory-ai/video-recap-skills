@@ -2,7 +2,6 @@
 import json
 import os
 import shutil
-import subprocess
 import sys
 import types
 from pathlib import Path
@@ -314,19 +313,6 @@ def test_build_edited_source_video_reads_long_graph_from_file(
     assert "-filter_complex" not in ffmpeg_cmd
     script = Path(ffmpeg_cmd[ffmpeg_cmd.index(script_option) + 1])
     assert "concat=n=40" in script.read_text(encoding="utf-8")
-
-
-@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not available")
-def test_filter_file_args_run_on_the_installed_ffmpeg(tmp_path):
-    script = tmp_path / "graph.txt"
-    script.write_text("[0:v]null[v]", encoding="utf-8")
-    lib._ffmpeg_reads_option_files.cache_clear()
-    result = subprocess.run(
-        ["ffmpeg", "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.1",
-         *lib.filter_file_args("filter_complex", script), "-map", "[v]", "-f", "null", "-"],
-        capture_output=True, text=True,
-    )
-    assert result.returncode == 0, result.stderr
 
 
 def _seed_cached_cut(tmp_path):

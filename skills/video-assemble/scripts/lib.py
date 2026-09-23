@@ -194,7 +194,8 @@ def _ffmpeg_reads_option_files():
         with open(graph, "w", encoding="utf-8") as fh:
             fh.write("null")
         result = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", graph],
-                                capture_output=True, text=True, timeout=20)
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True,
+                                timeout=20)
     return "Unrecognized option" not in result.stderr
 
 

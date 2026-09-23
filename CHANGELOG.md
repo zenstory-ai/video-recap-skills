@@ -57,7 +57,8 @@ All notable changes to this project are documented here.
 - **显式混音路径的 `assembly_manifest.json` 被第二次写入覆盖为 `audio_mix_binding: null`。** 删除 try 块外重复的 manifest 构建，最终 MP4 也少哈希四次。
 - `timeline.json` 的旁白起点改为向下取整到 1e-4 秒网格，序列化后不再截掉已放置音频的首个采样。
 - 已放置的旁白 WAV 若为 IEEE float 格式（Python `wave` 不支持），改用 ffprobe 读取时长，不再在装配和一致性检查时报错。
-- **ffmpeg 9 上长剪辑、长旁白渲染失败。** FFmpeg 9 删除了 `-filter_complex_script` / `-filter_script`：片段多的 cut、段落多或遮罩长的最终合成在渲染时报 `Unrecognized option`，loudnorm 首遍测量每次失败并静默降级为单遍 limiter。现在按本机 ffmpeg 实际支持的写法传参（7.0 起用 `-/filter_complex 文件`，更早版本用旧选项）。
+- **ffmpeg 9 上长剪辑、长旁白渲染失败。** FFmpeg 9 删除了 `-filter_complex_script` / `-filter_script`：片段多的 cut、段落多或遮罩长的最终合成在渲染时报 `Unrecognized option`，loudnorm 首遍测量每次失败并静默降级为单遍 loudnorm 目标 + limiter。现在按本机 ffmpeg 实际支持的写法传参（7.0 起用 `-/filter_complex 文件`，更早版本用旧选项）。
+- **dub 模式在没有 libass 的 ffmpeg 上无法启动。** dub 不烧录字幕，却被字幕烧录预检拦下（Homebrew 的 ffmpeg 自 2026-01 起不含 libass）；现在 dub 跳过该预检，显式传 `--burn-subtitles` 时直接报参数错误。
 
 ## [0.5.0] - 2026-09-05
 

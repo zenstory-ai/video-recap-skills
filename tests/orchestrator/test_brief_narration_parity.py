@@ -62,3 +62,30 @@ def test_asr_span_tol_matches_across_files():
     assert set(values.values()) == {0.05}, (
         f"_ASR_SPAN_TOL drifted across files: {values}"
     )
+
+
+def _top_level_definitions(path, names):
+    """ast.dump of each named top-level def/assignment (decorators included, comments not)."""
+    found = {}
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.FunctionDef):
+            name = node.name
+        elif isinstance(node, ast.Assign) and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+        else:
+            continue
+        if name in names:
+            found[name] = ast.dump(node)
+    return found
+
+
+def test_ffmpeg_filter_file_helpers_stay_identical():
+    """video-assemble and video-cut each keep the ffmpeg filter-file probe in their own lib."""
+    names = {"_LEGACY_FILTER_FILE_OPTIONS", "_ffmpeg_reads_option_files", "filter_file_args"}
+    assemble, cut = (
+        _top_level_definitions(ROOT / "skills" / skill / "scripts" / "lib.py", names)
+        for skill in ("video-assemble", "video-cut")
+    )
+    assert set(assemble) == names
+    assert assemble == cut
+

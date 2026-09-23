@@ -973,12 +973,12 @@ def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
     assert ffmpeg_cmd[ffmpeg_cmd.index("-crf") + 1] == "0"
 
 
-@pytest.mark.parametrize("reads_option_files, script_option", [
-    (True, "-/filter:v:0"),         # ffmpeg >= 7 (9 removed -filter_script)
-    (False, "-filter_script:v:0"),  # ffmpeg <= 6
+@pytest.mark.parametrize("reads_option_files, script_option, graph_option", [
+    (True, "-/filter:v:0", "-/filter_complex"),  # ffmpeg >= 7 (9 removed the *_script options)
+    (False, "-filter_script:v:0", "-filter_complex_script"),  # ffmpeg <= 6
 ])
 def test_assemble_video_uses_filter_script_for_long_timed_mask(
-    monkeypatch, tmp_path, reads_option_files, script_option
+    monkeypatch, tmp_path, reads_option_files, script_option, graph_option
 ):
     """Dense long-form narration must not place a >32K video graph on Windows' command line."""
     video = tmp_path / "input.mp4"
@@ -986,6 +986,7 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(
     output = tmp_path / "output.mp4"
     commands = []
     video_filter_scripts = []
+    audio_graphs = []
     monkeypatch.setattr(lib, "_ffmpeg_reads_option_files", lambda: reads_option_files)
 
     def fake_run_cmd(cmd):
@@ -993,6 +994,9 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(
         if script_option in cmd:
             script = Path(cmd[cmd.index(script_option) + 1])
             video_filter_scripts.append((script, script.read_text(encoding="utf-8")))
+        if graph_option in cmd:
+            graph = Path(cmd[cmd.index(graph_option) + 1])
+            audio_graphs.append((graph, graph.read_text(encoding="utf-8")))
         output.write_bytes(b"mp4")
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
@@ -1037,6 +1041,36 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(
     assert video_filter_scripts[0][1].count("drawbox=") == 375
     assert len(" ".join(map(str, ffmpeg_cmd))) < 32767
     assert not video_filter_scripts[0][0].exists()
+    # The 375-segment narration mix is long too: its graph is read from a file as well.
+    assert "-filter_complex" not in ffmpeg_cmd
+    assert "[aout]" in audio_graphs[-1][1]
+    assert not audio_graphs[-1][0].exists()
+
+
+def test_adopted_copy_removes_the_render_when_packet_verification_fails(monkeypatch, tmp_path):
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"video")
+    output = tmp_path / "output.mp4"
+    _mock_assemble_media(monkeypatch)
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
+    monkeypatch.setitem(CONFIG, "bgm_path", "")
+    monkeypatch.setattr(
+        assemble.frozen_audio, "validate_adopted_source", lambda *_args: {"sample_rate": 48000}
+    )
+
+    def fake_run_cmd(cmd):
+        output.write_bytes(b"mp4")
+        return CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    def packets_changed(*_args):
+        raise RuntimeError("采用音频 packet side data 已改变")
+
+    monkeypatch.setattr("assemble.lib.run_cmd", fake_run_cmd)
+    monkeypatch.setattr(assemble.frozen_audio, "verify_adopted_audio", packets_changed)
+
+    with pytest.raises(RuntimeError, match="side data"):
+        assemble_video(video, [], tmp_path, output, audio_mode="adopted-packet-copy")
+    assert not output.exists()
 
 
 @pytest.mark.parametrize("probe_stderr, expected", [
