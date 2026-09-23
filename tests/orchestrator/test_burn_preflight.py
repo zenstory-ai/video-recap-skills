@@ -12,8 +12,8 @@ import recap_runtime as recap
 import recap_timeline
 
 
-def _args(burn_subtitles=None):
-    return Namespace(burn_subtitles=burn_subtitles)
+def _args(burn_subtitles=None, edit_mode="full"):
+    return Namespace(burn_subtitles=burn_subtitles, edit_mode=edit_mode)
 
 
 @pytest.mark.parametrize(
@@ -51,6 +51,12 @@ def test_preflight_raises_when_present_but_cannot_burn(monkeypatch):
     monkeypatch.setattr(recap, "_ffmpeg_present_but_cannot_burn", lambda: True)
     with pytest.raises(SystemExit, match="subtitles/libass"):
         recap._preflight_burn_subtitles(_args())
+
+
+def test_preflight_skips_dub_which_never_burns(monkeypatch):
+    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
+    monkeypatch.setattr(recap, "_ffmpeg_present_but_cannot_burn", lambda: True)
+    recap._preflight_burn_subtitles(_args(edit_mode="dub"))  # must not raise
 
 
 def test_preflight_ok_when_can_burn(monkeypatch):
