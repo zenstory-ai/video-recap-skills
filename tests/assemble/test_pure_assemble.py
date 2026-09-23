@@ -1,3 +1,5 @@
+import shutil
+import subprocess
 import sys
 from fractions import Fraction
 from pathlib import Path
@@ -57,6 +59,7 @@ from visual_render import (
     _source_subtitle_mask_filter,
     _subtitle_burn_filter,
 )
+import lib
 from lib import CONFIG, env_float
 import assemble
 
@@ -970,18 +973,25 @@ def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
     assert ffmpeg_cmd[ffmpeg_cmd.index("-crf") + 1] == "0"
 
 
-def test_assemble_video_uses_filter_script_for_long_timed_mask(monkeypatch, tmp_path):
+@pytest.mark.parametrize("reads_option_files, script_option", [
+    (True, "-/filter:v:0"),         # ffmpeg >= 7 (9 removed -filter_script)
+    (False, "-filter_script:v:0"),  # ffmpeg <= 6
+])
+def test_assemble_video_uses_filter_script_for_long_timed_mask(
+    monkeypatch, tmp_path, reads_option_files, script_option
+):
     """Dense long-form narration must not place a >32K video graph on Windows' command line."""
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     output = tmp_path / "output.mp4"
     commands = []
     video_filter_scripts = []
+    monkeypatch.setattr(lib, "_ffmpeg_reads_option_files", lambda: reads_option_files)
 
     def fake_run_cmd(cmd):
         commands.append(cmd)
-        if "-filter_script:v:0" in cmd:
-            script = Path(cmd[cmd.index("-filter_script:v:0") + 1])
+        if script_option in cmd:
+            script = Path(cmd[cmd.index(script_option) + 1])
             video_filter_scripts.append((script, script.read_text(encoding="utf-8")))
         output.write_bytes(b"mp4")
         return CompletedProcess(cmd, 0, stdout="", stderr="")
@@ -1022,11 +1032,69 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(monkeypatch, tmp_
     assemble_video(video, segments, tmp_path, output)
 
     ffmpeg_cmd = commands[-1]
-    assert "-filter_script:v:0" in ffmpeg_cmd
+    assert script_option in ffmpeg_cmd
     assert "-vf" not in ffmpeg_cmd
     assert video_filter_scripts[0][1].count("drawbox=") == 375
     assert len(" ".join(map(str, ffmpeg_cmd))) < 32767
     assert not video_filter_scripts[0][0].exists()
+
+
+@pytest.mark.parametrize("probe_stderr, expected", [
+    ("Unrecognized option '/filter_complex'.\nError splitting the argument list: Option not found\n",
+     ["-filter_complex_script", "graph.txt"]),
+    ("Cannot find an unused video input stream to feed the unlabeled input pad null:default.\n",
+     ["-/filter_complex", "graph.txt"]),
+])
+def test_filter_file_args_follow_what_this_ffmpeg_accepts(monkeypatch, probe_stderr, expected):
+    monkeypatch.setattr(lib.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        lib.subprocess, "run",
+        lambda cmd, **kwargs: CompletedProcess(cmd, 1, stdout="", stderr=probe_stderr),
+    )
+    lib._ffmpeg_reads_option_files.cache_clear()
+    try:
+        assert lib.filter_file_args("filter_complex", "graph.txt") == expected
+    finally:
+        lib._ffmpeg_reads_option_files.cache_clear()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not available")
+@pytest.mark.parametrize("option, graph", [
+    ("filter_complex", "[0:v]null[v]"),
+    ("filter:v:0", "null"),
+])
+def test_filter_file_args_run_on_the_installed_ffmpeg(tmp_path, option, graph):
+    script = tmp_path / "graph.txt"
+    script.write_text(graph, encoding="utf-8")
+    maps = ["-map", "[v]"] if option == "filter_complex" else []
+    lib._ffmpeg_reads_option_files.cache_clear()
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.1",
+         *lib.filter_file_args(option, script), *maps, "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not available")
+def test_loudnorm_first_pass_measures_on_the_installed_ffmpeg(monkeypatch, tmp_path):
+    """The probe reads its graph from a file; ffmpeg 9 dropped -filter_complex_script, which
+    silently degraded every render to the single-pass limiter."""
+    video = tmp_path / "input.mp4"
+    narration = tmp_path / "narration.wav"
+    for args, out in (
+        (["-f", "lavfi", "-i", "color=c=black:s=64x64:d=1", "-c:v", "libx264"], video),
+        (["-f", "lavfi", "-i", "sine=frequency=440:duration=1"], narration),
+    ):
+        subprocess.run(["ffmpeg", "-y", "-v", "error", *args, str(out)], check=True)
+    monkeypatch.setitem(CONFIG, "final_loudnorm", True)
+    lib._ffmpeg_reads_option_files.cache_clear()
+
+    measured = audio_mix._run_loudnorm_first_pass(
+        video, narration, [], [], "[1:a]anull[aout]", tmp_path)
+
+    assert measured is not None
+    assert not (tmp_path / ".filter_complex_loudnorm_probe.txt").exists()
 
 
 def test_assemble_video_rejects_empty_tts_segments(tmp_path):

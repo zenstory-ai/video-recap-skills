@@ -277,13 +277,13 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         audio_map = "[aoutln]"
         audio_input_args = ["-i", str(narration_wav), *original_audio_input]
 
-    # 对于超长 volume 表达式（多段解说），使用 -filter_complex_script 避免命令行溢出
+    # 对于超长 volume 表达式（多段解说），从脚本文件读取 filter_complex 避免命令行溢出
     if filter_complex is not None:
         if len(filter_complex.encode("utf-8")) > constants.FILTER_SCRIPT_THRESHOLD_BYTES:
             fc_script = Path(work_dir) / ".filter_complex.txt"
             fc_script.write_text(filter_complex, encoding="utf-8")
-            lib.log(f"使用 filter_complex_script (表达式长度 {len(filter_complex.encode('utf-8'))} bytes)")
-            filter_args = ["-filter_complex_script", str(fc_script)]
+            lib.log(f"使用 filter_complex 脚本文件 (表达式长度 {len(filter_complex.encode('utf-8'))} bytes)")
+            filter_args = lib.filter_file_args("filter_complex", fc_script)
         else:
             filter_args = ["-filter_complex", filter_complex]
     cmd = [
@@ -330,7 +330,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         if len(video_filter.encode("utf-8")) > constants.FILTER_SCRIPT_THRESHOLD_BYTES:
             video_filter_script = Path(work_dir) / ".video_filter.txt"
             video_filter_script.write_text(video_filter, encoding="utf-8")
-            cmd += ["-filter_script:v:0", str(video_filter_script)]
+            cmd += lib.filter_file_args("filter:v:0", video_filter_script)
             lib.log(
                 "使用 video filter script "
                 f"(表达式长度 {len(video_filter.encode('utf-8'))} bytes)"

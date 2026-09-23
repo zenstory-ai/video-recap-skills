@@ -2,6 +2,7 @@
 import json
 import os
 import shutil
+import subprocess
 import sys
 import types
 from pathlib import Path
@@ -13,6 +14,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-c
 import cut
 import cut_contract
 import cut_render
+import lib
 import media_geometry
 import sentence_boundaries
 from lib import env_float
@@ -283,6 +285,48 @@ def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
     assert ffmpeg_cmd[ffmpeg_cmd.index("-pix_fmt") + 1] == "yuv420p"
     assert ffmpeg_cmd[ffmpeg_cmd.index("-ar") + 1] == "48000"
     assert ffmpeg_cmd[ffmpeg_cmd.index("-movflags") + 1] == "+faststart"
+
+
+@pytest.mark.parametrize("probe_stderr, script_option", [
+    # ffmpeg >= 7 reads `-/option file`; 9 removed -filter_complex_script.
+    ("Cannot find an unused video input stream to feed the unlabeled input pad null:default.\n",
+     "-/filter_complex"),
+    # ffmpeg <= 6 only knows the legacy spelling.
+    ("Unrecognized option '/filter_complex'.\nError splitting the argument list: Option not found\n",
+     "-filter_complex_script"),
+])
+def test_build_edited_source_video_reads_long_graph_from_file(
+    monkeypatch, tmp_path, probe_stderr, script_option
+):
+    monkeypatch.setattr(lib.shutil, "which", lambda name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(
+        lib.subprocess, "run",
+        lambda cmd, **kwargs: CompletedProcess(cmd, 1, stdout="", stderr=probe_stderr),
+    )
+    lib._ffmpeg_reads_option_files.cache_clear()
+    raw = [{"start": 2.0 * i, "end": 2.0 * i + 1.0} for i in range(40)]
+    try:
+        _, _, commands = _capture_render(monkeypatch, tmp_path, raw, 100)
+    finally:
+        lib._ffmpeg_reads_option_files.cache_clear()
+
+    ffmpeg_cmd = [cmd for cmd in commands if cmd[0] == "ffmpeg"][0]
+    assert "-filter_complex" not in ffmpeg_cmd
+    script = Path(ffmpeg_cmd[ffmpeg_cmd.index(script_option) + 1])
+    assert "concat=n=40" in script.read_text(encoding="utf-8")
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg not available")
+def test_filter_file_args_run_on_the_installed_ffmpeg(tmp_path):
+    script = tmp_path / "graph.txt"
+    script.write_text("[0:v]null[v]", encoding="utf-8")
+    lib._ffmpeg_reads_option_files.cache_clear()
+    result = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-v", "error", "-f", "lavfi", "-i", "color=c=black:s=16x16:d=0.1",
+         *lib.filter_file_args("filter_complex", script), "-map", "[v]", "-f", "null", "-"],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def _seed_cached_cut(tmp_path):

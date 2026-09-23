@@ -5,7 +5,7 @@ import json
 
 from pathlib import Path
 
-from lib import CONFIG, get_video_duration, log, run_cmd
+from lib import CONFIG, filter_file_args, get_video_duration, log, run_cmd
 
 from cut_contract import _write_edited_source_meta
 from media_geometry import _has_audio_stream
@@ -255,7 +255,7 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     if len(filter_complex.encode("utf-8")) > 7000:
         filter_script = work_dir / "edit_filter_complex.txt"
         filter_script.write_text(filter_complex, encoding="utf-8")
-        filter_args = ["-filter_complex_script", str(filter_script)]
+        filter_args = filter_file_args("filter_complex", filter_script)
     else:
         filter_args = ["-filter_complex", filter_complex]
 

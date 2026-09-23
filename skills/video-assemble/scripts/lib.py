@@ -1,7 +1,10 @@
 """Self-contained config + utilities for this skill (no cross-skill imports)."""
+import functools
 import math
 import os
+import shutil
 import subprocess
+import tempfile
 
 
 # ── 配置 ──────────────────────────────────────────────────────────────
@@ -171,6 +174,36 @@ def run_cmd(cmd, **kwargs):
     )
     log(f"运行: {display}")
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+
+
+# ffmpeg 7 added `-/option path` to read any option's value from a file; ffmpeg 9 removed the
+# older `-filter_complex_script` / `-filter_script` spellings, which are all ffmpeg <= 6 knows.
+_LEGACY_FILTER_FILE_OPTIONS = {
+    "filter_complex": "-filter_complex_script",
+    "filter:v:0": "-filter_script:v:0",
+}
+
+
+@functools.lru_cache(maxsize=None)
+def _ffmpeg_reads_option_files():
+    """Whether the ffmpeg on PATH accepts `-/option path` (asked once per process)."""
+    if shutil.which("ffmpeg") is None:
+        return False
+    with tempfile.TemporaryDirectory() as tmp:
+        graph = os.path.join(tmp, "probe_filter.txt")
+        with open(graph, "w", encoding="utf-8") as fh:
+            fh.write("null")
+        result = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", graph],
+                                capture_output=True, text=True, timeout=20)
+    return "Unrecognized option" not in result.stderr
+
+
+def filter_file_args(option, path):
+    """ffmpeg arguments that load `option`'s filtergraph from `path`, spelled for this ffmpeg."""
+    if _ffmpeg_reads_option_files():
+        return [f"-/{option}", str(path)]
+    return [_LEGACY_FILTER_FILE_OPTIONS[option], str(path)]
+
 
 def get_video_duration(video_path):
     """获取视频时长（秒）"""
