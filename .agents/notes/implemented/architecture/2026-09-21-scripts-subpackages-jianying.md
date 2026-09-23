@@ -48,5 +48,5 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
 
 ## Verification
 
-`python3 scripts/test.py assemble orchestrator`：assemble 与改动前失败集合相同（仅本机 ffmpeg 缺 libass 的 13 个）；
+`python3 scripts/test.py assemble orchestrator`：assemble 与改动前失败集合相同（本机 Homebrew ffmpeg 9 下的 13 个：9 个缺 libass，4 个是 `test_movie_clock_boundaries.py` 依赖 ffmpeg ≤ 8 的 fixture，已于 2026-09-23 修正）；
 orchestrator 除既有 26 个 libass 失败外全绿；`ruff check skills tests scripts` 无告警。

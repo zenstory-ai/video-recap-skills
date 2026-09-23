@@ -42,7 +42,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="video-cut: build an edited source video from an agent clip plan and map narration onto the cut timeline."
+        description="video-cut: build edited_source.mp4 from an agent clip plan; narration is authored afterwards on the output timeline."
     )
     parser.add_argument("video", help="source video path")
     parser.add_argument(

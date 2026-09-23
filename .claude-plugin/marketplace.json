@@ -3,12 +3,12 @@
   "owner": {
     "name": "PiteChen"
   },
-  "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg, remote Xiaomi MiMo ASR/VLM/default TTS, optional Fish Audio TTS, and required final playback review.",
+  "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg, remote Xiaomi MiMo ASR/VLM/default TTS, optional Fish Audio TTS or a self-hosted HTTP TTS endpoint, and required final playback review.",
   "plugins": [
     {
       "name": "video-recap-skills",
       "source": "./",
-      "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg; remote Xiaomi MiMo ASR, VLM, and default TTS; optional Fish Audio TTS with a separate API key; final playback review required.",
+      "description": "Independent stages plus a thin orchestrator for Chinese-narration recaps from supported video files: local Python/ffmpeg; remote Xiaomi MiMo ASR, VLM, and default TTS; optional Fish Audio TTS with a separate API key or a self-hosted HTTP TTS endpoint; final playback review required.",
       "homepage": "https://github.com/zenstory-ai/video-recap-skills",
       "license": "MIT"
     }

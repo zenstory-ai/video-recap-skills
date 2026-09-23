@@ -306,8 +306,8 @@ cut 模式下 Agent 选择要保留的原片片段，数组或 `{ "clips": [...]
 {
   "target_duration": "10m",
   "clips": [
-    {"source_id": "src_0123456789ab", "start": 12.0, "end": 38.0, "reason": "b01 | setup | knowledge: unknown→clue | POV=主角 | 保留迟疑反应 | 入点=线索出现 | 出点=疑问成立"},
-    {"source_id": "src_fedcba987654", "start": 4.0, "end": 22.0, "reason": "b02 | payoff | power: suspect→hero | POV=主角 | 保留最终选择 | 入点=证据落下 | 出点=代价显现"}
+    {"source_id": "src_episode1_734003200", "start": 12.0, "end": 38.0, "reason": "b01 | setup | knowledge: unknown→clue | POV=主角 | 保留迟疑反应 | 入点=线索出现 | 出点=疑问成立"},
+    {"source_id": "src_episode2_689110016", "start": 4.0, "end": 22.0, "reason": "b02 | payoff | power: suspect→hero | POV=主角 | 保留最终选择 | 入点=证据落下 | 出点=代价显现"}
   ]
 }
 ```
@@ -346,7 +346,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
   "clips": [
     {
       "clip_id": 0,
-      "source_id": "src_0123456789ab",
+      "source_id": "src_episode1_734003200",
       "source_path": "/abs/episode1.mp4",
       "source_start": 12.0,
       "source_end": 38.0,
