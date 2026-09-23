@@ -375,12 +375,13 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             video_filter_script.unlink(missing_ok=True)
 
     if audio_mode == "adopted-packet-copy":
-        adopted_audio = frozen_audio.verify_adopted_audio(
-            input_video, output_path, audio_stream_index
-        )
+        # Either check failing means the file at the final path is unverified: never leave it.
         try:
+            adopted_audio = frozen_audio.verify_adopted_audio(
+                input_video, output_path, audio_stream_index
+            )
             pair_media.validate_aac_packet_interval(adopted_audio["output"])
-        except ValueError:
+        except (RuntimeError, ValueError):
             output_path.unlink(missing_ok=True)
             raise
     subtitle_track_binding.verify_rendered_picture(work_dir, output_path)
