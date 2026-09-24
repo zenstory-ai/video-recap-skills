@@ -53,3 +53,8 @@
 
 第二层：不给最终答案，只给源片、任务与修改要求，产出后再用独立保留的问题集审查。
 问题集与任何真实项目的映射只存在于私有基准目录，不写进通用实现分支。
+
+## 相关
+
+- 项目主页：https://zenstory.ai/zh/video-recap
+- 剪映草稿导出与精剪：https://zenstory.ai/zh/video-recap/capcut-draft
