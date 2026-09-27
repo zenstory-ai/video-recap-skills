@@ -397,6 +397,23 @@ Dub /path/to/english.mp4 into Chinese, keeping the original speaker's voice.
 
 This replaces the original speech rather than overlaying commentary; the current version supports one speaker and full-track replacement without background-music separation.
 
+**Reuse subtitle style, voice, BGM and frame across a series:**
+
+```text
+Use /path/to/library as the resource library: register this BGM, this font and this frame image, draft a subtitle-style
+template for 1080x1920 for me to adopt, then render this series with /path/to/series/recap_project.json binding them.
+```
+
+Resources, templates and sample films are JSON records in your own directory; licence and "adopted" status are only ever set by you. A binding that conflicts with an explicit setting, or a template whose canvas differs from the output, stops the run before voicing. Each render gets a `resource_lock.json` listing what it actually used and whether the licences are clear. Format: [resource library, templates and samples](skills/video-recap/references/resource-library.md).
+
+**Browse projects, runs and the library in a local page (read-only):**
+
+```text
+Open the local dashboard for /path/to/projects so I can see run progress, finished videos and the library.
+```
+
+The dashboard is read-only and listens on loopback only; wherever something needs doing it gives you one sentence to paste back into the conversation.
+
 **Bring your own original-dialogue subtitles for accurate 「」 captions:** put `user_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]` on the output timeline; wrap it as `{"timeline": "source", "lines": [...]}` for source-timeline subs mapped through the clip plan) or `user_subtitles.srt` / `.ass` (source timeline) into `work_dir`. Priority: your file › the agent-proofread `original_subtitles.json` › ASR fallback.
 
 ## FAQ
