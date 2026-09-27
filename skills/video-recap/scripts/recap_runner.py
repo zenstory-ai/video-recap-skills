@@ -311,6 +311,7 @@ def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assembl
     project = getattr(args, "resolved_project", None)
     if project and project["templates"]:
         project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
+    project_binding.sync_packaging_layers(work_dir, project)
     review_ran = _narrate(work_dir, args, timeline) if uses_narration(args) else None
     aargs = [str(assemble_video), "--work-dir", str(work_dir), "--recap-stem", recap_stem]
     extend_assemble_args(aargs, args)

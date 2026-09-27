@@ -26,6 +26,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **静态包装图层。** video-assemble 读取 `work_dir/packaging_layers.json`，把包框、标题条、角标等图片按画布坐标叠到成片（遮原字幕之后、画面文字与字幕之前），并在 `timeline.json` 写出位置一致的 image 轨供剪映编辑；`--project` 绑定的 `packaging` 模板自动写出该文件，`resource_lock.json` 记录每个图层图片。
 - **项目绑定 `--project recap_project.json`。** 把资源库里已采用的字幕样式模板、音色与 BGM 绑定到一次运行，解析为各阶段已有的 `SUBTITLE_*` / `BGM_PATH` / 音色参数；与显式设置冲突或模板画布与成片不符时在开始前停止。video-assemble 新增 `SUBTITLE_FONT_FILE`：烧录字幕经 `fontsdir`、画面文字经 `fontfile` 使用指定字体文件。示例项目在 `examples/demo-project/`。
 - **运行资源记录 `resource_lock.json`。** full / cut 合成后汇总本次用到的原片、音色、BGM 与字幕字体，配置资源库时对上登记与授权状态，并在结束时打印需要人确认的项；`tts_meta.json` 新增 `voice`，记录实际使用的 provider、模型、音色或参考音频。
 - **资源库格式与只读校验。** 素材库根目录下可登记资源（BGM、音效、音色、字体、图片）、带版本与采用记录的模板（字幕样式、包装图层）和样片；`video-recap/scripts/library.py check|list|show` 只读校验授权、声音授权、路径越界与引用完整性。格式见 `video-recap/references/resource-library.md`，合成示例在 `examples/resource-library/`。本期渲染不读取资源库。

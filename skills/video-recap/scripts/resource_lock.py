@@ -66,6 +66,9 @@ def _assembly_entries(work_dir: Path) -> list[dict]:
     bgm = (settings.get("audio_mix") or {}).get("bgm_path")
     if bgm:
         entries.append(_file_entry("bgm", bgm))
+    packaging = (settings.get("video_filters") or {}).get("packaging_layers") or {}
+    for layer in packaging.get("layers", []):
+        entries.append(_file_entry("packaging_layer", layer.get("path"), {"name": layer.get("name")}))
     style = settings.get("subtitle_style")
     if isinstance(style, dict):
         entries.append(_file_entry("subtitle_font", style.get("font_file"),

@@ -7,6 +7,7 @@ from lib import CONFIG, log
 from media import _build_video_clips
 from source_subtitles import _combined_subtitle_entries
 from timeline import build_timeline, save_timeline
+import packaging
 
 def _timeline_subtitle_segments(tts_segments, work_dir, duration_s):
     """Display-ready subtitle cues for timeline/export text tracks.
@@ -93,7 +94,10 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
     subtitle_segments = _timeline_subtitle_segments(tts_segments, work_dir, duration_s)
     timeline = build_timeline(canvas, duration_s, video_clips,
                               narration_segments, bgm=bgm, ducking=ducking,
-                              subtitle_segments=subtitle_segments)
+                              subtitle_segments=subtitle_segments,
+                              image_segments=packaging.timeline_image_segments(
+                                  packaging.load_packaging_layers(work_dir, canvas),
+                                  canvas, duration_s))
     if explicit_audio_mix is not None:
         for clip in timeline["tracks"][0]["clips"]:
             clip["audio"] = {

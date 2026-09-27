@@ -17,6 +17,28 @@
 而不是用通用白字黑框近似品牌样式。该操作保留实际帧钟和 AAC 包，不生成字体或文案；只有通过验证的
 新文件才写入新目录。片名卡有渐显或动画时须提供完整序列，不能冻结最后一张图代替。
 
+## 静态包装图层 `packaging_layers.json`
+
+包框、标题条、角标 logo 这类整片不动的图片，可以直接在合成时叠加，不必先渲染成逐帧序列。
+在 `work_dir` 写 `packaging_layers.json`：
+
+```json
+{
+  "canvas": {"width": 1080, "height": 1920},
+  "layers": [
+    {"name": "frame", "path": "/abs/frame.png", "rect": {"x": 0, "y": 0, "width": 1080, "height": 1920}}
+  ],
+  "template": {"id": "brand-frame", "version": 2}
+}
+```
+
+- `canvas` 必须等于成片画布，否则合成前报错；`rect` 必须在画布内，图片缩放到 `rect` 大小（透明区域保持透明）。
+- 叠加顺序：遮原字幕 → 包装图层（按数组顺序）→ 画面文字 → 解说字幕 → 缩放。
+- `timeline.json` 同时得到对应的 image 轨，剪映草稿里的包框可单独编辑。
+- `assembly_manifest.json` 的 `video_filters.packaging_layers` 记录每张图片的路径与 `{size, mtime_ns}`。
+- 编排器按项目绑定的 `packaging` 模板写出这个文件时会带 `written_by` 标记；
+  手写的文件不会被它删除。有渐显或动画的包装仍走 `foreground-compose.md`。
+
 ## 原则
 
 包装价值来自稳定、可读、与内容一致的排版，不来自效果数量。先建立统一字体、颜色、描边/阴影和轻量动效；

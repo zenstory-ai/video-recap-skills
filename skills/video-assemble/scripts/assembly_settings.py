@@ -10,6 +10,7 @@ from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitles.core import _subtitle_style_config
 from adoption.narration_binding import binding_record
 from adoption.audio_mix_binding import binding_record as audio_mix_binding_record
+from packaging import packaging_settings
 
 
 def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
@@ -60,6 +61,7 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
                 "present": overlay_identity is not None,
                 "identity": overlay_identity,
             },
+            "packaging_layers": packaging_settings(work_dir),
         },
         "audio": {
             "mode": audio_mode,

@@ -20,6 +20,7 @@ import adoption.strict_publish as strict_publish
 import subtitles.render as subtitle_render
 import subtitles.track_binding as subtitle_track_binding
 import timeline_emit
+import packaging
 import visual_render
 import lib
 
@@ -189,6 +190,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     )
 
     overlay_filters, overlay_qc = visual_render._visual_overlay_filters(work_dir, canvas, video_duration)
+    packaging_layers = packaging.load_packaging_layers(work_dir, canvas)
     mask_filter = visual_render._source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
     visual_qc = visual_render._build_visual_qc(
         tts_segments,
@@ -316,13 +318,15 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     # needs EVEN width AND height, so normalize odd dims (4:2:2/4:4:4 permit them) before the
     # encode — otherwise libx264 aborts to a 0-byte file. The downscale helper already evens out.
     even = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
-    reencode = bool(vf_chain) or lib.CONFIG["force_video_reencode"]
+    reencode = bool(vf_chain or packaging_layers) or lib.CONFIG["force_video_reencode"]
     notes = []
     video_filter_script = None
-    if vf_chain:
+    if vf_chain or packaging_layers:
         if max_h <= 0:  # no downscale in the chain to force even dims
             vf_chain.append(even)
-        video_filter = ",".join(vf_chain)
+        video_filter = packaging.compose_video_filter(
+            vf_chain, packaging_layers, mask_first=bool(mask_filter)
+        )
         if len(video_filter.encode("utf-8")) > constants.FILTER_SCRIPT_THRESHOLD_BYTES:
             video_filter_script = Path(work_dir) / ".video_filter.txt"
             video_filter_script.write_text(video_filter, encoding="utf-8")
@@ -335,6 +339,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             cmd += ["-vf", video_filter]
         cmd += ["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]
         notes = ((["遮挡原字幕"] if mask_filter else [])
+                 + ([f"包装图层×{len(packaging_layers)}"] if packaging_layers else [])
                  + ([f"视觉叠加×{len(overlay_filters)}"] if overlay_filters else [])
                  + (["压制解说字幕"] if burn_subtitles else [])
                  + ([f"缩放≤{max_h}p"] if max_h > 0 else []))

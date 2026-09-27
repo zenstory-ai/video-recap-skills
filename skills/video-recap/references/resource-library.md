@@ -134,7 +134,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 | `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，字体资源 → 再加 `SUBTITLE_FONT_FILE` |
 | `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |
 | `bgm` | `BGM_PATH` ← 该资源的第一个文件 |
-| `packaging` | 见下一节 |
+| `packaging` | 合成前写出 `work_dir/packaging_layers.json`：每个图层的图片资源第一个文件 + `rect`，由 video-assemble 叠加到成片并写进 `timeline.json` 的 image 轨 |
 
 - 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会静默覆盖。
 - 合成前核对模板画布与实际成片画布；不一致即停止——换画幅要用另一个模板。

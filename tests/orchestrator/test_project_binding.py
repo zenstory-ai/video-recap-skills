@@ -161,3 +161,31 @@ def test_shipped_example_project_resolves_against_the_example_library(clean_env)
 
     assert resolved["library"] == str(EXAMPLE.resolve())
     assert resolved["env"]["BGM_PATH"].endswith("pulse-demo.wav")
+
+
+def test_bound_packaging_template_is_handed_to_assemble_and_retired_when_unbound(tmp_path, clean_env):
+    lib = tmp_path / "lib"
+    shutil.copytree(EXAMPLE, lib)
+    template = lib / "templates/packaging/bottom-bar/v1/template.json"
+    data = json.loads(template.read_text(encoding="utf-8"))
+    data.update(status="adopted", adoption={"date": "2026-09-27", "by": "user", "statement": "就用这个",
+                                            "scope": "演示画布"})
+    template.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    path, _ = _project(tmp_path, {"packaging": "bottom-bar@v1"}, library=lib)
+    work = tmp_path / "work"
+    work.mkdir()
+
+    project_binding.sync_packaging_layers(work, project_binding.resolve_project(path, _args()))
+
+    plan = json.loads((work / "packaging_layers.json").read_text(encoding="utf-8"))
+    assert plan["canvas"] == {"width": 900, "height": 1600}
+    assert plan["layers"] == [{"name": "bottom-bar",
+                               "path": str((lib / "resources/image/frame-demo/frame-demo.png").resolve()),
+                               "rect": {"x": 0, "y": 0, "width": 900, "height": 1600}}]
+
+    project_binding.sync_packaging_layers(work, None)
+    assert not (work / "packaging_layers.json").exists()
+
+    (work / "packaging_layers.json").write_text(json.dumps({"layers": []}), encoding="utf-8")
+    project_binding.sync_packaging_layers(work, None)
+    assert (work / "packaging_layers.json").exists()  # caller-authored plans are not ours to delete

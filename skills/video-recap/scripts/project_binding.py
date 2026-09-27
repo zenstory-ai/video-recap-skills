@@ -221,3 +221,36 @@ def check_canvas(resolved, width, height) -> None:
                 f"{template['role']} 模板 {template['id']}@v{template['version']} 按 "
                 f"{canvas['width']}x{canvas['height']} 校准，成片画布是 {width}x{height}；换一个同画幅的模板"
             )
+
+
+PACKAGING_LAYERS = "packaging_layers.json"
+_WRITTEN_BY = "video-recap --project"
+
+
+def sync_packaging_layers(work_dir, resolved) -> None:
+    """Write the bound packaging template's layers for video-assemble, or retire our old copy.
+
+    A caller-authored ``packaging_layers.json`` (no ``written_by`` marker) is left alone.
+    """
+    path = Path(work_dir) / PACKAGING_LAYERS
+    packaging = (resolved or {}).get("packaging")
+    if not packaging:
+        if path.exists():
+            try:
+                ours = json.loads(path.read_text(encoding="utf-8")).get("written_by") == _WRITTEN_BY
+            except ValueError:
+                ours = False
+            if ours:
+                path.unlink()
+        return
+    record, resources = packaging["record"], packaging["resources"]
+    layers = [{"name": layer["name"],
+               "path": resources[layer["image"]["resource"]]["files"][0]["path"],
+               "rect": layer["rect"]}
+              for layer in record["params"]["layers"]]
+    path.write_text(json.dumps({
+        "written_by": _WRITTEN_BY,
+        "template": {"id": record["id"], "version": record["version"]},
+        "canvas": record["canvas"],
+        "layers": layers,
+    }, ensure_ascii=False, indent=2), encoding="utf-8")
