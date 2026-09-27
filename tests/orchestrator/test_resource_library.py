@@ -61,6 +61,7 @@ def test_shipped_example_library_is_valid_with_only_the_intended_licence_warning
         pytest.param(SUBTITLE, lambda d: d["params"]["band"]["value"].update(y_bot=1700), (SUBTITLE, "band"), id="band_outside_canvas"),
         pytest.param(SUBTITLE, lambda d: d["params"].update(font={"resource": "pulse-demo"}), (SUBTITLE, "resource_kind"), id="font_ref_to_bgm"),
         pytest.param(SUBTITLE, lambda d: d.update(samples=["nope"]), (SUBTITLE, "sample_missing"), id="missing_sample_ref"),
+        pytest.param(SUBTITLE, lambda d: d["params"].update(fontsize={"value": 1, "provenance": "specified"}), (SUBTITLE, "unknown_params"), id="misspelled_subtitle_param"),
         pytest.param(PACKAGING, lambda d: d["params"]["layers"][0]["rect"].update(width=901), (PACKAGING, "rect_outside_canvas"), id="layer_outside_canvas"),
         pytest.param(PACKAGING, lambda d: d["params"]["layers"][0]["image"].update(resource="gone"), (PACKAGING, "resource_missing"), id="missing_layer_image"),
         pytest.param(SAMPLE, lambda d: d.update(templates=["clean-white@v9"]), (SAMPLE, "template_missing"), id="missing_template_ref"),
@@ -144,3 +145,19 @@ def test_reference_audio_voice_requires_a_consent_record(tmp_path):
     _, report = library.scan_library(root)
     assert (VOICE, "consent") not in _codes(report.errors)
     assert (VOICE, "consent_unknown") in _codes(report.warnings)
+
+
+def test_font_resource_bound_to_subtitles_must_name_its_family(tmp_path):
+    root = _copy_example(tmp_path)
+    font_dir = root / "resources/font/brand-sans"
+    font_dir.mkdir(parents=True)
+    (font_dir / "brand.ttf").write_bytes(b"font")
+    (font_dir / "resource.json").write_text(json.dumps({
+        "schema": "video-recap.resource.v1", "id": "brand-sans", "kind": "font", "title": "品牌黑体",
+        "files": [{"role": "regular", "path": "brand.ttf"}], "license": {"status": "licensed"}}),
+        encoding="utf-8")
+    _edit(root, SUBTITLE, lambda d: d["params"].update(font={"resource": "brand-sans"}))
+    assert (SUBTITLE, "font_family") in _codes(library.scan_library(root)[1].errors)
+
+    _edit(root, "resources/font/brand-sans/resource.json", lambda d: d.update(font={"family": "Brand Sans"}))
+    assert library.scan_library(root)[1].errors == []

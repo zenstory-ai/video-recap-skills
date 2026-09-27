@@ -194,6 +194,12 @@ def parse_args(argv=None):
         help="save analyzed JSON/MD artifacts into the material library",
     )
 
+    materials.add_argument(
+        "--project",
+        default=None,
+        help="recap_project.json（或其所在目录）：绑定资源库里已采用的字幕样式、包装模板、音色与 BGM",
+    )
+
     selfcheck = parser.add_argument_group("自检")
     selfcheck.add_argument("--doctor", action="store_true")
 

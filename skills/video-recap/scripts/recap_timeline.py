@@ -220,6 +220,8 @@ def _cut_narration_is_stale(ledger, current_clip_plan_identity):
 
 
 def _continuation_command(video, work_dir, args):
+    # Values a project binding filled in are re-derived from --project on resume.
+    bound = getattr(args, "_bound_from_project", frozenset())
     parts = [
         sys.executable,
         str(_entry("video-recap", "recap.py")),
@@ -256,11 +258,11 @@ def _continuation_command(video, work_dir, args):
     if args.consolidate_asr:
         parts.append("--consolidate-asr")
     if uses_narration(args):
-        if args.mimo_tts_voice:
+        if args.mimo_tts_voice and "mimo_tts_voice" not in bound:
             parts += ["--mimo-tts-voice", args.mimo_tts_voice]
-        if args.tts_provider != "auto":
+        if args.tts_provider != "auto" and "tts_provider" not in bound:
             parts += ["--tts-provider", args.tts_provider]
-        if args.voice_ref:
+        if args.voice_ref and "voice_ref" not in bound:
             parts += ["--voice-ref", args.voice_ref]
         if args.allow_partial_tts:
             parts.append("--allow-partial-tts")
@@ -287,8 +289,10 @@ def _continuation_command(video, work_dir, args):
             )
         if args.require_narration_review:
             parts.append("--require-narration-review")
-    if args.material_library_dir:
+    if args.material_library_dir and "material_library_dir" not in bound:
         parts += ["--material-library-dir", args.material_library_dir]
+    if getattr(args, "project", None):
+        parts += ["--project", args.project]
     if args.use_materials:
         parts.append("--use-materials")
     if args.save_materials:

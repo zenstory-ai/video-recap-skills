@@ -43,6 +43,10 @@ LICENSE_STATUSES = ("unknown", "owned", "licensed", "restricted")
 CONSENT_STATUSES = ("unknown", "granted", "denied")
 TEMPLATE_STATUSES = ("draft", "adopted", "retired")
 PROVENANCES = ("measured", "fitted", "specified", "unknown")
+SUBTITLE_PARAMS = {
+    "font", "size_px", "outline_px", "shadow_px", "primary_color", "outline_color",
+    "max_chars", "max_lines", "band",
+}
 VOICE_PROVIDERS = ("mimo-tts", "fish-audio", "index-tts")
 SAMPLE_EXTS = {".mp4", ".mov", ".mkv", ".webm"}
 
@@ -222,6 +226,9 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
         if "resource" in node:
             refs.append((where, node["resource"]))
     if kind == "subtitle_style":
+        unknown = sorted(set(params) - SUBTITLE_PARAMS)
+        if unknown:
+            report.error(path, "unknown_params", f"subtitle_style 不认识的参数: {', '.join(unknown)}")
         font = params.get("font")
         if not (isinstance(font, dict) and (_nonempty_str(font.get("resource")) or _nonempty_str(font.get("family")))):
             report.error(path, "font", "subtitle_style 需要 params.font.resource 或 params.font.family")
@@ -303,6 +310,10 @@ def _check_links(index: dict, report: Report):
                 report.error(path, "resource_missing", f"{where} 引用的资源不存在: {ref}")
             elif want and resource["kind"] != want:
                 report.error(path, "resource_kind", f"{where} 需要 {want} 资源，{ref} 是 {resource['kind']}")
+            elif want == "font" and not _nonempty_str(
+                (json.loads(Path(resource["record"]).read_text(encoding="utf-8")).get("font") or {}).get("family")
+            ):
+                report.error(path, "font_family", f"字体资源 {ref} 需要 font.family，渲染才能按名字找到这份字体")
         for sample_id in template["samples"]:
             if sample_id not in samples:
                 report.error(path, "sample_missing", f"引用的样片不存在: {sample_id}")

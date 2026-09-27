@@ -62,6 +62,11 @@ def _read_video_duration_or_raise(path):
 
 def _probe_display_height_or_raise(path, *, require_square_pixels=False):
     """Return ffmpeg's display-coordinate height, accounting for rotation and SAR."""
+    return _probe_display_size_or_raise(path, require_square_pixels=require_square_pixels)[1]
+
+
+def _probe_display_size_or_raise(path, *, require_square_pixels=False):
+    """Return ffmpeg's display-coordinate (width, height), accounting for rotation and SAR."""
     cmd = [
         "ffprobe",
         "-v",
@@ -102,7 +107,7 @@ def _probe_display_height_or_raise(path, *, require_square_pixels=False):
         (int(round(float(value))) % 360 for value in rotation_values if value not in (None, "")),
         0,
     )
-    return display_width if rotation in {90, 270} else height
+    return (height, display_width) if rotation in {90, 270} else (display_width, height)
 
 
 def _analysis_settings(args):

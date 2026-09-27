@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import materials as material_lib
+import project_binding
 import resource_lock
 
 from recap_cli import TTS_PROVIDERS, parse_args
@@ -17,6 +18,7 @@ from recap_runtime import (
     _optional_env_int,
     _preflight_burn_subtitles,
     _probe_display_height_or_raise,
+    _probe_display_size_or_raise,
     _read_video_duration_or_raise,
     _run,
     _write_multi_source_manifest,
@@ -306,6 +308,9 @@ def _narrate(work_dir, args, timeline):
 
 def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assemble_args=()):
     """Shared tail of every full/cut run: narration (if owned) -> assemble -> final QC."""
+    project = getattr(args, "resolved_project", None)
+    if project and project["templates"]:
+        project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
     review_ran = _narrate(work_dir, args, timeline) if uses_narration(args) else None
     aargs = [str(assemble_video), "--work-dir", str(work_dir), "--recap-stem", recap_stem]
     extend_assemble_args(aargs, args)
@@ -446,6 +451,16 @@ def main():
     if not args.video:
         ap.error("video is required (unless --doctor)")
     validate_audio_routing(ap, args)
+    args.resolved_project = None
+    if args.project:
+        if uses_local_adoption(args) or args.edit_mode == "dub":
+            ap.error("--project applies to full/cut runs, not dub or local adoption bundles")
+        project_binding.apply_project(
+            project_binding.resolve_project(
+                args.project, args, include_voice=needs_voiceover(args)
+            ),
+            args,
+        )
 
     if needs_voiceover(args) and args.voice_ref is None:
         args.voice_ref = os.environ.get("VOICE_REF", "").strip() or None

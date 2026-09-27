@@ -51,6 +51,7 @@ def _subtitle_style_config(canvas=None):
     """
     style = {
         "font_name": CONFIG["subtitle_font_name"],
+        "font_file": CONFIG["subtitle_font_file"],
         "font_size": CONFIG["subtitle_font_size"],
         "primary_color": CONFIG["subtitle_primary_color"],
         "outline_color": CONFIG["subtitle_outline_color"],

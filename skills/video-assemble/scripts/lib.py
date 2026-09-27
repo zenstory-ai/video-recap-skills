@@ -119,6 +119,8 @@ CONFIG = {
     "target_lra": env_float("TARGET_LRA", 11.0),          # 目标响度范围 (LU)
     "final_limiter_peak": env_float("FINAL_LIMITER_PEAK", 0.98, minimum=0.1),  # loudnorm 后峰值保护 limiter
     "subtitle_font_name": os.environ.get("SUBTITLE_FONT_NAME", "Arial"),
+    # 可选字体文件：ASS 烧录经 fontsdir 加载，画面文字经 drawtext fontfile 使用；family 名仍由 SUBTITLE_FONT_NAME 指定
+    "subtitle_font_file": os.environ.get("SUBTITLE_FONT_FILE", "").strip(),
     "subtitle_font_size": env_int("SUBTITLE_FONT_SIZE", 42, minimum=8),
     "subtitle_primary_color": os.environ.get("SUBTITLE_PRIMARY_COLOR", "&H00FFFFFF"),
     "subtitle_outline_color": os.environ.get("SUBTITLE_OUTLINE_COLOR", "&H00000000"),

@@ -882,6 +882,23 @@ def test_subtitle_burn_filter_escapes_path():
     assert r"a\:b\,c\[1\].ass" in filt
 
 
+def test_declared_font_file_reaches_subtitle_and_drawtext_filters(monkeypatch, tmp_path):
+    font = tmp_path / "fonts: 1" / "Brand Sans.ttf"
+    font.parent.mkdir()
+    font.write_bytes(b"font")
+    monkeypatch.setitem(CONFIG, "subtitle_font_file", str(font))
+
+    burn = _subtitle_burn_filter(tmp_path / "subs.ass")
+
+    assert burn.endswith(r"fontsdir='" + font.parent.resolve().as_posix().replace(":", r"\:") + "'")
+    assert visual_render._drawtext_font_option() == (
+        "fontfile='" + font.resolve().as_posix().replace(":", r"\:") + "':"
+    )
+    monkeypatch.setitem(CONFIG, "subtitle_font_file", "")
+    assert "fontsdir" not in _subtitle_burn_filter(tmp_path / "subs.ass")
+    assert visual_render._drawtext_font_option() == ""
+
+
 def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")

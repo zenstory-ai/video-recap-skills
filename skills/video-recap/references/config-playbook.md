@@ -2,8 +2,10 @@
 
 The bundle runs **zero-config** with sensible defaults. To change behavior, set the
 environment variables below (or pass the noted CLI flags) — they **override** the defaults.
-Nothing here is required; this is documentation only. No tool reads a config file, and the
-bundle ships no root `CLAUDE.md` (so it never collides with your project/global instructions).
+Nothing here is required; this is documentation only. The only config file any tool reads is an
+optional `recap_project.json` passed with `--project` (see `resource-library.md`): it resolves to the same
+variables below, and a variable you set that disagrees with the project stops the run. The bundle ships no
+root `CLAUDE.md` (so it never collides with your project/global instructions).
 Defaults below are bundle-level defaults unless a note scopes them to a specific stage.
 
 | Concern | Env var / flag | Default | Notes |
@@ -48,6 +50,7 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | Shot-change-aware cut | `SCENE_CUT_SNAP` / `SCENE_CUT_SNAP_MARGIN` / `SCENE_CUT_DETECT_THRESHOLD` | on / `0.5` / `0.4` | cut mode: nudge each clip boundary off the original footage's hard cuts so the edit point doesn't flash a sliver of the adjacent shot (闪烁). source_start moves forward onto / source_end back onto any shot-change within the margin; boundaries already on a cut, or that would shrink a clip below ~0.5s, are left as-is. Set `SCENE_CUT_SNAP=0` to disable |
 | VLM workers | `VLM_WORKERS` | `8` | lower to 1 if a proxy/WAF rate-limits |
 | Subtitle size | `SUBTITLE_FONT_SIZE` / `SUBTITLE_MARGIN_V` | `42` / `48` | look & placement |
+| Subtitle font | `SUBTITLE_FONT_NAME` / `SUBTITLE_FONT_FILE` | `Arial` / — | with a font file, burned ASS subtitles load fonts from its directory (`fontsdir`) and on-screen text overlays use it (`fontfile`); `SUBTITLE_FONT_NAME` must be that file's family name. A bound `subtitle_style` template sets both |
 | 整理 / index | `--no-consolidate` / `--consolidate-asr` | on | build the understanding index (and optionally clean ASR); use `--no-consolidate` to skip |
 | Advisory / strict narration review | `REVIEW_NARRATION` / `--review-narration` / `--no-review-narration`; strict: `REQUIRE_NARRATION_REVIEW` / `--require-narration-review` | advisory on, strict off | runs the narration review stage after validation and before TTS. Default advisory mode is fail-open; strict mode blocks TTS on review failure, parse error, or error-severity findings. In cut mode the reviewer uses `clip_plan_validated.json` to remap VLM/ASR grounding onto the output timeline |
 | 剪映 export (optional) | `--export-jianying` / `EXPORT_JIANYING` | off | after rendering, also write a 剪映/JianYing draft from `timeline.json`. Decoupled — the core render never needs it |

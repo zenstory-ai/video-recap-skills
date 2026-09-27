@@ -136,7 +136,8 @@ python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --material-library-dir 
 素材检索只是对 JSON / MD / JSONL 做 grep，例如 `grep -R "keyword" .video-materials`。当前版本不复制原始媒体，也不提供数据库、向量或语义搜索。
 
 同一根目录还可以登记可复用的资源（BGM、音效、音色、字体、图片）、带版本与采用记录的模板（字幕样式、包装图层）和样片。
-格式与 `scripts/library.py check|list|show` 只读工具见 `references/resource-library.md`；当前版本只登记与校验，渲染尚不读取它们。
+格式与 `scripts/library.py check|list|show` 只读工具见 `references/resource-library.md`。用 `--project recap_project.json` 把已采用的字幕样式、音色与 BGM 绑定到这次运行；
+每次 full / cut 合成后 `work_dir/resource_lock.json` 记下实际用到的资源与授权状态。
 
 ### 4.4 继续生成成片
 

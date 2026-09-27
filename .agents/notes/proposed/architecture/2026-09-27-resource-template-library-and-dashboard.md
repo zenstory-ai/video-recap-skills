@@ -117,7 +117,7 @@ Status: proposed
 4. 只读 dashboard。
 5. `packaging` 模板与样片。
 
-每期一个 PR，各自带实现笔记。第 1 期已落地：[[2026-09-27-resource-library-format]]；第 2 期：[[2026-09-27-resource-lock]]。
+每期一个 PR，各自带实现笔记。第 1 期已落地：[[2026-09-27-resource-library-format]]；第 2 期：[[2026-09-27-resource-lock]]；第 3 期：[[2026-09-27-project-binding-and-font-files]]。
 
 ## Alternatives considered
 

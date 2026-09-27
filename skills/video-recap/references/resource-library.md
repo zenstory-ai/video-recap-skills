@@ -115,6 +115,32 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 样片是证据，不是模板：`demonstrates` 写它示范了什么，`not_reusable` 写不能照搬什么（人物、字幕内容、时间码……）。
 `templates` 用 `id@vN` 指回它所示范的模板版本。
 
+## 项目绑定 `recap_project.json`
+
+```json
+{
+  "schema": "video-recap.project.v1",
+  "name": "某系列竖屏解说",
+  "library": "../video-library",
+  "bindings": {"subtitle_style": "clean-white@v1", "voice": "narrator-demo", "bgm": "pulse-demo"}
+}
+```
+
+`python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 在任何阶段开始前解析绑定：`library` 相对项目文件；
+模板必须是 `adopted`；资源与模板必须通过 `check`。解析结果只以各阶段已有的设置下发，阶段技能不读资源库：
+
+| 绑定 | 下发为 |
+|---|---|
+| `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，字体资源 → 再加 `SUBTITLE_FONT_FILE` |
+| `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |
+| `bgm` | `BGM_PATH` ← 该资源的第一个文件 |
+| `packaging` | 见下一节 |
+
+- 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会静默覆盖。
+- 合成前核对模板画布与实际成片画布；不一致即停止——换画幅要用另一个模板。
+- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；dub 模式与本地采用三件套不接受 `--project`。
+- 续跑命令只带 `--project`，不重复写出由绑定得到的值，改了绑定后续跑会按新绑定解析。
+
 ## 运行记录
 
 每次 full / cut 合成后，`work_dir/resource_lock.json` 记下这次用到的原片、音色、BGM 与字幕字体，并对上资源库里的登记和授权状态；

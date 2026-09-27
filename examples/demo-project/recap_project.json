@@ -1,0 +1,11 @@
+{
+  "schema": "video-recap.project.v1",
+  "name": "合成示例项目",
+  "library": "../resource-library",
+  "bindings": {
+    "subtitle_style": "clean-white@v1",
+    "voice": "narrator-demo",
+    "bgm": "pulse-demo"
+  },
+  "notes": "演示用：把合成示例库里已采用的字幕样式、MiMo 默认音色与合成 BGM 绑定到一次运行。模板按 900x1600 校准，只适用于同画布的成片。"
+}
