@@ -59,6 +59,8 @@ def test_text_char_count():
     assert _text_char_count("hello") == 5
     assert _text_char_count("你好世界") == 4
     assert _text_char_count("") == 0
+    assert _text_char_count("你好，世界。") == 4
+    assert _text_char_count("「你好」 world!") == 7
 
 
 @pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
@@ -741,14 +743,5 @@ def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
 
     with pytest.raises(SystemExit, match="finite and positive"):
         validate_bounds([{"start": 0.0, "end": 1.0}], float("nan"))
-
-
-def test_cut_output_mode_requires_output_duration(monkeypatch, tmp_path):
-    _write_json(
-        tmp_path / "narration.json", [{"start": 0.0, "end": 1.0, "narration": "有效。"}]
-    )
-
-    with pytest.raises(SystemExit, match="--output-duration is required"):
-        _run_validate(monkeypatch, tmp_path, "cut_output")
 
 

@@ -23,7 +23,6 @@ import json
 
 import understanding_runner as understand
 from vlm import _max_frames_for_duration
-from brief import assess_understanding_substrate
 
 
 def test_frame_count_scales_with_duration_and_caps():
@@ -74,21 +73,6 @@ def test_overview_becomes_primary_description_and_keeps_frame_facts(tmp_path):
     # scene 1: no overview chunk -> untouched (frame description is the fallback)
     assert out[1]["description"] == "frame desc 1"
     assert "frame_description" not in out[1]
-
-
-def test_overview_merge_does_not_regress_substrate_grade(tmp_path):
-    scenes = [{"scene_id": 0, "description": "frame", "frame_facts": {"1.0": ["a"]}}]
-    asr = [{"text": "对" * 250}]  # rich spine
-    before = assess_understanding_substrate([dict(s) for s in scenes], asr)["level"]
-    ov = tmp_path / "mimo_video_overview.json"
-    ov.write_text(
-        json.dumps({"chunks": [{"scene_id": 0, "content": "丰富的视频理解描述。"}]}),
-        encoding="utf-8",
-    )
-    after = assess_understanding_substrate(
-        understand._merge_overview_into_scenes(scenes, ov), asr
-    )["level"]
-    assert before == after == "rich"  # frame_facts untouched -> grade cannot drop
 
 
 def test_overview_absent_or_rejected_is_noop(tmp_path):

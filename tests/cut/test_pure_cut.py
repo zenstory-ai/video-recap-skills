@@ -401,7 +401,7 @@ def test_edited_source_cache_corrupt_own_metadata_raises(tmp_path, metadata):
     plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
     assert cut.should_reuse_edited_source(edited, plan, video) is False
     Path(f"{edited}.meta.json").write_text(metadata, encoding="utf-8")
-    with pytest.raises((ValueError, LookupError, TypeError)):
+    with pytest.raises(ValueError):
         cut.should_reuse_edited_source(edited, plan, video)
 
 

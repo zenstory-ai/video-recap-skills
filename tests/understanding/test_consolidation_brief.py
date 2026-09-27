@@ -79,7 +79,7 @@ def test_brief_without_consolidation_uses_raw_asr_and_writes_sidecars(monkeypatc
     uses RAW asr, and the chunk/fusion sidecars are still written and surfaced."""
     monkeypatch.setitem(CONFIG, "asr_chunk_min_chars", 5)
     monkeypatch.setitem(CONFIG, "asr_chunk_max_chars", 12)  # == len(ASR text): max flush
-    text = _brief_text(tmp_path)
+    text = _brief_text(tmp_path, style="纪实复盘")
     requirements = json.loads(
         (tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8")
     )
@@ -88,6 +88,8 @@ def test_brief_without_consolidation_uses_raw_asr_and_writes_sidecars(monkeypatc
         "style_card_required": False,
     }
     assert INDEX_HEADING not in text
+    for leaked in ["范闲", "监察院", "五竹", "京都"]:  # no hardcoded example entities
+        assert leaked not in text
     assert "ASR writing chunks" in text
     assert "Timeline fusion" in text
     written = json.loads(
@@ -962,19 +964,3 @@ def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
             120.0,
             tmp_path,
         )
-
-
-def test_script_narration_brief_does_not_leak_hardcoded_example_entities(tmp_path):
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
-    asr = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
-    silence = [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}]
-
-    text = build_agent_brief(scenes, asr, silence, 6.0, tmp_path, style="纪实复盘").read_text(encoding="utf-8")
-    requirements = json.loads((tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8"))
-
-    assert requirements == {
-        "schema_version": 1,
-        "style_card_required": False,
-    }
-    for leaked in ["范闲", "监察院", "五竹", "京都"]:
-        assert leaked not in text

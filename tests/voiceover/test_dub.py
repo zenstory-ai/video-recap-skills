@@ -401,14 +401,13 @@ def test_p0_dub_lint_warns_near_trim_risk_before_hard_cut():
 def test_clone_cache_meta_from_content_hash_schema_is_a_miss(monkeypatch, tmp_path):
     """A .meta.json from the fingerprint schema has no `inputs`: re-synthesize once, don't crash."""
     raw = tmp_path / "line_000_raw.wav"
-    raw.write_bytes(b"old")
+    _write_test_wav(raw)  # a usable cached wav, so only the stale meta can force the miss
     dub._clone_cache_meta_path(raw).write_text(
         json.dumps({"schema_version": 1, "fingerprint": "a" * 64, "model": dub.CLONE_MODEL}),
         encoding="utf-8",
     )
     synthesized = []
-    monkeypatch.setattr(dub, "_clone_tts", lambda text, ref, out: (synthesized.append(text), Path(out).write_bytes(b"new")))
-    monkeypatch.setattr(dub, "_usable_clone_wav", lambda path: Path(path).read_bytes() == b"new")
+    monkeypatch.setattr(dub, "_clone_tts", lambda text, ref, out: (synthesized.append(text), _write_test_wav(out)))
 
     hit = dub._ensure_clone_tts("你好", "b64", {"size": 3, "mtime_ns": 1}, raw)
 

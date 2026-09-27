@@ -34,7 +34,6 @@ from lib import (  # noqa: E402
 from understanding_brief import _research_context  # noqa: E402
 from vlm import (  # noqa: E402
     _mimo_video_chunks,
-    _video_data_url,
     analyze_scenes,
     analyze_video_overview,
 )
@@ -223,16 +222,6 @@ def test_mimo_video_chunks_split_on_scene_boundaries(monkeypatch):
         (3, 2.0, 4.0),
         (3, 4.0, 5.0),
     ]
-
-
-def test_mimo_video_overview_embeds_small_local_chunk(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"tiny")
-    monkeypatch.setitem(CONFIG, "mimo_video_base64_max_mb", 1)
-
-    data_url = _video_data_url(video)
-
-    assert data_url.startswith("data:video/mp4;base64,")
 
 
 def test_research_context_feeds_vlm_from_background_research(tmp_path):

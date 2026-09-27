@@ -97,7 +97,7 @@ def test_each_response_needs_premise_unless_order_is_not_required(run_cut, early
 
 def test_audio_requirement_cannot_be_met_by_silent_picture(run_cut, monkeypatch):
     run, video = run_cut
-    monkeypatch.setattr(cut_cli, '_has_audio_stream', lambda _: False, raising=False)
+    monkeypatch.setattr(cut_cli, '_has_audio_stream', lambda _: False)
     raw = {'clips': [{'start': 2, 'end': 6}], 'required_evidence': contract(video, 'audio')}
     with pytest.raises(SystemExit, match='QC blocking'):
         run(raw, '--normalize-only')
@@ -114,7 +114,7 @@ def test_present_invalid_contract_is_not_ignored(run_cut, bad):
 
 def test_absent_requirements_preserve_legacy_normalize(run_cut, monkeypatch):
     run, _ = run_cut
-    monkeypatch.setattr(cut_cli, '_has_audio_stream', lambda _: pytest.fail('unneeded audio probe'), raising=False)
+    monkeypatch.setattr(cut_cli, '_has_audio_stream', lambda _: pytest.fail('unneeded audio probe'))
     assert 'required_evidence' not in run({'clips': [{'start': 0, 'end': 2}]}, '--normalize-only')['qc']
 
 

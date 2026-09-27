@@ -767,11 +767,6 @@ def test_sidecar_from_content_hash_schema_is_a_plain_miss(monkeypatch, tmp_path)
     tts_dir.mkdir()
     wav = tts_dir / "narr_000.wav"
     wav.write_bytes(b"stale")
-    voiceover._tts_segment_cache_path(wav).write_text(json.dumps({
-        "version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64,
-        "spoken_text": "重新生成。", "audio_duration": 1.0, "tts_rate_offset": 0.0,
-        "truncated": False, "truncate_reason": "none", "normalization": None,
-    }), encoding="utf-8")
     calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
     monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0)
 

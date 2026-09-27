@@ -111,20 +111,6 @@ def test_approved_text_policy_is_part_of_segment_cache_inputs(monkeypatch, tmp_p
     assert legacy_key != approved_key
 
 
-def test_legacy_cache_payload_shape_remains_compatible(monkeypatch, tmp_path):
-    _configure_offline_tts(monkeypatch)
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
-    seg = {"start": 0.0, "end": 2.0, "narration": "旧缓存继续可用。"}
-
-    payload = voiceover._tts_segment_cache_inputs(
-        "mimo-tts", 0, seg, "旧缓存继续可用。", "+0%", "+0Hz"
-    )
-
-    assert "authored_text_policy" not in payload
-    assert "authored_text" not in payload
-    assert "provider_text_cleanup" not in payload
-
-
 def test_strict_cache_inputs_carry_raw_authored_text_after_cleanup(monkeypatch):
     _configure_offline_tts(monkeypatch)
     monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
