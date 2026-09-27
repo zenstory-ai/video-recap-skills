@@ -2,11 +2,8 @@
 
 from briefing.builder import build_agent_brief
 from briefing.context import assess_understanding_substrate
-from narration_lint import lint_narration, validate_narration_or_raise
 
 __all__ = [
     "assess_understanding_substrate",
     "build_agent_brief",
-    "lint_narration",
-    "validate_narration_or_raise",
 ]

@@ -22,13 +22,9 @@ import subtitles.track_binding as subtitle_track_binding
 import timeline_emit
 import visual_render
 import lib
-from assembly_settings import assembly_settings_payload
-from audio_mix import final_loudnorm_filter
 
 __all__ = [
     "assemble_video",
-    "assembly_settings_payload",
-    "final_loudnorm_filter",
     "main",
 ]
 

@@ -427,6 +427,8 @@ def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
     assert (
         "step 1 of 2" in text
     )  # A1: cut-first, write clip_plan only (no edited_source yet)
+    assert "Inspect dense scene-change candidates" in text
+    assert "restore same-source motion" in text
     clip_plan = next(
         item for item in _json_examples(text) if isinstance(item, dict) and "clips" in item
     )

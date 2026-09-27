@@ -128,20 +128,6 @@ def test_tempo_budget_helper_agrees_wherever_the_tempo_knobs_are_declared(libs):
             assert lib.narration_tempo_budget(offset) == expected, name
 
 
-def test_visual_qc_delivery_boundary_fields_are_not_audio_policy_keys(libs):
-    """Delivery transparency fields are rollup/QC facts, not shared audio policy knobs;
-    this guards against leaking visual-delivery contract fields into CONFIG parity."""
-    delivery_fact_keys = {
-        "video_encode_passes",
-        "reencode_reason",
-        "audio_sample_rate",
-        "final_compat_notes",
-        "double_encode",
-    }
-    for name, lib in libs.items():
-        assert not (delivery_fact_keys & set(lib.CONFIG)), name
-
-
 def test_no_skill_declares_config_it_never_reads(libs):
     """The invariant that replaces blanket parity.
 

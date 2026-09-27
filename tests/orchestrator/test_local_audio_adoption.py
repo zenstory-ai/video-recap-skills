@@ -160,6 +160,8 @@ def test_local_bundle_ignores_hostile_ambient_tts_and_voice(monkeypatch, tmp_pat
     recap_runner.main()
 
     assert [script for _, script, _ in calls] == ["assemble.py"]
+    forwarded = calls[0][2]
+    assert "--voice-ref" not in forwarded and "--tts-provider" not in forwarded
 
 
 def test_audio_binding_records_each_local_artifact_path(tmp_path):

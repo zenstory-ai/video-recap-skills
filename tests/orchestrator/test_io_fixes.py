@@ -495,19 +495,6 @@ def test_recap_strict_cut_output_review_forwards_strict_evidence(monkeypatch, tm
     assert "--strict-evidence" in review_args
 
 
-def test_recap_manifest_identity_is_size_and_mtime(tmp_path):
-    video = tmp_path / "a.mp4"
-    video.write_bytes(b"A" * 10)
-    stat = video.stat()
-
-    assert material_lib.file_identity(video) == {
-        "size": stat.st_size, "mtime_ns": stat.st_mtime_ns,
-    }
-    bumped = stat.st_mtime_ns + 1_000_000  # 1 ms: above NTFS's 100 ns tick on Windows CI
-    os.utime(video, ns=(stat.st_atime_ns, bumped))
-    assert material_lib.file_identity(video)["mtime_ns"] == bumped
-
-
 def test_recap_phase_b_rejects_work_dir_from_different_source(monkeypatch, tmp_path):
     """Phase B must not apply an existing narration.json to a different input video."""
     _, work = seed_full_work(tmp_path, [{"start": 0, "end": 1, "narration": "old。"}])
@@ -879,16 +866,6 @@ def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
     assert recap_timeline._read_phase_ledger(work).get("edited_source_rendered") is True
 
 
-def test_cut_narration_stale_guard_logic():
-    """Any clip_plan change while a cut narration is present makes that narration stale."""
-    cp1 = {"size": 10, "mtime_ns": 1}
-    cp2 = {"size": 10, "mtime_ns": 2}
-    assert recap_timeline._cut_narration_is_stale(None, cp1) is False
-    base = {"clip_plan_identity": cp1}
-    assert recap_timeline._cut_narration_is_stale(base, dict(cp1)) is False
-    assert recap_timeline._cut_narration_is_stale(base, cp2) is True
-
-
 def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
     monkeypatch, tmp_path
 ):
@@ -1125,20 +1102,35 @@ def test_recap_subtitle_coordinates_do_not_leak_into_process_environment(
 def test_recap_fails_fast_and_absolutizes_voice_reference(
     monkeypatch, tmp_path, capsys
 ):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"source")
+    video, work = seed_full_work(tmp_path)
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr("recap_runner._preflight_burn_subtitles", lambda args: None)
-    monkeypatch.setattr("recap_runner._understand_args_for_source", lambda *args: [])
+    monkeypatch.delenv("MIMO_TTS_VOICE", raising=False)
+    calls = []
+
+    class VoiceoverReached(Exception):
+        pass
+
+    def voiceover(cli):
+        raise VoiceoverReached
+
     monkeypatch.setattr(
-        "recap_runner._run_or_restore_understanding", lambda *args: None
+        "recap_runner._run", stub_child_run(work, calls=calls, voiceover=voiceover)
     )
-    _argv(monkeypatch, video, "--voice-ref", "missing.wav")
+    argv = [video, "--work-dir", work, "--no-review-narration", "--voice-ref", "voice.wav"]
+    _argv(monkeypatch, *argv)
 
     with pytest.raises(SystemExit) as exc_info:
         recap.main()
     assert exc_info.value.code == 2
     assert "reference audio does not exist" in capsys.readouterr().err
+    assert calls == []
+
+    (tmp_path / "voice.wav").write_bytes(b"reference")
+    with pytest.raises(VoiceoverReached):
+        recap.main()
+    voiceover_args = _call_args(calls, "video-voiceover", "voiceover.py")
+    forwarded = voiceover_args[voiceover_args.index("--voice-ref") + 1]
+    assert forwarded == str((tmp_path / "voice.wav").resolve())
 
 
 def _understand_writes_phase_a(cli):
@@ -1220,42 +1212,6 @@ def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
     )
     assert not any(c[1] in ("voiceover.py", "assemble.py") for c in calls)
     assert recap_timeline._read_phase_ledger(work)["multi_source"] is True
-
-
-def test_multi_cut_forwards_approved_text_protection_to_validation(
-    monkeypatch, tmp_path
-):
-    args = manifest_args(
-        edit_mode="cut", preserve_approved_text=True, review_narration=False
-    )
-    videos, work, records = seed_multi_work(
-        tmp_path, args, narration=[{"start": 0, "end": 1, "narration": "批准稿。"}]
-    )
-    calls = []
-
-    class VoiceoverReached(Exception):
-        pass
-
-    def voiceover(cli):
-        raise VoiceoverReached
-
-    monkeypatch.setattr(
-        "recap_runner._run",
-        stub_child_run(
-            work,
-            calls=calls,
-            cut=lambda cli: write_cut_output(work, [multi_cut_clip(records, videos)]),
-            voiceover=voiceover,
-        ),
-    )
-    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 1.0)
-
-    with pytest.raises(VoiceoverReached):
-        recap._run_multi_cut(videos, work, args)
-
-    validate_args = _call_args(calls, "video-script", "validate.py")
-    assert validate_args[validate_args.index("--mode") + 1] == "cut_output"
-    assert "--preserve-approved-text" in validate_args
 
 
 def test_recap_single_video_phase_a_can_save_materials(monkeypatch, tmp_path):

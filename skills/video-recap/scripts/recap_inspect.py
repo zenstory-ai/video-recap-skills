@@ -60,7 +60,6 @@ _STORYBOARD_ARTIFACTS = [
     "storyboard/source_storyboard.json",
     "storyboard/edited_storyboard.json",
 ]
-_FORWARD_STATE_FILES = ["manifest.json", "task_state.json"]
 
 _COMPACT_TEXT_LIMIT = 80
 
@@ -196,7 +195,6 @@ def cmd_state(work_dir, compact=None):
     if not work_dir.exists():
         return {"error": f"work_dir 不存在: {work_dir}"}
 
-    forward = [name for name in _FORWARD_STATE_FILES if _present(work_dir, name)]
     mode = _detect_mode(work_dir)
     groups = {
         "understanding": _UNDERSTANDING_ARTIFACTS,
@@ -215,7 +213,6 @@ def cmd_state(work_dir, compact=None):
     return {
         "work_dir": str(work_dir),
         "mode": mode,
-        "forward_state_files": forward,
         "source_video": _discover_source(work_dir),
         "multi_source": _discover_multi_source(work_dir),
         "next_pause": {"artifact": pause[0], "hint": pause[1]} if pause else None,
@@ -229,8 +226,6 @@ def _render_state_md(state, compact):
     if "error" in state:
         return state["error"]
     lines = [f"# recap work_dir 状态: {state['work_dir']}", ""]
-    if state["forward_state_files"]:
-        lines.append(f"状态来源（write-side manifest）: {', '.join(state['forward_state_files'])}")
     lines.append(f"模式: **{state['mode']}**")
     src = state["source_video"]
     lines.append(f"源视频: {_truncate(src['path'] or 'unknown', compact)}  (来源 {src['origin']})")

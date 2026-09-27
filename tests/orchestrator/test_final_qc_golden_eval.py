@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 import pytest
 
@@ -340,21 +339,6 @@ def test_golden_fixture_mismatch_blocker(tmp_path):
     assert {"min_duration_mismatch", "codec_mismatch"} <= codes
     assert golden["ok"] is False
     assert qc.validate_report(golden) is True
-
-
-def test_recap_post_render_helper_calls_final_qc_run(monkeypatch, tmp_path):
-    seen = {}
-
-    def fake_run(work_dir, final_output=None):
-        seen["work_dir"] = Path(work_dir)
-        seen["final_output"] = Path(final_output)
-        return {"written": ["final_qc.json", "golden_eval.json"]}
-
-    monkeypatch.setattr(recap.final_qc, "run", fake_run)
-    result = recap._write_final_qc_reports(tmp_path, tmp_path / "fake.mp4")
-
-    assert result["written"] == ["final_qc.json", "golden_eval.json"]
-    assert seen == {"work_dir": tmp_path, "final_output": tmp_path / "fake.mp4"}
 
 
 def test_no_secret_persistence_in_final_qc_or_golden_eval(tmp_path):

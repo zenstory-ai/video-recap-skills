@@ -199,6 +199,9 @@ def test_unknown_schema_version_and_missing_required_fields_validation_errors():
 
 
 def test_stage_names_match_approved_gate_matrix_exactly():
+    assert qc.ARTIFACTS == frozenset(
+        {"final_qc.json", "golden_eval.json", "mimo_qc.json", "preflight_qc.json"}
+    )
     assert qc.STAGES == frozenset(
         {
             "pre_cut",
@@ -298,14 +301,6 @@ def test_mimo_qc_artifact_attaches_to_actual_stage_not_stage_value():
     )
     with pytest.raises(qc.QCContractError, match="unsupported stage"):
         qc.build_report(artifact="mimo_qc.json", stage="mimo_qc", findings=[finding])
-
-
-def test_preflight_qc_artifact_supported_without_changing_existing_artifacts():
-    assert "preflight_qc.json" in qc.ARTIFACTS
-    assert {"final_qc.json", "golden_eval.json", "mimo_qc.json"} <= qc.ARTIFACTS
-    report = qc.build_report(artifact="preflight_qc.json", stage="pre_tts", findings=[])
-    assert report["ok"] is True
-    assert qc.validate_report(report) is True
 
 
 def test_shift_left_helper_rolls_up_latest_report_per_stage(tmp_path):

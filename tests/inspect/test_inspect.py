@@ -111,13 +111,6 @@ def test_state_lists_storyboards_when_present(tmp_path):
     assert "storyboard/edited_storyboard.json" not in state["storyboards"]
 
 
-def test_state_forward_compat_prefers_manifest_file(tmp_path):
-    """A future write-side manifest.json/task_state.json is surfaced as the state source."""
-    (tmp_path / "manifest.json").write_text("{}", encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
-    assert "manifest.json" in state["forward_state_files"]
-
-
 def test_state_missing_artifact_no_traceback(tmp_path):
     """An empty work_dir produces a clear human report with a stale-manifest warning, never a
     traceback. (Renders to markdown without raising.)"""

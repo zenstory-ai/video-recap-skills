@@ -165,13 +165,6 @@ def test_dense_scene_cut_policy_distinguishes_source_and_edit_created_cuts():
     assert "原片自带的无关短镜头整段删除" in cut_skill
     assert "由本次拼接制造的切点" in cut_skill
 
-    for skill_name in ("video-understanding",):
-        brief = (
-            SKILLS_ROOT / skill_name / "scripts" / "briefing" / "builder.py"
-        ).read_text(encoding="utf-8")
-        assert "Inspect dense scene-change candidates" in brief
-        assert "restore same-source motion" in brief
-
 
 def test_deslop_qc_schema_keeps_template_transitions_advisory():
     marker = "模板化“不是……而是……”转折"
