@@ -9,7 +9,7 @@ from ``recap_inspect.cmd_state``. Media is only what the run declares: the
 """
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import recap_inspect
 from dashboard_io import (MAX_JSON_BYTES, RUN_FILE, dir_of, media_entry, nearest, raw_text,
@@ -223,13 +223,38 @@ def lock_view(rdir: Path) -> dict:
         value = data.get(key)
         return [r for r in value if isinstance(r, dict)] if isinstance(value, list) else []
 
-    return {"status": "ok", "generated_at": data.get("generated_at"), "library": data.get("library"),
+    library = data.get("library")
+    resources = [{**entry, **_lock_file(entry), "registry": _registry(entry, library)} for entry in rows("resources")]
+    return {"status": "ok", "generated_at": data.get("generated_at"), "library": library,
             "project": data.get("project") if isinstance(data.get("project"), dict) else None,
-            "templates": rows("templates"), "resources": rows("resources"), "attention": rows("attention")}
+            "templates": rows("templates"), "resources": resources, "attention": rows("attention")}
+
+
+def _lock_file(entry: dict) -> dict:
+    """File name and directory of a lock entry's path, split for display."""
+    path = entry.get("path")
+    if not isinstance(path, str) or not path:
+        return {"name": None, "dir": None}
+    pure = PureWindowsPath(path) if "\\" in path else PurePosixPath(path)
+    return {"name": pure.name, "dir": str(pure.parent)}
+
+
+def _registry(entry: dict, library) -> str:
+    """Where a resource is accounted for: the resource library, the material library (source
+    videos are never registered as resources, by design), unregistered, or not applicable."""
+    if entry.get("role") == "source_video":
+        return "material"
+    if isinstance(entry.get("library"), dict):
+        return "library"
+    if library and (entry.get("path") or entry.get("role") == "voice"):
+        return "unregistered"
+    return "none"
 
 
 # --- stage bar ---------------------------------------------------------------------------
 def _stage_bar(mode, audio_mode, state, views, qc) -> list:
+    """Each stage's dot: ok, danger (must fix: QC or cut blockers), warn (advisory or unreadable),
+    todo (waiting for the agent) or "" (not reached)."""
     pause = ((state or {}).get("next_pause") or {}).get("artifact")
     understanding = ((state or {}).get("artifacts") or {}).get("understanding") or {"present": [], "missing": []}
     total = len(understanding["present"]) + len(understanding["missing"])
@@ -237,23 +262,23 @@ def _stage_bar(mode, audio_mode, state, views, qc) -> list:
     blockers = sum(c["blockers"] for c in qc)
     cells = {
         "home": ("", ""),
-        "understanding": ("on" if {"understanding_index.json", "agent_narration_brief.md"} & set(understanding["present"])
+        "understanding": ("ok" if {"understanding_index.json", "agent_narration_brief.md"} & set(understanding["present"])
                           else "", f"{len(understanding['present'])}/{total}" if total else ""),
-        "cut": {"ok": ("warn" if cut.get("blocking") else "on", f"{len(cut.get('clips', []))} 段"),
+        "cut": {"ok": ("danger" if cut.get("blocking") else "ok", f"{len(cut.get('clips', []))} 段"),
                 "pending": ("todo", "待校验"), "unparseable": ("warn", "无法解析"),
                 }.get(cut["status"], ("todo", "等剪辑计划") if pause == "clip_plan.json" else ("", "未剪")),
-        "narration": {"ok": ("warn" if (narration.get("tts") or {}).get("partial") else "on",
+        "narration": {"ok": ("warn" if (narration.get("tts") or {}).get("partial") else "ok",
                              f"{len(narration.get('segments', []))} 段"),
                       "unparseable": ("warn", "无法解析"),
                       }.get(narration["status"], ("todo", "等解说") if pause == "narration.json" else ("", "未写")),
-        "film": (("on", _clock(film["timeline"].get("duration")) if film["timeline"]["status"] == "ok" else "已合成")
+        "film": (("ok", _clock(film["timeline"].get("duration")) if film["timeline"]["status"] == "ok" else "已合成")
                  if (film["video"] or {}).get("path")
                  else ("warn", "无法预览") if film["video"] else ("", "未合成")),
-        "qc": (("warn", f"{blockers} 阻断") if blockers
+        "qc": (("danger", f"{blockers} 阻断") if blockers
                else ("warn", "无法解析") if any(c["level"] == "unparseable" for c in qc)
-               else ("on", "通过") if qc else ("", "未运行")),
+               else ("ok", "通过") if qc else ("", "未运行")),
         "resources": {"ok": ("warn", f"{len(lock.get('attention', []))} 注意") if lock.get("attention")
-                      else ("on", f"{len(lock.get('resources', []))} 项"),
+                      else ("ok", f"{len(lock.get('resources', []))} 项"),
                       "unparseable": ("warn", "无法解析")}.get(lock["status"], ("", "无记录")),
     }
     shown = [key for key, _ in STAGES

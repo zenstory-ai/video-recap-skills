@@ -13,8 +13,10 @@ from urllib.parse import quote
 
 import pytest
 
+import dashboard_data
 import dashboard_io
 import dashboard_server
+import dashboard_templates
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "resource-library"
@@ -37,6 +39,10 @@ def _build_root(root: Path) -> dict:
         "schema": "video-recap.project.v1", "name": "演示项目", "library": "../library",
         "bindings": {"subtitle_style": "clean-white@v1", "packaging": "bottom-bar@v1",
                      "voice": "narrator-demo", "bgm": "missing-bgm"},
+    })
+    _write(root / "clean" / "recap_project.json", {
+        "schema": "video-recap.project.v1", "name": "可用项目", "library": "../library",
+        "bindings": {"subtitle_style": "clean-white@v1", "voice": "narrator-demo"},
     })
     ep1 = root / "show" / "ep1"
     _write(ep1 / "recap_run_manifest.json", {"schema_version": 1, "source_video": "/abs/src.mp4",
@@ -71,10 +77,19 @@ def _build_root(root: Path) -> dict:
         {"code": "golden-duration", "message": "时长不符", "blocking": True}]})
     _write(ep1 / "assembly_qc.json", {"verdict": "PASS", "blocking_codes": []})
     _write(ep1 / "mimo_qc.json", "{not json")
+    bgm = root / "library" / "resources" / "bgm" / "pulse-demo" / "pulse-demo.wav"
     _write(ep1 / "resource_lock.json", {
-        "schema": "video-recap.resource-lock.v1", "generated_at": "2026-09-27T00:00:00Z", "library": None,
-        "project": None, "templates": [], "resources": [{"role": "voice", "path": None, "library": None}],
-        "attention": [{"code": "unregistered", "role": "voice", "message": "音色没有登记"}]})
+        "schema": "video-recap.resource-lock.v1", "generated_at": "2026-09-27T00:00:00Z",
+        "library": str(root / "library"), "project": {"path": str(root / "show"), "name": "演示项目"},
+        "templates": [{"role": "subtitle_style", "id": "clean-white", "version": 1, "status": "adopted"}],
+        "resources": [
+            {"role": "source_video", "path": "/abs/src.mp4", "size": 1, "mtime_ns": 1, "detail": {}, "library": None},
+            {"role": "voice", "path": "/abs/refs/narrator.wav", "size": 1, "mtime_ns": 1,
+             "detail": {"provider": "mimo-tts"}, "library": None},
+            {"role": "bgm", "path": str(bgm), "size": 8044, "mtime_ns": 1, "detail": {},
+             "library": {"id": "pulse-demo", "kind": "bgm", "license": "owned", "consent": None}},
+        ],
+        "attention": [{"code": "unregistered", "role": "voice", "message": "资源库中没有登记这项资源，授权状态未知"}]})
     _write(ep1 / "sources" / "src_a" / "recap_run_manifest.json", {"schema_version": 1, "source_video": "/abs/a.mp4"})
     _write(root / "broken" / "recap_run_manifest.json", "{oops")
     _write(root / "broken" / "final_qc.json", {"ok": True, "blocker_count": 0, "findings": []})
@@ -127,24 +142,47 @@ def _api(site, kind, rel):
 def test_overview_nests_runs_and_ranks_what_needs_attention(site):
     overview = _get_json(site, "/api/overview")
 
-    assert overview["counts"] == {"libraries": 1, "projects": 1, "runs": 4,
+    assert overview["counts"] == {"libraries": 1, "projects": 2, "runs": 4,
                                   "resources": 4, "templates": 2, "samples": 1}
     runs = {run["path"]: run for run in overview["runs"]}
     assert runs["show/ep1/sources/src_a"]["parent"] == "show/ep1"
     assert runs["show/ep1"]["project"] == "show"
-    assert overview["projects"][0]["runs"] == ["show/ep1"]
+    assert {p["path"]: p["runs"] for p in overview["projects"]}["show"] == ["show/ep1"]
     assert [item["kind"] for item in overview["next"]] == ["blocked", "waiting", "waiting"]
+    assert overview["next_severity"] == "danger"
     kinds = {(item["kind"], item.get("code")) for item in overview["attention"]}
     assert {("licence", "license_unknown"), ("binding", "not_adopted"), ("binding", "missing"),
             ("unparseable", None)} <= kinds
     assert all(item["ask"] and item["href"].startswith("#/") for item in overview["attention"])
 
 
+def test_severity_is_danger_only_for_what_must_be_fixed(site):
+    overview = _get_json(site, "/api/overview")
+    severity = {}
+    for item in overview["attention"]:
+        severity.setdefault(item["kind"], set()).add(item["severity"])
+
+    assert severity == {"blocked": {"danger"}, "binding": {"danger"}, "waiting": {"todo"},
+                        "licence": {"warn"}, "unparseable": {"warn"}}
+    stages = {s["key"]: s["state"] for s in _api(site, "run", "show/ep1")["stages"]}
+    assert (stages["qc"], stages["resources"], stages["narration"]) == ("danger", "warn", "ok")
+
+
+def test_advisories_alone_do_not_turn_the_next_steps_red(tmp_path):
+    shutil.copytree(EXAMPLE, tmp_path / "library")
+
+    overview = dashboard_data.overview(tmp_path.resolve())
+
+    assert [item["kind"] for item in overview["next"]] == ["licence"]
+    assert overview["next_severity"] == "warn"
+
+
 def test_library_detail_joins_records_with_bindings_and_previews(site):
     lib = _api(site, "library", "library")
 
     resources = {res["id"]: res for res in lib["resources"]}
-    assert resources["narrator-demo"]["bound_by"] == [{"path": "show", "name": "演示项目", "role": "voice"}]
+    assert resources["narrator-demo"]["bound_by"] == [{"path": "clean", "name": "可用项目", "role": "voice"},
+                                                      {"path": "show", "name": "演示项目", "role": "voice"}]
     assert resources["narrator-demo"]["license"]["status"] == "unknown"
     assert resources["pulse-demo"]["files"][0]["media"] == {
         "path": "library/resources/bgm/pulse-demo/pulse-demo.wav", "kind": "audio",
@@ -158,13 +196,55 @@ def test_library_detail_joins_records_with_bindings_and_previews(site):
     assert lib["samples"][0]["demonstrates"] == ["字幕带位置", "画布尺寸"]
 
 
+def test_templates_come_with_labelled_params_and_a_schematic_geometry(site):
+    templates = {tpl["ref"]: tpl for tpl in _api(site, "library", "library")["templates"]}
+    clean, bar = templates["clean-white@v1"], templates["bottom-bar@v1"]
+
+    assert [(r["label"], r["value"], r["unit"], r["provenance_label"]) for r in clean["rows"]] == [
+        ("字体", "Arial", "", ""), ("字号", "52", "px", "指定"), ("每行字数", "15", "字", "实测"),
+        ("描边", "3", "px", "指定"), ("字幕带", "y 1280–1440", "px", "实测")]
+    preview = clean["preview"]
+    assert preview["band"] == {"top": 80.0, "height": 10.0}
+    assert preview["margin_v"] == 160
+    assert (len(preview["line"]["text"]), preview["line"]["bottom"], preview["line"]["width_px"],
+            preview["line"]["usable_px"]) == (15, 10.0, 780, 820)
+    layer = bar["preview"]["layers"][0]
+    assert layer["media"]["path"] == "library/resources/image/frame-demo/frame-demo.png"
+    assert layer["box"] == {"left": 0.0, "top": 0.0, "width": 100.0, "height": 100.0}
+    assert bar["preview"]["safe"]["left"] == pytest.approx(40 / 9, abs=1e-3)
+    assert [r["label"] for r in bar["rows"]] == ["图层", "安全区"]
+
+
+@pytest.mark.parametrize("value, expected", [("&H00FFFFFF", "#FFFFFF"), ("&H0000A0FF", "#FFA000"),
+                                             ("&H102030", "#302010"), ("white", None)])
+def test_ass_colours_become_swatches(value, expected):
+    assert dashboard_templates.ass_to_hex(value) == expected
+
+
 def test_project_detail_reports_how_each_binding_resolves(site):
     project = _api(site, "project", "show")
 
-    assert {row["role"]: row["status"] for row in project["bindings"]} == {
-        "subtitle_style": "ok", "packaging": "not_adopted", "voice": "ok", "bgm": "missing"}
+    rows = {row["role"]: row for row in project["bindings"]}
+    assert {role: (row["status"], row["severity"]) for role, row in rows.items()} == {
+        "subtitle_style": ("ok", "ok"), "packaging": ("not_adopted", "danger"),
+        "voice": ("ok", "ok"), "bgm": ("missing", "danger")}
+    assert (rows["subtitle_style"]["target"]["title"], rows["subtitle_style"]["target"]["status"]) == ("白字细描边（演示）", "adopted")
+    assert (rows["voice"]["target"]["title"], rows["voice"]["target"]["license"]) == ("MiMo 默认解说音色", "unknown")
+    assert rows["packaging"]["target"]["status"] == "draft"
+    assert project["application"]["ok"] is False and "draft" in project["application"]["message"]
     assert project["library"]["rel"] == "library"
     assert {run["path"] for run in project["runs"]} == {"show/ep1", "show/ep1/sources/src_a"}
+
+
+def test_project_application_shows_what_recap_would_hand_the_stages(site, monkeypatch):
+    monkeypatch.setenv("SUBTITLE_FONT_SIZE", "99")  # ambient env must not change the view
+
+    application = _api(site, "project", "clean")["application"]
+
+    assert application["ok"] is True
+    assert {k: application["env"][k] for k in ("SUBTITLE_FONT_SIZE", "SUBTITLE_MAX_CHARS", "SUBTITLE_MARGIN_V")} == {
+        "SUBTITLE_FONT_SIZE": "52", "SUBTITLE_MAX_CHARS": "15", "SUBTITLE_MARGIN_V": "160"}
+    assert application["arg_updates"] == {"tts_provider": "mimo-tts", "mimo_tts_voice": "冰糖"}
 
 
 def test_run_detail_parses_each_stage_on_the_server(site):
@@ -180,7 +260,12 @@ def test_run_detail_parses_each_stage_on_the_server(site):
         "video": 2, "narration": 1, "bgm": 1, "subtitles": 1}
     assert {c["file"]: c["level"] for c in run["qc"]} == {
         "final_qc.json": "ok", "golden_eval.json": "error", "assembly_qc.json": "ok", "mimo_qc.json": "unparseable"}
-    assert views["resources"]["attention"][0]["code"] == "unregistered"
+    lock = views["resources"]
+    assert lock["attention"][0]["code"] == "unregistered"
+    assert [(r["role"], r["registry"], r["name"]) for r in lock["resources"]] == [
+        ("source_video", "material", "src.mp4"), ("voice", "unregistered", "narrator.wav"),
+        ("bgm", "library", "pulse-demo.wav")]
+    assert lock["resources"][1]["dir"] == "/abs/refs"
     assert [child["path"] for child in run["children"]] == ["show/ep1/sources/src_a"]
 
 

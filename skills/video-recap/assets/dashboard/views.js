@@ -9,7 +9,10 @@
 const LICENCE = { owned: ["ok", "自有"], licensed: ["ok", "已授权"], unknown: ["warn", "授权未确认"], restricted: ["bad", "受限"] };
 const CONSENT = { granted: ["ok", "声音授权已确认"], unknown: ["warn", "声音授权未确认"], denied: ["bad", "声音授权被拒"] };
 const TPL_STATUS = { adopted: ["ok", "已采用"], draft: ["off", "草稿"], retired: ["off", "已停用"] };
-const BINDING = { ok: ["ok", "已解析"], missing: ["bad", "找不到"], not_adopted: ["warn", "未采用"], kind_mismatch: ["bad", "类型不符"], version_required: ["warn", "缺版本"], no_library: ["bad", "没有资源库"], invalid: ["bad", "写法无效"] };
+const BINDING = { ok: ["ok", "已解析"], missing: ["bad", "找不到"], not_adopted: ["bad", "未采用，不会生效"], kind_mismatch: ["bad", "类型不符"], version_required: ["bad", "缺版本"], no_library: ["bad", "没有资源库"], invalid: ["bad", "写法无效"] };
+const SEVERITY_CHIP = { danger: ["bad", "必须处理"], todo: ["todo", "等你"], warn: ["warn", "留意"], ok: ["ok", "正常"] };
+const ROLE_LABEL = { source_video: "原片", voice: "音色", bgm: "背景音乐", subtitle_font: "字幕字体", packaging_layer: "包装图层", subtitle_style: "字幕样式", packaging: "包装" };
+const PROVENANCE = { measured: "实测", fitted: "调出", specified: "指定", unknown: "未知" };
 const QC_LEVEL = { ok: ["ok", "通过"], warn: ["warn", "留意"], error: ["bad", "阻断"], unparseable: ["bad", "无法解析"] };
 const KIND_LABEL = { bgm: "背景音乐", sfx: "音效", voice: "音色", font: "字体", image: "图片", subtitle_style: "字幕样式", packaging: "包装" };
 const MODE_LABEL = { full: "整段", cut: "剪辑" };
@@ -18,7 +21,7 @@ const GROUP_LABEL = { understanding: "理解", cut: "剪辑", script: "解说", 
 const STAGE_HINT = { understanding: "视频理解与创作 brief", cut: "剪辑计划与剪后母版", narration: "旁白稿与配音", film: "合成成片与时间线", qc: "成片检查", resources: "本次运行用到的资源" };
 const RESOURCE_KINDS = ["bgm", "sfx", "voice", "font", "image"];
 
-const statusChip = ([cls, word]) => `<span class="status ${cls}">${icon(cls === "ok" ? "check" : cls === "off" ? "minus" : "alert")}${esc(word)}</span>`;
+const statusChip = ([cls, word]) => `<span class="status ${cls}">${icon(cls === "ok" ? "check" : cls === "off" ? "minus" : cls === "todo" ? "right" : "alert")}${esc(word)}</span>`;
 const askButton = (ask, primary = false) => (ask ? `<button class="btn sm ${primary ? "primary" : ""}" type="button" data-copy="${esc(ask)}">${icon("copy")}复制给助手</button>` : "");
 const head = (title, sub, actions = "") => `<div class="head"><div><h2>${esc(title)}</h2>${sub ? `<div class="sub">${sub}</div>` : ""}</div>${actions ? `<div class="actions">${actions}</div>` : ""}</div>`;
 const section = (title, note = "") => `<div class="section-t"><h3>${esc(title)}</h3>${note ? `<span class="n">${esc(note)}</span>` : ""}</div>`;
@@ -58,7 +61,7 @@ function viewOverview(O) {
   const counts = O.next_counts;
   const rest = O.attention.length - O.next.length;
   const kpi = (label, value, detail, link) => `<a class="card kpi" href="${link}"><div class="k">${label}</div><div class="v">${value}</div><div class="d">${esc(detail)}</div></a>`;
-  const groups = O.projects.map((project) => `<a class="group-h" href="${href("project", project.path)}">${esc(project.name)} <span class="muted">${esc(project.path)}</span>${project.unresolved ? statusChip(["warn", `${project.unresolved} 个绑定未解析`]) : ""}</a>${runTree(O.runs.filter((run) => run.project === project.path), null) || '<div class="group-h muted">还没有运行</div>'}`);
+  const groups = O.projects.map((project) => `<a class="group-h" href="${href("project", project.path)}">${esc(project.name)} <span class="muted">${esc(project.path)}</span>${project.unresolved ? statusChip(["bad", `${project.unresolved} 个绑定不会生效`]) : ""}</a>${runTree(O.runs.filter((run) => run.project === project.path), null) || '<div class="group-h muted">还没有运行</div>'}`);
   const loose = O.runs.filter((run) => !run.project);
   if (loose.length) groups.push(`${O.projects.length ? '<div class="group-h">未归属项目的运行</div>' : ""}${runTree(loose, null)}`);
   return `<div class="wrap" data-view="overview">
@@ -74,9 +77,9 @@ function viewOverview(O) {
         ${kpi("需要处理", O.attention.length, `授权 ${counts.licence} · 库错误 ${counts.library_error}`, "#/")}
       </div>
     </div>
-    <div class="card next" id="nextSteps">
+    <div class="card next ${esc(O.next_severity)}" id="nextSteps" data-severity="${esc(O.next_severity)}">
       <div class="eyebrow">下一步</div>
-      ${O.next.length ? O.next.map((item, i) => `<div class="todo" data-kind="${esc(item.kind)}"><span class="num ${i ? "soft" : ""}">${i + 1}</span><div><div class="t">${esc(item.message)}</div><div class="d">${esc(item.title)}</div>
+      ${O.next.length ? O.next.map((item, i) => `<div class="todo" data-kind="${esc(item.kind)}" data-severity="${esc(item.severity)}"><span class="num ${esc(item.severity)}">${i + 1}</span><div><div class="t">${esc(item.message)}</div><div class="d">${esc(item.title)}</div>
         <div class="acts">${askButton(item.ask, i === 0)}<a class="btn sm ghost" href="${esc(item.href)}">打开</a></div></div></div>`).join("")
         : '<div class="todo"><span class="num">✓</span><div><div class="t">没有待处理的事</div><div class="d">运行都没有卡住，资源库也没有需要确认的授权。</div></div></div>'}
       <p class="foot">${rest > 0 ? `另有 ${rest} 条，见下方「需要注意」。` : ""}看板只读：写稿、剪辑、合成、登记授权都在和助手的对话里确认。</p>
@@ -90,25 +93,43 @@ function viewOverview(O) {
     <span class="pills"><span class="pill">资源 ${lib.counts.resources}</span><span class="pill">模板 ${lib.counts.templates}</span><span class="pill">样片 ${lib.counts.samples}</span></span>
     <span class="pills">${lib.error_count ? statusChip(["bad", `${lib.error_count} 个错误`]) : statusChip(["ok", "校验通过"])}${lib.warning_count ? statusChip(["warn", `${lib.warning_count} 条提醒`]) : ""}</span></a>`).join("")}</div>`
     : empty("还没有资源库", "资源库根目录放一个 library.json；格式见 references/resource-library.md。")}
-  ${O.attention.length ? `${section("需要注意", `${O.attention.length} 条`)}<div class="card alist">${O.attention.map((item) => `<a class="arow" href="${esc(item.href)}">${statusChip(item.level === "error" ? ["bad", "错误"] : item.level === "todo" ? ["warn", "待办"] : ["warn", "留意"])}<span><span class="t">${esc(item.title)}</span><br><span class="m">${esc(item.message)}</span></span><span class="go muted">${icon("right")}</span></a>`).join("")}</div>` : ""}
+  ${O.attention.length ? `${section("需要注意", `${O.attention.length} 条`)}<div class="card alist">${O.attention.map((item) => `<a class="arow" href="${esc(item.href)}">${statusChip(SEVERITY_CHIP[item.severity] || SEVERITY_CHIP.warn)}<span><span class="t">${esc(item.title)}</span><br><span class="m">${esc(item.message)}</span></span><span class="go muted">${icon("right")}</span></a>`).join("")}</div>` : ""}
 </div>`;
 }
 
 /* ================================================================ project */
 
+function resolvedTo(row) {
+  const t = row.target;
+  if (!t) return '<span class="muted">—</span>';
+  if (t.type === "template") return `${esc(t.title || t.ref)} <span class="mono muted">${esc(t.ref)}</span> ${statusChip(TPL_STATUS[t.status] || ["bad", t.status || "—"])}${t.canvas ? ` <span class="muted small">${t.canvas.width}×${t.canvas.height}</span>` : ""}`;
+  return `${esc(t.title || t.ref)} <span class="muted small">${esc(KIND_LABEL[t.kind] || t.kind)}</span> ${statusChip(LICENCE[t.license] || ["bad", t.license || "未填写"])}`;
+}
+
+function applicationBlock(A) {
+  if (!A) return "";
+  if (!A.ok) return notice(A.message, "danger", askButton(`请修复项目绑定：${A.message}`));
+  const rows = [...Object.entries(A.env || {}).map(([k, v]) => [k, v]), ...Object.entries(A.arg_updates || {}).map(([k, v]) => [`--${k.replace(/_/g, "-")}`, v])];
+  return `<div class="card">${rows.length ? facts(rows.map(([k, v]) => [k, `<span class="mono">${esc(v)}</span>`])) : '<p class="chips muted">绑定为空，运行时不会下发任何设置。</p>'}</div>`;
+}
+
 function viewProject(P) {
   const lib = P.library;
   const libLine = !lib ? "" : lib.found ? (lib.rel ? `<a href="${href("library", lib.rel)}">${esc(lib.raw)}</a>` : `${esc(lib.raw)} <span class="muted">（在 --root 之外：只解析绑定，不提供浏览与预览）</span>`) : `${esc(lib.raw ?? "未填写")} ${statusChip(["bad", "未找到 library.json"])}`;
+  const broken = P.bindings.filter((row) => row.severity === "danger");
   const rows = P.bindings.map((row) => {
     const target = row.target && lib && lib.rel ? href("library", lib.rel, row.target.type === "template" ? "templates" : "resources", `id=${enc(row.target.ref)}`) : "";
-    return `<tr data-role="${esc(row.role)}" data-status="${esc(row.status)}"><td>${esc(KIND_LABEL[row.role] || row.role)}<div class="muted small mono">${esc(row.role)}</div></td><td class="mono">${target ? `<a href="${target}">${esc(row.ref)}</a>` : esc(row.ref)}</td><td>${statusChip(BINDING[row.status] || ["warn", row.status])}</td><td>${esc(row.message)}</td></tr>`;
+    return `<tr class="${row.severity === "danger" ? "danger" : ""}" data-role="${esc(row.role)}" data-status="${esc(row.status)}"><td>${esc(KIND_LABEL[row.role] || row.role)}<div class="muted small mono">${esc(row.role)}</div></td><td class="mono">${target ? `<a href="${target}">${esc(row.ref)}</a>` : esc(row.ref)}</td><td>${resolvedTo(row)}</td><td>${statusChip(BINDING[row.status] || ["bad", row.status])}${row.status === "ok" ? "" : `<div class="small">${esc(row.message)}</div>`}</td></tr>`;
   }).join("");
   return `<div class="wrap" data-view="project">
     ${head(P.name, `项目 · <span class="mono">${esc(P.path)}</span>`)}
     ${P.error ? notice(`recap_project.json ${P.error}`, "danger") : ""}
+    ${broken.length ? notice(`${broken.length} 个绑定不会生效：${broken.map((row) => `${KIND_LABEL[row.role] || row.role} ${row.ref}`).join("、")}`, "danger", askButton(`请修复项目「${P.name}」的绑定：${broken.map((row) => `${row.role} ${row.ref}（${row.message}）`).join("；")}`, true)) : ""}
     <div class="card">${facts([["资源库", libLine], ["schema", P.schema ? `<span class="mono">${esc(P.schema)}</span>` : ""]])}</div>
     ${section("绑定", "只有 adopted 模板能绑定；绑定在对话里改")}
-    ${P.bindings.length ? `<div class="card table-card"><table class="rows"><thead><tr><th>角色</th><th>绑定</th><th>状态</th><th>说明</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("还没有绑定", "recap_project.json 的 bindings 为空。")}
+    ${P.bindings.length ? `<div class="card table-card"><table class="rows"><thead><tr><th>角色</th><th>绑定</th><th>解析到</th><th>状态</th></tr></thead><tbody>${rows}</tbody></table></div>` : empty("还没有绑定", "recap_project.json 的 bindings 为空。")}
+    ${section("运行时下发的设置", "按 recap.py --project 的规则解析；不含你的环境变量与命令行参数")}
+    ${applicationBlock(P.application)}
     ${section("运行", `${P.runs.length} 次`)}
     ${P.runs.length ? `<div class="card runs">${runTree(P.runs, null) || P.runs.map((run) => runRow(run)).join("")}</div>` : empty("还没有运行", "这个项目目录下还没有 recap_run_manifest.json。")}
   </div>`;
@@ -238,12 +259,15 @@ function runResources(R) {
   const L = R.views.resources;
   if (L.status === "unparseable") return rawFallback(L, "resource_lock.json");
   if (L.status !== "ok") return empty("这次运行没有 resource_lock.json", "资源记录列出本次成片用到的 BGM、音色、字体与包装；运行写出后会显示在这里。");
-  const lib = (item) => (item.library ? `<span class="mono">${esc(item.library.id)}</span> ${statusChip(LICENCE[item.library.license] || ["off", item.library.license || "—"])}` : statusChip(["warn", "未登记"]));
-  return `${L.attention.map((item) => notice(`${item.role ? `${item.role}：` : ""}${item.message || item.code}`, "", askButton(`请处理 ${R.work_dir} 的 resource_lock.json 里 ${item.role || ""} 的问题：${item.message || item.code}`))).join("")}
+  const lib = (item) => (item.registry === "library" ? `<span class="mono">${esc(item.library.id)}</span> ${statusChip(LICENCE[item.library.license] || ["off", item.library.license || "—"])}${item.library.consent ? ` ${statusChip(CONSENT[item.library.consent] || ["warn", item.library.consent])}` : ""}`
+    : item.registry === "material" ? '<span class="muted">素材库</span>' : item.registry === "unregistered" ? statusChip(["warn", "未登记"]) : '<span class="muted">—</span>');
+  const detail = (item) => Object.values(item.detail || {}).filter((v) => v !== null && v !== "" && typeof v !== "object").join(" · ");
+  const file = (item) => (item.name ? `<span class="fname" title="${esc(item.path)}">${esc(item.name)}</span><span class="fdir mono" title="${esc(item.path)}">${esc(item.dir)}</span>` : `<span class="muted">${esc(detail(item) || "—")}</span>`);
+  return `${L.attention.map((item) => notice(`${item.role ? `${ROLE_LABEL[item.role] || item.role}：` : ""}${item.message || item.code}`, "", askButton(`请处理 ${R.work_dir} 的 resource_lock.json 里 ${item.role || ""} 的问题：${item.message || item.code}`))).join("")}
     <div class="card">${facts([["生成时间", esc(L.generated_at || "")], ["资源库", L.library ? `<span class="mono">${esc(L.library)}</span>` : "未使用"], ["项目", L.project ? esc(L.project.name || L.project.path) : ""]])}</div>
-    ${L.templates.length ? `${section("模板", `${L.templates.length} 个`)}<div class="card table-card"><table class="rows"><thead><tr><th>角色</th><th>模板</th><th>状态</th></tr></thead><tbody>${L.templates.map((t) => `<tr><td>${esc(KIND_LABEL[t.role] || t.role)}</td><td class="mono">${esc(t.id)}@v${esc(t.version)}</td><td>${statusChip(TPL_STATUS[t.status] || ["warn", t.status || "—"])}</td></tr>`).join("")}</tbody></table></div>` : ""}
+    ${L.templates.length ? `${section("模板", `${L.templates.length} 个`)}<div class="card table-card"><table class="rows"><thead><tr><th>角色</th><th>模板</th><th>状态</th></tr></thead><tbody>${L.templates.map((t) => `<tr><td>${esc(ROLE_LABEL[t.role] || t.role)}</td><td class="mono">${esc(t.id)}@v${esc(t.version)}</td><td>${statusChip(TPL_STATUS[t.status] || ["warn", t.status || "—"])}</td></tr>`).join("")}</tbody></table></div>` : ""}
     ${section("资源", `${L.resources.length} 项`)}
-    ${L.resources.length ? `<div class="card table-card"><table class="rows"><thead><tr><th>角色</th><th>文件</th><th class="hide-m">大小</th><th>库条目与授权</th></tr></thead><tbody>${L.resources.map((r) => `<tr><td>${esc(r.role)}</td><td class="mono">${esc(r.path || "—")}</td><td class="hide-m">${esc(size(r.size))}</td><td>${lib(r)}</td></tr>`).join("")}</tbody></table></div>` : empty("没有资源条目", "resource_lock.json 的 resources 为空。")}`;
+    ${L.resources.length ? `<div class="card table-card"><table class="rows"><thead><tr><th>角色</th><th>文件</th><th class="hide-m">大小</th><th>登记与授权</th></tr></thead><tbody>${L.resources.map((r) => `<tr data-role="${esc(r.role)}" data-registry="${esc(r.registry)}"><td>${esc(ROLE_LABEL[r.role] || r.role)}</td><td class="fcell">${file(r)}</td><td class="hide-m">${esc(size(r.size))}</td><td>${lib(r)}</td></tr>`).join("")}</tbody></table></div>` : empty("没有资源条目", "resource_lock.json 的 resources 为空。")}`;
 }
 
 /* ================================================================ library */
@@ -268,13 +292,42 @@ function resourceCard(res) {
     ${res.notes ? `<p class="desc">${esc(res.notes)}</p>` : ""}${issuesList(res.issues)}${ask ? `<div>${askButton(ask)}</div>` : ""}</article>`;
 }
 
+function paramTable(rows) {
+  if (!rows || !rows.length) return "";
+  return `<div class="table-card"><table class="rows prm"><thead><tr><th>参数</th><th>值</th><th>来源</th></tr></thead><tbody>${rows.map((row) => `<tr data-param="${esc(row.key)}"><td>${esc(row.label)}</td><td>${row.swatch ? `<i class="swatch" data-css="background:${esc(row.swatch)}"></i>` : ""}<span class="mono">${esc(row.value)}</span>${row.unit ? ` <span class="muted">${esc(row.unit)}</span>` : ""}</td><td>${row.provenance ? `<span class="prov ${esc(row.provenance)}">${esc(PROVENANCE[row.provenance] || row.provenance)}</span>` : '<span class="muted">—</span>'}</td></tr>`).join("")}</tbody></table></div>`;
+}
+
+const box = (b) => `left:${b.left}%;top:${b.top}%;width:${b.width}%;height:${b.height}%`;
+
+function templateGeometry(tpl, libPath) {
+  const P = tpl.preview;
+  if (!P) return "";
+  const ratio = `aspect-ratio:${P.canvas.width} / ${P.canvas.height}`;
+  if (P.type === "subtitle_style") {
+    const L = P.line;
+    const over = L.width_px && L.width_px > L.usable_px;
+    const canvas = `<div class="mini" data-css="${ratio}" role="img" aria-label="字幕带与最长一行的示意图">
+      <span class="side" data-css="left:${P.side}%"></span><span class="side" data-css="right:${P.side}%"></span>
+      ${P.band ? `<span class="band" data-css="top:${P.band.top}%;height:${P.band.height}%"></span>` : ""}
+      ${L.font_size ? `<span class="line ${over ? "over" : ""}" data-css="bottom:${L.bottom ?? 4}%;font-size:${L.font_size}cqw">${esc(L.text)}</span>` : ""}</div>`;
+    const notes = [`画布 ${P.canvas.width}×${P.canvas.height} 等比缩小`, P.band_px ? `字幕带 y ${P.band_px.y_top}–${P.band_px.y_bot}，底对齐，底边距 ${P.margin_v}px` : "未给字幕带，示意放在底部",
+      L.width_px ? `一行 ${L.chars} 字 × 字号 = ${L.width_px}px，可用宽度 ${L.usable_px}px（两侧各留 40px）` : ""].filter(Boolean);
+    return `<div class="tpl-geo">${canvas}<div class="small"><b>示意图，不是渲染。</b><span class="muted">用每行字数的最长一行核对字幕带与宽度。${esc(notes.join("；"))}</span>${over ? ` ${statusChip(["warn", "超出可用宽度"])}` : ""}</div></div>`;
+  }
+  const layers = P.layers.map((layer) => (layer.box ? (layer.media ? `<img class="layer" src="${esc(mediaUrl(layer.media.path))}" alt="" data-css="${box(layer.box)}">` : `<span class="layer-box" data-css="${box(layer.box)}">${esc(layer.name)}</span>`) : "")).join("");
+  const canvas = `<div class="mini pkg" data-css="${ratio}" role="img" aria-label="包装图层示意图">${layers}${P.safe ? `<span class="safe" data-css="${box(P.safe)}"></span>` : ""}</div>`;
+  const list = `<table class="rows"><thead><tr><th>图层</th><th>位置</th><th>图片</th></tr></thead><tbody>${P.layers.map((layer) => `<tr><td>${esc(layer.name)}</td><td class="mono small">${esc(layer.rect_text)}</td><td>${layer.resource ? `<a href="${href("library", libPath, "resources", `id=${enc(layer.resource)}`)}">${esc(layer.title || layer.resource)}</a>` : "—"}${layer.media ? "" : ' <span class="muted small">（不在 --root 内，不预览）</span>'}</td></tr>`).join("")}</tbody></table>`;
+  return `<div class="tpl-geo">${canvas}<div class="small"><b>示意图，不是渲染。</b><span class="muted">图层按 rect 摆放在 ${P.canvas.width}×${P.canvas.height} 画布上，青色虚线框是安全区；棋盘格是透明处。</span></div></div><div class="table-card">${list}</div>`;
+}
+
 function templateCard(tpl, libPath) {
   const a = tpl.adoption;
   const ask = tpl.status === "draft" ? `请帮我评审模板 ${tpl.ref}，确认后写入采用记录。` : "";
   return `<article class="card asset" id="e-${esc(tpl.ref)}" data-template="${esc(tpl.ref)}"><div class="asset-h"><div><div class="nm">${esc(tpl.title || tpl.id)}</div><div class="cat"><span class="mono">${esc(tpl.ref)}</span> · ${esc(KIND_LABEL[tpl.kind] || tpl.kind)}</div></div>${statusChip(TPL_STATUS[tpl.status] || ["bad", tpl.status || "未填写"])}</div>
     ${facts([["画布", tpl.canvas ? `${tpl.canvas.width}×${tpl.canvas.height}` : ""], ["样片", tpl.samples.map((s) => (s.missing ? `<span class="mono">${esc(s.id)}</span> ${statusChip(["bad", "不存在"])}` : `<a href="${href("library", libPath, "samples", `id=${enc(s.id)}`)}">${esc(s.title || s.id)}</a>`)).join("、")], ["被使用", boundBy(tpl.bound_by)]])}
     ${a ? `<div class="adoption"><b>${esc(a.date || "")} · ${esc(a.by || "")}</b> 采用：<q>${esc(a.statement || "")}</q><div class="muted small">范围：${esc(a.scope || "")}</div></div>` : ""}
-    <pre class="params">${esc(JSON.stringify(tpl.params, null, 2))}</pre>${tpl.notes ? `<p class="desc">${esc(tpl.notes)}</p>` : ""}${issuesList(tpl.issues)}${ask ? `<div>${askButton(ask)}</div>` : ""}</article>`;
+    ${templateGeometry(tpl, libPath)}${paramTable(tpl.rows)}
+    <details class="rawjson"><summary>原始 JSON</summary><pre class="params">${esc(JSON.stringify(tpl.params, null, 2))}</pre></details>${tpl.notes ? `<p class="desc">${esc(tpl.notes)}</p>` : ""}${issuesList(tpl.issues)}${ask ? `<div>${askButton(ask)}</div>` : ""}</article>`;
 }
 
 function sampleCard(sample) {

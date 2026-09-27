@@ -7,18 +7,24 @@ Chinese message on the card or view that owns it and never aborts the rest of th
 from __future__ import annotations
 
 import re
+from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 import library
+import project_binding
 from dashboard_io import (LIBRARY_FILE, PROJECT_FILE, RUN_FILE, Refused, dir_of, discover,
                           media_entry, nearest, read_object, rel_of, resolve_under)
 from dashboard_runs import run_views
+from dashboard_templates import param_rows, template_preview
 
 ATTENTION_CODES = {"license_unknown", "license_restricted", "consent_unknown", "consent_denied",
                    "changed_since_adoption", "sample_offline"}
 LICENCE_CODES = {"license_unknown", "license_restricted", "consent_unknown", "consent_denied"}
+# What a binding problem means for the delivered file: a binding that cannot apply is danger.
+SEVERITY = {"blocked": "danger", "library_error": "danger", "binding": "danger",
+            "waiting": "todo", "licence": "warn", "library_warn": "warn", "unparseable": "warn"}
 REF_RE = re.compile(r"^(?P<id>.+)@v?(?P<version>\d+)$")
 MAX_NEXT = 3
 MAX_HITS = 60
@@ -102,15 +108,19 @@ def library_detail(root: Path, rel: str) -> dict:
                        "media": media_entry(root, f["path"])} for f in res["files"]],
             "bound_by": bound_by.get(("resource", res["id"]), []), "issues": issues.pop(record_rel, []),
         })
+    by_id = {r["id"]: r for r in index["resources"]}
     templates = []
     for tpl in index["templates"]:
         record_rel, data = record(tpl)
         ref = f"{tpl['id']}@v{tpl['version']}"
+        params = data.get("params", {})
         templates.append({
+            "rows": param_rows(tpl["kind"], params, by_id),
+            "preview": template_preview(root, tpl["kind"], tpl["canvas"], params, by_id),
             "id": tpl["id"], "version": tpl["version"], "ref": ref, "kind": tpl["kind"],
             "title": tpl["title"], "status": tpl["status"], "canvas": tpl["canvas"],
             "adoption": tpl["adoption"] if isinstance(tpl["adoption"], dict) else None,
-            "params": data.get("params", {}), "notes": data.get("notes", ""), "record": record_rel,
+            "params": params, "notes": data.get("notes", ""), "record": record_rel,
             "samples": [samples.get(s, {"id": s, "missing": True}) for s in tpl["samples"]],
             "bound_by": bound_by.get(("template", ref), []), "issues": issues.pop(record_rel, []),
         })
@@ -121,6 +131,12 @@ def library_detail(root: Path, rel: str) -> dict:
 
 # --- projects & bindings -----------------------------------------------------------------
 def _resolve_ref(role: str, ref, index) -> dict:
+    row = _check_ref(role, ref, index)
+    row["severity"] = "ok" if row["status"] == "ok" else "danger"
+    return row
+
+
+def _check_ref(role: str, ref, index) -> dict:
     row = {"role": role, "ref": ref, "target": None}
     if not isinstance(ref, str) or not ref.strip():
         return {**row, "status": "invalid", "message": "绑定值必须是非空字符串"}
@@ -131,22 +147,37 @@ def _resolve_ref(role: str, ref, index) -> dict:
         tpl = next((t for t in index["templates"]
                     if t["id"] == match["id"] and t["version"] == int(match["version"])), None)
         if tpl is None:
-            return {**row, "status": "missing", "message": "库里没有这个模板版本"}
-        row["target"] = {"type": "template", "ref": f"{tpl['id']}@v{tpl['version']}"}
+            return {**row, "status": "missing", "message": "库里没有这个模板版本，绑定不会生效"}
+        row["target"] = {"type": "template", "ref": f"{tpl['id']}@v{tpl['version']}", "title": tpl["title"],
+                         "kind": tpl["kind"], "status": tpl["status"], "canvas": tpl["canvas"]}
         if role in library.TEMPLATE_KINDS and tpl["kind"] != role:
             return {**row, "status": "kind_mismatch", "message": f"需要 {role} 模板，实际是 {tpl['kind']}"}
         if tpl["status"] != "adopted":
-            return {**row, "status": "not_adopted", "message": f"模板状态为 {tpl['status']}，只有 adopted 能绑定"}
+            return {**row, "status": "not_adopted", "message": f"模板状态为 {tpl['status']}，只有 adopted 能绑定，不会生效"}
         return {**row, "status": "ok", "message": "已解析"}
     res = next((r for r in index["resources"] if r["id"] == ref), None)
     if res is None:
         if any(t["id"] == ref for t in index["templates"]):
             return {**row, "status": "version_required", "message": "模板需要写成 id@vN"}
-        return {**row, "status": "missing", "message": "库里没有这个资源"}
-    row["target"] = {"type": "resource", "ref": res["id"]}
+        return {**row, "status": "missing", "message": "库里没有这个资源，绑定不会生效"}
+    row["target"] = {"type": "resource", "ref": res["id"], "title": res["title"], "kind": res["kind"],
+                     "license": res["license"]}
     if role in library.RESOURCE_EXTS and res["kind"] != role:
         return {**row, "status": "kind_mismatch", "message": f"需要 {role} 资源，实际是 {res['kind']}"}
     return {**row, "status": "ok", "message": "已解析"}
+
+
+def _application(pdir: Path) -> dict:
+    """What ``recap.py --project`` would apply, resolved with no ambient env or CLI flags."""
+    args = Namespace(tts_provider="auto", mimo_tts_voice=None, voice_ref=None, material_library_dir=None)
+    try:
+        resolved = project_binding.resolve_project(pdir, args, environ={})
+    except project_binding.BindingError as exc:
+        return {"ok": False, "message": str(exc.code)}
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, IndexError) as exc:
+        return {"ok": False, "message": f"项目绑定无法解析: {exc}"}
+    return {"ok": True, "message": "按这份绑定运行时会下发以下设置", "env": resolved["env"],
+            "arg_updates": resolved["arg_updates"]}
 
 
 def _project(root: Path, rel: str, cache: dict) -> dict:
@@ -205,7 +236,7 @@ def project_detail(root: Path, rel: str) -> dict:
     project = _project(root, rel, {})
     project.pop("lib_dir")
     runs = [r for r in _run_list(root, discover(root)) if r["project"] == rel]
-    return {**project, "runs": runs}
+    return {**project, "application": _application(pdir), "runs": runs}
 
 
 def run_detail(root: Path, rel: str) -> dict:
@@ -226,7 +257,7 @@ def _attention(libraries, reports, projects, runs) -> list:
     items = []
     for lib in libraries:
         if lib["error"]:
-            items.append({"level": "error", "kind": "library_error", "title": lib["name"],
+            items.append({"kind": "library_error", "title": lib["name"],
                           "message": f"library.json {lib['error']}", "href": _href("library", lib["path"]),
                           "ask": f"请修复资源库「{lib['name']}」的 library.json：{lib['error']}"})
         report = reports[lib["path"]]
@@ -238,46 +269,54 @@ def _attention(libraries, reports, projects, runs) -> list:
                 kind = ("library_error" if level == "error"
                         else "licence" if issue["code"] in LICENCE_CODES else "library_warn")
                 items.append({
-                    "level": level, "kind": kind, "code": issue["code"],
+                    "kind": kind, "code": issue["code"],
                     "title": f"{lib['name']} · {entry or issue['path']}", "message": issue["message"],
                     "href": _href("library", lib["path"], tab, id=entry),
                     "ask": f"请处理资源库「{lib['name']}」里 {issue['path']} 的问题：{issue['message']}"})
     for project in projects:
         if project["error"]:
-            items.append({"level": "error", "kind": "binding", "title": project["name"],
+            items.append({"kind": "binding", "title": project["name"],
                           "message": project["error"], "href": _href("project", project["path"]),
                           "ask": f"请修复项目「{project['name']}」的 recap_project.json：{project['error']}"})
         for row in project["bindings"]:
             if row["status"] != "ok":
-                items.append({"level": "warn", "kind": "binding", "code": row["status"],
+                items.append({"kind": "binding", "code": row["status"],
                               "title": f"{project['name']} · {row['role']}",
                               "message": f"{row['ref']}：{row['message']}", "href": _href("project", project["path"]),
                               "ask": f"请修复项目「{project['name']}」的 {row['role']} 绑定 {row['ref']}：{row['message']}"})
     for run in runs:
         if run["blockers"]:
-            items.append({"level": "error", "kind": "blocked", "title": run["path"],
+            items.append({"kind": "blocked", "title": run["path"],
                           "message": f"QC 共 {run['blockers']} 个阻断项", "href": _href("run", run["path"], "qc"),
                           "ask": f"请查看 {run['work_dir']} 的 QC 阻断项，修复后重新合成。"})
         if run["next_pause"]:
             artifact = run["next_pause"]["artifact"]
             view = "cut" if artifact == "clip_plan.json" else "narration"
-            items.append({"level": "todo", "kind": "waiting", "title": run["path"],
+            items.append({"kind": "waiting", "title": run["path"],
                           "message": f"等你：{run['next_pause']['hint']}",
                           "href": _href("run", run["path"], view),
                           "ask": f"请继续 {run['work_dir']} 这次运行：写 {artifact}（{run['next_pause']['hint']}）。"})
         for name in run["unparseable"]:
-            items.append({"level": "warn", "kind": "unparseable", "title": run["path"], "message": f"{name} 无法解析",
+            items.append({"kind": "unparseable", "title": run["path"], "message": f"{name} 无法解析",
                           "href": _href("run", run["path"]),
                           "ask": f"{run['work_dir']} 里的 {name} 无法解析，请检查。"})
         if run["lock_attention"]:
-            items.append({"level": "warn", "kind": "licence", "title": run["path"],
+            items.append({"kind": "licence", "title": run["path"],
                           "message": f"resource_lock 有 {run['lock_attention']} 条需要注意",
                           "href": _href("run", run["path"], "resources"),
                           "ask": f"请核对 {run['work_dir']} 的 resource_lock.json 里需要注意的资源。"})
+    for item in items:
+        item["severity"] = SEVERITY[item["kind"]]
     return items
 
 
 NEXT_ORDER = ("blocked", "waiting", "licence", "library_error", "binding", "unparseable", "library_warn")
+
+
+def _worst(items) -> str:
+    """The colour the next-steps card takes: danger only when something must be fixed."""
+    severities = {item["severity"] for item in items}
+    return next((s for s in ("danger", "todo", "warn") if s in severities), "ok")
 
 
 def overview(root: Path) -> dict:
@@ -302,6 +341,7 @@ def overview(root: Path) -> dict:
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "counts": {"libraries": len(libraries), "projects": len(projects), "runs": len(runs), **totals},
         "next": ranked[:MAX_NEXT], "next_counts": counts,
+        "next_severity": _worst(ranked[:MAX_NEXT]),
         "libraries": libraries, "projects": projects, "runs": runs,
         "attention": ranked, "warnings": found["warnings"],
     }
