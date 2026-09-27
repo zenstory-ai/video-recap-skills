@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-总体方案见 [[2026-09-27-resource-template-library-and-dashboard]]（仍在 `proposed/`）。在绑定、渲染和 dashboard 读取资源库之前，
+总体方案见 [[2026-09-27-resource-template-library-and-dashboard]]。在绑定、渲染和 dashboard 读取资源库之前，
 必须先有稳定的记录格式与一个能说清"这条记录能不能用、为什么"的校验器；否则后续每一期都要各自猜字段、各自处理坏文件。
 
 ## Decision
