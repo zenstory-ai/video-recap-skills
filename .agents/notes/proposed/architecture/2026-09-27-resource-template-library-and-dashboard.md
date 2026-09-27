@@ -95,7 +95,8 @@ Status: proposed
   （`BGM_PATH`、`SUBTITLE_*`、`--voice-ref`、`--mimo-voice`、`--tts-provider`……）。阶段技能 never 读取库，自包含不变。
 - 需要补的阶段能力只有两处：assemble 接受字体文件（ASS 渲染传 `fontsdir`，`drawtext` 传 `fontfile`），
   以及把 `packaging` 模板的图层交给 `compose_foreground.py` 的调用路径。
-- 授权为 `unknown` / `restricted` 的资源在成片 QC 里作为建议项列出，不阻断（与"三类验收"一致：授权是人的判断）。
+- 授权为 `unknown` / `restricted` 的资源作为建议项列出，不阻断（与"三类验收"一致：授权是人的判断）。第 2 期落地时放在
+  `resource_lock.json.attention` 并在运行结束时打印，而不是写进 `final_qc.json`——后者的格式只承载阻断项。
 
 ### 4. 只读 dashboard
 
@@ -116,7 +117,7 @@ Status: proposed
 4. 只读 dashboard。
 5. `packaging` 模板与样片。
 
-每期一个 PR，各自带实现笔记。第 1 期已落地：[[2026-09-27-resource-library-format]]。
+每期一个 PR，各自带实现笔记。第 1 期已落地：[[2026-09-27-resource-library-format]]；第 2 期：[[2026-09-27-resource-lock]]。
 
 ## Alternatives considered
 

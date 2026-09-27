@@ -114,3 +114,8 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
 样片是证据，不是模板：`demonstrates` 写它示范了什么，`not_reusable` 写不能照搬什么（人物、字幕内容、时间码……）。
 `templates` 用 `id@vN` 指回它所示范的模板版本。
+
+## 运行记录
+
+每次 full / cut 合成后，`work_dir/resource_lock.json` 记下这次用到的原片、音色、BGM 与字幕字体，并对上资源库里的登记和授权状态；
+格式见 `data-schema.md` 的 resource_lock.json 一节。

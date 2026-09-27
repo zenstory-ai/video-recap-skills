@@ -26,6 +26,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **运行资源记录 `resource_lock.json`。** full / cut 合成后汇总本次用到的原片、音色、BGM 与字幕字体，配置资源库时对上登记与授权状态，并在结束时打印需要人确认的项；`tts_meta.json` 新增 `voice`，记录实际使用的 provider、模型、音色或参考音频。
 - **资源库格式与只读校验。** 素材库根目录下可登记资源（BGM、音效、音色、字体、图片）、带版本与采用记录的模板（字幕样式、包装图层）和样片；`video-recap/scripts/library.py check|list|show` 只读校验授权、声音授权、路径越界与引用完整性。格式见 `video-recap/references/resource-library.md`，合成示例在 `examples/resource-library/`。本期渲染不读取资源库。
 - **video-cut `clip_plan.required_evidence`。** Agent 声明必保源片刻（节点、来源、原片秒、轨道、先后关系），工具在句界/画面吸附之后、渲染之前核对；缺段、错序或无效声明写入 `clip_plan_validated.json.qc.required_evidence` 并阻断，缓存复用同样重检。
 - **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。

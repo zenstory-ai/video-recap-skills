@@ -776,3 +776,30 @@ def test_sidecar_from_content_hash_schema_is_a_plain_miss(monkeypatch, tmp_path)
         assert result is not None
     assert len(calls) == 3
     assert wav.read_bytes() == b"fresh"
+
+
+@pytest.mark.parametrize(
+    "engine, config, expected",
+    [
+        pytest.param("mimo-tts", {"mimo_tts_voice": "冰糖", "voice_ref": ""},
+                     {"voice_id": "冰糖", "reference": None}, id="mimo_preset_voice"),
+        pytest.param("mimo-tts", {"mimo_tts_voice": "冰糖", "voice_ref": "REF"},
+                     {"voice_id": None, "model": "mimo-v2.5-tts-voiceclone"}, id="mimo_reference_clone"),
+        pytest.param("fish-audio", {"fish_tts_model": "s2", "fish_tts_reference_id": "voice-a", "voice_ref": ""},
+                     {"voice_id": "voice-a", "model": "s2", "reference": None}, id="fish"),
+        pytest.param("index-tts", {"index_tts_voice": "narrator", "voice_ref": ""},
+                     {"voice_id": "narrator", "reference": None}, id="index"),
+    ],
+)
+def test_tts_meta_records_the_voice_actually_used(monkeypatch, tmp_path, engine, config, expected):
+    ref = tmp_path / "ref.wav"
+    ref.write_bytes(b"reference")
+    for key, value in config.items():
+        monkeypatch.setitem(CONFIG, key, str(ref) if value == "REF" else value)
+
+    voice = voiceover._build_tts_meta([], engine, "narration.json", [])["voice"]
+
+    assert voice["provider"] == engine
+    assert {k: voice[k] for k in expected} == expected
+    if config.get("voice_ref") == "REF":
+        assert voice["reference"] == {"path": str(ref.resolve()), **voiceover.file_identity(ref)}

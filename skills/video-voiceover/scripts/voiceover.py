@@ -234,11 +234,27 @@ def _tts_failure_record(index, seg, error):
     return record
 
 
+def _voice_record(engine):
+    """Which voice this run actually used: provider, model, voice id or reference audio."""
+    settings = tts_settings_payload(engine)
+    if engine == "fish-audio":
+        return {"provider": engine, "model": settings["fish_tts_model"],
+                "voice_id": settings["fish_tts_reference_id"], "reference": None}
+    if engine == "index-tts":
+        return {"provider": engine, "model": None,
+                "voice_id": settings["index_tts_voice"], "reference": None}
+    reference = settings.get("voice_ref_identity")
+    return {"provider": engine, "model": settings["mimo_tts_model"],
+            "voice_id": None if reference else settings["mimo_tts_voice"],
+            "reference": reference}
+
+
 def _build_tts_meta(segments, engine, narration_name, failures):
     """Stable tts_meta.json payload, including partial-failure visibility."""
     return {
         "segments": segments,
         "engine": engine,
+        "voice": _voice_record(engine),
         "narration": narration_name,
         "partial": bool(failures),
         "failures": failures,

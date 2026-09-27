@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 
 import materials as material_lib
+import resource_lock
 
 from recap_cli import TTS_PROVIDERS, parse_args
 from recap_review import run_narration_review
@@ -91,6 +92,17 @@ def _approved_validation_args(args):
     return ["--preserve-approved-text"] if args.preserve_approved_text else []
 
 
+def _record_resources(work_dir, args):
+    """Write resource_lock.json for the finished render and surface anything needing a person."""
+    library_dir = getattr(args, "material_library_dir", None) or os.environ.get(
+        "VIDEO_RECAP_MATERIAL_LIBRARY_DIR"
+    )
+    lock = resource_lock.write_resource_lock(
+        work_dir, library_dir=library_dir, project=getattr(args, "resolved_project", None)
+    )
+    print(resource_lock.summary_line(lock), flush=True)
+
+
 def _finish_recap(work_dir, final_output, args):
     final_qc_result = _write_final_qc_reports(work_dir, final_output)
     if args.require_final_qc:
@@ -140,6 +152,7 @@ def _run_local_adoption(video, work_dir, args):
         record_failure(exc)
         raise
     final_output = _read_assembly_output(work_dir)
+    _record_resources(work_dir, args)
     _write_shift_left_stage_qc(
         work_dir,
         "post_render",
@@ -319,6 +332,7 @@ def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assembl
     _run("video-assemble", "assemble.py", *aargs)
 
     final_output = _read_assembly_output(work_dir)
+    _record_resources(work_dir, args)
     _write_shift_left_stage_qc(
         work_dir,
         "post_render",

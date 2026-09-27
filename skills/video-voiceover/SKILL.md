@@ -51,7 +51,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 ## 5. 输出契约
 
 - `tts_segments/*.wav`：每段旁白对应一个音频文件。
-- `tts_meta.json`：包含 `segments`、`engine` 与 `narration`。每段记录 `audio_path`、时间、
+- `tts_meta.json`：包含 `segments`、`engine`、`voice`（实际使用的 provider、模型、音色或参考音频）与 `narration`。每段记录 `audio_path`、时间、
   `pause_after_ms` 和放置字段。
 - 干净运行写入 `partial: false` 与 `failures: []`。
 - 使用 `--allow-partial-tts` 跳过失败段时，写入 `partial: true` 和

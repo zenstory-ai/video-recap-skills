@@ -466,6 +466,35 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 > 正常（无失败）运行也会带 `"partial": false, "failures": []`。partial 成片只适合预览，不建议直接发布。
 
+`voice` 记录本次实际使用的音色：`{"provider": "mimo-tts", "model": "mimo-v2.5-tts", "voice_id": "冰糖", "reference": null}`。
+用参考音频克隆时 `voice_id` 为 `null`，`reference` 为 `{path, size, mtime_ns}`；Fish Audio 的 `voice_id` 是 reference id，
+index-tts 的是 `INDEX_TTS_VOICE`。旧 `tts_meta.json` 没有这个字段时按只知道 `engine` 处理。
+
+## resource_lock.json（本次运行用到的资源）
+
+full / cut 流程（含本地采用路径）合成完成后，video-recap 在 `work_dir` 写出 `resource_lock.json`，汇总运行清单、
+`tts_meta.json.voice` 与 `assembly_manifest.json`（BGM 路径、字幕字体）里已有的事实；配置了资源库时，按解析后的路径
+（音色按 provider + voice_id）把每项对上已登记的资源，带出授权与声音授权状态。dub 模式不写。
+
+```json
+{
+  "schema": "video-recap.resource-lock.v1",
+  "work_dir": "/abs/work_dir",
+  "library": "/abs/library",
+  "project": null,
+  "templates": [],
+  "resources": [
+    {"role": "bgm", "path": "/abs/library/resources/bgm/pulse-demo/pulse-demo.wav", "size": 8044, "mtime_ns": 1,
+     "detail": {}, "library": {"id": "pulse-demo", "kind": "bgm", "license": "owned", "consent": null}}
+  ],
+  "attention": [{"code": "license_unknown", "role": "voice", "message": "…"}]
+}
+```
+
+`role` ∈ `source_video` / `voice` / `bgm` / `subtitle_font`（项目绑定后还会有模板引入的资源）。`attention` 列出需要人确认的项：
+`license_unknown` / `license_restricted`、参考音频的 `consent_unknown` / `consent_denied`，以及配置了资源库但没有登记的
+`unregistered`。它只提示、不阻断；`final_qc.json` 只承载阻断项，不包含这些提示。
+
 组装后，`assembly_manifest.json.audio_segments[]` 另外记录 `fit_status`、`truncated`、
 `truncate_reason`、`placed_audio_duration`、`placed_audio_path`、`source_duck_end`、
 `source_restore_at` 与 `source_handoff_status`。组装阶段从不按时间裁旁白尾音：放不下时用
