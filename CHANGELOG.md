@@ -26,6 +26,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **只读 dashboard（剪辑台）。** `video-recap/scripts/dashboard_server.py --root <目录>` 在本机回环地址启动标准库 HTTP 服务，按 `library.json` / `recap_project.json` / `recap_run_manifest.json` 发现资源库、项目与运行：总览给出下一步（QC 阻断、等 Agent 写的产物、授权与库错误），运行按阶段栏显示理解、剪辑节奏条、旁白、成片播放器与四轨时间线、QC 和 `resource_lock.json`，资源库分资源 / 模板 / 样片并附预览，⌘K 服务端搜索。严格只读：只允许 GET / HEAD，校验 Host / Origin，路径限定在 `--root` 内，媒体按白名单与 Range 提供；需要改动时只复制一句话给助手。视觉沿用 ZenStory 共用的 `tokens.css`。
 - **静态包装图层。** video-assemble 读取 `work_dir/packaging_layers.json`，把包框、标题条、角标等图片按画布坐标叠到成片（遮原字幕之后、画面文字与字幕之前），并在 `timeline.json` 写出位置一致的 image 轨供剪映编辑；`--project` 绑定的 `packaging` 模板自动写出该文件，`resource_lock.json` 记录每个图层图片。
 - **项目绑定 `--project recap_project.json`。** 把资源库里已采用的字幕样式模板、音色与 BGM 绑定到一次运行，解析为各阶段已有的 `SUBTITLE_*` / `BGM_PATH` / 音色参数；与显式设置冲突或模板画布与成片不符时在开始前停止。video-assemble 新增 `SUBTITLE_FONT_FILE`：烧录字幕经 `fontsdir`、画面文字经 `fontfile` 使用指定字体文件。示例项目在 `examples/demo-project/`。
 - **运行资源记录 `resource_lock.json`。** full / cut 合成后汇总本次用到的原片、音色、BGM 与字幕字体，配置资源库时对上登记与授权状态，并在结束时打印需要人确认的项；`tts_meta.json` 新增 `voice`，记录实际使用的 provider、模型、音色或参考音频。

@@ -225,11 +225,21 @@ python3 scripts/recap.py <video> --edit-mode dub --work-dir <work_dir>
 
 重复同一命令后输出 `dub_<name>.mp4`。每句单独克隆并贴回原时间线；只有即将覆盖下一句时才局部加速。当前版本只支持单说话者、整轨替换，不分离背景音乐。
 
-## 6. 自检命令
+## 6. 自检与只读 dashboard
 
 ```bash
 python3 scripts/recap.py --doctor
 ```
+
+### 6.1 只读 dashboard
+
+```bash
+python3 scripts/dashboard_server.py --root <目录> [--port 0] [--open]
+```
+
+前台运行并打印本机地址（只绑定 127.0.0.1，Agent 启动时放到后台）。它在 `--root` 下按 `library.json`、`recap_project.json`、
+`recap_run_manifest.json` 发现资源库、项目与运行，按阶段显示剪辑节奏、旁白、成片与时间线、QC 和 `resource_lock.json`。
+严格只读：只接受 GET / HEAD，不写任何文件；页面上的「复制给助手」只复制一句请求，改动回到对话里做。
 
 ## 7. 输出与参数
 

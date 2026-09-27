@@ -20,6 +20,8 @@ python3 scripts/library.py --library-dir <library> list [--kind bgm]
 python3 scripts/library.py --library-dir <library> show <id|id@vN>
 ```
 
+浏览资源、模板与样片（含图片、音频与样片预览）可用只读 dashboard：`python3 scripts/dashboard_server.py --root <library 或其上层目录>`。
+
 工具从不写库。新增或修改记录时直接编辑 JSON，再跑 `check`。**错误**表示该条目不能用；**警告**表示能用但需要人看一眼
 （授权未确认、声音授权未确认、样片不在本机、模板采用后资源文件已变化）。
 
