@@ -1,0 +1,20 @@
+{
+  "schema": "video-recap.sample.v1",
+  "id": "demo-sample",
+  "title": "纯色演示片",
+  "file": {
+    "path": "demo-sample.mp4"
+  },
+  "canvas": {
+    "width": 900,
+    "height": 1600
+  },
+  "demonstrates": [
+    "字幕带位置",
+    "画布尺寸"
+  ],
+  "not_reusable": "纯色画面，没有可复用的内容或声音",
+  "templates": [
+    "clean-white@v1"
+  ]
+}

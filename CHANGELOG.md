@@ -26,6 +26,7 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **资源库格式与只读校验。** 素材库根目录下可登记资源（BGM、音效、音色、字体、图片）、带版本与采用记录的模板（字幕样式、包装图层）和样片；`video-recap/scripts/library.py check|list|show` 只读校验授权、声音授权、路径越界与引用完整性。格式见 `video-recap/references/resource-library.md`，合成示例在 `examples/resource-library/`。本期渲染不读取资源库。
 - **video-cut `clip_plan.required_evidence`。** Agent 声明必保源片刻（节点、来源、原片秒、轨道、先后关系），工具在句界/画面吸附之后、渲染之前核对；缺段、错序或无效声明写入 `clip_plan_validated.json.qc.required_evidence` 并阻断，缓存复用同样重检。
 - **宣发文案修订工作流。** `video-script/references/promotional-copy.md`：不重跑故事链，只修改已完成短片的文字层。
 - **公共环境变量清单。** `tests/orchestrator/env-inventory-v1.json` 列出六个 skill 读取的全部环境变量及分类，配套测试对源码做 AST 扫描，未登记或疑似凭证的读取会失败。

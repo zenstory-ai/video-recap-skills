@@ -1,0 +1,35 @@
+{
+  "schema": "video-recap.template.v1",
+  "id": "bottom-bar",
+  "version": 1,
+  "kind": "packaging",
+  "title": "底部深色条包框（演示）",
+  "canvas": {
+    "width": 900,
+    "height": 1600
+  },
+  "params": {
+    "layers": [
+      {
+        "name": "bottom-bar",
+        "image": {
+          "resource": "frame-demo"
+        },
+        "rect": {
+          "x": 0,
+          "y": 0,
+          "width": 900,
+          "height": 1600
+        }
+      }
+    ],
+    "safe_rect": {
+      "x": 40,
+      "y": 80,
+      "width": 820,
+      "height": 1360
+    }
+  },
+  "samples": [],
+  "status": "draft"
+}

@@ -1,0 +1,25 @@
+{
+  "schema": "video-recap.resource.v1",
+  "id": "frame-demo",
+  "kind": "image",
+  "title": "底部深色条（演示包框）",
+  "files": [
+    {
+      "role": "layer",
+      "path": "frame-demo.png"
+    }
+  ],
+  "origin": {
+    "creator": "video-recap-skills",
+    "url": ""
+  },
+  "license": {
+    "status": "owned",
+    "terms": "本仓库合成的演示素材，随 MIT 许可分发",
+    "evidence": "examples/resource-library/README.md"
+  },
+  "tags": [
+    "演示",
+    "包框"
+  ]
+}

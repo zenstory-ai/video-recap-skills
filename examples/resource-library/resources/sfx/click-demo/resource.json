@@ -1,0 +1,25 @@
+{
+  "schema": "video-recap.resource.v1",
+  "id": "click-demo",
+  "kind": "sfx",
+  "title": "合成点击声（演示）",
+  "files": [
+    {
+      "role": "main",
+      "path": "click-demo.wav"
+    }
+  ],
+  "origin": {
+    "creator": "video-recap-skills",
+    "url": ""
+  },
+  "license": {
+    "status": "owned",
+    "terms": "本仓库合成的演示素材，随 MIT 许可分发",
+    "evidence": "examples/resource-library/README.md"
+  },
+  "tags": [
+    "演示",
+    "转场"
+  ]
+}

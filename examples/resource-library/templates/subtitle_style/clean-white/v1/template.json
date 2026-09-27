@@ -1,0 +1,41 @@
+{
+  "schema": "video-recap.template.v1",
+  "id": "clean-white",
+  "version": 1,
+  "kind": "subtitle_style",
+  "title": "白字细描边（演示）",
+  "canvas": {
+    "width": 900,
+    "height": 1600
+  },
+  "params": {
+    "font": {
+      "family": "Arial"
+    },
+    "size_px": {
+      "value": 52,
+      "provenance": "specified"
+    },
+    "outline_px": {
+      "value": 3,
+      "provenance": "specified"
+    },
+    "band": {
+      "value": {
+        "y_top": 1280,
+        "y_bot": 1440
+      },
+      "provenance": "measured"
+    }
+  },
+  "samples": [
+    "demo-sample"
+  ],
+  "status": "adopted",
+  "adoption": {
+    "date": "2026-09-27",
+    "by": "example",
+    "statement": "演示用的采用记录",
+    "scope": "900x1600 竖屏演示画布上的解说字幕"
+  }
+}

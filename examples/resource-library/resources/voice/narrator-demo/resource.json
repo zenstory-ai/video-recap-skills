@@ -1,0 +1,21 @@
+{
+  "schema": "video-recap.resource.v1",
+  "id": "narrator-demo",
+  "kind": "voice",
+  "title": "MiMo 默认解说音色",
+  "files": [],
+  "voice": {
+    "provider": "mimo-tts",
+    "voice_id": "冰糖"
+  },
+  "origin": {
+    "creator": "Xiaomi MiMo",
+    "url": "https://platform.xiaomimimo.com"
+  },
+  "license": {
+    "status": "unknown",
+    "terms": "",
+    "evidence": ""
+  },
+  "notes": "授权状态留给使用者按服务条款确认；check 会把 unknown 列为警告。"
+}
