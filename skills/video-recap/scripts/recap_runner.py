@@ -454,6 +454,7 @@ def main():
     validate_audio_routing(ap, args)
     args.resolved_project = None
     if args.project:
+        args.project = str(project_binding.project_path(args.project))
         if uses_local_adoption(args) or args.edit_mode == "dub":
             ap.error("--project applies to full/cut runs, not dub or local adoption bundles")
         project_binding.apply_project(

@@ -71,6 +71,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
   "params": {
     "font": {"family": "Arial"},
     "size_px": {"value": 52, "provenance": "specified"},
+    "max_chars": {"value": 15, "provenance": "measured"},
     "band": {"value": {"y_top": 1280, "y_bot": 1440}, "provenance": "measured"}
   },
   "samples": ["demo-sample"],
@@ -83,7 +84,8 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 - 任何带 `provenance` 的参数都要有 `value`，`provenance` ∈ `measured`（从成片实测）/ `fitted`（反复调出来的）/
   `specified`（人直接给的数值）/ `unknown`。编辑器面板上的读数不是像素，按 `specified` 或 `unknown` 记。
 - 引用资源写 `{"resource": "<id>"}`：`params.font` 必须指向 `font` 资源，图层的 `image` 必须指向 `image` 资源。
-- `subtitle_style` 需要 `params.font`（`resource` 或 `family`）与 `params.size_px`；`params.band.value` 若给出，需满足
+- `subtitle_style` 需要 `params.font`（`resource` 或 `family`）、`params.size_px` 与 `params.max_chars`（每行最多字数，用最长一行在这块画布上校准）；
+  `size_px × max_chars` 超过画布宽减去两侧各 40px 默认边距时报错。可选 `outline_px`、`shadow_px`、`primary_color`、`outline_color`、`max_lines`、`band`，其他参数名报错；`params.band.value` 若给出，需满足
   `0 <= y_top < y_bot <= canvas.height`。
 - `packaging` 需要非空 `params.layers`，每层有唯一 `name`、`image` 引用与画布内的整数 `rect {x, y, width, height}`；
   可选 `params.safe_rect`。

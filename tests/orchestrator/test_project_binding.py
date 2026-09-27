@@ -52,7 +52,8 @@ def test_bound_templates_and_resources_resolve_to_stage_settings(tmp_path, clean
 
     assert resolved["env"] == {
         "SUBTITLE_PLAY_RES_X": "900", "SUBTITLE_PLAY_RES_Y": "1600",
-        "SUBTITLE_FONT_SIZE": "52", "SUBTITLE_OUTLINE": "3", "SUBTITLE_FONT_NAME": "Arial",
+        "SUBTITLE_FONT_SIZE": "52", "SUBTITLE_OUTLINE": "3", "SUBTITLE_MAX_CHARS": "15",
+        "SUBTITLE_FONT_NAME": "Arial",
         "SUBTITLE_ALIGNMENT": "2", "SUBTITLE_MARGIN_V": "160",
         "BGM_PATH": str((lib / "resources/bgm/pulse-demo/pulse-demo.wav").resolve()),
     }
@@ -189,3 +190,20 @@ def test_bound_packaging_template_is_handed_to_assemble_and_retired_when_unbound
     (work / "packaging_layers.json").write_text(json.dumps({"layers": []}), encoding="utf-8")
     project_binding.sync_packaging_layers(work, None)
     assert (work / "packaging_layers.json").exists()  # caller-authored plans are not ours to delete
+
+
+def test_resume_command_names_the_project_by_absolute_path(monkeypatch, tmp_path, clean_env, capsys):
+    path, _ = _project(tmp_path, {"voice": "narrator-demo"})
+    video, work = seed_full_work(tmp_path, narration=None)
+
+    def understand(cli):
+        (work / "agent_narration_brief.md").write_text("# brief", encoding="utf-8")
+
+    monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, understand=understand))
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work),
+                                      "--project", "project"])
+
+    recap_runner.main()
+
+    assert f"--project {path.resolve()}" in capsys.readouterr().out

@@ -43,6 +43,7 @@ LICENSE_STATUSES = ("unknown", "owned", "licensed", "restricted")
 CONSENT_STATUSES = ("unknown", "granted", "denied")
 TEMPLATE_STATUSES = ("draft", "adopted", "retired")
 PROVENANCES = ("measured", "fitted", "specified", "unknown")
+SUBTITLE_SIDE_MARGIN = 40  # video-assemble's default left/right subtitle margin at PlayRes = canvas
 SUBTITLE_PARAMS = {
     "font", "size_px", "outline_px", "shadow_px", "primary_color", "outline_color",
     "max_chars", "max_lines", "band",
@@ -196,6 +197,12 @@ def _check_rect(path, where, rect, canvas, report):
         report.error(path, "rect_outside_canvas", f"{where} 超出画布 {canvas['width']}x{canvas['height']}")
 
 
+def _param_number(params, key):
+    node = params.get(key)
+    value = node.get("value") if isinstance(node, dict) else None
+    return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
+
+
 def _check_template(path: Path, data: dict, report: Report) -> dict | None:
     vdir = path.parent
     tid, kind = vdir.parent.name, vdir.parent.parent.name
@@ -234,6 +241,13 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
             report.error(path, "font", "subtitle_style 需要 params.font.resource 或 params.font.family")
         if not isinstance(params.get("size_px"), dict):
             report.error(path, "size_px", "subtitle_style 需要 params.size_px")
+        size, per_line = (_param_number(params, "size_px"), _param_number(params, "max_chars"))
+        if per_line is None:
+            report.error(path, "max_chars", "subtitle_style 需要 params.max_chars：按最长一行在这块画布上校准")
+        elif canvas and size and size * per_line > canvas["width"] - 2 * SUBTITLE_SIDE_MARGIN:
+            report.error(path, "line_too_wide",
+                         f"{per_line} 字 × {size}px 超过画布宽 {canvas['width']} 减去两侧各 "
+                         f"{SUBTITLE_SIDE_MARGIN}px 边距；减小字号或每行字数")
         band = params.get("band", {}).get("value") if isinstance(params.get("band"), dict) else None
         if band is not None and canvas and not (
             isinstance(band, dict) and 0 <= band.get("y_top", -1) < band.get("y_bot", -1) <= canvas["height"]

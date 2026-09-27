@@ -21,7 +21,9 @@ Status: implemented
 - 续跑命令写 `--project`，由绑定得到的值（`_bound_from_project`）不再重复写出。
 - video-assemble 新增 `SUBTITLE_FONT_FILE`：ASS 烧录的 `subtitles` 滤镜加 `fontsdir=<字体所在目录>`，画面文字 `drawtext` 加 `fontfile=`；
   family 名仍由 `SUBTITLE_FONT_NAME` 给出。`assembly_manifest` 的 `subtitle_style.font_file` 记录它，`resource_lock` 据此对上 `font` 资源。
-- `library.py check` 增加：字幕样式引用的字体资源必须有 `font.family`；字幕样式出现不认识的参数即报错。
+- `library.py check` 增加：字幕样式引用的字体资源必须有 `font.family`；字幕样式出现不认识的参数即报错；字幕样式必须给出 `max_chars`，
+  且 `size_px × max_chars` 不得超过画布宽减去两侧默认边距——真实端到端运行里，只给字号的模板让 18 字一行宽到 936px，被合成阶段的视觉 QC 拦下，这类问题应在登记时发现。
+- `--project` 在解析前转成绝对路径，续跑命令从任何目录都能用。
 - 示例项目 `examples/demo-project/recap_project.json` 绑定合成示例库。
 
 ## Alternatives considered
@@ -44,6 +46,9 @@ Status: implemented
   `packaging` 绑定本期只校验与记录，合成在第 5 期接入。
 
 ## Verification
+
+真实端到端（MiMo ASR / VLM / 评审 / TTS + 本机 ffmpeg，900x1600 合成测试片，绑定 `examples/demo-project`）：理解后暂停、续跑完成合成与剪映导出；
+`resource_lock.json` 记录模板 `clean-white@v1`、音色 `narrator-demo`（授权 unknown，结束时打印提示）与 BGM `pulse-demo`；抽帧确认字幕落在模板字幕带内。
 
 `tests/orchestrator/test_project_binding.py`（14 个）覆盖解析映射、字体资源、八种拒绝情形、画布核对、完整 full 流程下发的参数与环境、
 续跑命令与示例项目；`tests/orchestrator/test_resource_library.py` 新增字体 family 与未知参数两例；

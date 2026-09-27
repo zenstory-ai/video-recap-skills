@@ -16,6 +16,10 @@
       "value": 52,
       "provenance": "specified"
     },
+    "max_chars": {
+      "value": 15,
+      "provenance": "measured"
+    },
     "outline_px": {
       "value": 3,
       "provenance": "specified"
