@@ -15,7 +15,7 @@ from recap_cli import parse_args
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "resource-library"
-BINDING_ENV = ("SUBTITLE_FONT_NAME", "SUBTITLE_FONT_FILE", "SUBTITLE_FONT_SIZE", "SUBTITLE_OUTLINE",
+BINDING_ENV = ("VIDEO_RECAP_MATERIAL_LIBRARY_DIR", "SUBTITLE_FONT_NAME", "SUBTITLE_FONT_FILE", "SUBTITLE_FONT_SIZE", "SUBTITLE_OUTLINE",
                "SUBTITLE_PLAY_RES_X", "SUBTITLE_PLAY_RES_Y", "SUBTITLE_ALIGNMENT", "SUBTITLE_MARGIN_V",
                "BGM_PATH", "MIMO_TTS_VOICE", "VOICE_REF", "FISH_TTS_REFERENCE_ID", "INDEX_TTS_VOICE")
 
@@ -96,6 +96,8 @@ def test_font_resource_supplies_family_and_file(tmp_path, clean_env):
         pytest.param({"voice": "narrator-demo"}, {"mimo_tts_voice": "别的"}, {}, "--mimo-tts-voice", id="voice_arg_conflict"),
         pytest.param({"voice": "narrator-demo"}, {"tts_provider": "fish-audio"}, {}, "fish-audio", id="provider_conflict"),
         pytest.param({"colour": "x"}, {}, {}, "bindings.colour", id="unknown_binding"),
+        pytest.param({"voice": "narrator-demo"}, {}, {"VIDEO_RECAP_MATERIAL_LIBRARY_DIR": "/elsewhere"}, "VIDEO_RECAP_MATERIAL_LIBRARY_DIR", id="material_library_env_conflict"),
+        pytest.param({"bgm": "pulse-demo"}, {"audio_mode": "adopted-packet-copy"}, {}, "adopted-packet-copy", id="bgm_with_frozen_audio"),
     ],
 )
 def test_bindings_that_cannot_apply_stop_before_any_stage(tmp_path, clean_env, monkeypatch,
@@ -208,3 +210,35 @@ def test_resume_command_names_the_project_by_absolute_path(monkeypatch, tmp_path
     recap_runner.main()
 
     assert f"--project {shlex.quote(str(path.resolve()))}" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "bindings, break_library, match",
+    [
+        pytest.param({"bgm": "pulse-demo"},
+                     lambda lib: (lib / "resources/bgm/pulse-demo/pulse-demo.wav").unlink(),
+                     "bgm 资源 pulse-demo", id="bound_bgm_file_missing"),
+        pytest.param({"packaging": "bottom-bar@v1"},
+                     lambda lib: (lib / "resources/image/frame-demo/frame-demo.png").unlink(),
+                     "引用的资源 frame-demo", id="template_image_missing"),
+    ],
+)
+def test_bindings_to_invalid_library_records_are_refused(tmp_path, clean_env, bindings, break_library, match):
+    path, lib = _project(tmp_path, bindings)
+    template = lib / "templates/packaging/bottom-bar/v1/template.json"
+    data = json.loads(template.read_text(encoding="utf-8"))
+    data.update(status="adopted", adoption={"date": "2026-09-27", "by": "u", "statement": "s", "scope": "s"})
+    template.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    break_library(lib)
+
+    with pytest.raises(SystemExit, match=match):
+        project_binding.resolve_project(path, _args())
+
+
+def test_equivalent_ambient_settings_are_not_conflicts(tmp_path, clean_env, monkeypatch):
+    path, lib = _project(tmp_path, {"subtitle_style": "clean-white@v1", "bgm": "pulse-demo"})
+    monkeypatch.chdir(lib / "resources/bgm/pulse-demo")
+    monkeypatch.setenv("BGM_PATH", "pulse-demo.wav")
+    monkeypatch.setenv("SUBTITLE_FONT_SIZE", "52.0")
+
+    project_binding.resolve_project(path, _args())

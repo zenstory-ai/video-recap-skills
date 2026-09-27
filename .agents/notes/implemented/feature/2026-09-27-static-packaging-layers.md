@@ -15,7 +15,8 @@ Status: implemented
   画布必须等于成片画布、`rect` 必须在画布内、图片必须存在，否则合成前报错。
 - 渲染：每个图层用 `movie=filename=…,scale=w:h,format=rgba` 读入，按数组顺序 `overlay` 到遮原字幕之后、画面文字与解说字幕之前；
   整条滤镜仍是单输入单输出（`[in]…[out]`），沿用现有的 `-vf` / 滤镜脚本文件路径，不改输入与 `-map`。
-- `timeline.json` 得到位置与缩放一致的全长 image 段（画布中心为原点、Y 轴向上、以半个画布为单位；缩放相对"按比例适配画布"的尺寸），
+- `timeline.json` 得到位置与缩放一致的全长 image 段（画布中心为原点、Y 轴向上、以半个画布为单位；缩放相对"按图片自身比例适配画布"的尺寸，
+  用 ffprobe 读出的图片像素尺寸分别算 x、y，使拉伸到 `rect` 的渲染与剪映草稿一致），
   剪映草稿里的包框可单独编辑。`assembly_manifest.json` 的 `video_filters.packaging_layers` 记录每张图片的路径与 `{size, mtime_ns}`。
 - video-recap：`--project` 绑定了 `packaging` 模板时，合成前写出该文件（带 `written_by: "video-recap --project"`）；
   不再绑定时只删除带此标记的文件，调用方手写的文件保留。`resource_lock.json` 把每个图层列为 `packaging_layer` 并对上图片资源。
@@ -32,7 +33,7 @@ Status: implemented
 ## Consequences
 
 - **收益**：采用过的包装模板第一次真正进入成片与剪映草稿；叠加顺序明确，字幕永远在包框之上。
-- **代价**：`movie=` 源在滤镜里按路径读图，路径转义沿用字幕滤镜的规则；只支持静态图片，动画包装仍需逐帧序列；
+- **代价**：`movie=` 源在滤镜里按路径读图，路径转义沿用字幕滤镜的规则（路径含单引号时与既有的 `subtitles=` 一样不支持）；只支持静态图片，动画包装仍需逐帧序列；
   图层图片缩放到 `rect` 时不保持原始宽高比（模板作者负责给出匹配的图片）。
 
 ## Verification

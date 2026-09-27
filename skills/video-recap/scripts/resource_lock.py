@@ -86,7 +86,8 @@ def _match_library(entries: list[dict], index: dict) -> None:
                for r in index["resources"]}
     for entry in entries:
         resource = by_path.get(entry["path"]) if entry["path"] else None
-        if resource is None and entry["role"] == "voice" and not entry["path"]:
+        if (resource is None and entry["role"] == "voice" and not entry["path"]
+                and isinstance(entry["detail"].get("voice_id"), str) and entry["detail"]["voice_id"]):
             detail = entry["detail"]
             resource = next((v for v in voices
                              if (records[v["id"]].get("voice") or {}).get("provider") == detail.get("provider")

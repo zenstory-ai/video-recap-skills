@@ -66,18 +66,22 @@ def test_plans_that_do_not_fit_the_render_are_rejected(tmp_path, canvas, rect, m
 
 
 @pytest.mark.parametrize(
-    "rect, scale, position",
+    "rect, image_size, scale, position",
     [
-        pytest.param({"x": 0, "y": 0, "width": 320, "height": 240}, 1.0, (0.0, 0.0), id="full_canvas"),
-        pytest.param(BAR, 1.0, (0.0, -0.833333), id="bottom_bar"),
-        pytest.param({"x": 240, "y": 0, "width": 80, "height": 60}, 0.25, (0.75, 0.75), id="top_right_logo"),
+        pytest.param({"x": 0, "y": 0, "width": 320, "height": 240}, (640, 480), (1.0, 1.0), (0.0, 0.0), id="full_canvas"),
+        pytest.param(BAR, (32, 4), (1.0, 1.0), (0.0, -0.833333), id="bottom_bar_same_aspect"),
+        pytest.param(BAR, (4, 4), (1.333333, 0.166667), (0.0, -0.833333), id="square_image_stretched_to_bar"),
+        pytest.param({"x": 240, "y": 0, "width": 80, "height": 60}, (8, 6), (0.25, 0.25), (0.75, 0.75), id="top_right_logo"),
     ],
 )
-def test_timeline_segments_place_layers_where_the_render_does(rect, scale, position):
-    [segment] = packaging.timeline_image_segments([{"name": "l", "path": "/l.png", "rect": rect}], CANVAS, 3.0)
+def test_timeline_segments_place_layers_where_the_render_does(rect, image_size, scale, position):
+    layer = {"name": "l", "path": "/l.png", "rect": rect,
+             "image_size": {"width": image_size[0], "height": image_size[1]}}
+
+    [segment] = packaging.timeline_image_segments([layer], CANVAS, 3.0)
 
     assert (segment["timeline_start"], segment["timeline_end"]) == (0.0, 3.0)
-    assert segment["scale"] == {"x": scale, "y": scale}
+    assert (segment["scale"]["x"], segment["scale"]["y"]) == scale
     assert (segment["position"]["x"], segment["position"]["y"]) == position
 
 

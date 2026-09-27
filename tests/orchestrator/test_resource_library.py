@@ -67,6 +67,16 @@ def test_shipped_example_library_is_valid_with_only_the_intended_licence_warning
         pytest.param(PACKAGING, lambda d: d["params"]["layers"][0]["rect"].update(width=901), (PACKAGING, "rect_outside_canvas"), id="layer_outside_canvas"),
         pytest.param(PACKAGING, lambda d: d["params"]["layers"][0]["image"].update(resource="gone"), (PACKAGING, "resource_missing"), id="missing_layer_image"),
         pytest.param(SAMPLE, lambda d: d.update(templates=["clean-white@v9"]), (SAMPLE, "template_missing"), id="missing_template_ref"),
+        pytest.param(SUBTITLE, lambda d: d["params"]["size_px"].update(value=52.5), (SUBTITLE, "integer"), id="fractional_font_size"),
+        pytest.param(SUBTITLE, lambda d: d["params"].update(font={"resource": ["x"]}), (SUBTITLE, "resource_ref"), id="font_ref_not_an_id"),
+        pytest.param(SUBTITLE, lambda d: d["params"]["band"]["value"].update(y_top="1280"), (SUBTITLE, "band"), id="band_as_string"),
+        pytest.param(SUBTITLE, lambda d: d.update(samples=[{"id": "demo-sample"}]), (SUBTITLE, "samples"), id="samples_not_ids"),
+        pytest.param(SUBTITLE, lambda d: d["adoption"].update(resources=["frame-demo"]), (SUBTITLE, "adoption_resources"), id="adoption_snapshot_list"),
+        pytest.param(SAMPLE, lambda d: d.update(templates=[{"id": "clean-white"}]), (SAMPLE, "templates"), id="sample_templates_not_refs"),
+        pytest.param(PACKAGING, lambda d: d["params"]["layers"][0].pop("image"), (PACKAGING, "layer"), id="layer_without_image"),
+        pytest.param(PACKAGING, lambda d: d["params"]["layers"][0]["rect"].update(x=True), (PACKAGING, "rect"), id="rect_with_boolean"),
+        pytest.param(VOICE, lambda d: d.update(voice={"provider": "fish-audio"}), (VOICE, "voice"), id="fish_voice_without_id"),
+        pytest.param(BGM, lambda d: d.update(files="pulse-demo.wav"), (BGM, "files"), id="files_not_a_list"),
     ],
 )
 def test_invalid_records_are_reported_as_errors(tmp_path, rel, change, expected):

@@ -9,6 +9,7 @@ video filter; ``timeline.json`` gets matching image segments for editable export
 import json
 from pathlib import Path
 
+import lib
 from artifacts import file_identity
 from visual_render import _escape_subtitle_filter_path
 
@@ -38,8 +39,20 @@ def load_packaging_layers(work_dir, canvas):
                 or rect["x"] + rect["width"] > canvas["width"]
                 or rect["y"] + rect["height"] > canvas["height"]):
             raise RuntimeError(f"包装图层 {layer['name']} 超出画布")
-        layers.append({"name": layer["name"], "path": str(image), "rect": dict(rect)})
+        layers.append({"name": layer["name"], "path": str(image), "rect": dict(rect),
+                       "image_size": _image_size(image)})
     return layers
+
+
+def _image_size(image):
+    """Pixel size of a layer image; the editor fits by it, the render stretches to the rect."""
+    res = lib.run_cmd(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                       "-show_entries", "stream=width,height", "-of", "json", str(image)])
+    try:
+        stream = json.loads(res.stdout)["streams"][0]
+        return {"width": int(stream["width"]), "height": int(stream["height"])}
+    except (ValueError, KeyError, IndexError):
+        raise RuntimeError(f"无法读取包装图层尺寸: {image}") from None
 
 
 def compose_video_filter(chain, layers, *, mask_first):
@@ -70,18 +83,22 @@ def compose_video_filter(chain, layers, *, mask_first):
 
 
 def timeline_image_segments(layers, canvas, duration_s):
-    """Full-length image segments in the timeline's center-origin, Y-up transform."""
+    """Full-length image segments in the timeline's center-origin, Y-up transform.
+
+    The editor shows an image fitted inside the canvas (keeping its own aspect) at scale 1;
+    the render stretches it to the rect, so x and y scales are derived separately.
+    """
     width, height = canvas["width"], canvas["height"]
     segments = []
     for layer in layers:
-        rect = layer["rect"]
-        # The editor fits an image inside the canvas at scale 1, keeping its aspect.
-        fit_width = min(width, height * rect["width"] / rect["height"])
+        rect, size = layer["rect"], layer["image_size"]
+        fit = min(width / size["width"], height / size["height"])
         segments.append({
             "source_path": layer["path"],
             "timeline_start": 0.0,
             "timeline_end": duration_s,
-            "scale": {"x": round(rect["width"] / fit_width, 6), "y": round(rect["width"] / fit_width, 6)},
+            "scale": {"x": round(rect["width"] / (size["width"] * fit), 6),
+                      "y": round(rect["height"] / (size["height"] * fit), 6)},
             "position": {
                 "x": round((rect["x"] + rect["width"] / 2 - width / 2) / (width / 2), 6),
                 "y": round((height / 2 - rect["y"] - rect["height"] / 2) / (height / 2), 6),

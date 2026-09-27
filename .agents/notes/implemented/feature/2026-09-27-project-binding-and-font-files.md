@@ -25,6 +25,11 @@ Status: implemented
   且 `size_px × max_chars` 不得超过画布宽减去两侧默认边距——真实端到端运行里，只给字号的模板让 18 字一行宽到 936px，被合成阶段的视觉 QC 拦下，这类问题应在登记时发现。
 - `--project` 在解析前转成绝对路径，续跑命令从任何目录都能用。
 - 示例项目 `examples/demo-project/recap_project.json` 绑定合成示例库。
+- 被绑定的资源、以及模板引用的资源，只要 `check` 对其记录报了错误就拒绝绑定（缺文件、Fish / index-tts 缺 `voice_id`、未知 provider 等），
+  不会在花钱的阶段之后才崩溃或悄悄换成默认音色；数值型字幕参数（字号、每行字数、行数、字幕带）必须是整数；
+  已设置的 `VIDEO_RECAP_MATERIAL_LIBRARY_DIR` 与项目库不同即停止；`adopted-packet-copy` 不接受 BGM 绑定；
+  环境变量冲突按数值、按解析后的路径比较，等价写法不算冲突。
+- `scan_library` 对任何结构异常的记录只报 `malformed` 等错误、从不抛异常；`resource_lock` 写入失败只打印警告，不让已完成的渲染失败。
 
 ## Alternatives considered
 

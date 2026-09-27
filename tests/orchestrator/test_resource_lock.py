@@ -103,3 +103,33 @@ def test_finished_run_writes_the_lock_next_to_its_artifacts(monkeypatch, tmp_pat
     lock = json.loads((work / "resource_lock.json").read_text(encoding="utf-8"))
     assert [e["role"] for e in lock["resources"]][:2] == ["source_video", "voice"]
     assert lock["project"] is None
+
+
+def test_voice_without_an_id_is_not_credited_to_a_reference_voice(tmp_path):
+    lib = _library(tmp_path)
+    record = lib / "resources/voice/narrator-demo/resource.json"
+    shutil.copy(lib / "resources/bgm/pulse-demo/pulse-demo.wav", record.parent / "ref.wav")
+    data = json.loads(record.read_text(encoding="utf-8"))
+    data.update(files=[{"role": "reference", "path": "ref.wav"}], consent={"status": "denied"})
+    data["voice"].pop("voice_id")
+    _write(record, data)
+    _, work = _finished_work(tmp_path, voice={"provider": "mimo-tts", "model": None, "voice_id": None,
+                                              "reference": None})
+
+    lock = resource_lock.build_resource_lock(work, library_dir=lib)
+
+    assert _by_role(lock)["voice"]["library"] is None
+
+
+def test_a_malformed_library_record_never_fails_the_lock(tmp_path):
+    lib = _library(tmp_path)
+    template = lib / "templates/subtitle_style/clean-white/v1/template.json"
+    data = json.loads(template.read_text(encoding="utf-8"))
+    data["params"]["font"] = {"resource": ["not", "an", "id"]}
+    data["samples"] = 3
+    _write(template, data)
+    _, work = _finished_work(tmp_path)
+
+    lock = resource_lock.build_resource_lock(work, library_dir=lib)
+
+    assert [e["role"] for e in lock["resources"]] == ["source_video", "voice", "subtitle_font"]

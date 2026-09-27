@@ -95,10 +95,19 @@ def _voice_updates(resource, args):
     return updates, env
 
 
+def _same_setting(key, current, value):
+    if key.endswith(("_PATH", "_FILE", "VOICE_REF")):
+        return Path(current).expanduser().resolve() == Path(value).expanduser().resolve()
+    try:
+        return float(current) == float(value)
+    except ValueError:
+        return current == value
+
+
 def _check_env_conflicts(env, environ):
     for key, value in env.items():
         current = environ.get(key, "").strip()
-        if current and current != value:
+        if current and not _same_setting(key, current, value):
             raise BindingError(f"{key}={current} 与项目绑定的 {value} 冲突；删掉其中一处")
 
 
@@ -132,6 +141,14 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
     index, report = library_lib.scan_library(library_root)
     resources = {r["id"]: r for r in index["resources"]}
     templates = {f"{t['id']}@v{t['version']}": t for t in index["templates"]}
+    errors = {}
+    for issue in report.errors:
+        errors.setdefault(issue["path"], issue["message"])
+
+    def require_valid(entry, label):
+        rel = Path(entry["record"]).relative_to(library_root).as_posix()
+        if rel in errors:
+            raise BindingError(f"{label}: {errors[rel]}（先运行 library.py check）")
 
     def template(kind):
         ref = bindings.get(kind)
@@ -142,9 +159,11 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
             raise BindingError(f"{kind} 模板 {ref} 不存在或无效（先运行 library.py check）")
         if entry["status"] != "adopted":
             raise BindingError(f"{kind} 模板 {ref} 的状态是 {entry['status']}，只有 adopted 能绑定")
-        broken = [e for e in report.errors if e["path"] == Path(entry["record"]).relative_to(library_root).as_posix()]
-        if broken:
-            raise BindingError(f"{ref}: {broken[0]['message']}")
+        require_valid(entry, ref)
+        for _, rid in entry["refs"]:
+            if rid not in resources:
+                raise BindingError(f"{ref} 引用的资源 {rid} 不存在或无效（先运行 library.py check）")
+            require_valid(resources[rid], f"{ref} 引用的资源 {rid}")
         return entry
 
     def resource(kind):
@@ -154,6 +173,7 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         entry = resources.get(rid)
         if entry is None or entry["kind"] != kind:
             raise BindingError(f"{kind} 资源 {rid} 不存在或无效（先运行 library.py check）")
+        require_valid(entry, f"{kind} 资源 {rid}")
         return entry
 
     env, updates, used_templates = {}, {}, []
@@ -174,8 +194,17 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         updates.update(voice_updates)
         env.update(voice_env)
     bgm = resource("bgm")
+    if bgm and getattr(args, "audio_mode", "narration") == "adopted-packet-copy":
+        raise BindingError("adopted-packet-copy 冻结原音轨，不能再绑定 BGM；去掉 bindings.bgm 或换声音模式")
     if bgm:
         env["BGM_PATH"] = bgm["files"][0]["path"]
+    material_env = environ.get("VIDEO_RECAP_MATERIAL_LIBRARY_DIR", "").strip()
+    if (material_env and not getattr(args, "material_library_dir", None)
+            and Path(material_env).expanduser().resolve() != library_root):
+        raise BindingError(
+            f"VIDEO_RECAP_MATERIAL_LIBRARY_DIR={material_env} 与项目的库 {library_root} 不是同一个目录；"
+            "素材库与资源库共用根目录，删掉其中一处"
+        )
     _check_env_conflicts(env, environ)
     _check_env_conflicts(
         {name: updates[key] for key, name in (("mimo_tts_voice", "MIMO_TTS_VOICE"), ("voice_ref", "VOICE_REF"))
@@ -237,9 +266,10 @@ def sync_packaging_layers(work_dir, resolved) -> None:
     if not packaging:
         if path.exists():
             try:
-                ours = json.loads(path.read_text(encoding="utf-8")).get("written_by") == _WRITTEN_BY
+                plan = json.loads(path.read_text(encoding="utf-8"))
             except ValueError:
-                ours = False
+                plan = None
+            ours = isinstance(plan, dict) and plan.get("written_by") == _WRITTEN_BY
             if ours:
                 path.unlink()
         return

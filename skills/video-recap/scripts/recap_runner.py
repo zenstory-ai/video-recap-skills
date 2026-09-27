@@ -99,9 +99,13 @@ def _record_resources(work_dir, args):
     library_dir = getattr(args, "material_library_dir", None) or os.environ.get(
         "VIDEO_RECAP_MATERIAL_LIBRARY_DIR"
     )
-    lock = resource_lock.write_resource_lock(
-        work_dir, library_dir=library_dir, project=getattr(args, "resolved_project", None)
-    )
+    try:
+        lock = resource_lock.write_resource_lock(
+            work_dir, library_dir=library_dir, project=getattr(args, "resolved_project", None)
+        )
+    except (OSError, ValueError, TypeError, KeyError) as exc:  # a record must never fail a finished render
+        print(f"[video-recap] ⚠ 未能写出 resource_lock.json: {type(exc).__name__}: {exc}", flush=True)
+        return
     print(resource_lock.summary_line(lock), flush=True)
 
 
