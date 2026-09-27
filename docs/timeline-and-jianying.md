@@ -143,11 +143,13 @@ and atomically renamed, so a copy/write exception does not publish a half-draft.
 ### Duo-video capability alignment
 
 The adapter is pinned to `duo-video@ef4eb46`; it deep-copies the upstream MIT
-JSON templates before replacing authored values. Core categories use status
-`supported`; proprietary-resource categories use
-`supported_offline_payload`. The latter means a pre-adapted material/segment
-protocol can be emitted from caller data. It does **not** mean this project
-ships JianYing's proprietary resource catalog or reconstructs it from an ID.
+JSON templates before replacing authored values. The table below is the full
+set of supported capabilities; the timeline contract rejects any other track
+kind before a draft is built. Proprietary-resource capabilities (sound,
+sticker, effects, text templates, transitions, masks, LUTs) are offline-payload
+only: a pre-adapted material/segment protocol can be emitted from caller data.
+This does **not** mean this project ships JianYing's proprietary resource
+catalog or reconstructs it from an ID.
 
 | Capability | Timeline authoring | Output |
 | --- | --- | --- |

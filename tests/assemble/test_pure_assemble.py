@@ -33,15 +33,6 @@ _DELIVERY = {
     "video_encode_passes": 0, "reencode_reason": [], "audio_sample_rate": 48000,
     "final_compat_notes": ["video_copy", "aac_48000", "faststart"],
 }
-
-_FAKE_QC = {
-    "verdict": "PASS", "blocking": False, "blocking_codes": [], "loudness_mode": None,
-    "loudnorm_measurement": None, "audio_operations": {}, "adopted_audio": None,
-}
-_DELIVERY = {
-    "video_encode_passes": 0, "reencode_reason": [], "audio_sample_rate": 48000,
-    "final_compat_notes": ["video_copy", "aac_48000", "faststart"],
-}
 from assembly_contract import _resolve_final_output
 from assembly_settings import assembly_settings_payload
 from audio_mix import _build_audio_filter_complex, final_loudnorm_filter
@@ -91,26 +82,6 @@ def _assembly_manifest_payload(
     )
 
 
-def _adjust_tts_speed(*args, **kwargs):
-    return narration_audio._adjust_tts_speed(
-        *args,
-        command_runner=narration_audio.run_cmd,
-        duration_probe=narration_audio.get_video_duration,
-        logger=narration_audio.log,
-        **kwargs,
-    )
-
-
-def _apply_narration_speed(*args, **kwargs):
-    return narration_audio._apply_narration_speed(
-        *args,
-        command_runner=narration_audio.run_cmd,
-        duration_probe=narration_audio.get_video_duration,
-        logger=narration_audio.log,
-        **kwargs,
-    )
-
-
 def _canvas(width=1280, height=720, fps=30.0):
     return media._canvas_from_stream(
         {
@@ -148,16 +119,6 @@ def _mock_assemble_media(monkeypatch, *, duration=4.0, has_audio=True):
         assembly_contract,
         "_build_assembly_qc",
         lambda *_args, **_kwargs: {"blocking": False, "blocking_codes": []},
-    )
-
-
-def _build_timed_narration(*args, **kwargs):
-    return narration_audio._build_timed_narration(
-        *args,
-        adjust_speed=narration_audio._adjust_tts_speed,
-        command_runner=narration_audio.run_cmd,
-        logger=narration_audio.log,
-        **kwargs,
     )
 
 
@@ -250,7 +211,7 @@ def test_adjust_tts_speed_derives_outputs_from_audio_name_only(monkeypatch, tmp_
     monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
 
     adjusted, actual_dur, meta = _adjust_result_parts(
-        _adjust_tts_speed(src, target_duration=2.0)
+        narration_audio._adjust_tts_speed(src, target_duration=2.0)
     )
 
     assert actual_dur == 2.0
@@ -730,7 +691,7 @@ def test_apply_narration_speed_atempos_each_segment(monkeypatch, tmp_path):
     monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
     monkeypatch.setattr(narration_audio, "get_video_duration", lambda p: 4.46)
 
-    _apply_narration_speed(segs, tmp_path)
+    narration_audio._apply_narration_speed(segs, tmp_path)
 
     assert any("atempo=1.120" in " ".join(c) for c in cmds)
     assert segs[0]["audio_path"].endswith("_spd_0.wav")
@@ -747,7 +708,7 @@ def test_apply_narration_speed_noop_at_1x(monkeypatch, tmp_path):
 
     monkeypatch.setitem(CONFIG, "narration_speed", 1.0)
     monkeypatch.setattr(narration_audio, "run_cmd", boom)
-    _apply_narration_speed(segs, tmp_path)
+    narration_audio._apply_narration_speed(segs, tmp_path)
     assert segs[0]["audio_path"] == str(src)  # unchanged
 
 
@@ -889,7 +850,7 @@ def test_build_timed_narration_clamps_delay_to_slot(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "narration_delay_seconds", 1.5)
     monkeypatch.setitem(CONFIG, "narration_tail_pad_seconds", 0.1)
 
-    _build_timed_narration([segment], tmp_path / "out.wav", 2.0, tmp_path)
+    narration_audio._build_timed_narration([segment], tmp_path / "out.wav", 2.0, tmp_path)
 
     assert segment["actual_place_start"] == pytest.approx(0.1, abs=0.02)
     assert segment["actual_place_end"] == pytest.approx(0.9, abs=0.02)
@@ -908,7 +869,7 @@ def test_narration_start_has_no_hidden_default_delay(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
     monkeypatch.setitem(CONFIG, "narration_tail_pad_seconds", 0.1)
 
-    _build_timed_narration([segment], tmp_path / "out.wav", 8.0, tmp_path)
+    narration_audio._build_timed_narration([segment], tmp_path / "out.wav", 8.0, tmp_path)
 
     assert segment["actual_place_start"] == pytest.approx(5.81, abs=0.01)
 
@@ -1777,7 +1738,7 @@ def test_p0_adjust_tts_speed_respects_cumulative_tempo_cap(monkeypatch, tmp_path
     monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
 
     out, dur, meta = _adjust_result_parts(
-        _adjust_tts_speed(
+        narration_audio._adjust_tts_speed(
             src, target_duration=10.0, tts_rate_offset=0.05
         )
     )
@@ -1817,7 +1778,7 @@ def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path
     monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
 
     out, dur, meta = _adjust_result_parts(
-        _adjust_tts_speed(
+        narration_audio._adjust_tts_speed(
             src, target_duration=10.0, tts_rate_offset=0.05
         )
     )
@@ -1865,7 +1826,7 @@ def test_p0_build_timed_narration_propagates_no_safe_fit_metadata(
         tts_rate_offset=0.0,
     )
 
-    _build_timed_narration([seg], tmp_path / "narration.wav", 1.5, tmp_path)
+    narration_audio._build_timed_narration([seg], tmp_path / "narration.wav", 1.5, tmp_path)
 
     assert seg["fit_status"] == "no_safe_fit"
     assert seg["truncate_reason"] == "no_safe_boundary"
@@ -1990,7 +1951,7 @@ def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
         tts_rate_offset=0.0,
     )
 
-    _build_timed_narration([seg], tmp_path / "narration.wav", 2.0, tmp_path)
+    narration_audio._build_timed_narration([seg], tmp_path / "narration.wav", 2.0, tmp_path)
 
     assert seg["fit_status"] == "no_safe_fit"
     assert seg.get("blocking") is True
@@ -2481,31 +2442,6 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
     assert qc["mask"]["policy"] == "off"
     assert qc["overlays"]["facts"][0]["type"] == "top_title"
     assert filters and all("drawtext=" in f for f in filters)
-
-
-def test_subtitle_layout_qc_records_multiline_safe_area_and_overflow(monkeypatch):
-    monkeypatch.setitem(CONFIG, "subtitle_max_lines", 2)
-    style = {
-        "font_size": 42,
-        "outline": 2,
-        "shadow": 1,
-        "margin_l": 40,
-        "margin_r": 40,
-        "margin_v": 48,
-        "max_chars": 20,
-        "play_res_x": 640,
-        "play_res_y": 360,
-        "alignment": 2,
-    }
-    qc = visual_render._subtitle_layout_qc(
-        [{"start": 0, "end": 2, "text": "第一行\n第二行\n第三行"}],
-        style,
-    )
-
-    assert qc["safe_area"]["width"] == 560
-    assert qc["multi_line"] is True
-    assert qc["overflow"] is True
-    assert qc["overflow_entries"][0]["overflow_reasons"] == ["max_lines_exceeded"]
 
 
 def test_assembly_qc_rolls_up_visual_and_delivery_facts_without_polluting_visual():

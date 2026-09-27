@@ -118,13 +118,13 @@ def _canvas_from_stream(stream):
     }
 
 
-def _probe_canvas(video_path, *, command_runner=run_cmd):
+def _probe_canvas(video_path):
     """Return rotation/SAR/DAR-aware canvas facts for a video.
 
     ``width``/``height`` are the display canvas used by subtitle/overlay geometry.
     For legacy square-pixel landscape sources, these remain the raw storage dimensions.
     """
-    res = command_runner([
+    res = run_cmd([
         "ffprobe", "-v", "error", "-select_streams", "v:0",
         "-show_entries",
         "stream=width,height,r_frame_rate,avg_frame_rate,sample_aspect_ratio,display_aspect_ratio:stream_tags=rotate:stream_side_data=rotation",
@@ -138,23 +138,16 @@ def _probe_canvas(video_path, *, command_runner=run_cmd):
     return _canvas_from_stream(streams[0])
 
 
-def _has_audio_stream(video_path, *, command_runner=run_cmd):
+def _has_audio_stream(video_path):
     """Return True when the input has an audio stream usable as [0:a]."""
-    result = command_runner([
+    result = run_cmd([
         "ffprobe", "-v", "error", "-select_streams", "a:0",
         "-show_entries", "stream=index", "-of", "csv=p=0", str(video_path),
     ])
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
-def _build_video_clips(
-    input_video,
-    work_dir,
-    duration_s,
-    *,
-    logger=log,
-    source_video_getter=_explicit_source_video,
-):
+def _build_video_clips(input_video, work_dir, duration_s):
     """Video-track clips for the timeline.
 
     In cut mode each plan entry becomes a clip referencing the ORIGINAL source
@@ -162,7 +155,7 @@ def _build_video_clips(
     require an explicit ambient --source-video. Without any declared source (full
     mode, or cut mode rendered without --source-video) the rendered input is one clip.
     """
-    explicit_source_video = source_video_getter()
+    explicit_source_video = _explicit_source_video()
     spans = _plan_clip_spans(work_dir)
     multi_source = spans is not None and any(span["entry"].get("source_path") for span in spans)
     if spans is None or not (explicit_source_video or multi_source):
@@ -178,7 +171,7 @@ def _build_video_clips(
             # Degrade ONLY this clip — point it at the rendered cut for its own output
             # window — and keep real provenance for every present source, instead of
             # collapsing the whole multi-source timeline.
-            logger(f"  时间线: source_path 不存在，该片段降级为剪后成片片段: {source_path or '(unset)'}")
+            log(f"  时间线: source_path 不存在，该片段降级为剪后成片片段: {source_path or '(unset)'}")
             clips.append({"source_id": entry.get("source_id"),
                           "source_path": str(input_video),
                           "source_start": timeline_start,

@@ -6,9 +6,7 @@ import subprocess
 from lib import CONFIG
 
 def _ffmpeg_filters():
-    """Return ffmpeg's compiled-in filter names."""
-    if shutil.which("ffmpeg") is None:
-        return set()
+    """Return ffmpeg's compiled-in filter names (caller has confirmed ffmpeg exists)."""
     result = subprocess.run(["ffmpeg", "-hide_banner", "-filters"],
                             text=True, capture_output=True, timeout=20)
     if result.returncode != 0:

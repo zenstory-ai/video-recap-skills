@@ -225,6 +225,10 @@ def test_unknown_future_timeline_schema_is_rejected(schema_version):
         (lambda timeline: timeline.update(tracks={}), "tracks"),
         (lambda timeline: timeline["tracks"].append("video"), "tracks\\[1\\]"),
         (lambda timeline: timeline["tracks"][0].pop("kind"), "tracks\\[0\\].kind"),
+        (
+            lambda timeline: timeline["tracks"][0].update(kind="transition"),
+            "unsupported track kind",
+        ),
         (lambda timeline: timeline["tracks"][0].update(clips={}), "tracks\\[0\\].clips"),
         (
             lambda timeline: timeline["tracks"][0]["clips"][0].pop("source_path"),

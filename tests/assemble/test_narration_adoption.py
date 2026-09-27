@@ -327,6 +327,16 @@ def _frequency_magnitudes(video):
     return result
 
 
+def test_unadopted_narration_tone_is_audible_in_final_mix(render_media, tmp_path):
+    source, work = render_media
+    output = work / "output.mp4"
+
+    assemble.assemble_video(source, [_segment(_tone(tmp_path / "voice.wav"))], work, output)
+
+    magnitudes = _frequency_magnitudes(output)
+    assert magnitudes[997] > 100 * magnitudes[330], magnitudes
+
+
 def test_adopted_f32_stereo_input_is_decoded_and_bound_through_final_mix(
     render_media, tmp_path
 ):

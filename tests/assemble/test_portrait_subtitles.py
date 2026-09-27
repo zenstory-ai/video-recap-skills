@@ -11,13 +11,11 @@ stay byte-identical; portrait must use a frame-matching PlayRes that fits the wi
 import json  # noqa: E402
 from subprocess import CompletedProcess  # noqa: E402
 import media  # noqa: E402
+import pytest  # noqa: E402
+from lib import CONFIG  # noqa: E402
 from subtitles.core import _subtitle_style_config  # noqa: E402
 from subtitles.render import _generate_ass  # noqa: E402
 from visual_render import _subtitle_layout_qc  # noqa: E402
-
-
-def _probe_canvas(video_path):
-    return media._probe_canvas(video_path, command_runner=media.run_cmd)
 
 
 def test_canvas_none_is_legacy_default():
@@ -87,7 +85,7 @@ def test_probe_canvas_preserves_legacy_landscape(monkeypatch, tmp_path):
         }), "")
 
     monkeypatch.setattr(media, "run_cmd", fake_run_cmd)
-    canvas = _probe_canvas(tmp_path / "landscape.mp4")
+    canvas = media._probe_canvas(tmp_path / "landscape.mp4")
     assert canvas["width"] == 1280
     assert canvas["height"] == 720
     assert canvas["fps"] == 29.97
@@ -108,7 +106,7 @@ def test_probe_canvas_applies_rotation_and_sar(monkeypatch, tmp_path):
         }), "")
 
     monkeypatch.setattr(media, "run_cmd", fake_run_cmd)
-    canvas = _probe_canvas(tmp_path / "rotated.mp4")
+    canvas = media._probe_canvas(tmp_path / "rotated.mp4")
     assert canvas["storage_width"] == 1920
     assert canvas["storage_height"] == 1080
     assert canvas["rotation"] == 90
@@ -122,21 +120,32 @@ def json_text(value):
     return json.dumps(value)
 
 
-def test_subtitle_layout_qc_flags_multiline_safe_area_overflow():
-    """Subtitle layout QC must be multi-line aware and fail/warn when text exceeds safe area."""
-    style = _subtitle_style_config({"width": 1080, "height": 1920})
-    ok = _subtitle_layout_qc(
-        [{"start": 0.0, "end": 2.0, "text": "第一行\n第二行"}],
-        style,
-        safe_area={"x": 54, "y": 96, "width": 972, "height": 1728},
-    )
-    assert ok["max_lines"] == 2
-    assert ok["overflow"] is False
+@pytest.mark.parametrize(
+    ("text", "canvas", "safe_area", "line_count", "safe_width", "reasons", "kinds"),
+    [
+        # two lines inside an explicit portrait safe area: multi-line, no overflow
+        ("第一行\n第二行", (1080, 1920), {"x": 54, "y": 96, "width": 972, "height": 1728},
+         2, 972.0, [], []),
+        # default safe area derives from margins; a third line exceeds subtitle_max_lines=2
+        ("第一行\n第二行\n第三行", (640, 360), None,
+         3, 600.0, ["max_lines_exceeded"], ["line_count"]),
+        # one very long line overflows the safe width
+        ("超长字幕" * 120, (360, 640), {"x": 36, "y": 64, "width": 288, "height": 120},
+         1, 288.0, ["safe_width_exceeded"], ["line_width"]),
+    ],
+)
+def test_subtitle_layout_qc_reports_multiline_and_safe_area_overflow(
+    monkeypatch, text, canvas, safe_area, line_count, safe_width, reasons, kinds
+):
+    monkeypatch.setitem(CONFIG, "subtitle_max_lines", 2)
+    style = _subtitle_style_config({"width": canvas[0], "height": canvas[1]})
 
-    overflow = _subtitle_layout_qc(
-        [{"start": 0.0, "end": 2.0, "text": "超长字幕" * 120}],
-        _subtitle_style_config({"width": 360, "height": 640}),
-        safe_area={"x": 36, "y": 64, "width": 288, "height": 120},
-    )
-    assert overflow["overflow"] is True
-    assert any(v.get("kind") in {"safe_area", "line_width", "line_count"} for v in overflow["violations"])
+    qc = _subtitle_layout_qc([{"start": 0.0, "end": 2.0, "text": text}], style, safe_area=safe_area)
+
+    fact = qc["entry_facts"][0]
+    assert fact["line_count"] == line_count
+    assert fact["safe_width"] == safe_width
+    assert fact["overflow_reasons"] == reasons
+    assert qc["multi_line"] is (line_count > 1)
+    assert qc["overflow"] is bool(reasons)
+    assert [v["kind"] for v in qc["violations"]] == kinds

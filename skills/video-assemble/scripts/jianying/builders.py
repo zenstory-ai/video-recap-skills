@@ -4,7 +4,7 @@ import json
 import os
 from copy import deepcopy
 
-from jianying.schema import scrub_platform_identity, us, validate_material_category
+from jianying.schema import scrub_platform_identity, us
 from jianying.templates import template
 from jianying.tracks import SEGMENT_RENDER_INDEX
 
@@ -219,13 +219,6 @@ def rich_text_content(text, base_style=None, words=None, style_presets=None):
     content["text"] = text
     content["styles"] = styles
     return content
-
-
-def unsupported_track_note(kind):
-    info = validate_material_category(kind)
-    if info["supported"]:
-        return None
-    return info.get("note")
 
 
 RESOURCE_TRACKS = {
@@ -721,9 +714,5 @@ def build_timeline_track(ctx, timeline_track):
         build_text_track(ctx, timeline_track)
     elif kind == "image":
         build_image_track(ctx, timeline_track)
-    elif kind in RESOURCE_TRACKS:
+    else:  # normalize_timeline admits only RESOURCE_TRACKS kinds past this point
         build_resource_track(ctx, timeline_track)
-    else:
-        note = unsupported_track_note(kind)
-        if note:
-            ctx.note(note)

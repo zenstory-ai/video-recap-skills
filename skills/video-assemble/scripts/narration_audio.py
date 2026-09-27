@@ -10,9 +10,6 @@ def _apply_narration_speed(
     tts_segments,
     work_dir,
     *,
-    command_runner=run_cmd,
-    duration_probe=get_video_duration,
-    logger=log,
     tempo_policy=None,
 ):
     """Globally speed up narration audio via atempo (CONFIG['narration_speed']).
@@ -30,15 +27,15 @@ def _apply_narration_speed(
         if not os.path.exists(src):
             continue  # reported as a skipped segment during placement
         out = str(Path(work_dir) / f"_spd_{seg['index']}.wav")
-        res = command_runner(["ffmpeg", "-y", "-i", src, "-filter:a", f"atempo={speed:.3f}",
+        res = run_cmd(["ffmpeg", "-y", "-i", src, "-filter:a", f"atempo={speed:.3f}",
                               "-ar", "44100", "-ac", "1", "-acodec", "pcm_s16le", out])
         if res.returncode != 0:
             raise RuntimeError(f"解说提速失败 {src}: {res.stderr}")
         seg["audio_path"] = out
         seg["narration_conversion_path"] = out
-        seg["audio_duration"] = duration_probe(out)
+        seg["audio_duration"] = get_video_duration(out)
         done += 1
-    logger(f"解说整体提速: atempo={speed:.2f} ({done} 段)")
+    log(f"解说整体提速: atempo={speed:.2f} ({done} 段)")
 
 
 def _adjust_tts_speed(
@@ -46,9 +43,6 @@ def _adjust_tts_speed(
     target_duration,
     tts_rate_offset=0.0,
     *,
-    command_runner=run_cmd,
-    duration_probe=get_video_duration,
-    logger=log,
     tempo_policy=None,
 ):
     """Fit overlong TTS with bounded atempo; never time-trim speech in assemble.
@@ -58,7 +52,7 @@ def _adjust_tts_speed(
     untouched for QC to block instead of guessing a spoken_text truncation.
     """
     audio_path = Path(audio_path)
-    current_dur = duration_probe(audio_path)
+    current_dur = get_video_duration(audio_path)
     budget = narration_tempo_budget(tts_rate_offset)
     if tempo_policy:
         budget.update({
@@ -104,7 +98,7 @@ def _adjust_tts_speed(
             "placed_audio_duration": 0.0,
             "needed_tempo_factor": ratio,
         })
-        logger(
+        log(
             f"  TTS 无安全放置: {current_dur:.1f}s 需 x{ratio:.2f}，"
             f"超过段内预算 x{effective_max:.2f}（assemble 不按时间硬切）"
         )
@@ -117,10 +111,10 @@ def _adjust_tts_speed(
     cmd = ["ffmpeg", "-y", "-i", str(audio_path),
            "-filter:a", f"atempo={tempo:.6f}",
            "-ar", "44100", "-ac", "1", str(adjusted_path)]
-    result = command_runner(cmd)
+    result = run_cmd(cmd)
     if result.returncode != 0:
         raise RuntimeError(f"TTS 加速失败 {audio_path}: {result.stderr}")
-    new_dur = duration_probe(adjusted_path)
+    new_dur = get_video_duration(adjusted_path)
     if new_dur > target_duration + (1.0 / 44100.0):
         adjusted_path.unlink(missing_ok=True)
         meta.update({
@@ -130,7 +124,7 @@ def _adjust_tts_speed(
             "placed_audio_duration": 0.0,
             "needed_tempo_factor": new_dur / target_duration,
         })
-        logger(
+        log(
             f"  TTS 加速后仍超出安全窗口 {new_dur - target_duration:.3f}s；"
             "禁止裁尾，交由 Agent 缩短/移动文本"
         )
@@ -142,7 +136,7 @@ def _adjust_tts_speed(
         "placed_audio_duration": new_dur,
         "effective_tempo": budget["global_narration_speed"] * budget["tts_rate_factor"] * tempo,
     })
-    logger(f"  TTS 温和加速: {current_dur:.1f}s → {new_dur:.1f}s (x{tempo:.2f})")
+    log(f"  TTS 温和加速: {current_dur:.1f}s → {new_dur:.1f}s (x{tempo:.2f})")
     return (str(adjusted_path), new_dur, meta)
 
 
@@ -189,9 +183,6 @@ def _build_timed_narration(
     video_duration,
     work_dir,
     *,
-    adjust_speed=_adjust_tts_speed,
-    command_runner=run_cmd,
-    logger=log,
     tempo_policy=None,
 ):
     """将 TTS 片段按时间轴放置到一条与视频等长的音轨上"""
@@ -266,12 +257,12 @@ def _build_timed_narration(
         available_duration = max(available_samples / sample_rate, 0)
         if tts_dur > available_duration > 0:
             if tempo_policy:
-                wav_path, _actual_dur, fit_meta = adjust_speed(
+                wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
                     wav_path, available_duration, tts_rate_offset,
                     tempo_policy=tempo_policy,
                 )
             else:
-                wav_path, _actual_dur, fit_meta = adjust_speed(
+                wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
                     wav_path, available_duration, tts_rate_offset
                 )
             seg.update({
@@ -308,11 +299,11 @@ def _build_timed_narration(
             needs_resample = False
         if needs_resample:
             tmp_path = str(Path(work_dir) / f"_rs_{seg['index']}.wav")
-            rs_result = command_runner(["ffmpeg", "-y", "-i", wav_path,
+            rs_result = run_cmd(["ffmpeg", "-y", "-i", wav_path,
                                         "-ar", str(sample_rate), "-ac", "1",
                                         "-acodec", "pcm_s16le", tmp_path])
             if rs_result.returncode != 0:
-                logger(f"  跳过: 重采样失败 {wav_path}: {rs_result.stderr}")
+                log(f"  跳过: 重采样失败 {wav_path}: {rs_result.stderr}")
                 _unplaced(seg, seg["start"], "skipped", "resample_failed")
                 prev_pause_samples = pause_samples
                 skipped_count += 1
@@ -329,7 +320,7 @@ def _build_timed_narration(
         write_samples = audio_samples
 
         if write_samples <= 0 or available <= 0:
-            logger(f"  跳过: {seg['start']:.1f}s-{seg['end']:.1f}s (无空间)")
+            log(f"  跳过: {seg['start']:.1f}s-{seg['end']:.1f}s (无空间)")
             _unplaced(seg, seg["start"], "no_safe_fit", "no_room", blocking=True)
             prev_pause_samples = pause_samples
             no_safe_fit_count += 1
@@ -340,7 +331,7 @@ def _build_timed_narration(
             # consonant/vowel release. _adjust_tts_speed must produce a complete file
             # that fits; otherwise block and ask the Agent to shorten/move the block.
             over = (audio_samples - available) / sample_rate
-            logger(f"  TTS 无安全放置: 段 {seg['index']} 超出可用窗口 {over:.3f}s；禁止裁尾，交由 QC 阻断")
+            log(f"  TTS 无安全放置: 段 {seg['index']} 超出可用窗口 {over:.3f}s；禁止裁尾，交由 QC 阻断")
             _unplaced(seg, actual_start / sample_rate, "no_safe_fit", "no_safe_boundary", blocking=True)
             prev_pause_samples = pause_samples
             skipped_count += 1
@@ -351,7 +342,7 @@ def _build_timed_narration(
         if actual_start < last_written_end:
             overlap_ms = (last_written_end - actual_start) * 1000 / sample_rate
             if last_written_end >= actual_start + write_samples:
-                logger(f"  跳过重叠段: {actual_start/sample_rate:.1f}s "
+                log(f"  跳过重叠段: {actual_start/sample_rate:.1f}s "
                        f"(与前段重叠 {overlap_ms:.0f}ms)")
                 _unplaced(seg, seg["start"], "no_safe_fit", "no_room", blocking=True)
                 prev_pause_samples = pause_samples
@@ -360,7 +351,7 @@ def _build_timed_narration(
             actual_start = last_written_end
             available = end_boundary - actual_start
             if write_samples > available:
-                logger(f"  重叠 {overlap_ms:.0f}ms 后无安全完整窗口，跳过")
+                log(f"  重叠 {overlap_ms:.0f}ms 后无安全完整窗口，跳过")
                 _unplaced(seg, actual_start / sample_rate, "no_safe_fit", "no_safe_boundary", blocking=True)
                 prev_pause_samples = pause_samples
                 skipped_count += 1
@@ -419,4 +410,4 @@ def _build_timed_narration(
             "已中止以避免生成无解说视频"
         )
 
-    logger(f"解说音轨: {video_duration:.1f}s, {len(tts_segments)} 段")
+    log(f"解说音轨: {video_duration:.1f}s, {len(tts_segments)} 段")

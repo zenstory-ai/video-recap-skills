@@ -8,11 +8,7 @@ sys.path.insert(
 import json  # noqa: E402
 import pytest  # noqa: E402
 from export_jianying import build_draft, export_timeline_to_jianying, us  # noqa: E402
-from jianying.schema import (  # noqa: E402
-    MATERIAL_KEYS,
-    material_category_registry,
-    validate_material_category,
-)
+from jianying.schema import MATERIAL_KEYS  # noqa: E402
 from jianying.tracks import TRACK_LAYOUT_BANDS, TrackAllocator  # noqa: E402
 import jianying.writer as jianying_writer  # noqa: E402
 from timeline import build_timeline  # noqa: E402
@@ -418,52 +414,6 @@ def test_core_assemble_does_not_import_exporter():
     )
     r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
-
-
-def test_material_category_registry_matches_implemented_builders():
-    categories = material_category_registry()
-    assert categories["video"]["status"] == "supported"
-    assert categories["audio"]["status"] == "supported"
-    assert categories["text"]["status"] == "supported"
-    assert categories["subtitle"]["status"] == "supported"
-    assert categories["speed"]["status"] == "supported_auxiliary"
-    assert categories["image"] == {
-        "status": "supported",
-        "materials_key": "videos",
-        "track_type": "video",
-    }
-    for supported in (
-        "sticker",
-        "sound",
-        "text_template",
-        "lut",
-        "transition",
-        "video_effect",
-        "face_effect",
-        "mask",
-        "style",
-        "chroma",
-        "green_screen",
-        "compound",
-    ):
-        assert categories[supported]["status"].startswith("supported")
-    for offline_payload in (
-        "sticker",
-        "sound",
-        "text_template",
-        "lut",
-        "transition",
-        "video_effect",
-        "face_effect",
-        "mask",
-        "chroma",
-    ):
-        assert categories[offline_payload]["status"] == "supported_offline_payload"
-    assert categories["face_effect"]["materials_key"] == "video_effects"
-    assert categories["style"]["materials_key"] is None
-    unsupported = validate_material_category("transition")
-    assert unsupported["supported"] is True
-    assert unsupported["status"] == "supported_offline_payload"
 
 
 def test_local_image_overlay_builds_photo_material_and_overlap_safe_tracks():

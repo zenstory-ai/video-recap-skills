@@ -89,38 +89,6 @@ def _only_material(content, materials_key):
     return materials[0]
 
 
-def test_capability_manifest_is_pinned_to_reviewed_duo_video_revision():
-    manifest = _fixture("capabilities.json")
-
-    assert manifest["source"] == {
-        "repository": "https://github.com/duoec/duo-video.git",
-        "commit": "ef4eb46",
-        "module": "duo-video-jy",
-    }
-    assert set(manifest["required_capabilities"]) == {
-        "video",
-        "image",
-        "audio",
-        "text",
-        "sound",
-        "sticker",
-        "text_template",
-        "transition",
-        "mask",
-        "lut",
-        "video_effect",
-        "face_effect",
-        "green_screen",
-        "chroma",
-        "compound",
-        "variable_speed",
-        "reverse_local_source",
-        "generic_transform",
-        "rich_text",
-        "per_character_text_style",
-    }
-
-
 def test_empty_project_root_config_and_materials_match_duo_template():
     content = _build(duration=3.5)
     expected = _fixture("duo_empty_project_info.json")

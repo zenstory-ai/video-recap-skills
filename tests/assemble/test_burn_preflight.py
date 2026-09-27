@@ -64,15 +64,9 @@ def test_ffmpeg_filters_parse_matches_doctor(monkeypatch):
         returncode = 0
         stdout = sample
 
-    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Result())
     filters = preflight._ffmpeg_filters()
     assert "subtitles" in filters and "atempo" in filters
-
-
-def test_ffmpeg_filters_empty_when_ffmpeg_absent(monkeypatch):
-    monkeypatch.setattr(shutil, "which", lambda _name: None)
-    assert preflight._ffmpeg_filters() == set()
 
 
 def test_ffmpeg_filters_empty_on_nonzero_returncode(monkeypatch):
@@ -80,6 +74,5 @@ def test_ffmpeg_filters_empty_on_nonzero_returncode(monkeypatch):
         returncode = 1
         stdout = "should be ignored"
 
-    monkeypatch.setattr(shutil, "which", lambda _name: "/usr/bin/ffmpeg")
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _Result())
     assert preflight._ffmpeg_filters() == set()
