@@ -1,4 +1,5 @@
 import json
+import shlex
 import shutil
 import sys
 from argparse import Namespace
@@ -206,4 +207,4 @@ def test_resume_command_names_the_project_by_absolute_path(monkeypatch, tmp_path
 
     recap_runner.main()
 
-    assert f"--project {path.resolve()}" in capsys.readouterr().out
+    assert f"--project {shlex.quote(str(path.resolve()))}" in capsys.readouterr().out

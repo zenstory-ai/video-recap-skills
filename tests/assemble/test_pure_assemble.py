@@ -882,17 +882,24 @@ def test_subtitle_burn_filter_escapes_path():
     assert r"a\:b\,c\[1\].ass" in filt
 
 
+def _filter_escaped(path):
+    text = path.as_posix()
+    for raw, escaped in (("\\", "\\\\"), (":", "\\:"), ("'", "\\'"), (",", "\\,"), ("[", "\\["), ("]", "\\]")):
+        text = text.replace(raw, escaped)
+    return text
+
+
 def test_declared_font_file_reaches_subtitle_and_drawtext_filters(monkeypatch, tmp_path):
-    font = tmp_path / "fonts: 1" / "Brand Sans.ttf"
+    font = tmp_path / "fonts [1], a" / "Brand Sans.ttf"  # the drive letter covers ':' on Windows
     font.parent.mkdir()
     font.write_bytes(b"font")
     monkeypatch.setitem(CONFIG, "subtitle_font_file", str(font))
 
     burn = _subtitle_burn_filter(tmp_path / "subs.ass")
 
-    assert burn.endswith(r"fontsdir='" + font.parent.resolve().as_posix().replace(":", r"\:") + "'")
+    assert burn.endswith(r"fontsdir='" + _filter_escaped(font.parent.resolve()) + "'")
     assert visual_render._drawtext_font_option() == (
-        "fontfile='" + font.resolve().as_posix().replace(":", r"\:") + "':"
+        "fontfile='" + _filter_escaped(font.resolve()) + "':"
     )
     monkeypatch.setitem(CONFIG, "subtitle_font_file", "")
     assert "fontsdir" not in _subtitle_burn_filter(tmp_path / "subs.ass")
