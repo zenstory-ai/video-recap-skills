@@ -18,8 +18,21 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会比对
 `recap_run_manifest.json` 记录的源视频路径、文件大小/修改时间与运行参数，拒绝复用来自其他源视频或其他参数的旧工作目录；视频理解产物也只在来源一致时复用。
 
-画面流程 `--edit-mode full|cut|dub` 与声音策略分开：`--audio-mode narration` 保留上述解说流程；
-`source-mix` 不做配音；`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。使用原声模式时读
+画面流程 `--edit-mode full|cut|dub` 与声音策略 `--audio-mode` 是两个独立开关；
+`narration` 保留上述解说流程，`source-mix` 不做配音，`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。
+组合只有下面几条路径，其余组合在启动时直接报错：
+
+| 输入 | `--edit-mode` | `--audio-mode` | Agent 暂停点 | 流程 | 详见 |
+|---|---|---|---|---|---|
+| 单视频 | full | narration | 1：`narration.json` | 理解 → 写稿 → 校验 → 配音 → 合成 | §4 |
+| 单视频 | cut | narration | 2：`clip_plan.json`，再对着成片写 `narration.json` | 理解 → 剪辑 → 重建输出时间 brief → 写稿 → 配音 → 合成 | §4 |
+| 多视频 | cut | narration | 2：同上，clip 必须带 `source_id` | 逐源理解 → 剪辑 → 写稿 → 配音 → 合成 | §4.3 |
+| 单视频 | full | source-mix / adopted-packet-copy | 无 | 直接合成当前整段 | §4.7 |
+| 单 / 多视频 | cut | source-mix / adopted-packet-copy | 1：`clip_plan.json` | 理解 → 剪辑 → 合成，不写稿 | §4.7 |
+| 单视频 | dub | narration | 1：`dub_script.json` | 英文转写 → 译稿 → 克隆音色整轨替换 | §5 |
+| 已剪好的母版 | full | narration + 三个采用 JSON | 无 | 只做严格合成 | 下文 |
+
+所有 full/cut 路径共用同一段收尾：（有旁白时）评审 → TTS → 合成 → 成片 QC。使用原声模式时读
 `references/audio-routing.md`。
 
 已有预制画面和本地采用的完整声音三件套时，可走严格 assembly-only 路径：

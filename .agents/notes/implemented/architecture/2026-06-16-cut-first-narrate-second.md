@@ -16,7 +16,7 @@ cut 模式初版让 Agent 用原片时间写 `narration.json`，再由 `map_narr
 
 守则：
 
-- `recap_phase.json` 记录 `clip_plan` 与 `narration` 的 md5；`clip_plan.json` 变而 `narration.json` 未变时 must 拒绝继续，提示删稿重写。
+- `recap_phase.json` 记录写稿时 `clip_plan.json` 的 `clip_plan_identity {size, mtime_ns}`（内容哈希已于 2026-09-20 移除，见 [[2026-09-20-no-content-hashing]]）；`clip_plan.json` 变而 `narration.json` 仍在时 must 拒绝继续，提示删稿重写。
 - `clip_plan_validated.json` 是 cut 证据的权威来源：输出时间轴的 speech 证据（`speech_boundary_anchors_output.json` 等）must 携带匹配的 `clip_plan_fingerprint`；缺失、过期或畸形一律 fail closed，never 回退到原片时钟，never 信任 Agent 写入的 `overlaps_speech=false`。
 - `review.py --timeline` 默认 `auto`，以 `recap_run_manifest.json` 的 `edit_mode` 为准判断评审时间轴；编排 full 模式显式传 `source`，避免复用目录里的旧 cut 产物误导。
 - `--audio-mode source-mix|adopted-packet-copy` 的 cut 项目只有 PASS 1：剪完直接合成，不重建 brief、不等 `narration.json`，声音归属由 `recap_run_manifest.json` 的 `audio` 块记录（#103）。
