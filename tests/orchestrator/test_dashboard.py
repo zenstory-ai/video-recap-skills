@@ -438,3 +438,66 @@ def test_cli_refuses_a_non_loopback_host(tmp_path):
 
     assert result.returncode != 0
     assert "回环" in result.stderr
+
+
+def test_cross_site_subresource_requests_are_refused_and_marked_same_origin(site):
+    status, _, _ = _request(site, "GET", "/api/overview", {"Host": f"127.0.0.1:{site['port']}",
+                                                           "Sec-Fetch-Site": "cross-site"})
+    assert status == 403
+    status, headers, _ = _request(site, "GET", "/api/overview", {"Sec-Fetch-Site": "same-origin"})
+    assert status == 200
+    assert headers["cross-origin-resource-policy"] == "same-origin"
+
+
+def _run_with(tmp_path, name, make):
+    root = tmp_path / "root"
+    run = root / "ep"
+    _write(run / "recap_run_manifest.json", {"schema_version": 1, "source_video": "/abs/src.mp4"})
+    make(run / name, tmp_path)
+    return root.resolve()
+
+
+def test_symlinked_run_artifact_never_exposes_a_file_outside_root(tmp_path):
+    def make(path, base):
+        secret = base / "secret.txt"
+        secret.write_text("SECRET_TOKEN=sk-live-abcdef\n", encoding="utf-8")
+        try:
+            path.symlink_to(secret)
+        except (OSError, NotImplementedError):
+            pytest.skip("symlinks not permitted")
+    root = _run_with(tmp_path, "narration.json", make)
+
+    detail = dashboard_data.run_detail(root, "ep")
+
+    assert "SECRET_TOKEN" not in json.dumps(detail, ensure_ascii=False)
+
+
+@pytest.mark.skipif(not hasattr(__import__("os"), "mkfifo"), reason="needs a FIFO")
+def test_a_fifo_artifact_is_reported_instead_of_blocking(tmp_path):
+    root = _run_with(tmp_path, "assembly_manifest.json", lambda path, _: __import__("os").mkfifo(path))
+    result = {}
+    worker = threading.Thread(target=lambda: result.update(overview=dashboard_data.overview(root)), daemon=True)
+
+    worker.start()
+    worker.join(timeout=10)
+
+    assert not worker.is_alive(), "overview blocked on a FIFO"
+    assert result["overview"]["counts"]["runs"] == 1
+
+
+def test_hand_written_record_fields_are_normalised_before_they_reach_the_page(tmp_path):
+    lib = tmp_path / "library"
+    shutil.copytree(EXAMPLE, lib)
+    for rel, change in (
+        ("samples/demo-sample/sample.json", {"canvas": {"width": "<meta http-equiv=refresh>", "height": 1}}),
+        ("resources/bgm/pulse-demo/resource.json", {"tags": None}),
+    ):
+        record = lib / rel
+        data = json.loads(record.read_text(encoding="utf-8"))
+        data.update(change)
+        record.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    detail = dashboard_data.library_detail(tmp_path.resolve(), "library")
+
+    assert detail["samples"][0]["canvas"] is None
+    assert {r["id"]: r["tags"] for r in detail["resources"]}["pulse-demo"] == []

@@ -30,6 +30,24 @@ MAX_NEXT = 3
 MAX_HITS = 60
 
 
+def _strings(value) -> list:
+    """Hand-written list fields: keep only strings so one odd record cannot break a view."""
+    return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+
+def _text(value) -> str:
+    return value if isinstance(value, str) else ""
+
+
+def _canvas(value):
+    """A record's canvas as positive integers, or None; never pass author data through raw."""
+    if not isinstance(value, dict):
+        return None
+    width, height = value.get("width"), value.get("height")
+    ok = all(isinstance(v, int) and not isinstance(v, bool) and v > 0 for v in (width, height))
+    return {"width": width, "height": height} if ok else None
+
+
 def _href(kind: str, rel: str, view: str = "", **query) -> str:
     tail = f"/{view}" if view else ""
     qs = "&".join(f"{k}={quote(str(v), safe='')}" for k, v in query.items() if v is not None)
@@ -91,8 +109,8 @@ def library_detail(root: Path, rel: str) -> dict:
         record_rel, data = record(sample)
         samples[sample["id"]] = {
             "id": sample["id"], "title": sample["title"], "record": record_rel,
-            "demonstrates": data.get("demonstrates", []), "not_reusable": data.get("not_reusable", ""),
-            "templates": sample["templates"], "canvas": data.get("canvas"),
+            "demonstrates": _strings(data.get("demonstrates")), "not_reusable": _text(data.get("not_reusable")),
+            "templates": sample["templates"], "canvas": _canvas(data.get("canvas")),
             "file": media_entry(root, sample["file"]) if sample["file"] else None,
             "offline": sample["file"] is None, "issues": issues.pop(record_rel, []),
         }
@@ -103,7 +121,7 @@ def library_detail(root: Path, rel: str) -> dict:
             "id": res["id"], "kind": res["kind"], "title": res["title"], "record": record_rel,
             "license": data.get("license") if isinstance(data.get("license"), dict) else {},
             "consent": data.get("consent"), "voice": data.get("voice"), "origin": data.get("origin"),
-            "tags": data.get("tags", []), "notes": data.get("notes", ""),
+            "tags": _strings(data.get("tags")), "notes": _text(data.get("notes")),
             "files": [{"role": f["role"], "name": Path(f["path"]).name, "size": f["size"],
                        "media": media_entry(root, f["path"])} for f in res["files"]],
             "bound_by": bound_by.get(("resource", res["id"]), []), "issues": issues.pop(record_rel, []),

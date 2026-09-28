@@ -29,12 +29,16 @@ Status: implemented
 
 - 只有 GET / HEAD；其余任何方法（含 `http.server` 本来回 501 的未知方法）一律 405 并带 `Allow: GET, HEAD`。
   没有任何接口写文件，也不写会话文件（方案里的 `--detach / --status / --stop` 与 `<root>/.video-recap/` 会话文件因此不做）。
-- Host 必须是 `127.0.0.1:<端口>` 或 `localhost:<端口>`，带 Origin 时必须同源，否则 403（防 DNS rebinding）。
+- Host 必须是 `127.0.0.1:<端口>` 或 `localhost:<端口>`，带 Origin 时必须同源，`Sec-Fetch-Site` 为 `cross-site` / `same-site` 时拒绝，
+  否则 403（防 DNS rebinding 与跨站 `<img>` / `<video>` 探测）。
 - 请求路径一律是 `--root` 相对路径：拒绝绝对路径、Windows 盘符、`..`；`Path.resolve()` 后必须仍在 root 内，
   指向 root 外的符号链接因此被拒。媒体只放行 mp4 / mov / webm / m4a / wav / mp3 / png / jpg / jpeg / webp，单文件上限 4 GB，
   支持单段 HTTP Range（206 / 416），视频可拖动。
+- 读取任何数据文件（run 产物、资源库记录、项目文件）前先 `lstat`：符号链接、FIFO / 设备等非普通文件、超过 2 MB 的文件一律不读，
+  该视图显示原因；运行状态交给 `recap_inspect` 之前先检查 run 目录顶层每个 JSON。手写记录里的 `canvas`、`tags`、`demonstrates`
+  在服务端规范为正整数或字符串数组后才进页面，前端所有数值经 `num()`、文本经 `esc()` 插入，视图构建出错时显示错误面板。
 - 响应头：`Content-Security-Policy: default-src 'self'; media-src 'self'; img-src 'self' data:; …`、`X-Content-Type-Options: nosniff`、
-  `Cache-Control: no-store`、`Referrer-Policy: no-referrer`。CSP 不允许内联脚本和内联样式，数据驱动的宽度与播放头经 CSSOM 写入。
+  `Cache-Control: no-store`、`Referrer-Policy: no-referrer`、`Cross-Origin-Resource-Policy: same-origin`。CSP 不允许内联脚本和内联样式，数据驱动的宽度与播放头经 CSSOM 写入。
 
 **发现**：从 `--root` 广度优先，深度 ≤ 8、目录 ≤ 5000，跳过隐藏目录、`node_modules`、`__pycache__` 与符号链接目录；
 `library.json` 所在目录不再下探（交给 `scan_library`）。超限只给一条中文警告。嵌套运行（多源的 `sources/<id>/`）挂到最近的上级运行，

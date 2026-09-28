@@ -47,6 +47,7 @@ SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
     "Cache-Control": "no-store",
+    "Cross-Origin-Resource-Policy": "same-origin",
 }
 RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
 CHUNK = 64 * 1024
@@ -117,7 +118,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
         if host not in allowed:
             return False
         origin = self.headers.get("Origin")
-        return origin is None or origin.strip().lower() in {f"http://{h}" for h in allowed}
+        if origin is not None and origin.strip().lower() not in {f"http://{h}" for h in allowed}:
+            return False
+        # Browsers label cross-site subresource requests (<img>, <video>) even without Origin.
+        site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+        return site not in {"cross-site", "same-site"}
 
     # --- responses -----------------------------------------------------------------------
     def _start(self, status: int, content_type: str, length: int, extra=None):

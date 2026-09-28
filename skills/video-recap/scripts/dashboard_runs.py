@@ -12,12 +12,10 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import recap_inspect
-from dashboard_io import (MAX_JSON_BYTES, RUN_FILE, dir_of, media_entry, nearest, raw_text,
-                          read_json, read_object)
+from dashboard_io import (RUN_FILE, dir_of, media_entry, nearest, raw_text,
+                          read_json, read_object, unreadable_reason)
 
 # Files cmd_state parses; each must stay under the JSON cap before it is handed over.
-STATE_INPUTS = (RUN_FILE, "assembly_manifest.json", "edited_source.mp4.meta.json",
-                "multi_source_manifest.json")
 QC_FILES = (
     ("final_qc.json", "成片 QC"),
     ("golden_eval.json", "黄金评估"),
@@ -40,10 +38,11 @@ def _num(value) -> float:
 
 
 def run_state(rdir: Path):
-    for name in STATE_INPUTS:
-        path = rdir / name
-        if path.is_file() and path.stat().st_size > MAX_JSON_BYTES:
-            return None, f"{name} 超过 2 MB，未读取"
+    # recap_inspect reads these without limits; vet every JSON it might open first.
+    for path in sorted(rdir.glob("*.json")):
+        reason = unreadable_reason(path)
+        if reason:
+            return None, f"{path.name} {reason}"
     try:
         return recap_inspect.cmd_state(rdir), None
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:

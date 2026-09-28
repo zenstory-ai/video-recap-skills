@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import re
 from collections import deque
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -92,14 +93,27 @@ def media_entry(root: Path, path) -> dict | None:
     return {"path": rel, "kind": kind, "name": path.name, "size": path.stat().st_size}
 
 
+def unreadable_reason(path: Path) -> str | None:
+    """Why a data file must not be opened: symlinks (they could point outside root) and
+    anything that is not a regular file (a FIFO or device would block or never end)."""
+    try:
+        st = os.lstat(path)
+    except OSError as exc:
+        return f"无法读取: {exc.strerror or exc}"
+    if stat.S_ISLNK(st.st_mode):
+        return "是符号链接，未读取"
+    if not stat.S_ISREG(st.st_mode):
+        return "不是普通文件，未读取"
+    if st.st_size > MAX_JSON_BYTES:
+        return "文件超过 2 MB，未读取"
+    return None
+
+
 def read_json(path: Path):
     """``(data, None)`` or ``(None, 中文原因)``; never raises, never reads past the cap."""
-    try:
-        size = path.stat().st_size
-    except OSError as exc:
-        return None, f"无法读取: {exc.strerror or exc}"
-    if size > MAX_JSON_BYTES:
-        return None, "文件超过 2 MB，未读取"
+    reason = unreadable_reason(path)
+    if reason:
+        return None, reason
     try:
         return json.loads(path.read_text(encoding="utf-8")), None
     except (OSError, ValueError) as exc:
@@ -115,6 +129,8 @@ def read_object(path: Path):
 
 def raw_text(path: Path) -> str:
     """The start of a file for the "按原文显示" fallback; empty when unreadable."""
+    if unreadable_reason(path):
+        return ""
     try:
         with path.open("r", encoding="utf-8", errors="replace") as handle:
             text = handle.read(MAX_RAW_CHARS + 1)

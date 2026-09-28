@@ -102,7 +102,7 @@ function viewOverview(O) {
 function resolvedTo(row) {
   const t = row.target;
   if (!t) return '<span class="muted">—</span>';
-  if (t.type === "template") return `${esc(t.title || t.ref)} <span class="mono muted">${esc(t.ref)}</span> ${statusChip(TPL_STATUS[t.status] || ["bad", t.status || "—"])}${t.canvas ? ` <span class="muted small">${t.canvas.width}×${t.canvas.height}</span>` : ""}`;
+  if (t.type === "template") return `${esc(t.title || t.ref)} <span class="mono muted">${esc(t.ref)}</span> ${statusChip(TPL_STATUS[t.status] || ["bad", t.status || "—"])}${t.canvas ? ` <span class="muted small">${num(t.canvas.width)}×${num(t.canvas.height)}</span>` : ""}`;
   return `${esc(t.title || t.ref)} <span class="muted small">${esc(KIND_LABEL[t.kind] || t.kind)}</span> ${statusChip(LICENCE[t.license] || ["bad", t.license || "未填写"])}`;
 }
 
@@ -240,7 +240,7 @@ function runFilm(R) {
         <div class="tl-head" id="playhead"></div><div class="tl-hit" id="tlhit" aria-label="点击跳转"></div></div></section>`
     : T.status === "unparseable" ? rawFallback(T, "timeline.json")
       : `<div class="empty"><p>合成后会生成 timeline.json，这里按画面、旁白、背景音乐、字幕四轨显示。</p></div>`;
-  const canvas = T.canvas ? `${T.canvas.width}×${T.canvas.height}${T.canvas.fps ? ` · ${T.canvas.fps}fps` : ""}` : "";
+  const canvas = T.canvas ? `${num(T.canvas.width)}×${num(T.canvas.height)}${T.canvas.fps ? ` · ${num(T.canvas.fps)}fps` : ""}` : "";
   const pills = [canvas, total ? `时长 ${clock(total, true)}` : "", AUDIO_LABEL[R.audio_mode] || ""].filter(Boolean);
   const ask = F.video ? "" : `请继续 ${R.work_dir} 的运行，完成配音与合成。`;
   return `<div class="film">${playerBlock(F.video, "还没有成片。合成在对话里确认。", total)}
@@ -302,7 +302,7 @@ const box = (b) => `left:${b.left}%;top:${b.top}%;width:${b.width}%;height:${b.h
 function templateGeometry(tpl, libPath) {
   const P = tpl.preview;
   if (!P) return "";
-  const ratio = `aspect-ratio:${P.canvas.width} / ${P.canvas.height}`;
+  const ratio = `aspect-ratio:${num(P.canvas.width)} / ${num(P.canvas.height)}`;
   if (P.type === "subtitle_style") {
     const L = P.line;
     const over = L.width_px && L.width_px > L.usable_px;
@@ -310,28 +310,28 @@ function templateGeometry(tpl, libPath) {
       <span class="side" data-css="left:${P.side}%"></span><span class="side" data-css="right:${P.side}%"></span>
       ${P.band ? `<span class="band" data-css="top:${P.band.top}%;height:${P.band.height}%"></span>` : ""}
       ${L.font_size ? `<span class="line ${over ? "over" : ""}" data-css="bottom:${L.bottom ?? 4}%;font-size:${L.font_size}cqw">${esc(L.text)}</span>` : ""}</div>`;
-    const notes = [`画布 ${P.canvas.width}×${P.canvas.height} 等比缩小`, P.band_px ? `字幕带 y ${P.band_px.y_top}–${P.band_px.y_bot}，底对齐，底边距 ${P.margin_v}px` : "未给字幕带，示意放在底部",
+    const notes = [`画布 ${num(P.canvas.width)}×${num(P.canvas.height)} 等比缩小`, P.band_px ? `字幕带 y ${P.band_px.y_top}–${P.band_px.y_bot}，底对齐，底边距 ${P.margin_v}px` : "未给字幕带，示意放在底部",
       L.width_px ? `一行 ${L.chars} 字 × 字号 = ${L.width_px}px，可用宽度 ${L.usable_px}px（两侧各留 40px）` : ""].filter(Boolean);
     return `<div class="tpl-geo">${canvas}<div class="small"><b>示意图，不是渲染。</b><span class="muted">用每行字数的最长一行核对字幕带与宽度。${esc(notes.join("；"))}</span>${over ? ` ${statusChip(["warn", "超出可用宽度"])}` : ""}</div></div>`;
   }
   const layers = P.layers.map((layer) => (layer.box ? (layer.media ? `<img class="layer" src="${esc(mediaUrl(layer.media.path))}" alt="" data-css="${box(layer.box)}">` : `<span class="layer-box" data-css="${box(layer.box)}">${esc(layer.name)}</span>`) : "")).join("");
   const canvas = `<div class="mini pkg" data-css="${ratio}" role="img" aria-label="包装图层示意图">${layers}${P.safe ? `<span class="safe" data-css="${box(P.safe)}"></span>` : ""}</div>`;
   const list = `<table class="rows"><thead><tr><th>图层</th><th>位置</th><th>图片</th></tr></thead><tbody>${P.layers.map((layer) => `<tr><td>${esc(layer.name)}</td><td class="mono small">${esc(layer.rect_text)}</td><td>${layer.resource ? `<a href="${href("library", libPath, "resources", `id=${enc(layer.resource)}`)}">${esc(layer.title || layer.resource)}</a>` : "—"}${layer.media ? "" : ' <span class="muted small">（不在 --root 内，不预览）</span>'}</td></tr>`).join("")}</tbody></table>`;
-  return `<div class="tpl-geo">${canvas}<div class="small"><b>示意图，不是渲染。</b><span class="muted">图层按 rect 摆放在 ${P.canvas.width}×${P.canvas.height} 画布上，青色虚线框是安全区；棋盘格是透明处。</span></div></div><div class="table-card">${list}</div>`;
+  return `<div class="tpl-geo">${canvas}<div class="small"><b>示意图，不是渲染。</b><span class="muted">图层按 rect 摆放在 ${num(P.canvas.width)}×${num(P.canvas.height)} 画布上，青色虚线框是安全区；棋盘格是透明处。</span></div></div><div class="table-card">${list}</div>`;
 }
 
 function templateCard(tpl, libPath) {
   const a = tpl.adoption;
   const ask = tpl.status === "draft" ? `请帮我评审模板 ${tpl.ref}，确认后写入采用记录。` : "";
   return `<article class="card asset" id="e-${esc(tpl.ref)}" data-template="${esc(tpl.ref)}"><div class="asset-h"><div><div class="nm">${esc(tpl.title || tpl.id)}</div><div class="cat"><span class="mono">${esc(tpl.ref)}</span> · ${esc(KIND_LABEL[tpl.kind] || tpl.kind)}</div></div>${statusChip(TPL_STATUS[tpl.status] || ["bad", tpl.status || "未填写"])}</div>
-    ${facts([["画布", tpl.canvas ? `${tpl.canvas.width}×${tpl.canvas.height}` : ""], ["样片", tpl.samples.map((s) => (s.missing ? `<span class="mono">${esc(s.id)}</span> ${statusChip(["bad", "不存在"])}` : `<a href="${href("library", libPath, "samples", `id=${enc(s.id)}`)}">${esc(s.title || s.id)}</a>`)).join("、")], ["被使用", boundBy(tpl.bound_by)]])}
+    ${facts([["画布", tpl.canvas ? `${num(tpl.canvas.width)}×${num(tpl.canvas.height)}` : ""], ["样片", tpl.samples.map((s) => (s.missing ? `<span class="mono">${esc(s.id)}</span> ${statusChip(["bad", "不存在"])}` : `<a href="${href("library", libPath, "samples", `id=${enc(s.id)}`)}">${esc(s.title || s.id)}</a>`)).join("、")], ["被使用", boundBy(tpl.bound_by)]])}
     ${a ? `<div class="adoption"><b>${esc(a.date || "")} · ${esc(a.by || "")}</b> 采用：<q>${esc(a.statement || "")}</q><div class="muted small">范围：${esc(a.scope || "")}</div></div>` : ""}
     ${templateGeometry(tpl, libPath)}${paramTable(tpl.rows)}
     <details class="rawjson"><summary>原始 JSON</summary><pre class="params">${esc(JSON.stringify(tpl.params, null, 2))}</pre></details>${tpl.notes ? `<p class="desc">${esc(tpl.notes)}</p>` : ""}${issuesList(tpl.issues)}${ask ? `<div>${askButton(ask)}</div>` : ""}</article>`;
 }
 
 function sampleCard(sample) {
-  return `<article class="card asset" id="e-${esc(sample.id)}" data-sample="${esc(sample.id)}"><div class="asset-h"><div><div class="nm">${esc(sample.title)}</div><div class="cat"><span class="mono">${esc(sample.id)}</span>${sample.canvas ? ` · ${sample.canvas.width}×${sample.canvas.height}` : ""}</div></div>${sample.offline ? statusChip(["warn", "不在本机"]) : ""}</div>
+  return `<article class="card asset" id="e-${esc(sample.id)}" data-sample="${esc(sample.id)}"><div class="asset-h"><div><div class="nm">${esc(sample.title)}</div><div class="cat"><span class="mono">${esc(sample.id)}</span>${sample.canvas ? ` · ${num(sample.canvas.width)}×${num(sample.canvas.height)}` : ""}</div></div>${sample.offline ? statusChip(["warn", "不在本机"]) : ""}</div>
     ${facts([["示范", `<span class="pills">${sample.demonstrates.map((text) => `<span class="pill">${esc(text)}</span>`).join("")}</span>`], ["不能照搬", esc(sample.not_reusable)], ["对应模板", sample.templates.map((ref) => `<span class="mono">${esc(ref)}</span>`).join("、")]])}
     ${issuesList(sample.issues)}</article>`;
 }

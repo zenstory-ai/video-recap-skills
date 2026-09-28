@@ -182,11 +182,17 @@ async function render() {
   renderTop(route);
   renderTabs(route);
   let html;
-  switch (route.page) {
-    case "run": html = viewRun(data, route); break;
-    case "library": html = viewLibrary(data, route); break;
-    case "project": html = viewProject(data); break;
-    default: html = viewOverview(S.overview);
+  try {
+    switch (route.page) {
+      case "run": html = viewRun(data, route); break;
+      case "library": html = viewLibrary(data, route); break;
+      case "project": html = viewProject(data); break;
+      default: html = viewOverview(S.overview);
+    }
+  } catch (error) {
+    view.innerHTML = `<div class="wrap"><div class="empty"><h3>这一页有数据读不懂</h3><p>${esc(error.message)}</p><a class="btn" href="#/">回到总览</a></div></div>`;
+    view.dataset.state = "error";
+    return;
   }
   view.innerHTML = html;
   applyCss(view);

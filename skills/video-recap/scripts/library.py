@@ -19,6 +19,7 @@ import argparse
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -86,8 +87,15 @@ class Report:
         self.warnings.append({"path": self._rel(path), "code": code, "message": message})
 
 
+MAX_RECORD_BYTES = 2 * 1024 * 1024
+
+
 def _load(path: Path, schema: str, keys: set, report: Report):
     try:
+        st = os.stat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_RECORD_BYTES:
+            report.error(path, "unreadable", "记录必须是不超过 2 MB 的普通文件")
+            return None
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         report.error(path, "unreadable", f"无法解析: {exc}")
