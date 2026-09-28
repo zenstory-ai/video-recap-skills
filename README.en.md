@@ -414,6 +414,10 @@ Open the local dashboard for /path/to/projects so I can see run progress, finish
 
 The dashboard is read-only and listens on loopback only; wherever something needs doing it gives you one sentence to paste back into the conversation.
 
+<img alt="Dashboard film view: player with picture, narration, BGM and subtitle tracks" src="docs/dashboard-film.png" width="100%">
+
+<img alt="Dashboard template view: canvas schematics for packaging and subtitle style, parameter table with provenance" src="docs/dashboard-templates.png" width="100%">
+
 **Bring your own original-dialogue subtitles for accurate 「」 captions:** put `user_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]` on the output timeline; wrap it as `{"timeline": "source", "lines": [...]}` for source-timeline subs mapped through the clip plan) or `user_subtitles.srt` / `.ass` (source timeline) into `work_dir`. Priority: your file › the agent-proofread `original_subtitles.json` › ASR fallback.
 
 ## FAQ

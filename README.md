@@ -404,6 +404,10 @@ MiMo 复核每个阶段最多一次请求，只给建议，失败也不阻断出
 
 剪辑台只读、只监听本机地址；需要改动的地方给你一句可以复制回对话的话，不会从页面上发起任何生产。
 
+<img alt="剪辑台成片视图：播放器与画面、旁白、背景音乐、字幕四轨时间线" src="docs/dashboard-film.png" width="100%">
+
+<img alt="剪辑台模板视图：包装图层与字幕样式的画布示意、带来源标记的参数表" src="docs/dashboard-templates.png" width="100%">
+
 **自带原声字幕，让留白处的「」字幕更准：** 把 `user_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "台词"}]`，按成片时间轴；包一层 `{"timeline": "source", "lines": [...]}` 则按原片时间轴自动映射）或 `user_subtitles.srt` / `.ass`（按原片时间轴）放进 `work_dir`。优先级：你的字幕文件 › Agent 校对的 `original_subtitles.json` › ASR 兜底。
 
 ## 常见问题
