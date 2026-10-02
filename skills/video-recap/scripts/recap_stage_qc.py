@@ -104,4 +104,3 @@ def _require_final_qc(result, work_dir):
         raise SystemExit(
             "严格最终 QC 未通过或摘要格式无效: " + ", ".join(invalid)
         )
-
