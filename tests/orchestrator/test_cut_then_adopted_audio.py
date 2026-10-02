@@ -329,35 +329,6 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
     )
     sealed_inputs = {path: path.read_bytes() for path in (wav, meta, narration)}
 
-    current_receipt = _prepare_bed(
-        sources, ["red", "blue"], tmp_path / "bed-current", env
-    )
-    current_mix = _write_mix_adoption(
-        tmp_path / "mix-current.json",
-        current,
-        current_receipt,
-        narration,
-        wav,
-        12_000,
-    )
-    first = _adopt(
-        current,
-        tmp_path / "adopt-current",
-        tmp_path / "delivery-current",
-        meta,
-        narration,
-        current_mix,
-        env,
-    )
-    assert "video-understanding/" not in first.stdout
-    assert "video-voiceover/" not in first.stdout
-    first_manifest = json.loads(
-        (tmp_path / "adopt-current/assembly_manifest.json").read_text(encoding="utf-8")
-    )
-    assert first_manifest["audio_segments"][0]["actual_place_start"] == pytest.approx(
-        0.25
-    )
-
     reordered_receipt = _prepare_bed(
         sources, ["blue", "red"], tmp_path / "bed-reordered", env
     )

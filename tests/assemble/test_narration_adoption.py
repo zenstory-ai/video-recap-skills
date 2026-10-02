@@ -447,15 +447,3 @@ def test_strict_adoption_never_overwrites_an_existing_output(render_media, tmp_p
     assert output.read_bytes() == previous
     assert not (work / "narration_input_binding.json").exists()
 
-
-def test_cli_help_exposes_explicit_narration_adoption_option():
-    # -X utf8: the help text carries CJK product names that a cp1252 console cannot encode.
-    result = subprocess.run(
-        [sys.executable, "-X", "utf8", str(SCRIPTS / "assemble.py"), "--help"],
-        check=True,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-    )
-
-    assert "--narration-adoption" in result.stdout

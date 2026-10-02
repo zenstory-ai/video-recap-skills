@@ -1,11 +1,9 @@
-"""Keep the public env inventory complete and free of credential names."""
+"""Every env var the skills read is a tuning knob, except the provider ``*_API_KEY`` reads."""
 
 import ast
-import json
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-INVENTORY = Path(__file__).resolve().parent / "env-inventory-v1.json"
 
 CREDENTIAL_MARKERS = ("KEY", "SECRET", "PASSWORD")
 ENV_READERS = {"env_bool", "_env_bool", "env_int", "_optional_env_int", "env_float", "env_str"}
@@ -53,21 +51,20 @@ def _literal_env_reads(tree):
     return reads
 
 
-def test_public_env_contract_classifies_all_literal_reads_and_no_credentials():
-    contract = json.loads(INVENTORY.read_text(encoding="utf-8"))["variables"]
-    for name in contract:
-        assert not any(marker in name for marker in CREDENTIAL_MARKERS), name
-        assert not name.endswith("_TOKEN"), name
-    assert "MIMO_TOKEN_PLAN_CLUSTER" in contract
-    assert {"REVIEW_NARRATION", "REQUIRE_NARRATION_REVIEW"} <= set(contract)
+def _credential_shaped(name):
+    return any(marker in name for marker in CREDENTIAL_MARKERS) or name.endswith("_TOKEN")
 
+
+def test_literal_env_reads_are_not_credential_shaped_except_api_keys():
     trees = _skill_script_trees()
     assert len(trees) >= 6
     reads = set()
     for tree in trees:
         reads |= _literal_env_reads(tree)
-    unclassified = {
+    # The scanner must still see real reads, including names that only look token-like.
+    assert {"MIMO_TOKEN_PLAN_CLUSTER", "VLM_MAX_TOKENS", "MIMO_API_KEY"} <= reads
+    credential_reads = {
         name for name in reads
-        if name not in contract and not name.endswith("API_KEY")
+        if _credential_shaped(name) and not name.endswith("_API_KEY")
     }
-    assert unclassified == set()
+    assert credential_reads == set()

@@ -20,7 +20,7 @@ Status: implemented
 - `lib.py` 删除 `_EXISTING_CONFIG_REF` 重导入保护。环境变量探测测试改用 `_load_lib_with_env`：用 `spec_from_file_location` 把 `lib.py` 加载成单独命名的模块，与 video-cut 的做法一致。
 - `assemble_constants.SEGMENT_AUDIO_SCHEMA_VERSION`、`track_binding.VALIDATION_SCHEMA` / `PROJECTOR_VERSION` 删除；`_load_validation` 只要求记录存在。voiceover 写进 `tts_meta.json` 的 `segment_audio_schema_version` 不在本篇范围，由 understanding/voiceover 内部去重一组处理。
 - `subtitle_track.json` 的 picture / audio binding 把 `sha256` / `edit_sha256` 当未知字段拒绝。本条翻转 [[2026-09-20-no-content-hashing]] 中“调用方 JSON 里旧的 sha256 键被忽略”在字幕轨上的适用；narration / audio-mix adoption、source_score 等其他调用方 JSON 仍然忽略这些键。
-- `tests/orchestrator/env-inventory-v1.json` 里的 `SOURCE_VIDEO` 条目保留：清单测试只要求“读到的都已登记”，多出的条目不报错，而这份清单会由另一组精简（PR-A7）整体换成 AST 检查。
+- `tests/orchestrator/env-inventory-v1.json` 里的 `SOURCE_VIDEO` 条目当时保留：清单测试只要求“读到的都已登记”，多出的条目不报错。这份清单随后整体删除，换成对 AST 扫到的读取直接做凭据名检查，见 [[2026-10-02-drop-env-inventory-dedupe-render-tests]]。
 
 ## Alternatives considered
 

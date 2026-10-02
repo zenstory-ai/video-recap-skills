@@ -188,7 +188,7 @@ def test_half_open_reorder_quiet_gain_and_continuous_score_sample_by_sample(tmp_
         (24, 1, 'protected_original'), (0, low_gain, 'mixed_original_under_narration')])]
     plan['score'].update(kind='raw', source_offset_sample=5000, gain=.25,
                          fade_in_samples=0, fade_out_samples=0, fade_shape='linear')
-    _, out = prepare(tmp_path, plan)
+    receipt, out = prepare(tmp_path, plan)
     canonical = pcm(source)
     expected = list(canonical[96000:192000]) + [v*low_gain for v in canonical[:96000]]
     actual_source = pcm(out / 'source_bed.wav')
@@ -202,3 +202,15 @@ def test_half_open_reorder_quiet_gain_and_continuous_score_sample_by_sample(tmp_
     mixed = pcm(out / 'prepared_bed.wav')
     assert len(mixed) == len(actual_source)
     assert max(abs(m-a-b) for m, a, b in zip(mixed, actual_source, actual_score)) < 1e-7
+    assert receipt['artifact'] == 'prepared_bed_receipt'
+    assert receipt['status'] == 'PREPARED'
+    assert receipt['direct_listening'] == 'NOT_CHECKED'
+    assert receipt['release_approved'] is False
+    assert receipt['plan'] == {'path': str((tmp_path / 'plan.json').resolve())}
+    for name in ('source_bed.wav', 'score_bed.wav', 'prepared_bed.wav'):
+        assert receipt['outputs'][name]['path'] == str(out / name)
+        assert receipt['outputs'][name]['bytes'] == (out / name).stat().st_size
+        assert receipt['outputs'][name]['pcm']['codec_name'] == 'pcm_f32le'
+        assert receipt['outputs'][name]['finite'] is True
+    assert receipt['outputs']['prepared_bed.wav']['headroom_policy'] == \
+        'FLOAT_PRESERVED_NO_MASTER'

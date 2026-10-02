@@ -49,22 +49,6 @@ def pcm(path):
     return array.array("f", raw)
 
 
-def constant_pcm(path, value, seconds):
-    run("ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i",
-        f"aevalsrc={value}|{value}:s=48000:d={seconds}", "-c:a", "pcm_f32le", path)
-    return path
-
-
-def magnitude(samples, frequency, start_frame, frame_count):
-    mono = [(samples[2 * frame] + samples[2 * frame + 1]) / 2
-            for frame in range(start_frame, start_frame + frame_count)]
-    real = sum(value * math.cos(2 * math.pi * frequency * n / 48_000)
-               for n, value in enumerate(mono))
-    imag = sum(value * math.sin(2 * math.pi * frequency * n / 48_000)
-               for n, value in enumerate(mono))
-    return math.hypot(real, imag) / len(mono)
-
-
 @pytest.fixture
 def plan(tmp_path):
     first = tone(tmp_path / "first.wav", 440, 1)
@@ -105,34 +89,6 @@ def plan(tmp_path):
     return path, document, video, score
 
 
-def test_real_reorder_gain_continuous_score_and_receipt(plan, tmp_path):
-    path, _document, _video, _score = plan
-    output = tmp_path / "prepared"
-    receipt = source_score.prepare_source_score(path, output)
-    source = pcm(output / "source_bed.wav")
-    score = pcm(output / "score_bed.wav")
-    prepared = pcm(output / "prepared_bed.wav")
-    assert magnitude(source, 880, 8_000, 24_000) > 30 * magnitude(source, 440, 8_000, 24_000)
-    high = magnitude(source, 880, 8_000, 24_000)
-    low = magnitude(source, 440, 56_000, 24_000)
-    assert low == pytest.approx(high * 0.25, rel=0.08)
-    # A single score decode/playhead spans the picture join; it is not restarted there.
-    assert magnitude(score, 220, 43_000, 10_000) > 0.003
-    assert prepared != source and prepared != score
-    assert receipt["artifact"] == "prepared_bed_receipt"
-    assert receipt["status"] == "PREPARED"
-    assert receipt["direct_listening"] == "NOT_CHECKED"
-    assert receipt["release_approved"] is False
-    assert receipt["plan"] == {"path": str(path.resolve())}
-    for name in ("source_bed.wav", "score_bed.wav", "prepared_bed.wav"):
-        assert receipt["outputs"][name]["path"] == str(output / name)
-        assert receipt["outputs"][name]["bytes"] == (output / name).stat().st_size
-        assert receipt["outputs"][name]["pcm"]["codec_name"] == "pcm_f32le"
-        assert receipt["outputs"][name]["finite"] is True
-    assert receipt["outputs"]["prepared_bed.wav"]["headroom_policy"] == \
-        "FLOAT_PRESERVED_NO_MASTER"
-
-
 def test_no_score_keeps_reordered_faded_source_payload_and_writes_zero_score(
     plan, tmp_path
 ):
@@ -163,20 +119,6 @@ def test_no_score_rejects_unknown_fields(plan, tmp_path):
     path.write_text(json.dumps(document))
     with pytest.raises(ValueError, match="none score requires exactly fields"):
         source_score.prepare_source_score(path, tmp_path / "invalid-none")
-
-
-def test_raw_half_cosine_fades_clamp_outside_their_windows(plan, tmp_path):
-    path, document, _video, _score = plan
-    score = constant_pcm(tmp_path / "constant.wav", 0.5, 3)
-    document["score"].update(path=str(score), gain=0.1)
-    path.write_text(json.dumps(document))
-    source_score.prepare_source_score(path, tmp_path / "half-cosine")
-    samples = pcm(tmp_path / "half-cosine/score_bed.wav")
-    left = [samples[2 * index] for index in (8_000, 24_000, 48_000, 72_000, 88_000)]
-    assert left == pytest.approx([0.05] * len(left), abs=2e-6)
-    assert samples[0] == pytest.approx(0.0, abs=1e-7)
-    assert samples[2 * 4_799] == pytest.approx(0.05, abs=2e-6)
-    assert samples[2 * 95_999] == pytest.approx(0.0, abs=1e-7)
 
 
 def test_decoded_source_must_cover_every_selected_sample(plan, tmp_path):
@@ -233,18 +175,14 @@ def test_ffmpeg_failure_never_publishes(plan, tmp_path, monkeypatch):
     assert not (output / "prepared_bed_receipt.json").exists()
 
 
-def test_isolated_copied_skill_cli_and_existing_target(plan, tmp_path):
+def test_existing_target_is_refused_without_touching_prior_output(plan, tmp_path):
     path, _document, _source, _score = plan
-    copied = tmp_path / "installed"
-    shutil.copytree(SCRIPTS, copied)
-    target = tmp_path / "cli"
-    launcher = ("import runpy,sys;p=sys.argv.pop(1);sys.path.insert(0,p);"
-                "sys.argv[0]=p+'/source_score.py';runpy.run_path(sys.argv[0],run_name='__main__')")
-    result = run(sys.executable, "-I", "-c", launcher, copied, path,
-                 "--output-dir", target)
-    assert json.loads(result.stdout)["status"] == "PREPARED"
+    target = tmp_path / "prepared"
+    source_score.prepare_source_score(path, target)
+    before = (target / "prepared_bed.wav").read_bytes()
     with pytest.raises(FileExistsError):
         source_score.prepare_source_score(path, target)
+    assert (target / "prepared_bed.wav").read_bytes() == before
 
 
 def test_accepts_ntsc_frame_clock_and_rounds_sample_bounds_consistently(tmp_path):

@@ -31,6 +31,7 @@ All notable changes to this project are documented here.
 
 ### Removed
 
+- **删除环境变量清单 `tests/orchestrator/env-inventory-v1.json`。** 0.6.0 引入的这份清单只给每个变量标了 `value` / `url` / `file_path` 分类，没有任何测试或文档读取分类，变量删掉后条目也不会报错。测试改为直接检查 AST 扫到的六个 skill 的全部环境变量读取：除 `*_API_KEY` 外，名字不得含 `KEY` / `SECRET` / `PASSWORD` 或以 `_TOKEN` 结尾。新增环境变量不再需要登记；用户可调的变量仍以 `config-playbook.md` 为准。
 - **删除 MiMo 多模态建议型 QC。** `recap.py` 不再接受 `--mimo-qc` / `--mimo-qc-refresh`（传入即报 unrecognized arguments），`MIMO_QC` / `MIMO_QC_REFRESH` / `MIMO_QC_MODEL` 环境变量不再被读取；入口 `mimo_qc.py` 与 `scripts/qc/` 子包删除，流水线不再写 `mimo_qc.json`。`final_qc.json` 的 `metadata.artifacts` 不再汇总 `mimo_qc.json`，QC 契约的 `artifact` 不再接受 `mimo_qc.json`，dashboard 的 QC 页去掉「MiMo 复核」卡片；旧 work_dir 里残留的 `mimo_qc.json` 不再被任何环节读取。该功能默认关闭、不能阻断也不能自动修复，却是代码与测试里成本最高的建议型功能（约 1,200 行代码、约 900 行测试）。确定性的 `final_qc.json` 与解说评审不受影响。
 - **`golden_eval.json` 并入 `final_qc.json`。** 渲染后只写 `final_qc.json`，不再写 `golden_eval.json`；没有 golden fixture 时它只是复述 `final_qc.ok`，而流水线从不传 fixture。`--require-final-qc` 只检查 `final_qc.json` 的摘要（`ok: true` 且整数 `blocker_count: 0`），判定结果不变；`final_qc.py` 去掉 `--golden-fixture` / `--only`（传入即报错），QC 契约不再接受 `golden_eval.json` artifact 与 `golden` stage，dashboard 的 QC 页去掉「黄金评估」卡片；旧 work_dir 里残留的 `golden_eval.json` 不再被读取。
 - **删除 dub 的手动侧 CLI 与 `dub_review.json`。** `dub.py` 只剩编排入口调用的 `--stage prepare|render`：`--stage lint|review` 与 `--print-schema` 传入即报错，渲染不再写没有任何读取方的 `dub_review.json`（它只是把 `dub_lint.json` 换个形状重写）。`dub_lint.json` 照常在语音克隆前写出，lint 非 PASS 仍中止。dub 翻译规则只保留在 `dub_brief.md` 一处，brief 同时写出目标语速（约 5 字/秒）和 lint 警告阈值（7 字/秒）。

@@ -32,7 +32,7 @@ mimo_qc.py 两个 12 参数的纯透传函数（`mimo_qc.py` 已于 2026-10-02 �
   `references/shift-left-qc-schema.md`（此前没有任何 SKILL.md 链接它；2026-10-02 该文档删除，链接改指 `data-schema.md`，见 [[2026-10-02-converge-qc-on-final-qc]]）。
 - 长段落下沉：voiceover 新增 `references/index-tts.md`；assemble 新增 `references/packaging.md` 并把 source_score
   的中文摘要追加到 `references/source-score.md`；cut 的取景复核段落并入 `references/shot-review.md`。
-- `timeline-and-jianying.md` 移到 `docs/`，README / docs 链接同步；`env-inventory-v1.json` 移到 `tests/orchestrator/`。
+- `timeline-and-jianying.md` 移到 `docs/`，README / docs 链接同步；`env-inventory-v1.json` 移到 `tests/orchestrator/`（该文件已于 2026-10-02 删除，见 [[2026-10-02-drop-env-inventory-dedupe-render-tests]]）。
 - 脚本：删除上述无人调用的函数与常量；asr.py 改为从 detect.py 导入 `_audio_meta_path` / `_write_audio_meta`
   （detect 不导入 asr，无环）；recap_runner 抽 `_reject_stale(mismatches, label)`；mimo_qc.py 的 `build_report` / `run`
   改成 `**kwargs` 透传，`api_call` 在调用时读取模块级 `mimo_qc_api_call`，保持测试 monkeypatch 的接缝。

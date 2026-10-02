@@ -123,12 +123,6 @@ def test_creative_roles_and_artifact_examples_form_a_structured_contract():
         }
 
 
-def test_shared_craft_guide_includes_required_evidence():
-    """The runtime side is covered by test_io_fixes::test_multi_source_briefs_include_clip_and_narration_craft."""
-    playbook = SKILLS_ROOT / 'video-script/references/creative-editing-playbook.md'
-    assert 'clip_plan.json.required_evidence' in playbook.read_text(encoding='utf-8')
-
-
 def test_research_guides_match_their_own_stage_timing():
     recap_guide = (SKILLS_ROOT / "video-understanding" / "references" / "research-guide.md").read_text(encoding="utf-8")
     script_guide = (SKILLS_ROOT / "video-script" / "references" / "research-guide.md").read_text(encoding="utf-8")

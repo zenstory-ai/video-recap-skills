@@ -4,6 +4,7 @@ from array import array
 import copy
 import json
 import math
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -16,6 +17,7 @@ from test_narration_adoption import _adoption
 SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
+import adoption.audio_mix_binding as audio_mix_binding  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import source_score  # noqa: E402
 
@@ -144,6 +146,7 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     mix = json.loads((work / 'audio_mix_binding.json').read_text())
     expected_bus = [0.0]*192000
     for i, item in enumerate(binding['segments']):
+        assert item['placed']['pcm']['sample_rate'] == '48000'
         placed = pcm(item['placed']['path'])
         original = pcm(adopted_case['files'][i])
         assert len(placed) == len(original)
@@ -161,6 +164,10 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     assert mix['voice_bus']['path'] == binding['narration_bus']['path']
     assert mix['narration_input_binding'] == {
         'path': str((work/'narration_input_binding.json').resolve()), 'status': 'FINALIZED'}
+    assert mix['status'] == 'FINALIZED'
+    assert [(item['output_start_sample'], item['gain']) for item in mix['segments']] == [
+        (item['output_start_sample'], item['gain'])
+        for item in adopted_case['document']['segments']]
     master = pcm(mix['master']['path'])
     master_gain = 10**(-3/20)
     assert max(abs(a-b*master_gain) for a, b in zip(master, expected_bus)) < 1e-7
@@ -168,6 +175,7 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     decoded = pcm(output)
     assert max(abs(x) for x in decoded[:18000]) < 1e-5
     qc = json.loads((work/'assembly_qc.json').read_text())
+    assert qc['audio_operations']['explicit_audio_mix'] is True
     for operation in ['ducking', 'loudness_normalization', 'limiter', 'tempo']:
         assert qc['audio_operations'][operation] is False
     assert qc['loudness_mode'] == 'fixed_master_gain_no_loudnorm'
@@ -204,6 +212,65 @@ def test_explicit_mix_allows_requested_reencode_without_changing_frame_clock(
     assert mix['output_picture']['fps'] in ['24', '24/1']
 
 
+def test_load_adoption_binds_picture_receipt_narration_and_segments(adopted_case):
+    context = audio_mix_binding.load_adoption(
+        adopted_case['adoption'], input_video=adopted_case['picture'],
+        narration_adoption_path=adopted_case['narration'],
+        tts_segments=adopted_case['segments'],
+    )
+    assert context['format']['total_samples'] == 96000
+    assert context['prepared']['prepared_bed.wav']['pcm']['samples'] == 96000
+    assert context['narration_adoption'] == {
+        'path': str(Path(adopted_case['narration']).resolve())}
+    assert context['segments'] == adopted_case['document']['segments']
+
+
+@pytest.mark.parametrize('field', ['prepared_receipt', 'format'])
+def test_missing_top_level_field_fails_before_snapshot(adopted_case, tmp_path, field):
+    document = copy.deepcopy(adopted_case['document'])
+    del document[field]
+    adopted_case['adoption'].write_text(json.dumps(document))
+    with pytest.raises(ValueError, match='(?i)(field|adoption)'):
+        render(adopted_case, tmp_path)
+    work = tmp_path/'render'
+    assert not (work/'.narration_input_snapshots').exists()
+    assert not (work/'output.mp4').exists()
+
+
+def test_isolated_copied_skill_cli_publishes_new_alias_and_manifest(adopted_case, tmp_path):
+    copied = tmp_path / 'copied-skill'
+    shutil.copytree(SCRIPTS.parent, copied, ignore=shutil.ignore_patterns('__pycache__'))
+    work = tmp_path / 'cli-work'
+    work.mkdir()
+    delivery = tmp_path / 'delivery'
+    # -I drops caller/repo imports; only the copied scripts directory is importable.
+    launcher = (
+        'import runpy,sys;sys.path.insert(0,sys.argv[1]);sys.argv=sys.argv[2:];'
+        "runpy.run_path(sys.argv[0],run_name='__main__')"
+    )
+    env = {**os.environ, 'BGM_PATH': '/missing/ambient.wav', 'FINAL_LOUDNORM': '1',
+           'NARRATION_SPEED': '1.15', 'OUTPUT_MAX_HEIGHT': '0'}
+    command = [
+        sys.executable, '-I', '-c', launcher, copied / 'scripts',
+        copied / 'scripts/assemble.py', adopted_case['picture'], '--work-dir', work,
+        '--tts-meta', adopted_case['meta'], '--narration-adoption', adopted_case['narration'],
+        '--audio-mix-adoption', adopted_case['adoption'], '--no-burn-subtitles',
+        '--output-dir', delivery, '--recap-stem', 'strict',
+    ]
+    result = subprocess.run(tuple(map(str, command)), env=env, capture_output=True,
+                            text=True, encoding='utf-8', errors='replace', timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    alias = delivery / 'recap_strict.mp4'
+    manifest = json.loads((work / 'assembly_manifest.json').read_text())
+    assert alias.is_file()
+    assert manifest['audio_mix_binding']['status'] == 'FINALIZED'
+    assert manifest['assembly_settings']['audio']['path'] == 'explicit_adopted_full_sound'
+    second = subprocess.run(tuple(map(str, command)), env=env, capture_output=True,
+                            text=True, encoding='utf-8', errors='replace', timeout=120)
+    assert second.returncode != 0
+    assert alias.is_file(), 'exclusive strict retry must not remove an older delivery'
+
+
 @pytest.mark.parametrize('mutation', [
     lambda d: d['format'].update(total_samples=95000),
     lambda d: d['prepared_receipt'].update(path='/nonexistent/prepared_bed_receipt.json'),
@@ -226,18 +293,20 @@ def test_bad_adopted_receipt_or_sample_window_never_publishes(adopted_case, tmp_
 def test_both_bindings_and_video_rollback_on_qc_failure(adopted_case, tmp_path, monkeypatch,
                                                       failed_call):
     original = assemble.assembly_contract._build_assembly_qc
-    calls = []
+    work = tmp_path/'render'
+    published_during_qc = []
     def qc(*args, **kwargs):
-        calls.append(1)
+        published_during_qc.append((work/'output.mp4').exists())
         result = original(*args, **kwargs)
-        if len(calls) == failed_call:
+        if len(published_during_qc) == failed_call:
             result.update(blocking=True, verdict='FAIL', blocking_codes=['test_failure'])
         return result
     monkeypatch.setattr(assemble.assembly_contract, '_build_assembly_qc', qc)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError, match='QC'):
         render(adopted_case, tmp_path)
-    assert len(calls) == failed_call
-    work = tmp_path/'render'
+    assert len(published_during_qc) == failed_call
+    # The strict final name stays invisible until the first QC pass has cleared.
+    assert published_during_qc[0] is False
     assert not (work/'output.mp4').exists()
     assert not (work/'narration_input_binding.json').exists()
     assert not (work/'audio_mix_binding.json').exists()
