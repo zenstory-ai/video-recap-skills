@@ -52,8 +52,10 @@ def test_lint_narration_embeds_deslop_qc_and_writes_sibling_report(tmp_path):
     assert {"missing_style_card", "em_dash"}.issubset(codes)
     assert report["deslop_qc"]["style_card_required"] is True
     assert report["deslop_qc"]["style_card_requirement_source"] == "deslop_qc_requirements.json"
-    assert (tmp_path / "deslop_qc.json").exists()
-    assert (tmp_path / "narration_lint.json").exists()
+    # The deslop report lives only inside narration_lint.json; no separate copy is written.
+    assert not (tmp_path / "deslop_qc.json").exists()
+    written = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
+    assert written["deslop_qc"] == report["deslop_qc"]
 
 
 def test_prompt_style_card_mention_without_requirements_does_not_gate(tmp_path):

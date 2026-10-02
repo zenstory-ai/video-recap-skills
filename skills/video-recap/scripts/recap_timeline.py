@@ -90,20 +90,6 @@ def _write_canonical_visual_overlays(work_dir, narration_path):
     return path
 
 
-def _print_grounding_qc_pointer(work_dir):
-    qc_path = Path(work_dir) / "grounding_qc.json"
-    if not qc_path.exists():
-        return
-    data = load_json(qc_path)
-    ranges = data["review_coverage"]["time_ranges"]
-    warnings = data["warnings"]
-    suffix = f" · warnings {len(warnings)}" if warnings else ""
-    print(
-        f"[video-recap] 🧭 Grounding QC: {data['verdict']} · ranges {len(ranges)}{suffix} → {qc_path}",
-        flush=True,
-    )
-
-
 def _print_narration_review_pointer(work_dir, *, review_ran=True):
     """Surface the advisory narration review produced by this run, if any.
 
@@ -111,7 +97,6 @@ def _print_narration_review_pointer(work_dir, *, review_ran=True):
     stale narration_review.md from an older run is never surfaced. When it ran, video-script's
     review_runner has written both narration_review.json and .md.
     """
-    _print_grounding_qc_pointer(work_dir)
     if not review_ran:
         return
     review_md = Path(work_dir) / "narration_review.md"

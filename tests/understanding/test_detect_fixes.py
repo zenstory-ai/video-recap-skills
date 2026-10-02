@@ -1,5 +1,4 @@
 """Regression tests for detect.py bug fixes (BUG 2 junk filter, BUG 11 silence)."""
-import json
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -213,13 +212,13 @@ def test_detect_silence_records_overlap_and_ignores_coarse_grid_asr(monkeypatch,
     assert out and all(p["has_speech"] is False for p in out)
     assert all(p["asr_granularity"] == "coarse_grid" for p in out)
     assert all("speech_overlap_ratio" in p and "has_speech_reason" in p for p in out)
-    qc = json.loads((tmp_path / "silence_periods.qc.json").read_text(encoding="utf-8"))
-    assert qc["coarse_asr_windows"] == len(out)
+    assert all(p["has_speech_reason"] == "coarse_asr_overlap_ignored" for p in out)
+    assert not (tmp_path / "silence_periods.qc.json").exists()
 
 
 def test_annotate_quiet_windows_with_asr_is_pure_helper():
     periods = [{"start": 5.0, "end": 9.0, "duration": 4.0, "has_speech": False}]
-    annotated, qc = detect.annotate_quiet_windows_with_asr(
+    annotated = detect.annotate_quiet_windows_with_asr(
         periods,
         [{"start": 5.5, "end": 8.5, "text": "real"}],
         video_duration=30.0,
@@ -229,4 +228,4 @@ def test_annotate_quiet_windows_with_asr_is_pure_helper():
     assert annotated[0]["has_speech"] is True
     assert annotated[0]["has_speech_reason"] == "asr_overlap_high_confidence"
     assert annotated[0]["speech_overlap_ratio"] >= 0.7
-    assert qc["asr_granularity"] == "segment"
+    assert annotated[0]["asr_granularity"] == "segment"

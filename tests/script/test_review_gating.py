@@ -9,7 +9,7 @@ sys.path.insert(
 )
 import json
 
-import review
+import review_runner
 import recap_review
 
 
@@ -45,7 +45,7 @@ def _run_review_with_finding(monkeypatch, work_dir, finding):
         }
 
     monkeypatch.setattr("review_runner.api_call", fake_api)
-    review.review_narration(work_dir)
+    review_runner.review_narration(work_dir)
     return payloads
 
 

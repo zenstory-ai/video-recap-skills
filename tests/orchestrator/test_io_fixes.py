@@ -1512,23 +1512,6 @@ def test_cut_qc_summary_surfaces_canonical_cut_result(tmp_path, capsys):
     )
 
 
-def test_print_narration_review_pointer_surfaces_grounding_qc(capsys, tmp_path):
-    (tmp_path / "grounding_qc.json").write_text(
-        json.dumps(
-            {
-                "verdict": "warn",
-                "review_coverage": {"time_ranges": [{"start": 0, "end": 1}]},
-                "warnings": ["stale mapping"],
-            },
-            ensure_ascii=False,
-        ),
-        encoding="utf-8",
-    )
-    recap_timeline._print_narration_review_pointer(tmp_path, review_ran=False)
-    out = capsys.readouterr().out
-    assert "Grounding QC" in out and "warn" in out and "warnings 1" in out
-
-
 def test_recap_rewrites_visual_overlays_for_each_narration(tmp_path):
     """visual_overlays.json always mirrors the current narration: supported overlays are
     written out, and a later narration without any supported overlay empties the file."""

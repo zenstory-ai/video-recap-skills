@@ -7,13 +7,11 @@ import re
 
 EVIDENCE_CONTRACT_VERSION = 1
 
-COVERAGE_POLICY_VERSION = "coverage_policy_v1"
-
 
 def _safe_time(item, key, default=0.0):
     try:
         value = float(item.get(key, default))
-    except (AttributeError, TypeError, ValueError):
+    except (TypeError, ValueError):
         return default
     return value if math.isfinite(value) else default
 
@@ -85,7 +83,6 @@ def coverage_policy_v1(
     duration = _overall_duration(scenes, asr_result, narration)
     if duration <= 0:
         return {
-            "coverage_policy_version": COVERAGE_POLICY_VERSION,
             "selected_ranges": [],
             "dropped_ranges": [],
             "dropped_range_count": 0,
@@ -162,7 +159,6 @@ def coverage_policy_v1(
     for r in merged + dropped:
         r.pop("priority", None)
     return {
-        "coverage_policy_version": COVERAGE_POLICY_VERSION,
         "selected_ranges": merged,
         "dropped_ranges": dropped,
         "dropped_range_count": len(dropped),
@@ -276,13 +272,11 @@ def _research_context_items(research):
 
 
 def filter_evidence_by_ranges(vlm_analysis, asr_result, ranges, *, timeline="source"):
-    """Pure compatibility seam: collect visual/ASR evidence items inside ranges."""
+    """Pure: collect visual/ASR evidence items inside ranges."""
     clock = "output" if timeline == "cut_output" else "source"
     items = []
     dropped = {"visual": 0, "asr": 0}
     for i, scene in enumerate(vlm_analysis or []):
-        if not isinstance(scene, dict):
-            continue
         start = _safe_time(scene, "start")
         end = _safe_time(scene, "end", start)
         if end <= start or not _in_ranges(start, end, ranges):
@@ -309,8 +303,6 @@ def filter_evidence_by_ranges(vlm_analysis, asr_result, ranges, *, timeline="sou
                 item[k] = scene.get(k)
         items.append(item)
     for i, seg in enumerate(asr_result or []):
-        if not isinstance(seg, dict):
-            continue
         text = str(seg.get("text", "")).strip()
         if not text:
             continue
@@ -343,22 +335,6 @@ def filter_evidence_by_ranges(vlm_analysis, asr_result, ranges, *, timeline="sou
         "items": items,
         "dropped_visual_count": dropped["visual"],
         "dropped_asr_count": dropped["asr"],
-    }
-
-
-def build_review_coverage_metadata(bundle):
-    """Summarize a build_evidence_bundle() bundle's coverage contract."""
-    coverage = bundle["coverage"]
-    metadata = bundle["metadata"]
-    return {
-        "coverage_policy_version": coverage["coverage_policy_version"],
-        "time_ranges": coverage["selected_ranges"],
-        "dropped_ranges": coverage["dropped_ranges"],
-        "dropped_range_count": coverage["dropped_range_count"],
-        "scene_count": metadata["reviewed_scene_count"],
-        "asr_count": metadata["reviewed_asr_count"],
-        "dropped_scene_count": metadata["dropped_scene_count"],
-        "dropped_asr_count": metadata["dropped_asr_count"],
     }
 
 

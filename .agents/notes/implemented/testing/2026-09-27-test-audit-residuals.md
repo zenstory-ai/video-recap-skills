@@ -32,7 +32,7 @@ test-slim 1/6–6/6 瘦身之后，又有三批生产改动落地：去掉全部
 所以私有谓词测试可删；dub 缓存与去标点两处在补测试前后分别变异，确认旧测试不失败、新测试失败。
 
 未做：`strict_publish` 写完 binding 后立即检查文件存在的守卫，属于严格发布路径上的"重验自己的输出"，需要另立笔记再决定。
-`review.py` 的测试门面同理保留。
+`review.py` 的测试门面同理保留。（此项已翻转：`review.py` 只剩 `main`，测试直接导入实现模块，见 [[2026-10-02-drop-review-scorecard]]。）
 
 ## Alternatives considered
 

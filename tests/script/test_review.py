@@ -8,7 +8,9 @@ import json
 import os
 import pytest
 
-import review
+import evidence_bundle
+import review_grounding
+import review_response
 import review_runner
 
 OK_RESPONSE = '{"verdict":"OK","summary":"ok","findings":[]}'
@@ -38,7 +40,7 @@ def _capture_api(monkeypatch, content=OK_RESPONSE):
 
 
 def _parse(payload):
-    return review.parse_review_response(json.dumps(payload, ensure_ascii=False))
+    return review_response.parse_review_response(json.dumps(payload, ensure_ascii=False))
 
 
 def test_parse_review_handles_fenced_raw_and_garbage():
@@ -46,16 +48,17 @@ def test_parse_review_handles_fenced_raw_and_garbage():
         '```json\n{"verdict":"REVISE","summary":"s","findings":'
         '[{"segment":0,"severity":"error","category":"hallucination","issue":"i","fix":"f"}]}\n```'
     )
-    r = review.parse_review_response(fenced)
+    r = review_response.parse_review_response(fenced)
     assert r["verdict"] == "REVISE"
     assert r["findings"][0]["category"] == "hallucination"
-    assert review.parse_review_response(OK_RESPONSE)["verdict"] == "OK"
-    junk = review.parse_review_response("no json here")
+    # A stray "OK" from the judge is approval, not a revision request.
+    assert review_response.parse_review_response(OK_RESPONSE)["verdict"] == "PASS"
+    junk = review_response.parse_review_response("no json here")
     assert junk["verdict"] == "REVISE" and junk.get("parse_error")
 
 
 def test_parse_review_normalizes_bad_severity_and_category_and_verdict():
-    r = review.parse_review_response(
+    r = review_response.parse_review_response(
         '{"verdict":"weird","findings":[{"severity":"BOGUS","category":"nope","issue":"i"}]}'
     )
     assert r["verdict"] == "REVISE"
@@ -97,7 +100,7 @@ def test_build_review_messages_grounds_draft_asr_and_every_frame_fact_shape(
         }
     ]
     asr = [{"start": 1, "end": 4, "text": "你给我站住"}]
-    content = review.build_review_messages(narration, vlm, asr)[0]["content"]
+    content = review_response.build_review_messages(narration, vlm, asr)[0]["content"]
     assert "他下定决心" in content and "门口对峙" in content
     assert "你给我站住" in content
     for fact in expected_facts:
@@ -128,7 +131,7 @@ def test_build_review_messages_includes_bounded_research_context(tmp_path):
         },
     )
 
-    content = review.build_review_messages(
+    content = review_response.build_review_messages(
         [{"start": 1.0, "end": 4.0, "narration": "他开始反击。"}],
         [],
         [],
@@ -149,7 +152,7 @@ def test_review_narration_passes_background_research_to_reviewer(monkeypatch, tm
     _write_json(tmp_path / "background_research.json", {"synopsis": "主角秘密查案"})
     payloads = _capture_api(monkeypatch)
 
-    review.review_narration(tmp_path)
+    review_runner.review_narration(tmp_path)
 
     assert "主角秘密查案" in payloads[0]["messages"][0]["content"]
 
@@ -161,7 +164,7 @@ def test_review_narration_writes_artifacts(monkeypatch, tmp_path):
         '{"verdict":"REVISE","summary":"需加钩子","findings":'
         '[{"segment":0,"severity":"warning","category":"weak_hook","issue":"开头平淡","fix":"加悬念"}]}',
     )
-    r = review.review_narration(tmp_path)
+    r = review_runner.review_narration(tmp_path)
     assert r["verdict"] == "REVISE"
     assert (tmp_path / "narration_review.json").exists()
     md = (tmp_path / "narration_review.md").read_text(encoding="utf-8")
@@ -208,7 +211,7 @@ def test_cut_output_review_remaps_grounding_to_output_timeline():
             "output_end": 10.0,
         }
     ]
-    vlm, asr = review.remap_grounding_to_output_timeline(
+    vlm, asr = review_grounding.remap_grounding_to_output_timeline(
         [
             {
                 "scene_id": 1,
@@ -239,24 +242,23 @@ def test_cut_output_review_remaps_grounding_to_output_timeline():
 def test_review_narration_cut_output_requires_fresh_validated_clip_spans(
     monkeypatch, tmp_path
 ):
-    """Advisory cut_output review fails open with warnings + a warn-verdict QC file; strict
-    evidence blocks on a missing or stale clip_plan_validated.json. No grounding files at
-    all: missing vlm/asr artifacts must degrade to empty evidence, not crash."""
+    """Advisory cut_output review fails open with warnings recorded in narration_review.json;
+    strict evidence blocks on a missing or stale clip_plan_validated.json. No grounding files
+    at all: missing vlm/asr artifacts must degrade to empty evidence, not crash."""
     _write_json(tmp_path / "narration.json", [{"start": 1, "end": 2, "narration": "测试。"}])
     _capture_api(monkeypatch, '{"verdict":"PASS","summary":"ok","findings":[]}')
 
-    out = review.review_narration(tmp_path, timeline="cut_output")
+    out = review_runner.review_narration(tmp_path, timeline="cut_output")
     assert out["warnings"]
-    qc = json.loads((tmp_path / "grounding_qc.json").read_text(encoding="utf-8"))
-    assert qc["owner"] == "video-script.review"
-    assert qc["verdict"] == "warn"
-    assert qc["coverage_policy_version"] == "coverage_policy_v1"
+    written = json.loads((tmp_path / "narration_review.json").read_text(encoding="utf-8"))
+    assert written["warnings"] == written["evidence_contract"]["warnings"] == out["warnings"]
+    assert not (tmp_path / "grounding_qc.json").exists()
     with pytest.raises(SystemExit, match="clip_plan_validated"):
-        review.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
+        review_runner.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
 
     raw = [{"start": 10, "end": 20}]
     _write_json(tmp_path / "clip_plan.json", raw)
-    out = review.review_narration(tmp_path, timeline="cut_output")
+    out = review_runner.review_narration(tmp_path, timeline="cut_output")
     assert out.get("warnings")
 
     stale = {
@@ -268,7 +270,7 @@ def test_review_narration_cut_output_requires_fresh_validated_clip_spans(
     os.utime(tmp_path / "clip_plan_validated.json", ns=(1_000_000_000, 1_000_000_000))
     os.utime(tmp_path / "clip_plan.json", ns=(2_000_000_000, 2_000_000_000))
     with pytest.raises(SystemExit, match="clip_plan_validated"):
-        review.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
+        review_runner.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
 
 
 def test_review_narration_cut_output_uses_remapped_grounding(monkeypatch, tmp_path):
@@ -304,7 +306,7 @@ def test_review_narration_cut_output_uses_remapped_grounding(monkeypatch, tmp_pa
     )
     payloads = _capture_api(monkeypatch)
 
-    review.review_narration(tmp_path, timeline="cut_output")
+    review_runner.review_narration(tmp_path, timeline="cut_output")
 
     content = payloads[0]["messages"][0]["content"]
     assert "[OUTPUT 3.0-5.0s 对白" in content and "输出三到五秒对白" in content
@@ -377,7 +379,7 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
     )
     payloads = _capture_api(monkeypatch, '{"verdict":"PASS","summary":"ok","findings":[]}')
 
-    review.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
+    review_runner.review_narration(tmp_path, timeline="cut_output", strict_evidence=True)
 
     content = payloads[0]["messages"][0]["content"]
     assert (
@@ -386,60 +388,26 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
     assert content.count("活塞包夹") == 2
     assert "[OUTPUT 0.0-5.0s 画面" in content
     assert "[OUTPUT 5.0-10.0s 画面" in content
-    qc = json.loads((tmp_path / "grounding_qc.json").read_text(encoding="utf-8"))
-    assert qc["review_coverage"]["scene_count"] == 2
-    assert qc["review_coverage"]["asr_count"] == 2
-    assert qc["index_inputs"] == {"vlm": True, "asr": True, "research": False}
 
 
-def test_parse_review_scorecard_is_advisory_and_keeps_verdict():
-    """Weak scores never override the judge's PASS verdict; the advisory sections still render."""
+def test_parse_review_keeps_only_verdict_summary_and_findings():
+    """Advisory extras a judge may still emit (old scorecard prompt) are not carried over."""
     r = _parse(
         {
             "verdict": "PASS",
-            "summary": "weak but judge passed",
-            "scorecard": {
-                "promise_match": 1,
-                "hook_3s": 1,
-                "first_15s_delivery": 1,
-                "spine_clarity": 1,
-                "information_gain": 1,
-            },
-            "hook_candidates_review": [
-                {
-                    "candidate": "他以为赢了，其实刚入局",
-                    "type": "contrast",
-                    "score": 5,
-                    "keep": True,
-                }
-            ],
-            "retention_risk_points": [
-                {"time": "00:28", "risk": "解释太久", "fix": "插入反问"}
-            ],
-            "highest_return_edits": ["露出00:31原声"],
-            "information_gain_notes": [{"segment": 0, "label": "motive", "note": "补动机"}],
-            "spoken_language_rewrites": [
-                {"segment": 0, "original": "因此", "rewrite": "所以", "why": "更口语"}
-            ],
-            "grounding_assertions": [
-                {"segment": 0, "assertion": "二人是盟友", "source": "ASR", "risk": "low"}
-            ],
+            "summary": "ok",
+            "scorecard": {"hook_3s": 1},
+            "hook_candidates_review": [{"candidate": "首句", "score": 5}],
+            "grounding_assertions": [{"segment": 0, "source": "research"}],
             "findings": [],
         }
     )
-    assert r["verdict"] == "PASS"
-    assert r["scorecard"]["hook_3s"] == 1
-    md = review.format_review_md(r)
-    assert (
-        "Scorecard" in md
-        and "Highest-return edits" in md
-        and "Grounding assertions" in md
-    )
+    assert set(r) == {"verdict", "summary", "findings"}
+    md = review_response.format_review_md(r)
+    assert "Scorecard" not in md and "## Findings" in md
 
 
-def test_build_review_messages_includes_optional_planning_style_and_deslop_artifacts(
-    tmp_path,
-):
+def test_build_review_messages_includes_optional_planning_and_style_artifacts(tmp_path):
     _write_json(tmp_path / "packaging_plan.json", {"viewer_promise": "看到反转"})
     _write_json(
         tmp_path / "recap_story_plan.json",
@@ -461,11 +429,7 @@ def test_build_review_messages_includes_optional_planning_style_and_deslop_artif
         },
     )
     _write_json(tmp_path / "style_card.json", {"tone": "冷静克制", "avoid": ["空泛拔高"]})
-    _write_json(
-        tmp_path / "deslop_qc.json",
-        {"flags": [{"type": "template_transition", "text": "然而"}]},
-    )
-    content = review.build_review_messages(
+    content = review_response.build_review_messages(
         [{"start": 0, "end": 3, "narration": "测试。"}], [], [], work_dir=tmp_path
     )[0]["content"]
 
@@ -483,39 +447,8 @@ def test_build_review_messages_includes_optional_planning_style_and_deslop_artif
     assert (
         "style_card.json" in content and "冷静克制" in content and "空泛拔高" in content
     )
-    assert (
-        "deslop_qc.json" in content
-        and "template_transition" in content
-        and "然而" in content
-    )
     assert "可能为空" in content
-
-
-def test_parse_review_scorecard_coerces_scores_and_marks_unscored_dimensions():
-    """Scores are clamped ints; dimensions the judge omits stay None (rendered 未评分)."""
-    r = _parse(
-        {
-            "verdict": "PASS",
-            "summary": "s",
-            "scorecard": {
-                "hook_3s": 5,
-                "ending_payoff": 5,
-                "style_consistency": "4",
-                "ai_flavor": 2.2,
-                "packaging_consistency": 0,
-            },
-            "findings": [],
-        }
-    )
-    scorecard = r["scorecard"]
-    assert scorecard["hook_3s"] == 5
-    assert scorecard["ending_payoff"] == 5
-    assert scorecard["style_consistency"] == 4
-    assert scorecard["ai_flavor"] == 2
-    assert scorecard["packaging_consistency"] == 1
-    assert scorecard["tts_pacing"] is None
-    md = review.format_review_md(r)
-    assert "未评分" in md and "hook_3s: 5/5" in md
+    assert "scorecard" not in content.lower() and "deslop_qc" not in content
 
 
 def test_coverage_policy_v1_covers_long_video_tail_and_bme():
@@ -532,9 +465,8 @@ def test_coverage_policy_v1_covers_long_video_tail_and_bme():
         {"start": i * 5.0, "end": i * 5.0 + 2.0, "text": f"line{i}"} for i in range(200)
     ]
     narration = [{"start": 850.0, "end": 860.0, "narration": "后段关键反转。"}]
-    cov = review.coverage_policy_v1(scenes, asr, narration)
+    cov = evidence_bundle.coverage_policy_v1(scenes, asr, narration)
     ranges = cov["selected_ranges"]
-    assert cov["coverage_policy_version"] == "coverage_policy_v1"
     assert any(r["start"] <= 0 <= r["end"] for r in ranges)
     assert any(r["start"] <= 500 <= r["end"] for r in ranges)
     assert any(r["start"] <= 990 <= r["end"] for r in ranges)
@@ -543,7 +475,7 @@ def test_coverage_policy_v1_covers_long_video_tail_and_bme():
         for r in ranges
     )
     assert (
-        review.coverage_policy_v1(scenes, asr, narration)["selected_ranges"] == ranges
+        evidence_bundle.coverage_policy_v1(scenes, asr, narration)["selected_ranges"] == ranges
     )
 
 
@@ -574,7 +506,7 @@ def test_evidence_bundle_labels_source_output_and_context_only():
         "characters": {"叶轻眉": "主角之母"},
         "character_details": {"叶轻眉": {"aliases": ["叶青眉"], "role": "背景人物"}},
     }
-    bundle = review.build_evidence_bundle(
+    bundle = evidence_bundle.build_evidence_bundle(
         vlm, asr, narration, timeline="cut_output", research=research
     )
     assert {item["clock"] for item in bundle["items"]} == {"output"}
@@ -585,13 +517,13 @@ def test_evidence_bundle_labels_source_output_and_context_only():
         item["clock"] is None and item["support"] == "context_only"
         for item in bundle["context_items"]
     )
-    rendered = review.render_evidence_bundle(bundle)
+    rendered = evidence_bundle.render_evidence_bundle(bundle)
     assert "clock=OUTPUT" in rendered and "SOURCE 12.0-16.0s" in rendered
     assert "clock=null" in rendered
 
 
 def test_merge_review_findings_dedup_keeps_highest_severity():
-    merged = review.merge_review_findings(
+    merged = review_response.merge_review_findings(
         [
             {
                 "findings": [
@@ -624,29 +556,7 @@ def test_merge_review_findings_dedup_keeps_highest_severity():
     )
 
 
-def test_parse_review_downgrades_user_context_assertions_to_context_only():
-    r = _parse(
-        {
-            "verdict": "PASS",
-            "summary": "ok",
-            "grounding_assertions": [
-                {
-                    "segment": 0,
-                    "assertion": "用户说这是兄弟",
-                    "source": "user_context",
-                    "risk": "from prompt",
-                }
-            ],
-            "findings": [],
-        }
-    )
-    assertion = r["grounding_assertions"][0]
-    assert assertion["support"] == "context_only"
-    assert assertion["clock"] is None
-    assert "user_context-only" in assertion["risk"]
-
-
-def test_public_grounding_seams_are_api_free(tmp_path):
+def test_grounding_helpers_are_api_free():
     narration = [{"start": 1, "end": 3, "narration": "测试。"}]
     vlm = [
         {
@@ -659,25 +569,15 @@ def test_public_grounding_seams_are_api_free(tmp_path):
     ]
     asr = [{"start": 1, "end": 2, "text": "站住"}]
 
-    bundle = review.build_evidence_bundle(
+    bundle = evidence_bundle.build_evidence_bundle(
         vlm, asr, narration, research={"characters": {"甲": "背景"}}
     )
     ranges = bundle["coverage"]["selected_ranges"]
-    filtered = review.filter_evidence_by_ranges(vlm, asr, ranges)
+    filtered = evidence_bundle.filter_evidence_by_ranges(vlm, asr, ranges)
     assert [item["source"] for item in filtered["items"]] == ["visual", "asr"]
 
-    assert review.build_review_coverage_metadata(bundle)["scene_count"] == 1
-    assert "门口对峙" in review.render_evidence_bundle(bundle)
-
-    qc = review.build_grounding_qc(tmp_path, review.parse_review_response("{}"), bundle)
-    assert qc["verdict"] == "pass"
-    review.write_grounding_qc(tmp_path, qc)
-    assert (
-        json.loads((tmp_path / "grounding_qc.json").read_text(encoding="utf-8"))[
-            "owner"
-        ]
-        == "video-script.review"
-    )
+    assert bundle["metadata"]["reviewed_scene_count"] == 1
+    assert "门口对峙" in evidence_bundle.render_evidence_bundle(bundle)
 
 
 def test_review_narration_chunks_large_evidence_and_merges(monkeypatch, tmp_path):
@@ -713,12 +613,12 @@ def test_review_narration_chunks_large_evidence_and_merges(monkeypatch, tmp_path
         )
 
     payloads = _capture_api(monkeypatch, chunk_response)
-    out = review.review_narration(tmp_path)
+    out = review_runner.review_narration(tmp_path)
     assert len(payloads) > 1
     assert out["chunked_review"]["chunk_count"] == len(payloads)
     assert len(out["findings"]) == len(payloads)
-    qc = json.loads((tmp_path / "grounding_qc.json").read_text(encoding="utf-8"))
-    assert qc["review_coverage"]["time_ranges"]
+    assert out["evidence_contract"]["chunk_count"] == len(payloads)
+    assert out["evidence_contract"]["selected_ranges"]
 
 
 def test_duplicate_source_clip_backrefs_remain_distinguishable():
@@ -744,56 +644,25 @@ def test_duplicate_source_clip_backrefs_remain_distinguishable():
             "output_segment_index": 1,
         },
     ]
-    rv, ra = review.remap_grounding_to_output_timeline(vlm, asr, spans)
+    rv, ra = review_grounding.remap_grounding_to_output_timeline(vlm, asr, spans)
     assert len(rv) == 2 and len(ra) == 2
     assert {x["source_clip_id"] for x in rv} == {"clip-a", "clip-b"}
     assert {x["output_segment_index"] for x in ra} == {0, 1}
-    bundle = review.build_evidence_bundle(
+    bundle = evidence_bundle.build_evidence_bundle(
         rv, ra, [{"start": 0, "end": 40, "narration": "测试"}], timeline="cut_output"
     )
-    rendered = review.render_evidence_bundle(bundle)
+    rendered = evidence_bundle.render_evidence_bundle(bundle)
     assert "clip#0" in rendered and "clip#1" in rendered
 
 
-def test_research_only_assertion_stays_context_only_not_strong_fact(tmp_path):
-    parsed = _parse(
-        {
-            "verdict": "PASS",
-            "summary": "ok",
-            "grounding_assertions": [
-                {
-                    "segment": 0,
-                    "assertion": "角色已背叛",
-                    "source": "research",
-                    "risk": "spoiler",
-                }
-            ],
-            "findings": [],
-        }
-    )
-    bundle = review.build_evidence_bundle(
-        [],
-        [],
-        [{"start": 0, "end": 1, "narration": "他已经背叛。"}],
-        research={"characters": {"甲": "未来剧情"}},
-    )
-    qc = review.build_grounding_qc(tmp_path, parsed, bundle)
-    assertion = parsed["grounding_assertions"][0]
-    assert assertion["support"] == "context_only" and assertion["clock"] is None
-    assert qc["research_guardrail"]["spoiler_risk_assertions"] == 1
-
-
-def test_build_review_messages_bad_style_and_deslop_json_keep_context_titles(tmp_path):
+def test_build_review_messages_bad_style_json_keeps_context_title(tmp_path):
     (tmp_path / "style_card.json").write_text("{bad json", encoding="utf-8")
-    (tmp_path / "deslop_qc.json").write_text("[bad json", encoding="utf-8")
 
-    content = review.build_review_messages(
+    content = review_response.build_review_messages(
         [{"start": 0, "end": 1, "narration": "测试。"}], [], [], work_dir=tmp_path
     )[0]["content"]
 
-    assert "style_card.json" in content
-    assert "deslop_qc.json" in content
-    assert content.count("(无)") >= 2
+    assert "style_card.json（表达意图/语气/节奏/禁忌，不负责包装，可能为空）\n(无)" in content
 
 
 def test_parse_review_clamps_craft_categories_to_warning_but_keeps_factual_errors():
