@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **新增按需技能 video-reference：把成片拆成可复用的制作参考。** `reference.py measure` 用一次 ffmpeg（`scdet` + `ebur128`）测镜头切点、镜长分布与响度，按成片 `{size, mtime_ns}` 缓存；Agent 在 `reference_breakdown.json` 标注音轨归属与叙事段落，并分开写原片事实与可迁移方法；`check` 用 R1–R8 机械分离两者（封闭 schema、事实锚点、方法证据、target 只写测量路径、实体名/台词引文/绝对时间/路径泄漏扫描、五维覆盖），`export` 零 error 时才写不含原片事实的 `production_reference.json`。写稿 Agent 只在 work_dir 有这个文件时阅读，并可在 `recap_story_plan.json` 写可选的 `reference_methods`。不调用 MiMo，不进默认生产路径，recap 不加参数，不新增 QC。
+
 ### Changed
 
 - **full 模式校验不再静默改写解说稿（破坏性变更）。** `validate.py --mode full` 不再截短超预算文本、丢弃过短段、合并相似相邻段、补句末标点或按时间重排，也不再丢掉白名单之外的字段；它和 cut_output 一样只做 lint，再用同一套声音归属算法（原声对白区间减去安静窗口）回写 `overlaps_speech`，因此 full 模式的 `overlaps_speech` 和随之的原声闪避可能与以前不同。字数超过该时间窗推荐字数 1.25 倍的段现在是 `over_budget` error（以前会被静默截短或丢弃），`narration_lint.json` 写明段号、时间窗、`budget_chars`、`limit_chars`、`actual_chars` 与 `over_chars`，Agent 改稿后重跑；cut_output 的超预算仍是 warning。未按 `start` 排序的段在所有模式下都报 `out_of_order` error。`validate.py` 删除 `--preserve-approved-text`（传入即报 unrecognized arguments），recap 不再把它传给校验；`recap.py --preserve-approved-text` 照旧传给 voiceover，voiceover 默认的句界缩稿作为最后保险保留。

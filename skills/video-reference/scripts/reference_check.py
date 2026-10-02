@@ -1,0 +1,380 @@
+"""R1–R8: mechanically keep source facts out of the transferable production reference.
+
+`check` validates the agent's single file (reference_breakdown.json) against the cached
+measurements and the optional understanding artifacts, computes `derived` in memory, and
+returns {derived, errors, warnings}. `export` writes production_reference.json only when there
+are zero errors, then re-scans the serialized result (R8).
+"""
+import json
+import math
+import re
+from pathlib import Path
+
+from lib import read_json, write_json
+from reference_measure import MEASUREMENTS_FILE
+from reference_profile import OWNERS, build_production, derive, is_resolved, resolve
+
+BREAKDOWN_FILE = "reference_breakdown.json"
+BREAKDOWN_SCHEMA = "video-reference.breakdown.v1"
+DIMENSIONS = ("narrative_structure", "pacing", "shots_editing", "narration_subtitles", "audio_visual")
+APPLIES_TO = ("story_plan", "visual_audio_board", "clip_plan", "narration", "style_card")
+FUNCTIONS = ("hook", "setup", "turn", "escalation", "payoff")
+NARRATION_JOBS = ("context", "causal_link", "foreshadow", "interpretation", "transition")
+TARGET_ROOTS = ("shots", "loudness", "derived")
+GAP_S = 0.5
+T_EPSILON_S = 0.05
+CJK_RUN_MIN = 8
+LATIN_RUN_MIN = 5
+
+_KEYS = {
+    "top": {"schema", "labels", "source_facts", "methods", "skipped_dimensions"},
+    "labels": {"audio_spans", "sections", "subtitles", "basis"},
+    "span": {"start", "end", "owner", "narration_job"},
+    "section": {"start", "end", "function"},
+    "subtitles": {"burned", "max_lines", "marks_original", "evidence_t"},
+    "fact": {"id", "dimension", "statement", "t", "measure", "entities"},
+    "method": {"id", "dimension", "rule", "applies_when", "avoid_when", "applies_to", "evidence", "targets"},
+    "target": {"from"},
+}
+_REQUIRED = {
+    "top": {"schema", "labels"},
+    "labels": {"audio_spans", "sections"},
+    "span": {"start", "end", "owner"},
+    "section": {"start", "end", "function"},
+    "subtitles": {"burned", "max_lines"},
+    "fact": {"id", "dimension", "statement", "entities"},
+    "method": {"id", "dimension", "rule", "applies_to", "evidence"},
+    "target": {"from"},
+}
+METHOD_TEXT_FIELDS = ("rule", "applies_when", "avoid_when")
+BANNED_EXPORT_KEYS = {"source_facts", "labels", "entities", "evidence", "statement", "from", "path"}
+_CJK = re.compile(r"[㐀-鿿豈-﫿]+")
+_WORD = re.compile(r"[A-Za-z0-9']+")
+# Python's \b treats CJK as word characters, so "在1:23处" has no boundary before "1"; use
+# digit/ASCII lookarounds instead. Path segments are ASCII so prose like "旁白/原声/音乐" stays legal.
+_TIMECODE = re.compile(r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])|第\s*[0-9一二三四五六七八九十百零两]+\s*秒")
+_ABS_PATH = re.compile(
+    r"(?<![A-Za-z0-9_.])/(?:[A-Za-z0-9_.-]+/)+[\w.-]*|~/[\w.-]+|(?<![A-Za-z0-9_])[A-Za-z]:[\\/][\w.-]+")
+_NUMBER_IN_RULE = re.compile(r"\d+(?:\.\d+)?\s*(?:秒|%|％|字)")
+
+
+def _num(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _closed(obj, kind, where, errors):
+    """R1 closed key set + required keys; returns True when `obj` is a dict."""
+    if not isinstance(obj, dict):
+        errors.append(f"R1 {where}: 必须是对象")
+        return False
+    for key in sorted(set(obj) - _KEYS[kind]):
+        errors.append(f"R1 {where}: 不允许的键 {key!r}")
+    for key in sorted(_REQUIRED.get(kind, set()) - set(obj)):
+        errors.append(f"R1 {where}: 缺少键 {key!r}")
+    return True
+
+
+def _timed(items, kind, enum_key, enum, errors):
+    """R1 for spans/sections; returns the well-formed items for R2 and derive()."""
+    good = []
+    for i, item in enumerate(items if isinstance(items, list) else []):
+        where = f"labels.{'audio_spans' if kind == 'span' else 'sections'}[{i}]"
+        if not _closed(item, kind, where, errors):
+            continue
+        ok = _num(item.get("start")) and _num(item.get("end"))
+        if not ok:
+            errors.append(f"R1 {where}: start/end 必须是数字")
+        if item.get(enum_key) not in enum:
+            errors.append(f"R1 {where}: {enum_key} 必须是 {'|'.join(enum)}，不是 {item.get(enum_key)!r}")
+            ok = False
+        job = item.get("narration_job")
+        if "narration_job" in item and (item.get("owner") != "narration" or job not in NARRATION_JOBS):
+            errors.append(f"R1 {where}: narration_job 只用于 narration 段，取值 {'|'.join(NARRATION_JOBS)}")
+        if ok:
+            good.append(item)
+    return good
+
+
+def _check_cover(items, name, duration, errors):
+    """R2: sorted, no overlap, gaps <= 0.5 s, covering [0, duration] within 0.5 s."""
+    if not items:
+        errors.append(f"R2 labels.{name}: 不能为空")
+        return
+    for i, item in enumerate(items):
+        if item["start"] >= item["end"]:
+            errors.append(f"R2 labels.{name}[{i}]: start 必须小于 end")
+        if item["end"] > duration + GAP_S:
+            errors.append(f"R2 labels.{name}[{i}]: end 超出时长 {duration}")
+        if i:
+            prev = items[i - 1]
+            if item["start"] < prev["end"] - 1e-6:
+                errors.append(f"R2 labels.{name}[{i}]: 与上一段重叠或未按时间排序")
+            elif item["start"] - prev["end"] > GAP_S:
+                errors.append(f"R2 labels.{name}[{i}]: 与上一段间隙 {item['start'] - prev['end']:.2f}s > {GAP_S}s")
+    if items[0]["start"] > GAP_S or items[-1]["end"] < duration - GAP_S:
+        errors.append(f"R2 labels.{name}: 必须覆盖 [0, {duration}]（首尾容差 {GAP_S}s）")
+
+
+def _check_labels(labels, duration, errors):
+    if not _closed(labels, "labels", "labels", errors):
+        return [], []
+    spans = _timed(labels.get("audio_spans"), "span", "owner", OWNERS, errors)
+    sections = _timed(labels.get("sections"), "section", "function", FUNCTIONS, errors)
+    _check_cover(spans, "audio_spans", duration, errors)
+    _check_cover(sections, "sections", duration, errors)
+    subtitles = labels.get("subtitles")
+    if subtitles is not None and _closed(subtitles, "subtitles", "labels.subtitles", errors):
+        for t in subtitles.get("evidence_t") or []:
+            if not _num(t) or not 0 <= t <= duration:
+                errors.append(f"R2 labels.subtitles.evidence_t: {t!r} 不在 [0, {duration}] 内")
+    return spans, sections
+
+
+def _check_ids(items, prefix, where, errors):
+    seen = set()
+    for i, item in enumerate(items):
+        ident = item.get("id")
+        if not isinstance(ident, str) or not re.fullmatch(rf"{prefix}\d+", ident):
+            errors.append(f"R1 {where}[{i}]: id 必须形如 {prefix}1")
+        elif ident in seen:
+            errors.append(f"R1 {where}[{i}]: id {ident} 重复")
+        seen.add(ident)
+    return seen
+
+
+def _check_facts(facts, measurements, derived, duration, errors):
+    """R1 + R3: every fact is anchored to a time range or a resolvable measurement."""
+    for fact in facts:
+        where = f"source_facts.{fact.get('id')}"
+        if fact.get("dimension") not in DIMENSIONS:
+            errors.append(f"R1 {where}: dimension 必须是 {'|'.join(DIMENSIONS)}")
+        if not isinstance(fact.get("statement"), str) or not fact.get("statement").strip():
+            errors.append(f"R1 {where}: statement 不能为空")
+        if not isinstance(fact.get("entities"), list) or not all(isinstance(e, str) for e in fact.get("entities", [])):
+            errors.append(f"R3 {where}: 必须显式写 entities 列表（可为空）")
+        if ("t" in fact) == ("measure" in fact):
+            errors.append(f"R3 {where}: t 与 measure 必须二选一")
+        elif "t" in fact:
+            t = fact["t"]
+            if not (isinstance(t, list) and len(t) == 2 and all(_num(x) for x in t)
+                    and 0 <= t[0] < t[1] <= duration + T_EPSILON_S):
+                errors.append(f"R3 {where}: t 必须是 [a, b] 且 0 ≤ a < b ≤ {duration}")
+        else:
+            paths = fact["measure"]
+            if not isinstance(paths, list) or not paths:
+                errors.append(f"R3 {where}: measure 必须是非空路径列表")
+            for path in paths if isinstance(paths, list) else []:
+                if not is_resolved(resolve(path, measurements, derived)):
+                    errors.append(f"R3 {where}: 测量路径 {path!r} 无法解析")
+
+
+def _target_ok(path, value):
+    if not isinstance(path, str) or path.split(".")[0] not in TARGET_ROOTS or not is_resolved(value):
+        return False
+    return _num(value) or isinstance(value, dict) or (path == "derived.structure" and isinstance(value, list))
+
+
+def _check_methods(methods, fact_ids, measurements, derived, errors):
+    """R1 + R4 + R5: closed method shape, real evidence, targets only name measurement paths."""
+    for method in methods:
+        where = f"methods.{method.get('id')}"
+        if method.get("dimension") not in DIMENSIONS:
+            errors.append(f"R1 {where}: dimension 必须是 {'|'.join(DIMENSIONS)}")
+        if method.get("applies_to") not in APPLIES_TO:
+            errors.append(f"R1 {where}: applies_to 必须是 {'|'.join(APPLIES_TO)}")
+        for field in METHOD_TEXT_FIELDS:
+            if field in method and (not isinstance(method[field], str) or not method[field].strip()):
+                errors.append(f"R1 {where}: {field} 必须是非空字符串")
+        evidence = method.get("evidence")
+        if not isinstance(evidence, list) or not evidence:
+            errors.append(f"R4 {where}: evidence 至少一条")
+        for item in evidence if isinstance(evidence, list) else []:
+            ok = item in fact_ids or (
+                isinstance(item, str) and item.startswith("measure:")
+                and is_resolved(resolve(item[len("measure:"):], measurements, derived)))
+            if not ok:
+                errors.append(f"R4 {where}: evidence {item!r} 既不是已有 fact id，也不是可解析的 measure:路径")
+        targets = method.get("targets", {})
+        if not isinstance(targets, dict):
+            errors.append(f"R1 {where}: targets 必须是对象")
+            continue
+        for name, target in targets.items():
+            twhere = f"{where}.targets.{name}"
+            if not re.fullmatch(r"[a-z][a-z0-9_]*", str(name)):
+                errors.append(f"R1 {twhere}: 名字只用小写字母、数字和下划线")
+            if not _closed(target, "target", twhere, errors):
+                continue
+            if set(target) & {"value", "provenance"}:
+                errors.append(f"R5 {twhere}: 数值与 provenance 由 export 填写，只写 from")
+            path = target.get("from")
+            if "from" in target and not _target_ok(path, resolve(path, measurements, derived)):
+                errors.append(f"R5 {twhere}: from {path!r} 必须解析到 shots/loudness/derived 下的数值或对象")
+
+
+def _ngrams(text, size):
+    grams = set()
+    for run in _CJK.findall(text):
+        grams.update(run[i:i + size] for i in range(len(run) - size + 1))
+    return grams
+
+
+def _word_grams(text, size):
+    words = [w.lower() for w in _WORD.findall(text)]
+    return {tuple(words[i:i + size]) for i in range(len(words) - size + 1)}
+
+
+def leak_corpus(facts, asr_segments, asr_evidence, research):
+    """Entity names and source text that must never reach a transferable method."""
+    names = {e for f in facts for e in (f.get("entities") or []) if isinstance(e, str)}
+    research = research if isinstance(research, dict) else {}
+    asr_evidence = asr_evidence if isinstance(asr_evidence, dict) else {}
+    characters = research.get("characters")
+    if isinstance(characters, dict):
+        names.update(characters)
+    elif isinstance(characters, list):
+        names.update(c.get("name") for c in characters if isinstance(c, dict))
+    names.update((asr_evidence.get("glossary") or {}).get("names") or [])
+    texts = [str(s.get("text") or "") for s in asr_segments or [] if isinstance(s, dict)]
+    texts += [str(f.get("statement") or "") for f in facts]
+    return {
+        "names": sorted({n for n in names if isinstance(n, str) and len(n.strip()) >= 2}, key=len, reverse=True),
+        "cjk": set().union(*(_ngrams(t, CJK_RUN_MIN) for t in texts)) if texts else set(),
+        "latin": set().union(*(_word_grams(t, LATIN_RUN_MIN) for t in texts)) if texts else set(),
+    }
+
+
+def leak_errors(text, where, corpus, rule="R6"):
+    """R6 a–d on one string; each error quotes the offending substring."""
+    errors = []
+    lowered = text.lower()
+    for name in corpus["names"]:
+        if name.lower() in lowered:
+            errors.append(f"{rule} {where}: 含原片实体名「{name}」")
+    for gram in sorted(_ngrams(text, CJK_RUN_MIN) & corpus["cjk"])[:1]:
+        errors.append(f"{rule} {where}: 与原片台词/事实共有连续 {CJK_RUN_MIN}+ 字「{gram}」")
+    for gram in sorted(_word_grams(text, LATIN_RUN_MIN) & corpus["latin"])[:1]:
+        errors.append(f"{rule} {where}: 与原片台词/事实共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」")
+    for match in _TIMECODE.finditer(text):
+        errors.append(f"{rule} {where}: 含绝对时间「{match.group(0)}」，改用相对位置或 targets")
+    for match in _ABS_PATH.finditer(text):
+        errors.append(f"{rule} {where}: 含绝对路径「{match.group(0)}」")
+    return errors
+
+
+def _warnings(breakdown, facts, methods, asr_segments, asr_status, research):
+    warnings = []
+    for method in methods:
+        if not method.get("applies_when"):
+            warnings.append(f"methods.{method.get('id')}: 没写 applies_when，后续制作难判断何时套用")
+        if _NUMBER_IN_RULE.search(str(method.get("rule") or "")):
+            warnings.append(f"methods.{method.get('id')}: rule 正文含数字，建议把数值放进 targets")
+    if asr_status != "AVAILABLE_COARSE":
+        warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
+    has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
+    if has_cjk and not research and not any(f.get("entities") for f in facts):
+        warnings.append("ASR 有中文对白，但所有 fact 的 entities 都为空且没有 background_research.json：人名泄漏扫描可能漏网")
+    labels = breakdown.get("labels") if isinstance(breakdown.get("labels"), dict) else {}
+    if not str(labels.get("basis") or "").strip():
+        warnings.append("labels.basis 为空：写明标注依据（如 5s ASR 窗口 + 故事板）")
+    return warnings
+
+
+def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None, research=None):
+    """Run R1–R7; return {derived, errors, warnings}."""
+    errors = []
+    duration = measurements["source"]["duration_s"]
+    if not _closed(breakdown, "top", "breakdown", errors):
+        return {"derived": None, "errors": errors, "warnings": []}
+    if breakdown.get("schema") != BREAKDOWN_SCHEMA:
+        errors.append(f"R1 breakdown.schema 必须是 {BREAKDOWN_SCHEMA}")
+    spans, sections = _check_labels(breakdown.get("labels", {}), duration, errors)
+    asr_segments = [s for s in (asr_segments or []) if isinstance(s, dict)]
+    asr_status = (asr_evidence if isinstance(asr_evidence, dict) else {}).get("status") or "UNKNOWN"
+    derived = derive({"audio_spans": spans, "sections": sections}, measurements, asr_segments, asr_status)
+
+    facts, methods = [], []
+    for key, kind, bucket in (("source_facts", "fact", facts), ("methods", "method", methods)):
+        items = breakdown.get(key, [])
+        if not isinstance(items, list):
+            errors.append(f"R1 breakdown.{key}: 必须是列表")
+            continue
+        bucket.extend(item for i, item in enumerate(items) if _closed(item, kind, f"{key}[{i}]", errors))
+    fact_ids = _check_ids(facts, "f", "source_facts", errors)
+    _check_ids(methods, "m", "methods", errors)
+    _check_facts(facts, measurements, derived, duration, errors)
+    _check_methods(methods, fact_ids, measurements, derived, errors)
+
+    corpus = leak_corpus(facts, asr_segments, asr_evidence, research)
+    for method in methods:
+        for field in METHOD_TEXT_FIELDS:
+            if isinstance(method.get(field), str):
+                errors.extend(leak_errors(method[field], f"methods.{method.get('id')}.{field}", corpus))
+
+    skipped = breakdown.get("skipped_dimensions", {})
+    if not isinstance(skipped, dict) or set(skipped) - set(DIMENSIONS):
+        errors.append(f"R1 skipped_dimensions: 键只能是 {'|'.join(DIMENSIONS)}")
+        skipped = {}
+    covered = {m.get("dimension") for m in methods}
+    for dimension in DIMENSIONS:
+        reason = skipped.get(dimension)
+        if dimension not in covered and not (isinstance(reason, str) and reason.strip()):
+            errors.append(f"R7 {dimension}: 至少一条 method，或在 skipped_dimensions 写明原因")
+    warnings = _warnings(breakdown, facts, methods, asr_segments, asr_status, research)
+    return {"derived": derived, "errors": errors, "warnings": warnings}
+
+
+def _load(work_dir):
+    work_dir = Path(work_dir)
+    measurements = read_json(work_dir / MEASUREMENTS_FILE)
+    breakdown = read_json(work_dir / BREAKDOWN_FILE)
+    missing = [name for name, value in ((MEASUREMENTS_FILE, measurements), (BREAKDOWN_FILE, breakdown)) if value is None]
+    return measurements, breakdown, {
+        "asr_segments": read_json(work_dir / "asr_result.json", []),
+        "asr_evidence": read_json(work_dir / "asr_timing_evidence.json"),
+        "research": read_json(work_dir / "background_research.json"),
+    }, missing
+
+
+def run_check(work_dir):
+    measurements, breakdown, extra, missing = _load(work_dir)
+    if missing:
+        return {"derived": None, "errors": [f"缺少 {name}" for name in missing], "warnings": []}
+    return check_breakdown(breakdown, measurements, **extra)
+
+
+def _walk(node, where="$"):
+    if isinstance(node, dict):
+        for key, value in node.items():
+            yield "key", str(key), f"{where}.{key}"
+            yield from _walk(value, f"{where}.{key}")
+    elif isinstance(node, list):
+        for i, value in enumerate(node):
+            yield from _walk(value, f"{where}[{i}]")
+    elif isinstance(node, str):
+        yield "str", node, where
+
+
+def export_errors(production, corpus):
+    """R8: re-scan every string of the serialized export and reject source-only keys."""
+    errors = []
+    for kind, text, where in _walk(json.loads(json.dumps(production, ensure_ascii=False))):
+        if kind == "key" and text in BANNED_EXPORT_KEYS:
+            errors.append(f"R8 {where}: 导出物不能含键 {text!r}")
+        elif kind == "str":
+            errors.extend(leak_errors(text, where, corpus, rule="R8"))
+    return errors
+
+
+def run_export(work_dir, out_path):
+    """Check, project, re-scan, then write; returns the report (with `written` on success)."""
+    report = run_check(work_dir)
+    if report["errors"]:
+        return report
+    measurements, breakdown, extra, _ = _load(work_dir)
+    production = build_production(breakdown, measurements, report["derived"])
+    facts = [f for f in breakdown.get("source_facts") or [] if isinstance(f, dict)]
+    corpus = leak_corpus(facts, extra["asr_segments"], extra["asr_evidence"], extra["research"])
+    report["errors"] = export_errors(production, corpus)
+    if not report["errors"]:
+        report["written"] = str(write_json(out_path, production))
+    return report

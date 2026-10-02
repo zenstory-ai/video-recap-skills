@@ -11,6 +11,7 @@ PUBLIC_ENTRYPOINTS = (
     "skills/video-assemble/scripts/assemble.py",
     "skills/video-cut/scripts/cut.py",
     "skills/video-recap/scripts/recap.py",
+    "skills/video-reference/scripts/reference.py",
     "skills/video-script/scripts/review.py",
     "skills/video-understanding/scripts/understand.py",
 )
@@ -241,3 +242,23 @@ def test_public_entrypoints_have_no_private_compatibility_surface():
             )
 
     assert not violations, f"Entrypoints must expose public APIs only: {violations}"
+
+
+# Only the skill that produces production_reference.json may name it in code. Every other
+# reader is the writing agent (prose only); a script that starts reading it would grow the
+# reference back into a per-run evaluation layer, so that has to be an explicit test change.
+PRODUCTION_REFERENCE_WRITERS = ("video-reference",)
+
+
+def test_only_the_reference_skill_names_production_reference_in_scripts():
+    offenders = [
+        str(path.relative_to(ROOT))
+        for path in _script_modules()
+        if path.relative_to(ROOT / "skills").parts[0] not in PRODUCTION_REFERENCE_WRITERS
+        and "production_reference.json" in path.read_text(encoding="utf-8")
+    ]
+
+    assert not offenders, (
+        "production_reference.json is an optional, prose-only input for the writing agent; "
+        f"scripts outside the reference skill must not read or write it: {offenders}"
+    )

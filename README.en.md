@@ -7,7 +7,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>Turn one or several videos into a Chinese-narration recap: six skills inside the coding agent you already use, ffmpeg locally, one Xiaomi MiMo key remotely, and an optional JianYing/CapCut draft to keep editing by hand.</b>
+  <b>Turn one or several videos into a Chinese-narration recap: seven skills (six for production plus one on-demand reference skill) inside the coding agent you already use, ffmpeg locally, one Xiaomi MiMo key remotely, and an optional JianYing/CapCut draft to keep editing by hand.</b>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@ The 59-second landscape recap above, *Guohuo (这一秒过火)*, is the final de
 
 ## What it is
 
-Six skills install into Claude Code, Codex CLI, OpenCode, or OpenClaw. You give the video paths and the recap you want in plain language; the agent understands picture and dialogue, decides the story and audiovisual plan, cuts, writes, voices, mixes, and subtitles. Supported inputs: `.mp4 / .mov / .mkv / .webm`.
+Seven skills (six for production plus one on-demand reference skill) install into Claude Code, Codex CLI, OpenCode, or OpenClaw. You give the video paths and the recap you want in plain language; the agent understands picture and dialogue, decides the story and audiovisual plan, cuts, writes, voices, mixes, and subtitles. Supported inputs: `.mp4 / .mov / .mkv / .webm`.
 
 - **One key, ffmpeg locally.** ASR, VLM, and TTS all go through [Xiaomi MiMo](https://platform.xiaomimimo.com); the local runtime is Python's standard library plus `ffmpeg`, with no GPU, no `pip install`, and no model downloads. Voiceover can switch to Fish Audio, which replaces only that stage.
 - **The editorial decision comes before the sound allocation.** The agent compares edit hypotheses first, writes the viewer promise, POV, dramatic question, and change-based beats into `recap_story_plan.json`, then assigns each beat a picture job and an audio owner: narration is voiced as a block only when it has a defined job, and strong dialogue, action sound, or silence may own an entire beat.
@@ -90,7 +90,7 @@ git clone https://github.com/zenstory-ai/video-recap-skills.git
 cd video-recap-skills
 mkdir -p .opencode
 ln -s ../skills .opencode/skills             # on Windows, copy skills\* into .opencode\skills\
-opencode debug skill                         # should list all 6 skills
+opencode debug skill                         # should list all 7 skills
 ```
 
 **OpenClaw**: after cloning, import the Claude plugin bundle:
@@ -326,7 +326,7 @@ Use /path/to/ep1.mp4 and /path/to/ep2.mp4 to make one ten-minute recap with a sh
 
 The agent handles understanding, story and audiovisual planning, cutting, scripting, voiceover, and assembly. In cut mode it first chooses the footage, renders the shortened video, and only then writes narration on the output timeline; the internal pauses and resumes are the agent's job too.
 
-## Workflow and the six skills
+## Workflow and the seven skills
 
 ```mermaid
 flowchart LR
@@ -342,7 +342,7 @@ flowchart LR
     class research,cut opt;
 ```
 
-The six skills hand off through the JSON / MP4 artifacts in `work_dir`:
+The seven skills (six for production plus one on-demand reference skill) hand off through the JSON / MP4 artifacts in `work_dir`:
 
 | Skill | Responsibility | In → Out |
 |---|---|---|
@@ -352,6 +352,7 @@ The six skills hand off through the JSON / MP4 artifacts in `work_dir`:
 | [`video-cut`](skills/video-cut/) | Clip plan → rendered cut; cut first, narrate second on the output timeline | `clip_plan.json + video` → `edited_source.mp4` |
 | [`video-voiceover`](skills/video-voiceover/) | Synthesise narration audio (MiMo `mimo-v2.5-tts` / Fish Audio `s2.1-pro-free`) | `narration.json` → `tts_segments/ + tts_meta.json` |
 | [`video-assemble`](skills/video-assemble/) | Mix · duck original audio · render subtitles · multi-track timeline · optional JianYing export | `video + tts_meta` → `recap_<name>.mp4 + subtitles.srt/.ass + timeline.json` |
+| [`video-reference`](skills/video-reference/) | On demand, off the production path: break a finished video down into a reusable production reference (structure, pacing, shots, narration/subtitles, sound-picture handoff); source facts stay local, the export holds only methods and numbers | `finished video + understanding artifacts` → `production_reference.json` |
 
 The recap is always written to `recap_<name>.mp4` alongside `subtitles.srt/.ass`; all intermediate artifacts live in `work_dir/`, with the field contracts in the [data schema](skills/video-recap/references/data-schema.md).
 

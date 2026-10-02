@@ -14,7 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-GROUPS = ["understanding", "cut", "voiceover", "assemble", "script", "orchestrator"]
+GROUPS = [
+    "understanding", "cut", "voiceover", "assemble", "script", "orchestrator", "reference",
+]
 
 
 def _require_pytest():

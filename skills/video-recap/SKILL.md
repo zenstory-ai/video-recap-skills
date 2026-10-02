@@ -15,6 +15,10 @@ description: >
 video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [video-cut] ─▶ video-voiceover ─▶ video-assemble
 ```
 
+把成片拆成制作参考不是生产路径。用户要求时：对成片跑 video-understanding（建议 `ASR_SEGMENT_SECONDS=5`），
+再用 video-reference 做 measure、标注、check、export，把导出的 `production_reference.json` 复制进下一次运行的
+`work_dir`。recap 不会自动运行它，也不拿新成片与参考做比对。
+
 流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会比对
 `recap_run_manifest.json` 记录的源视频路径、文件大小/修改时间与运行参数，拒绝复用来自其他源视频或其他参数的旧工作目录；视频理解产物也只在来源一致时复用。
 暂停时打印的续跑命令就是原命令：保留原来的写法，视频与路径参数转成绝对路径，补上 `--work-dir` 和来自环境变量的设置，从任何目录都能直接运行；同一份参数写在 manifest 的 `argv`。

@@ -5,7 +5,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>把一段或几段视频做成中文解说成片：六个技能装进你正在用的编程 Agent，本地只要 ffmpeg，远程只要一个小米 MiMo key，成片还能一键导成剪映草稿接着改。</b>
+  <b>把一段或几段视频做成中文解说成片：七个技能（六个生产 + 一个按需参考）装进你正在用的编程 Agent，本地只要 ffmpeg，远程只要一个小米 MiMo key，成片还能一键导成剪映草稿接着改。</b>
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@
 
 ## 这是什么
 
-六个技能装进 Claude Code、Codex CLI、OpenCode 或 OpenClaw，你用自然语言给出视频路径和想要的成片，Agent 负责理解画面与对白、
+七个技能（六个生产 + 一个按需参考）装进 Claude Code、Codex CLI、OpenCode 或 OpenClaw，你用自然语言给出视频路径和想要的成片，Agent 负责理解画面与对白、
 决定故事与视听方案、剪辑、写稿、配音、混音和字幕。支持 `.mp4 / .mov / .mkv / .webm`。
 
 - **一个 key，本地只要 ffmpeg。** ASR、VLM、TTS 都走[小米 MiMo](https://platform.xiaomimimo.com)，本地只用 Python 标准库和 `ffmpeg`，不需要 GPU，不需要 `pip install`，也不下载模型。配音可以换成 Fish Audio，只替换配音这一段。
@@ -91,7 +91,7 @@ git clone https://github.com/zenstory-ai/video-recap-skills.git
 cd video-recap-skills
 mkdir -p .opencode
 ln -s ../skills .opencode/skills             # Windows 把 skills\* 复制到 .opencode\skills\
-opencode debug skill                         # 应列出全部 6 个技能
+opencode debug skill                         # 应列出全部 7 个技能
 ```
 
 **OpenClaw**：克隆后导入 Claude 插件包：
@@ -315,7 +315,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 
 Agent 会自动完成理解、故事与视听规划、剪辑、写稿、配音和合成。剪辑模式内部会先确定保留片段、生成剪后成片，再按输出时间轴写旁白；这些暂停和续跑也由 Agent 处理。
 
-## 流程与六个技能
+## 流程与七个技能
 
 ```mermaid
 flowchart LR
@@ -331,7 +331,7 @@ flowchart LR
     class research,cut opt;
 ```
 
-六个技能通过 `work_dir` 里的 JSON / MP4 产物衔接：
+七个技能（六个生产 + 一个按需参考）通过 `work_dir` 里的 JSON / MP4 产物衔接：
 
 | 技能 | 职责 | 输入 → 输出 |
 |---|---|---|
@@ -341,6 +341,7 @@ flowchart LR
 | [`video-cut`](skills/video-cut/) | 片段计划 → 拼剪成片；剪辑模式先剪后配，解说按成片时间轴写 | `clip_plan.json + 视频` → `edited_source.mp4` |
 | [`video-voiceover`](skills/video-voiceover/) | 合成解说音频（MiMo `mimo-v2.5-tts` / Fish Audio `s2.1-pro-free`） | `narration.json` → `tts_segments/ + tts_meta.json` |
 | [`video-assemble`](skills/video-assemble/) | 混音 · 压低原声 · 渲染字幕 · 多轨时间线 · 可选导出剪映 | `视频 + tts_meta` → `recap_<名>.mp4 + subtitles.srt/.ass + timeline.json` |
+| [`video-reference`](skills/video-reference/) | 按需拆片，不在生产路径上：把一部成片拆成可复用的制作参考（结构、节奏、镜头、旁白字幕、音画分工），原片事实只留本地，导出物只含方法与数值 | `成片 + 理解产物` → `production_reference.json` |
 
 成片固定输出为 `recap_<名>.mp4`，同时产出 `subtitles.srt/.ass`；全部中间产物在 `work_dir/`，字段契约见[数据结构](skills/video-recap/references/data-schema.md)。
 
