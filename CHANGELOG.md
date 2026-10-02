@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **理解与写稿技能不再整文件复制旁白 lint 链。** video-understanding 去掉从不执行的 `narration_lint` / `speech_ownership` / `deslop_qc`，video-script 去掉 `timeline_fusion` 和 brief 分块代码，两个技能的脚本合计少约 1,440 行；一致性测试改为只比对两边真正共用的五个文本预算函数及其预算配置默认值。产物、命令与默认值不变。
+
 ### Fixed
 
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。

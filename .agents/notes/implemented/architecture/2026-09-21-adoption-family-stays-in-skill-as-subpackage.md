@@ -19,7 +19,7 @@ speech_ownership / timeline_fusion`）名字相近却归属不同。
     `source_score.py`、`pair_media.py`、`compose_foreground.py` 有 `__main__` 且被 SKILL.md / references 点名，
     留在顶层作入口；`frozen_audio` 只服务 adoption 家族与 adopted 模式的字幕轨，一并进包。
   - `video-understanding/scripts/briefing/{builder,context,inputs,timeline}.py`
-    （原 `agent_brief / brief_context / brief_inputs / brief_timeline`）；入口 `brief.py` 与 parity 共享的五个模块留在顶层。
+    （原 `agent_brief / brief_context / brief_inputs / brief_timeline`）；入口 `brief.py` 与 `agent_text`、`timeline_fusion` 留在顶层。
 - 顶层保留的模块就是"每次成片都会经过"的核心与公开入口；子包名即功能族名。
 
 ## Alternatives considered

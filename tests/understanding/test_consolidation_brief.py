@@ -31,7 +31,6 @@ from briefing.inputs import (  # noqa: E402
     _load_mimo_overview_for_brief,
     _load_optional_stage_status,
 )
-from narration_lint import lint_narration  # noqa: E402
 
 SCENES = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
 ASR = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
@@ -878,23 +877,6 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
     assert output_anchors["sentence_anchors"][0]["time"] == 4.0
     assert output_anchors["sentence_anchors"][0]["pause_start"] == 3.88
     assert output_anchors["sentence_anchors"][0]["source_pause_start"] == 103.88
-
-    lint = lint_narration(
-        [
-            {
-                "start": 2.0,
-                "end": 6.0,
-                "narration": "剪后时间中途切入。",
-                "overlaps_speech": True,
-            },
-        ],
-        mode="cut",
-        work_dir=tmp_path,
-    )
-    issue = next(
-        item for item in lint["errors"] if item["code"] == "interrupts_source_sentence"
-    )
-    assert issue["suggested_start"] == 4.0
 
 
 def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):

@@ -31,6 +31,7 @@ from lib import (  # noqa: E402
     load_background_research,
     normalize_api_url,
 )
+from timeline_fusion import _build_timeline_fusion  # noqa: E402
 from understanding_brief import _research_context  # noqa: E402
 from vlm import (  # noqa: E402
     _mimo_video_chunks,
@@ -294,3 +295,38 @@ def test_load_background_research_missing_is_empty_and_malformed_raises(tmp_path
     (tmp_path / "background_research.json").write_text("[1, 2]", encoding="utf-8")
     with pytest.raises(ValueError, match="JSON 对象"):
         load_background_research(tmp_path)
+
+
+def test_timeline_fusion_aligns_scenes_dialogue_and_quiet_slots():
+    fusion = _build_timeline_fusion(
+        [
+            {
+                "scene_id": 0,
+                "start": 0.0,
+                "end": 10.0,
+                "description": "对峙",
+                "frame_facts": {"1.0": ["看门"]},
+            }
+        ],
+        [
+            {"start": 2.0, "end": 4.0, "text": "你到底是谁"},
+            {"start": 8.0, "end": 12.0, "text": "跨场对白"},
+        ],
+        [
+            {"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False},
+            {"start": 5.0, "end": 7.0, "duration": 2.0, "has_speech": False},
+            {"start": 9.0, "end": 9.5, "duration": 0.5, "has_speech": True},
+        ],
+    )
+
+    item = fusion[0]
+    assert item["dialogue_overlap_seconds"] == 4.0
+    assert [seg["text"] for seg in item["dialogue_segments"]] == [
+        "你到底是谁",
+        "跨场对白",
+    ]
+    assert [(slot["start"], slot["end"]) for slot in item["narration_slots"]] == [
+        (0.0, 1.0),
+        (5.0, 7.0),
+    ]
+    assert item["frame_facts"] == {"1.0": ["看门"]}

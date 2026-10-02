@@ -46,12 +46,15 @@ video-understanding ─▶ Agent 按 video-script 写计划与旁白 ─▶ [vid
 
 ## 刻意复制的模块
 
-同一份代码出现在两个技能里时必须逐字节一致，清单以 `tests/orchestrator/test_brief_narration_parity.py` 为准：
-video-understanding 与 video-script 共有的旁白 lint 链（`agent_text`、`deslop_qc`、`narration_lint`、
-`speech_ownership`、`timeline_fusion`）。只复制技能自己入口会用到的模块；brief 生成链只在 video-understanding
-（`simplification/2026-09-21-drop-script-brief-chain-and-orphan-references.md`）。
+复制按函数算，不按文件算：同一个函数出现在两个技能里时 AST 必须一致，清单以
+`tests/orchestrator/test_brief_narration_parity.py` 的 `SHARED_FUNCTIONS` 为准。目前只有 video-understanding 的
+brief 预算与 video-script 的旁白 lint 共用的五个文本原语（`_recommended_char_budget`、`_scene_available_seconds`、
+`_overlap_seconds`、`_sentence_pieces`、`_text_units`），以及它们读取的四个预算 CONFIG 键。每个副本都必须在本技能内被调用，
+不为凑 parity 保留死副本。模块各归一个技能：brief 生成链与 `timeline_fusion` 只在 video-understanding，
+`narration_lint`、`speech_ownership`、`deslop_qc` 只在 video-script；两边各有一个 `agent_text`，内容不同
+（`simplification/2026-10-02-function-level-parity.md`）。
 
 ## 结构守卫
 
 `python3 scripts/test.py orchestrator` 覆盖：禁止跨技能 import 与路径引用、每个脚本模块不超过 800 行、技能内 import 无环、
-每份 `lib.py` 只声明自己读取的配置键、复制模块逐字节一致、剪映模块不进入核心渲染路径。
+每份 `lib.py` 只声明自己读取的配置键、复制函数保持一致、剪映模块不进入核心渲染路径。
