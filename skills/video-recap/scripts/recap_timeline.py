@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from lib import load_json
+from materials import file_identity
 from recap_runtime import (
     _coerce_videos,
     _entry,
@@ -465,7 +466,8 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             when = float(anchor["time"])
             if not (source_start - 0.05 <= when <= source_end + 0.05):
                 continue
-            pause = max(source_start, min(float(anchor["pause_start"]), when))
+            # Same default as the single-source remap in video-understanding's timeline brief.
+            pause = max(source_start, min(float(anchor.get("pause_start", when - 0.12)), when))
             item = dict(anchor)
             item.update(
                 source_id=source_id,
@@ -503,6 +505,8 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         "artifact": "speech_boundary_anchors_output.json",
         "timeline": "cut_output",
         "source_artifact": "multi_source_manifest.json",
+        # video-script's cut_output lint trusts this evidence only for this exact plan file.
+        "clip_plan_identity": file_identity(Path(work_dir) / "clip_plan_validated.json"),
         "sentence_anchors": sorted(mapped_anchors, key=lambda row: row["time"]),
         "speech_spans": sorted(mapped_speech, key=lambda row: (row["start"], row["end"])),
         "quiet_windows": sorted(mapped_quiet, key=lambda row: (row["start"], row["end"])),

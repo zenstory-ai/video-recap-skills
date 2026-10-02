@@ -99,6 +99,33 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     assert (dest / "asr_clean.json").exists()
 
 
+def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_not(tmp_path):
+    """brief-only on a restored work_dir still sees a failed consolidate; the ASR timing
+    sidecar binds files a restore rewrites or never copies, so it is not stored at all."""
+    lib = tmp_path / "library"
+    work = tmp_path / "work"
+    work.mkdir()
+    status = {
+        "stage": "consolidation", "enabled": True, "do_asr": False, "do_index": True,
+        "status": "failed", "message": "MiMo timeout", "artifacts": [],
+    }
+    (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
+    (work / "consolidation.status.json").write_text(json.dumps(status), encoding="utf-8")
+    (work / "asr_timing_evidence.json").write_text(json.dumps({"status": "x"}), encoding="utf-8")
+    video = tmp_path / "ep.mp4"
+    meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
+    assert {a["name"] for a in meta["artifacts"]} == {"scenes.json", "consolidation.status.json"}
+
+    dest = tmp_path / "dest"
+    restored = materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY, settings=SETTINGS,
+        material_id=meta["material_id"],
+    )
+    assert restored["restored"] is True
+    assert json.loads((dest / "consolidation.status.json").read_text(encoding="utf-8")) == status
+    assert not (dest / "asr_timing_evidence.json").exists()
+
+
 def test_restore_material_prunes_stale_allowed_artifacts_before_copy(tmp_path):
     lib = tmp_path / "library"
     seed = tmp_path / "seed"

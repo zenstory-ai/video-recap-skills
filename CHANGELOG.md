@@ -10,6 +10,12 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。
+- **多视频 cut 的旁白校验不再以 `KeyError` 崩溃。** recap 写的多源 `speech_boundary_anchors_output.json` 现在带 `clip_plan_identity`；源锚点缺 `pause_start` 时与单源一样按 `time − 0.12` 处理。
+- **素材库保存并恢复 `consolidation.status.json`。** 从素材库恢复的 work_dir 重建 brief 时，仍会提示 consolidate 失败或缺索引。
+
 ## [0.6.0] - 2026-09-27
 
 三条主线：资源库与模板（登记与校验、项目绑定、每次运行的资源记录、字体文件、静态包装图层）；只读的本机剪辑台 dashboard；以及 skill 层分包、去内容哈希、测试审计后的架构梳理。

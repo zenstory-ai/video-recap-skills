@@ -1499,6 +1499,101 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     assert output_evidence["quiet_windows"][0]["end"] == 1.2
 
 
+class _ValidationPassed(Exception):
+    pass
+
+
+def _seed_multi_source_speech(work, record):
+    """Source evidence: one sentence ends at 2.0s (anchor without pause_start), then quiet."""
+    source = work / record["source_work_dir"]
+    source.mkdir(parents=True, exist_ok=True)
+    (source / "speech_boundary_anchors.json").write_text(
+        json.dumps(
+            {"sentence_anchors": [
+                {"time": 2.0, "text_tail": "来源完整讲话。", "confidence": "high"}
+            ]}
+        ),
+        encoding="utf-8",
+    )
+    (source / "asr_result.json").write_text(
+        json.dumps([{"start": 0.0, "end": 2.0, "text": "来源完整讲话。"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (source / "silence_periods.json").write_text(
+        json.dumps([{"start": 2.0, "end": 6.0, "has_speech": False}]), encoding="utf-8"
+    )
+
+
+def _multi_cut_through_real_validation(work, clip):
+    """Pass 2 stubs cut.py's render; pass 3 models cut.py reusing edited_source.mp4, which
+    leaves an unchanged clip_plan_validated.json untouched (pinned by the video-cut group).
+    video-script/validate.py always runs for real."""
+    def run(skill, script, *cli_args):
+        if (skill, script) == ("video-cut", "cut.py"):
+            if not (work / "clip_plan_validated.json").exists():
+                write_cut_output(work, [clip])
+            return None
+        if (skill, script) == ("video-script", "validate.py"):
+            return recap_runtime._run(skill, script, *cli_args)
+        raise _ValidationPassed(f"{skill}/{script}")
+
+    return run
+
+
+@pytest.mark.parametrize(
+    "start, passes, error_code",
+    [(2.1, True, None), (1.0, False, "interrupts_source_sentence")],
+)
+def test_multi_source_cut_output_validate_reads_recap_written_evidence(
+    monkeypatch, tmp_path, start, passes, error_code
+):
+    """recap's multi-source writer feeds video-script's cut_output lint without mocks:
+    the evidence carries the plan identity the lint checks, and a later resume still
+    trusts it instead of failing closed (or crashing on a missing key)."""
+    args = manifest_args(edit_mode="cut", review_narration=False)
+    videos, work, records = seed_multi_work(tmp_path, args)
+    _seed_multi_source_speech(work, records[0])
+    clip = {
+        **multi_cut_clip(records, videos),
+        "source_end": 6, "output_end": 6, "duration": 6, "reason": "b1 | payoff",
+    }
+    monkeypatch.setattr("recap_runner._run", _multi_cut_through_real_validation(work, clip))
+    monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 6.0)
+
+    recap._run_multi_cut(videos, work, args)  # pass 2: brief + evidence, then pause
+
+    evidence = json.loads(
+        (work / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )
+    assert evidence["clip_plan_identity"] == material_lib.file_identity(
+        work / "clip_plan_validated.json"
+    )
+    assert evidence["sentence_anchors"][0]["pause_start"] == 1.88
+    (work / "narration.json").write_text(
+        json.dumps(
+            [{"start": start, "end": 5.8, "narration": "他终于明白，弟弟一直在门口等他回家。",
+              "overlaps_speech": False}],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    if passes:
+        with pytest.raises(_ValidationPassed):
+            recap._run_multi_cut(videos, work, args)  # pass 3 continues past validation
+    else:
+        with pytest.raises(SystemExit, match=r"video-script/validate\.py 失败 \(exit 1\)"):
+            recap._run_multi_cut(videos, work, args)
+
+    lint = json.loads((work / "narration_lint.json").read_text(encoding="utf-8"))
+    codes = [issue["code"] for issue in lint["errors"]]
+    if passes:
+        assert codes == []
+    else:
+        assert codes == [error_code]
+        assert lint["errors"][0]["suggested_start"] == 2.0
+
+
 def test_multi_source_excerpt_preserves_source_evidence_from_a_long_brief(tmp_path):
     brief = tmp_path / "agent_narration_brief.md"
     unique_fact = "SOURCE_FACT_女主在雨中把钥匙交给弟弟"

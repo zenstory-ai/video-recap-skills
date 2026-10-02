@@ -106,13 +106,17 @@
 {
   "schema_version": 2,
   "timeline": "cut_output",
+  "clip_plan_identity": {"size": 4970, "mtime_ns": 1790949817370765842},
   "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
   "speech_spans": [{"start": 0.0, "end": 3.8}],
   "quiet_windows": [{"start": 3.8, "end": 4.1}]
 }
 ```
 
-该文件必须不早于当前 `clip_plan_validated.json`（按修改时间判断）。缺失、过期或畸形的
+`clip_plan_identity` 是写入时 `clip_plan_validated.json` 的 `{size, mtime_ns}`：video-script
+校验要求它与当前文件相等，assemble 要求本文件不早于 `clip_plan_validated.json`。video-cut
+对同一剪辑计划重跑（续跑时复用 `edited_source.mp4`）不会重写内容未变的 `clip_plan_validated.json`，
+所以第二遍写下的证据在第三遍续跑时仍然有效；`clip_plan.json` 被重新保存后则必然重写。缺失、过期或畸形的
 output 证据一律 fail closed，不能回退到原片时钟或信任 Agent 写入的
 `overlaps_speech=false`。多来源剪辑的每条映射记录还保留 `source_id` 和原片起止时间。
 
@@ -374,7 +378,11 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
     artifacts/asr_clean.json       # 启用 --consolidate-asr 时保留，恢复后 brief/review 优先使用
     artifacts/vlm_analysis.json
     artifacts/understanding_index.json
+    artifacts/consolidation.status.json  # 恢复后 brief-only 仍能提示 consolidate 失败/缺索引
 ```
+
+`asr_timing_evidence.json` 不入库：它按 `{size, mtime_ns}` 绑定 `asr_result.json` 与 `audio.wav`，
+恢复时前者被脱敏重写、后者不复制，恢复出的副本只会被判为 `MISSING_OR_STALE`。
 
 `materials_index.jsonl` 每次保存追加一行，字段包括 `schema_version`, `event`, `material_id`, `source_name`, `source_path`, `source_video_identity`, `summary`, `tags`, `material_dir`, `updated_at`；`material.json` 另外记录分析 `settings` 字典与每个产物的 `bytes`。当前权威状态始终以 `materials/<material_id>/material.json` 为准。MVP 只承诺 `grep -R "关键词" <library>` 这类文件检索；没有 DB、embedding 或语义搜索。
 

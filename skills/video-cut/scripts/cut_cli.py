@@ -38,6 +38,20 @@ from sentence_boundaries import (
 )
 
 
+def _write_validated_plan(path, plan, raw_plan_paths):
+    """Write clip_plan_validated.json unless the file already holds exactly this plan.
+
+    Downstream output-clock evidence binds to this file's {size, mtime_ns}, so a resumed
+    run that re-validates an unchanged plan must leave it alone. The file is still
+    rewritten when any raw plan is newer, so "validated older than raw = stale" holds."""
+    text = json.dumps(plan, ensure_ascii=False, indent=2)
+    if path.exists() and path.read_text(encoding="utf-8") == text:
+        written = path.stat().st_mtime_ns
+        if all(not raw.exists() or raw.stat().st_mtime_ns <= written for raw in raw_plan_paths):
+            return
+    path.write_text(text, encoding="utf-8")
+
+
 def main():
     import argparse
 
@@ -245,9 +259,17 @@ def main():
         source_paths=source_paths,
         output_path=work_dir / "edited_source.mp4",
     )
-    (work_dir / "clip_plan_validated.json").write_text(
-        json.dumps(validated_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+    plan_path = work_dir / "clip_plan_validated.json"
+    raw_plan_paths = {clip_plan_path, work_dir / "clip_plan.json"}
+    edited_source_path = work_dir / "edited_source.mp4"
+    reuse = (
+        not validated_plan["qc"].get("blocking")
+        and not args.normalize_only
+        and should_reuse_edited_source(edited_source_path, validated_plan, args.video)
     )
+    if not reuse:
+        # Planned (not yet rendered) facts stay on disk if the render below fails.
+        _write_validated_plan(plan_path, validated_plan, raw_plan_paths)
     if validated_plan["qc"].get("blocking"):
         raise SystemExit(
             "clip_plan QC blocking: fix required source evidence, unsafe sentence boundaries or target-duration drift. "
@@ -270,8 +292,7 @@ def main():
         )
         return
 
-    edited_source_path = work_dir / "edited_source.mp4"
-    if should_reuse_edited_source(edited_source_path, validated_plan, args.video):
+    if reuse:
         log(f"复用剪辑源视频: {edited_source_path}")
         update_delivery_qc(
             validated_plan,
@@ -281,16 +302,11 @@ def main():
         )
         write_cut_delivery_qc(work_dir, validated_plan)
         _write_edited_source_meta(edited_source_path, validated_plan, args.video)
-        (work_dir / "clip_plan_validated.json").write_text(
-            json.dumps(validated_plan, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
     else:
         build_edited_source_video(
             args.video, validated_plan, work_dir, edited_source_path
         )
-        (work_dir / "clip_plan_validated.json").write_text(
-            json.dumps(validated_plan, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+    _write_validated_plan(plan_path, validated_plan, raw_plan_paths)
 
     if args.review_shots:
         review_options = {"plan_path": work_dir / "clip_plan_validated.json"}
