@@ -26,6 +26,7 @@ All notable changes to this project are documented here.
 - **voiceover 的参考音频每次运行只转码一次，并按参数传给各段。** 有段落需要合成时才转码，全部命中缓存的重跑仍不调用 ffmpeg；配音期间参考音频被改动会报 `参考音频在配音期间被修改`，不再静默沿用旧快照。`tts_meta.json` 与 TTS 段缓存键不变。
 - **cut 与 understanding 收掉只为测试存在的门面。** `cut.py` 只导出 `main`，video-understanding 删除再导出用的 `brief.py`，`narration_mapping.py` 改名 `cut_qc.py`；进程内导入这些名字的脚本需改从所属模块导入。cut 计划里源区间重叠的报错结尾改为 `split or remove duplicate source footage in the clip plan`。命令行、参数与产物不变。
 - **ASR 缓存缺少 `asr_timing_evidence.json` 时重跑 ASR。** video-understanding 删除 `LEGACY_UNVERIFIED` 状态：sidecar 被删掉、或重跑 ASR 时被 Ctrl-C 中断的 work_dir 不再离线复用旧转写，旧版本写下的 `LEGACY_UNVERIFIED` sidecar 也视为未命中。VLM prompt 模板缺失时直接报错，不再静默换用一份已过时的两段式兜底 prompt。
+- **video-cut 的 `--sources-manifest` 只接受一种形状。** 清单必须是 `{"sources": [{"source_id", "source_path"[, "duration", "source_work_dir"]}]}`（即 recap 写出的 `multi_source_manifest.json`）；裸数组、以 `source_id` 为键的映射，以及 `id` / `name`、`path` / `video_path` / `video` / `file`、`duration_seconds` / `source_duration` 等别名一律报错，报错写明期望形状。多源 `clip_plan.json` 的片段必须写 `source_id`，不再把 `id` 当来源；顶层目标时长只认 `target_duration`，不再认 `target_duration_seconds`。形状写进了 video-cut SKILL.md。
 
 ### Removed
 
@@ -44,6 +45,8 @@ All notable changes to this project are documented here.
 - **删除 19 个未文档化的调参环境变量和旧版旁白入场延迟。** video-assemble 不再读取 `FADE_MS`、`DUCKING_ORIG_VOLUME`、`TARGET_TRUE_PEAK`、`TARGET_LRA`、`FINAL_LIMITER_PEAK`、`NARRATION_RUN_GAP_SECONDS`、`NARRATION_TIGHT_PAUSE_SECONDS`、`NARRATION_MAX_PULL_SECONDS`、`SUBTITLE_MARGIN_L`、`SUBTITLE_MARGIN_R`、`NARRATION_TIGHTEN`、`NARRATION_DELAY_SECONDS`；video-voiceover 不再读取 `MIMO_TTS_STYLE`、`TTS_SEGMENT_NORMALIZE`、`TTS_SEGMENT_TARGET_RMS_DBFS`、`TTS_SEGMENT_PEAK_LIMIT`；两者都不再读取 `NARRATION_CUMULATIVE_TEMPO_MAX`、`NARRATION_CUMULATIVE_TEMPO_HARD_MAX`、`TTS_SEGMENT_TEMPO_MAX`。它们的默认值成为固定值，设置后不再生效；`NARRATION_TIGHTEN=0` 的按 slot 锚定放置和 `NARRATION_DELAY_SECONDS` 的隐藏入场延迟随之删除，段落起点一律严格采用作者写的 `start`。`assembly_manifest.json` 的 `assembly_settings.narration_timing` 不再写 `delay_seconds` / `tail_pad_seconds`。`SUBTITLE_ORIGINAL_IN_GAPS` 等文档列出的变量不变；默认渲染结果与 TTS 缓存都不变。
 - **删除 `dub.py` 的 `--asr-window` / `--ref-start` / `--ref-dur`。** 传入即报 unrecognized arguments；ASR 窗口 6 秒、克隆参考从第 2 秒取 10 秒的默认值不变。
 - **不再写出没有读者的产物。** video-cut 不再写 `cut_delivery_qc.json`，`clip_plan_validated.json` 的 `qc` 里不再有 `delivery_qc`，也不再有顶层 `warning`（超出目标时长仍由 `qc.target_duration_drift` 报告），每次剪辑少一次 ffprobe；成片交付检查仍在 `assembly_qc.json`。video-understanding 的 brief 不再写 `deslop_qc_requirements.json`，`narration_lint.json` 里的 `deslop_qc` 报告去掉恒为 `false` 的 `style_card_required` / `style_card_requirement_source`，缺少或为空的 `style_card.json` 一律是建议项（与此前默认行为一致）。渲染参数与 lint 阻断规则不变。
+- **删除 video-cut 的 `--clip-padding` 与 `CLIP_PADDING`。** recap 从不传这个参数、默认值是 0，而片段边界本来就会吸附到句末与自然停顿；现在 `cut.py --clip-padding` 报 unrecognized arguments，`CLIP_PADDING` 环境变量不再被读取。需要前后余量时直接在 `clip_plan.json` 里把入出点写宽。
+- **`shot_review.py` 删除三个未写进文档的召回参数** `--max-short-seconds` / `--dense-window-seconds` / `--min-dense-cuts`（传入即报错），召回规则固定为 1 秒短镜、2 秒内 4 个切点；`--max-short-frames`、`--threshold`、`--roi`、`--plan` 不变。
 
 ### Fixed
 

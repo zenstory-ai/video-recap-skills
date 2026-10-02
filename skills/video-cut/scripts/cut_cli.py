@@ -10,6 +10,7 @@ from lib import CONFIG, get_video_duration, log
 import shot_review
 
 from cut_contract import (
+    SOURCES_MANIFEST_SHAPE,
     _write_edited_source_meta,
     load_clip_plan,
     normalize_clip_plan,
@@ -21,17 +22,7 @@ from cut_render import build_edited_source_video
 from media_geometry import _has_audio_stream, _select_output_geometry
 from narrative_selection import check_required_evidence
 from cut_qc import update_cut_qc
-from sentence_boundaries import (
-    _combine_boundary_windows,
-    _load_sentence_boundary_windows,
-    _load_silence_for_source,
-    _load_source_speech_spans,
-    enforce_clip_sentence_boundaries,
-    snap_clip_ends_to_lines,
-    snap_clip_starts_to_lines,
-    snap_clips_off_shot_changes,
-    snap_multi_source_clips,
-)
+from sentence_boundaries import snap_multi_source_clips, snap_source_clips
 
 
 def _write_validated_plan(path, plan, raw_plan_paths):
@@ -68,18 +59,12 @@ def main():
     parser.add_argument(
         "--sources-manifest",
         default=None,
-        help="multi-source manifest json mapping source_id values to source media",
+        help=f"multi-source manifest json: {SOURCES_MANIFEST_SHAPE}",
     )
     parser.add_argument(
         "--target-duration",
         default=None,
         help="target output duration, e.g. 10m / 600 / 00:10:00",
-    )
-    parser.add_argument(
-        "--clip-padding",
-        type=float,
-        default=None,
-        help="seconds to pad each clip on both ends (default: CLIP_PADDING env, else 0)",
     )
     parser.add_argument(
         "--allow-overlap",
@@ -90,7 +75,7 @@ def main():
         "--normalize-only",
         action="store_true",
         help="only normalize the clip plan -> clip_plan_validated.json (no render); "
-        "lets validate lint the SAME padded/pruned plan the render uses",
+        "lets validate lint the SAME pruned plan the render uses",
     )
     parser.add_argument(
         "--review-shots", action="store_true",
@@ -120,13 +105,6 @@ def main():
     ):
         parser.error("--shot-roi requires --review-shots, nonnegative X/Y and positive WIDTH/HEIGHT")
 
-    # CLIP_PADDING is declared in every skill's CONFIG, but video-cut is the only place that
-    # implements padding — and it used to read the CLI flag alone, so setting the env var did
-    # nothing at all while `clip_padding_source: "env"` reported otherwise. CLI still wins.
-    clip_padding = (
-        args.clip_padding if args.clip_padding is not None else CONFIG["clip_padding"]
-    )
-
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
     clip_plan_path = (
@@ -142,76 +120,38 @@ def main():
         if args.sources_manifest
         else None
     )
-    if sources_manifest is not None:
-        validated_plan = normalize_multi_source_clip_plan(
-            raw_plan,
-            sources_manifest,
-            target_duration=target_seconds,
-            clip_padding=clip_padding,
-            allow_overlap=args.allow_overlap,
-        )
-        video_duration = None
-    else:
+    # Visual shot-change cleanup runs first; the sentence/quiet pass is the final authority,
+    # so a prettier edit point never moves a boundary back inside a spoken sentence.
+    snap_options = {
+        "line_max_extend": CONFIG["clip_snap_max_extend"],
+        "scene_margin": CONFIG["scene_cut_snap_margin"],
+        "scene_threshold": CONFIG["scene_cut_detect_threshold"],
+        "start_max_prepend": CONFIG["clip_start_snap_max_prepend"],
+        "start_max_trim": CONFIG["clip_start_snap_max_trim"],
+        "do_line_snap": CONFIG["snap_clip_line_end"],
+        "do_scene_snap": CONFIG["scene_cut_snap"],
+    }
+    if sources_manifest is None:
         video_duration = get_video_duration(args.video)
         validated_plan = normalize_clip_plan(
             raw_plan,
             video_duration,
             target_duration=target_seconds,
-            clip_padding=clip_padding,
             allow_overlap=args.allow_overlap,
         )
-
-    # Keep boundaries off the original footage's hard cuts (avoids 闪烁 at the edit point).
-    # This visual-only pass runs FIRST. The sentence/quiet pass below is the final authority:
-    # a prettier edit point must never move the final boundary back inside a spoken sentence.
-    if sources_manifest is None and CONFIG["scene_cut_snap"]:
-        validated_plan = snap_clips_off_shot_changes(
-            validated_plan,
-            args.video,
-            margin=CONFIG["scene_cut_snap_margin"],
-            threshold=CONFIG["scene_cut_detect_threshold"],
+        validated_plan = snap_source_clips(
+            validated_plan, args.video, video_duration, work_dir, **snap_options
         )
-
-    if sources_manifest is None:
-        safe_boundaries = _combine_boundary_windows(
-            _load_silence_for_source(work_dir, None),
-            _load_sentence_boundary_windows(work_dir),
+    else:
+        # Each clip snaps against ITS OWN source's pauses and shot changes.
+        validated_plan = normalize_multi_source_clip_plan(
+            raw_plan,
+            sources_manifest,
+            target_duration=target_seconds,
+            allow_overlap=args.allow_overlap,
         )
-        if CONFIG["snap_clip_line_end"]:
-            validated_plan = snap_clip_starts_to_lines(
-                validated_plan,
-                safe_boundaries,
-                video_duration,
-                CONFIG["clip_start_snap_max_prepend"],
-                max_trim=CONFIG["clip_start_snap_max_trim"],
-            )
-            validated_plan = snap_clip_ends_to_lines(
-                validated_plan,
-                safe_boundaries,
-                video_duration,
-                CONFIG["clip_snap_max_extend"],
-            )
-        validated_plan = enforce_clip_sentence_boundaries(
-            validated_plan,
-            safe_boundaries,
-            _load_source_speech_spans(work_dir),
-            video_duration,
-        )
-
-    # Multi-source: snap each clip against ITS OWN source's pauses/shot-changes (single-source
-    # snaps above can't, since silence_periods.json and args.video are per-project, not per-source).
-    if sources_manifest is not None:
         validated_plan = snap_multi_source_clips(
-            validated_plan,
-            validated_plan["sources"],
-            work_dir,
-            line_max_extend=CONFIG["clip_snap_max_extend"],
-            scene_margin=CONFIG["scene_cut_snap_margin"],
-            scene_threshold=CONFIG["scene_cut_detect_threshold"],
-            do_line_snap=CONFIG["snap_clip_line_end"],
-            do_scene_snap=CONFIG["scene_cut_snap"],
-            start_max_prepend=CONFIG["clip_start_snap_max_prepend"],
-            start_max_trim=CONFIG["clip_start_snap_max_trim"],
+            validated_plan, validated_plan["sources"], work_dir, **snap_options
         )
 
     validated_plan.setdefault("qc", {})["join_fade_ms"] = round(

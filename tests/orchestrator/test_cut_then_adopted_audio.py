@@ -278,7 +278,6 @@ def test_reordered_multi_cut_reuses_wav_through_existing_full_adoption(tmp_path)
         PYTHONNOUSERSITE="1",
         SCENE_CUT_SNAP="0",
         SNAP_CLIP_LINE_END="0",
-        CLIP_PADDING="0",
         OUTPUT_MAX_HEIGHT="0",
     )
     sources = {

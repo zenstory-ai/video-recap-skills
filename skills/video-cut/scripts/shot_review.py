@@ -341,14 +341,10 @@ def main():
     parser.add_argument("--threshold", type=float, default=0.35)
     parser.add_argument("--roi", nargs=4, type=int, metavar=("X", "Y", "WIDTH", "HEIGHT"))
     parser.add_argument("--max-short-frames", type=int, default=None,
-                        help="explicit frame cap; default derives round(fps * max_short_seconds)")
-    parser.add_argument("--max-short-seconds", type=float, default=1.0)
-    parser.add_argument("--dense-window-seconds", type=float, default=2.0)
-    parser.add_argument("--min-dense-cuts", type=int, default=4)
+                        help="explicit frame cap; default derives round(fps * 1s) from the measured clock")
     args = parser.parse_args()
     report = write_scan(args.video, args.output, threshold=args.threshold, plan_path=args.plan, roi=args.roi,
-                        max_short_frames=args.max_short_frames, max_short_seconds=args.max_short_seconds,
-                        dense_window_seconds=args.dense_window_seconds, min_dense_cuts=args.min_dense_cuts)
+                        max_short_frames=args.max_short_frames)
     print(json.dumps({"status": report["status"], "short_spans": len(report["short_spans"]),
                       "dense_windows": len(report["dense_windows"]), "report": args.output}))
 

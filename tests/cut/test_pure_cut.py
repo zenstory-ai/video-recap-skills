@@ -179,91 +179,79 @@ def test_normalize_clip_plan_clamps_and_maps_output_timeline():
             {"start": 5.0, "end": 5.1, "reason": "too short"},
             {"start": "bad", "end": 7.0},
         ]},
-        video_duration=10.0, clip_padding=0.5,
+        video_duration=10.0,
     )
     assert plan["target_duration"] == 10.0
-    assert plan["total_duration"] == 6.5
+    assert plan["total_duration"] == 5.0
     assert len(plan["clips"]) == 2
-    assert plan["clips"][0]["source_start"] == 0.5
-    assert plan["clips"][0]["source_end"] == 4.5
+    assert plan["clips"][0]["source_start"] == 1.0
+    assert plan["clips"][0]["source_end"] == 4.0
     assert plan["clips"][0]["output_start"] == 0.0
-    assert plan["clips"][1]["source_start"] == 7.5
+    assert plan["clips"][1]["source_start"] == 8.0
     assert plan["clips"][1]["source_end"] == 10.0
-    assert plan["clips"][1]["output_start"] == 4.0
+    assert plan["clips"][1]["output_start"] == 3.0
 
 
-def test_clip_padding_does_not_make_back_to_back_clips_look_duplicated():
-    """Overlap is judged on authored ranges, not on the padded ones; real overlap still fails."""
+def test_back_to_back_clips_are_not_duplicates_but_real_overlap_fails():
     plan = normalize_clip_plan(
         [{"start": 0.0, "end": 10.0, "reason": "a"}, {"start": 10.0, "end": 20.0, "reason": "b"}],
-        video_duration=60.0, clip_padding=0.5,
+        video_duration=60.0,
     )
-    assert [(c["source_start"], c["source_end"]) for c in plan["clips"]] == [(0.0, 10.5), (9.5, 20.5)]
-    with pytest.raises(ValueError, match="overlaps an earlier source range"):
+    assert [(c["source_start"], c["source_end"]) for c in plan["clips"]] == [(0.0, 10.0), (10.0, 20.0)]
+    with pytest.raises(ValueError, match="overlaps an earlier source range;"):
         normalize_clip_plan([{"start": 0.0, "end": 10.0}, {"start": 5.0, "end": 15.0}],
-                            video_duration=60.0, clip_padding=0.5)
+                            video_duration=60.0)
 
 
-def test_multi_source_clip_padding_only_collides_on_authored_ranges():
-    manifest = {"sources": [{"source_id": "a", "source_path": "a.mp4", "duration": 60.0}]}
+def test_multi_source_back_to_back_clips_only_collide_within_one_source():
+    manifest = {"sources": [{"source_id": "a", "source_path": "a.mp4", "duration": 60.0},
+                            {"source_id": "b", "source_path": "b.mp4", "duration": 60.0}]}
     plan = cut_contract.normalize_multi_source_clip_plan(
-        [{"source_id": "a", "start": 0.0, "end": 10.0}, {"source_id": "a", "start": 10.0, "end": 20.0}],
-        manifest, clip_padding=0.5,
+        [{"source_id": "a", "start": 0.0, "end": 10.0}, {"source_id": "a", "start": 10.0, "end": 20.0},
+         {"source_id": "b", "start": 5.0, "end": 15.0}],
+        manifest,
     )
-    assert len(plan["clips"]) == 2
+    assert len(plan["clips"]) == 3
     with pytest.raises(ValueError, match="source_id a"):
         cut_contract.normalize_multi_source_clip_plan(
             [{"source_id": "a", "start": 0.0, "end": 10.0}, {"source_id": "a", "start": 5.0, "end": 15.0}],
-            manifest, clip_padding=0.5,
+            manifest,
         )
 
 
-def _load_lib_with_env(monkeypatch, **env):
-    """Evaluate video-cut's lib.py under an environment as a separately named module.
-
-    Not importlib.reload(lib): a reload rebinds lib.CONFIG while cut_cli keeps the original,
-    so every later test would patch a different object than the code reads.
-    """
-    import importlib.util
-
-    for name, value in env.items():
-        monkeypatch.setenv(name, value)
-    path = Path(__file__).resolve().parents[2] / "skills" / "video-cut" / "scripts" / "lib.py"
-    spec = importlib.util.spec_from_file_location("_cut_lib_env_probe", path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+@pytest.mark.parametrize("manifest", [
+    [{"source_id": "a", "source_path": "a.mp4", "duration": 10.0}],
+    {"a": {"source_path": "a.mp4", "duration": 10.0}},
+    {"clips": []},
+])
+def test_sources_manifest_rejects_other_containers_and_names_the_shape(manifest):
+    with pytest.raises(ValueError, match=r'sources manifest must be \{"sources": \[\{"source_id"'):
+        cut_contract.normalize_sources_manifest(manifest)
 
 
-def test_clip_padding_env_is_actually_read_into_config(monkeypatch):
-    """env -> CONFIG: monkeypatching CONFIG alone would pass even if lib never declared the key."""
-    import lib
+@pytest.mark.parametrize("row, message", [
+    ({"id": "a", "source_path": "a.mp4", "duration": 10.0}, "missing source_id"),
+    ({"source_id": "a", "path": "a.mp4", "duration": 10.0}, "missing source_path"),
+    ({"source_id": "a", "source_path": "a.mp4", "duration": "long"}, "invalid duration"),
+])
+def test_sources_manifest_rows_use_only_the_documented_keys(row, message):
+    with pytest.raises(ValueError, match=message):
+        cut_contract.normalize_sources_manifest({"sources": [row]})
 
-    live_config = lib.CONFIG
-    probed = _load_lib_with_env(monkeypatch, CLIP_PADDING="2.5")
-    assert probed.CONFIG["clip_padding"] == 2.5
-    assert lib.CONFIG is live_config, "probing must not rebind the live CONFIG"
+
+def test_sources_manifest_probes_missing_duration_and_keeps_source_work_dir(monkeypatch):
+    monkeypatch.setattr(cut_contract, "get_video_duration", lambda path: 42.0)
+    sources = cut_contract.normalize_sources_manifest({"schema_version": 1, "sources": [
+        {"source_id": "a", "source_path": "a.mp4", "source_work_dir": "sources/a", "source_name": "ep1"},
+    ]})
+    assert sources == {"a": {"source_id": "a", "source_path": "a.mp4", "duration": 42.0,
+                             "source_work_dir": "sources/a"}}
 
 
-def test_clip_padding_env_reaches_the_only_skill_that_implements_it(monkeypatch, tmp_path):
-    """CONFIG -> normalizer: video-cut once read the CLI flag alone and ignored CONFIG."""
-    _mock_media_probes(monkeypatch)
-    import cut_cli
-
-    work = tmp_path / "w"
-    work.mkdir()
-    video = tmp_path / "src.mp4"
-    video.write_bytes(b"video")
-    (work / "clip_plan.json").write_text(json.dumps([{"start": 10.0, "end": 20.0, "reason": "x"}]), encoding="utf-8")
-    monkeypatch.setitem(cut_cli.CONFIG, "clip_padding", 2.0)
-    monkeypatch.setattr("cut_cli.get_video_duration", lambda path: 100.0)
-    monkeypatch.setattr("cut_cli.build_edited_source_video", lambda *a, **k: Path(a[-1]))
-    monkeypatch.setattr(sys, "argv", ["cut.py", str(video), "--work-dir", str(work)])
-
-    cut.main()
-
-    clip = json.loads((work / "clip_plan_validated.json").read_text(encoding="utf-8"))["clips"][0]
-    assert (clip["source_start"], clip["source_end"]) == (8.0, 22.0)
+def test_multi_source_clip_needs_its_own_source_id_not_an_id_label():
+    manifest = {"sources": [{"source_id": "a", "source_path": "a.mp4", "duration": 60.0}]}
+    with pytest.raises(ValueError, match="missing source_id"):
+        cut_contract.normalize_multi_source_clip_plan([{"id": "a", "start": 0.0, "end": 5.0}], manifest)
 
 
 def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
@@ -331,7 +319,7 @@ def test_cut_main_reuses_edited_source_only_while_cache_binding_holds(monkeypatc
     if break_binding == "missing_meta":
         Path(f"{edited}.meta.json").unlink()
     elif break_binding == "plan":
-        argv += ["--clip-padding", "5"]
+        (work / "clip_plan.json").write_text(json.dumps([{"start": 5.0, "end": 20.0}]), encoding="utf-8")
     elif break_binding == "source":
         video = tmp_path / "video_new.mp4"
         video.write_bytes(b"new source bytes")
@@ -570,14 +558,14 @@ def test_normalize_multi_source_clip_plan_maps_sources_and_validates_per_source_
         {"source_id": "a", "start": 1.0, "end": 4.0, "reason": "A"},
         {"source_id": "b", "start": 4.0, "end": 8.0, "reason": "B"},
         {"source_id": "b", "start": 0.0, "end": 1.0, "reason": "B2"},
-    ], manifest, clip_padding=0.5)
+    ], manifest)
 
-    assert plan["total_duration"] == 7.0
+    assert plan["total_duration"] == 5.0
     assert [c["source_id"] for c in plan["clips"]] == ["a", "b", "b"]
     assert plan["clips"][0]["source_path"].endswith("a.mp4")
-    assert plan["clips"][0]["source_start"] == 0.5
+    assert plan["clips"][0]["source_start"] == 1.0
     assert plan["clips"][1]["source_end"] == 5.0  # clamped to source b duration
-    assert plan["clips"][2]["output_start"] == 5.5
+    assert plan["clips"][2]["output_start"] == 4.0
 
     with pytest.raises(ValueError, match="source_id a"):
         cut_contract.normalize_multi_source_clip_plan(
