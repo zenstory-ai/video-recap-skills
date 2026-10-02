@@ -1,7 +1,6 @@
 import json
 import os
 import re
-import subprocess
 import sys
 from pathlib import Path
 
@@ -34,40 +33,35 @@ def _call_args(calls, skill, script):
     return next(call[2] for call in calls if call[:2] == (skill, script))
 
 
-def test_recap_preserve_approved_text_reaches_real_validator_before_voiceover(
-    monkeypatch, tmp_path
+_OVER_BUDGET_TEXT = (
+    "少年停在了门外。他终于明白同伴为什么坚持等候，"
+    "也决定先把受伤的人送回家再去寻找失踪的同伴。"
+)
+
+
+@pytest.mark.parametrize(
+    "end, reaches_voiceover", [(30, True), (3, False)], ids=["fits", "over_budget"]
+)
+def test_recap_full_validator_never_rewrites_text_before_voiceover(
+    monkeypatch, tmp_path, end, reaches_voiceover
 ):
-    """The orchestrator protects approved prose before TTS; --no-review-narration skips review."""
+    """Default full mode keeps the agent's text: it fits and reaches TTS unchanged, or it
+    fails lint and goes back to the author. Only voiceover receives the approved-text flag."""
     approved = [
-        {
-            "start": 0,
-            "end": 3,
-            "narration": (
-                "少年停在了门外。他终于明白同伴为什么坚持等候，"
-                "也决定先把受伤的人送回家再去寻找失踪的同伴。"
-            ),
-            "overlaps_speech": False,
-        }
+        {"start": 0, "end": end, "narration": _OVER_BUDGET_TEXT, "overlaps_speech": False}
     ]
     video, work = seed_full_work(tmp_path, approved, preserve_approved_text=True)
+    raw = (work / "narration.json").read_text(encoding="utf-8")
 
     class VoiceoverReached(Exception):
         pass
 
     def run_through_validation(skill, script, *cli_args):
         if (skill, script) == ("video-script", "validate.py"):
-            assert "--preserve-approved-text" in cli_args
-            result = subprocess.run(
-                [
-                    sys.executable, "-X", "utf8",
-                    str(recap_runtime._entry(skill, script)),
-                    *map(str, cli_args),
-                ],
-                check=False,
-            )
-            assert result.returncode == 0
-            return
+            assert "--preserve-approved-text" not in cli_args
+            return recap_runtime._run(skill, script, *cli_args)
         if (skill, script) == ("video-voiceover", "voiceover.py"):
+            assert "--preserve-approved-text" in cli_args
             consumed = json.loads(
                 (work / "narration.json").read_text(encoding="utf-8")
             )
@@ -85,8 +79,15 @@ def test_recap_preserve_approved_text_reaches_real_validator_before_voiceover(
         "--no-review-narration",
     )
 
-    with pytest.raises(VoiceoverReached):
+    if reaches_voiceover:
+        with pytest.raises(VoiceoverReached):
+            recap.main()
+        return
+    with pytest.raises(SystemExit, match=r"video-script/validate\.py 失败 \(exit 1\)"):
         recap.main()
+    assert (work / "narration.json").read_text(encoding="utf-8") == raw
+    lint = json.loads((work / "narration_lint.json").read_text(encoding="utf-8"))
+    assert [error["code"] for error in lint["errors"]] == ["over_budget"]
 
 
 def _write_stale_lint_pass(work):
@@ -440,7 +441,8 @@ def test_recap_cut_mode_voiceover_uses_output_time_narration(monkeypatch, tmp_pa
     )
     validate_args = _call_args(calls, "video-script", "validate.py")
     assert validate_args[validate_args.index("--output-duration") + 1] == "10.000"
-    assert "--preserve-approved-text" in validate_args
+    assert "--preserve-approved-text" not in validate_args
+    assert "--preserve-approved-text" in vo
     review_args = _call_args(calls, "video-script", "review.py")
     assert review_args[review_args.index("--timeline") + 1] == "cut_output"
     order = [script for _, script, _ in calls]

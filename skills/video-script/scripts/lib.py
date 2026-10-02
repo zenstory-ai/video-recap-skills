@@ -115,7 +115,6 @@ CONFIG = {
     "quiet_overlap_min_ratio": 0.8,  # 解说段至少多少比例落在安静窗口内才标记为非对白重叠
     "visual_beat_max_seconds": 18.0,  # 单段解说超过该时长且跨多个帧锚点时给 lint 提醒
     "visual_beat_max_facts": 3,  # 单段解说最多建议覆盖的 frame_facts 锚点数量
-    "edit_mode": os.environ.get("EDIT_MODE", "full"),  # full | cut
 }
 
 def log(msg):

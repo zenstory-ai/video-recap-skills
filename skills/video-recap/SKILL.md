@@ -149,7 +149,7 @@ python3 scripts/recap.py <video> --work-dir <work_dir>  # 可追加 --edit-mode 
 
 流程会校验当前阶段的硬输入（`clip_plan.json` / `narration.json`）；两份创作计划仍是 Agent 与建议型评审使用的工作记录，不是渲染门禁。cut 模式随后生成 `edited_source.mp4`，再合成旁白并输出 `recap_<name>.mp4`。
 
-已有批准解说稿时加 `--preserve-approved-text`：校验与 TTS 原样保留批准稿（只更新 `overlaps_speech`），装不下时间窗即失败，不缩稿、不降级为部分成功。
+校验从不改写解说稿（只更新实测的 `overlaps_speech`）；full 模式下文本装不下时间窗会以 `over_budget` error 退回给 Agent。已有批准解说稿时加 `--preserve-approved-text`，TTS 也原样保留批准稿，装不下时间窗即失败，不缩稿、不降级为部分成功。
 
 ### 4.5 字幕与克隆旁白
 

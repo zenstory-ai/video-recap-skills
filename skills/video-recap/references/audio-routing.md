@@ -104,7 +104,8 @@ narration review files are not read as evidence for the current run.
   because the precise-track contract only binds adopted packet audio.
 
 `--preserve-approved-text` remains opt-in and is forwarded unchanged to
-voiceover and continuation only in narration mode.
+voiceover and continuation only in narration mode. The narration validator no longer takes
+it: validation never rewrites narration in any mode.
 
 Narration may explicitly select `--tts-provider index-tts`; `auto` does not
 select Index TTS. Index TTS cannot be combined with MiMo voice selection,

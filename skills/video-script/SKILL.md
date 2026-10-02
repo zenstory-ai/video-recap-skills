@@ -23,7 +23,7 @@ description: >
 4. 声音/旁白编辑
 5. 第一次观看的观众
 
-Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理解索引做机械校验；full 模式默认还会执行预算整理并计算旁白的原声重叠。已有批准稿应加 `--preserve-approved-text`，保留段落顺序、数量、时间、文本、停顿和扩展元数据，仅允许依据现有声音证据更新 `overlaps_speech`。
+Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理解索引做机械校验，从不改写 Agent 的稿子：段落顺序、数量、时间、文本、停顿和扩展元数据原样保留，只依据现有声音证据回写实测的 `overlaps_speech`。文本装不下时间窗、段落未按时间排序等问题以 error 退回给 Agent 修改。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 
@@ -237,11 +237,10 @@ python3 scripts/review.py --work-dir <work_dir>
 
 ```bash
 python3 scripts/validate.py --work-dir <work_dir> --mode full
-python3 scripts/validate.py --work-dir <work_dir> --mode full --preserve-approved-text
 # cut 输出时间线由编排器使用 --mode cut_output
 ```
 
-命令写出 `narration_lint.json`。full 模式默认执行字符预算整理、去重合并并依据安静窗口计算 `overlaps_speech`，但不会把时间段移动到安静窗口；`--preserve-approved-text` 则保留批准稿的原始时间、文本、停顿、顺序与扩展元数据，只允许更新实测 `overlaps_speech`。修复所有 error 后重复运行，直到校验干净，再继续 TTS 与合成。
+命令写出 `narration_lint.json`。full 与 cut_output 用同一套声音归属算法（原声对白区间减去安静窗口）回写 `overlaps_speech`，其余字段原样保留，不截短、不合并、不补标点、不重排。full 模式下某段字数超过该时间窗推荐字数的 1.25 倍即报 `over_budget` error，报告里写明段号、时间窗、`budget_chars`、`limit_chars`、`actual_chars` 和 `over_chars`：缩短文字或放宽/挪动时间窗，不要指望 TTS 替你缩稿。修复所有 error 后重复运行，直到校验干净，再继续 TTS 与合成。
 
 片名或题材明确但缺少剧情上下文时，先按本技能的 `references/research-guide.md` 写 `background_research.json`。若理解素材偏薄，brief 中的数量只能当上限：宁可少写、写实，也不要为凑数复述画面。
 
