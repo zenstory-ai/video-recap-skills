@@ -21,27 +21,8 @@ class DraftBuildContext:
     total_us: int
     new_id: NewIdFn
     probe: ProbeFn
-    resource_packages: dict = field(default_factory=dict)
-    style_presets: dict = field(default_factory=dict)
     materials: dict[str, list] = field(
-        default_factory=lambda: {
-            key: []
-            for key in (
-                "audios",
-                "chromas",
-                "common_mask",
-                "drafts",
-                "effects",
-                "masks",
-                "speeds",
-                "stickers",
-                "text_templates",
-                "texts",
-                "transitions",
-                "video_effects",
-                "videos",
-            )
-        }
+        default_factory=lambda: {"audios": [], "texts": [], "videos": []}
     )
     tracks: list[dict] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)
@@ -58,8 +39,6 @@ class DraftBuildContext:
             total_us=us(timeline["duration"]),
             new_id=new_id,
             probe=probe,
-            resource_packages=timeline.get("resource_packages", {}),
-            style_presets=timeline.get("style_presets", {}),
         )
 
     def add_segment(self, kind, base_name, start_us, duration_us, segment):

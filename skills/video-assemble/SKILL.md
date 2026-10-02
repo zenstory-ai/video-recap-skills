@@ -77,7 +77,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - `--export-jianying` / `EXPORT_JIANYING=1` 可把 `timeline.json` 导出为可编辑草稿。cut 模式应传 `--source-video <orig>`，让草稿引用真实原片区间。
 - 剪映导出默认把视频、音频与图片复制到 `Resources/local/{video,audio,image}`，保持草稿可搬迁；`--jianying-no-bundle-media` 只适合原路径始终可访问的情况。
 - 重叠覆盖物会拆到编号轨道；非空目标目录不会覆盖，而会创建编号兄弟目录。
-- 常速、倒放、变换、富文本、转场、蒙版、LUT、绿幕复合草稿及显式特效轨道通过 timeline v2 扩展表达。需要素材包的功能只接受调用方合法提供的离线资源。
+- 导出只接受 `schema_version: 2` 的 `timeline.json`，只映射视频、音频、字幕和图片叠层（`scale` / `position`）；变速、转场、蒙版、富文本、特效轨等手写扩展字段会被明确拒绝。
 - 剪映草稿引用未烧录的源视频，因此原片硬字幕仍会保留，必要时在剪映内另行遮罩。
 - 字幕外观可用 `SUBTITLE_FONT_SIZE`、`SUBTITLE_MARGIN_V`、`SUBTITLE_MAX_CHARS` 等控制。
 - `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为半开 `[top, bot)`；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。

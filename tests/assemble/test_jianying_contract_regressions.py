@@ -1,6 +1,5 @@
 import json
 import sys
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -119,41 +118,6 @@ def test_public_export_can_explicitly_disable_media_bundling(tmp_path):
     assert content["materials"]["videos"][0]["path"] == str(source)
 
 
-def test_public_export_generates_and_bundles_missing_reverse_source(monkeypatch, tmp_path):
-    source = tmp_path / "source.mp4"
-    source.write_bytes(b"original")
-    timeline = _video_timeline(source)
-    timeline["tracks"][0]["clips"][0]["reverse"] = True
-
-    def fake_reverse(_source, output):
-        Path(output).write_bytes(b"reversed")
-
-    monkeypatch.setattr(export_jianying, "_generate_reversed_media", fake_reverse)
-    draft_dir, notes = export_timeline_to_jianying(
-        timeline, tmp_path / "out", new_id=_counter_ids(), probe=_fake_probe
-    )
-    root = Path(draft_dir)
-    reversed_files = list((root / "Resources/local/video").glob("reversed-*.mp4"))
-
-    assert len(reversed_files) == 1
-    assert reversed_files[0].read_bytes() == b"reversed"
-    assert any("已生成倒放素材" in note for note in notes)
-    assert "reverse_path" not in timeline["tracks"][0]["clips"][0]
-
-
-def test_automatic_reverse_requires_bundling(tmp_path):
-    source = tmp_path / "source.mp4"
-    source.write_bytes(b"original")
-    timeline = _video_timeline(source)
-    timeline["tracks"][0]["clips"][0]["reverse"] = True
-
-    with pytest.raises(ValueError, match="requires media bundling"):
-        export_timeline_to_jianying(
-            timeline, tmp_path / "out", bundle_media=False,
-            new_id=_counter_ids(), probe=_fake_probe,
-        )
-
-
 @pytest.mark.parametrize(
     ("extra_args", "expected"),
     [([], True), (["--no-bundle-media"], False), (["--bundle-media"], True)],
@@ -187,25 +151,8 @@ def test_direct_cli_defaults_to_bundle_with_explicit_opt_out(
     assert captured == {"bundle_media": expected}
 
 
-def test_v1_timeline_is_migrated_without_mutating_the_caller():
-    timeline = _video_timeline(schema_version=1)
-    original = deepcopy(timeline)
-
-    v1_content, _meta, _notes = build_draft(
-        timeline, new_id=_counter_ids(), probe=_fake_probe
-    )
-    v2_content, _meta, _notes = build_draft(
-        {**timeline, "schema_version": 2},
-        new_id=_counter_ids(),
-        probe=_fake_probe,
-    )
-
-    assert timeline == original
-    assert v1_content == v2_content
-
-
-@pytest.mark.parametrize("schema_version", [3, 999])
-def test_unknown_future_timeline_schema_is_rejected(schema_version):
+@pytest.mark.parametrize("schema_version", [1, 3, 999])
+def test_timeline_schema_other_than_v2_is_rejected(schema_version):
     with pytest.raises(ValueError, match="unsupported timeline schema_version"):
         build_draft(
             _video_timeline(schema_version=schema_version),
@@ -244,12 +191,6 @@ def test_unknown_future_timeline_schema_is_rejected(schema_version):
             lambda timeline: timeline["tracks"][0]["clips"][0].update(scale="ignored"),
             "scale",
         ),
-        (
-            lambda timeline: timeline["tracks"][0]["clips"][0].update(
-                green_background="not-a-background-package"
-            ),
-            "green_background",
-        ),
     ],
 )
 def test_v2_timeline_contract_rejects_malformed_required_structure(mutate, message):
@@ -257,38 +198,6 @@ def test_v2_timeline_contract_rejects_malformed_required_structure(mutate, messa
     mutate(timeline)
 
     with pytest.raises((TypeError, ValueError), match=message):
-        build_draft(timeline, new_id=_counter_ids(), probe=_fake_probe)
-
-
-@pytest.mark.parametrize(
-    ("resource_config", "message"),
-    [
-        ("resource.json", "resource_config: must be an object"),
-        ({"mainConfig": {}}, "main_config: must be an object"),
-        ({"main_config": "{}"}, "main_config: must be an object"),
-        ({"main_config": {}, "resources": ["asset.zip"]}, "resources.*source_path objects"),
-    ],
-)
-def test_resource_config_requires_canonical_object_contract(resource_config, message):
-    timeline = _video_timeline()
-    timeline["tracks"].append({
-        "kind": "sticker",
-        "segments": [{
-            "timeline_start": 0.0,
-            "timeline_end": 1.0,
-            "resource_config": resource_config,
-        }],
-    })
-
-    with pytest.raises(ValueError, match=message):
-        build_draft(timeline, new_id=_counter_ids(), probe=_fake_probe)
-
-
-def test_named_resource_package_uses_same_canonical_object_contract():
-    timeline = _video_timeline()
-    timeline["resource_packages"] = {"legacy": {"mainConfig": {}}}
-
-    with pytest.raises(ValueError, match="resource_packages.legacy.main_config"):
         build_draft(timeline, new_id=_counter_ids(), probe=_fake_probe)
 
 
@@ -303,26 +212,33 @@ def test_missing_relative_media_is_reported_during_portable_export(tmp_path, mon
     assert any("definitely-missing.mp4" in note for note in notes)
 
 
-def test_runtime_project_and_compound_drafts_scrub_upstream_hardware_ids(tmp_path):
-    foreground = tmp_path / "foreground.mp4"
-    background = tmp_path / "background.png"
-    foreground.write_bytes(b"video")
-    background.write_bytes(b"image")
-    timeline = _video_timeline(foreground)
-    timeline["tracks"][0]["clips"][0].update(
-        compound=True,
-        green_background={"source_path": str(background), "type": "photo"},
-        chroma={"resource_id": "chroma.green", "color": "#00FF00"},
-    )
+@pytest.mark.parametrize(
+    ("mutate", "field"),
+    [
+        (lambda timeline: timeline["tracks"][0]["clips"][0].update(speed=2.0), "speed"),
+        (lambda timeline: timeline["tracks"][0]["clips"][0].update(transition="fade"), "transition"),
+        (lambda timeline: timeline.update(style_presets={}), "style_presets"),
+        (
+            lambda timeline: timeline["tracks"].append({"kind": "sticker", "segments": []}),
+            "unsupported track kind",
+        ),
+    ],
+)
+def test_removed_authoring_extensions_are_rejected_not_ignored(mutate, field):
+    timeline = _video_timeline()
+    mutate(timeline)
 
+    with pytest.raises(ValueError, match=field):
+        build_draft(timeline, new_id=_counter_ids(), probe=_fake_probe)
+
+
+def test_runtime_project_scrubs_upstream_hardware_ids():
     content, _meta, _notes = build_draft(
-        timeline, new_id=_counter_ids(), probe=_fake_probe
+        _video_timeline(), new_id=_counter_ids(), probe=_fake_probe
     )
-    projects = [content, content["materials"]["drafts"][0]["draft"]]
 
-    for project in projects:
-        for platform_key in ("last_modified_platform", "platform"):
-            platform = project[platform_key]
-            assert platform["device_id"] == ""
-            assert platform["hard_disk_id"] == ""
-            assert platform["mac_address"] == ""
+    for platform_key in ("last_modified_platform", "platform"):
+        platform = content[platform_key]
+        assert platform["device_id"] == ""
+        assert platform["hard_disk_id"] == ""
+        assert platform["mac_address"] == ""

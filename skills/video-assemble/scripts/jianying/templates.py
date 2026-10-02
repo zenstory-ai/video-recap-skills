@@ -14,9 +14,6 @@ _TEMPLATE_FILES = {
     "text": "empty_yj_material_text.json",
     "text_style": "empty_jy_text_styles.json",
     "segment": "empty_jy_segment.json",
-    "draft": "empty_jy_draft.json",
-    "combination_segment": "empty_jy_combination_segment.json",
-    "combination_video": "empty_jy_combination_video_material.json",
     "meta": "empty_draft_meta_info.json",
     "meta_material": "empty_jy_meta_material_value.json",
 }

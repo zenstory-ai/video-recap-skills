@@ -10,8 +10,8 @@ set of tracks — exactly like a cut-tool project:
   - one **narration** audio track: the placed TTS beats;
   - an optional **bgm** audio track: a looped music bed with its own ducking;
   - one **subtitle** (text) track: the narration lines.
-  - optional **image** tracks: local photo overlays with normalized center-origin,
-    Y-up transforms for editable JianYing export.
+  - optional **image** tracks: local photo overlays with a normalized center-origin,
+    Y-up scale/position for editable JianYing export.
 
 The canonical ducking semantics live in `audio_automation.py`; ffmpeg
 (`assemble.py`) and this timeline model both derive their automation from that
@@ -44,8 +44,7 @@ def _floor_time(value, digits=4):
 
 def build_timeline(canvas, duration_s, video_clips, narration_segments,
                    bgm=None, ducking=None, subtitle_segments=None,
-                   image_segments=(), resource_packages=None,
-                   style_presets=None, extra_tracks=()):
+                   image_segments=()):
     """Assemble a Timeline dict from resolved placement data.
 
     canvas: {"width", "height", "fps"}
@@ -63,8 +62,8 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
     ducking: {"idle", "speech", "quiet", "fade", "bridge"} for the original-audio
              automation; None disables original ducking (flat original). `bridge` holds
              the duck across inter-beat gaps shorter than it.
-    image_segments: optional v2 local image overlays [{"source_path", "timeline_start",
-                 "timeline_end", ...authoring extensions}], passed through as authored.
+    image_segments: optional local image overlays [{"source_path", "timeline_start",
+                 "timeline_end", optional "scale"/"position"}], passed through as authored.
     """
     placed = [
         s for s in narration_segments
@@ -94,22 +93,14 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
             audio["base_gain"] = round(float(ducking["idle"]), 4)
         else:
             audio["base_gain"] = 1.0
-        video_clip = {
+        video_clip_objs.append({
             "source_path": c["source_path"],
             "source_start": round(float(c["source_start"]), 4),
             "source_end": round(float(c["source_end"]), 4),
             "timeline_start": round(ts, 4),
             "timeline_end": round(te, 4),
             "audio": audio,
-        }
-        for key in (
-            "chroma", "compound", "flip", "green_background", "lut", "mask",
-            "opacity", "position", "reverse", "reverse_path", "rotation_degrees",
-            "scale", "speed", "transition",
-        ):
-            if key in c:
-                video_clip[key] = deepcopy(c[key])
-        video_clip_objs.append(video_clip)
+        })
 
     tracks = [{"kind": "video", "name": "video", "clips": video_clip_objs}]
 
@@ -127,8 +118,6 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
         for key in ("source_duck_end", "source_restore_at", "source_handoff_status", "source_entry_status"):
             if key in s:
                 narration[key] = deepcopy(s[key])
-        if "speed" in s:
-            narration["speed"] = float(s["speed"])
         narr_segs.append(narration)
     if narr_segs:
         tracks.append({"kind": "audio", "name": "narration", "role": "narration",
@@ -161,20 +150,16 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
         ts, te = float(s["timeline_start"]), float(s["timeline_end"])
         if te <= ts:
             continue
-        text_segment = {
+        text_segs.append({
             "text": s["text"],
             "timeline_start": round(ts, 4),
             "timeline_end": round(te, 4),
-        }
-        for key in ("flip", "opacity", "position", "rotation_degrees", "scale", "style", "style_id", "words"):
-            if key in s:
-                text_segment[key] = deepcopy(s[key])
-        text_segs.append(text_segment)
+        })
     if text_segs:
         tracks.append({"kind": "text", "name": "subtitle", "segments": text_segs})
 
-    # --- local image overlays (optional, timeline schema v2). Transform fields are
-    # optional authoring extensions; the JianYing exporter validates and defaults them.
+    # --- local image overlays (optional). scale/position are optional; the JianYing
+    # exporter validates and defaults them.
     images = []
     for segment in image_segments:
         image = {
@@ -182,15 +167,12 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
             "timeline_start": round(float(segment["timeline_start"]), 4),
             "timeline_end": round(float(segment["timeline_end"]), 4),
         }
-        for key in ("flip", "lut", "mask", "opacity", "position", "rotation_degrees",
-                    "scale", "speed", "transition"):
+        for key in ("position", "scale"):
             if key in segment:
                 image[key] = deepcopy(segment[key])
         images.append(image)
     if images:
         tracks.append({"kind": "image", "name": "image", "segments": images})
-
-    tracks.extend(deepcopy(track) for track in extra_tracks)
 
     timeline = {
         "schema_version": SCHEMA_VERSION,
@@ -199,10 +181,6 @@ def build_timeline(canvas, duration_s, video_clips, narration_segments,
         "duration": round(float(duration_s), 4),
         "tracks": tracks,
     }
-    if resource_packages:
-        timeline["resource_packages"] = deepcopy(resource_packages)
-    if style_presets:
-        timeline["style_presets"] = deepcopy(style_presets)
     return timeline
 
 

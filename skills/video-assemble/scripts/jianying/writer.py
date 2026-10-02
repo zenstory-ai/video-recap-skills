@@ -7,7 +7,6 @@ import shutil
 import tempfile
 import time
 import uuid
-import zipfile
 
 from jianying.templates import template
 
@@ -35,19 +34,6 @@ def _resource_kind(material, materials_key):
     if material.get("type") == "photo":
         return "image", "photo"
     return "video", "video"
-
-
-RESOURCE_DIRECTORY_BY_MATERIALS_KEY = {
-    "chromas": "effect",
-    "common_mask": "mask",
-    "effects": "effect",
-    "masks": "mask",
-    "stickers": "sticker",
-    "texts": "text",
-    "text_templates": "text_template",
-    "transitions": "transition",
-    "video_effects": "effect",
-}
 
 
 def _unused_name(directory, basename, used):
@@ -96,122 +82,18 @@ def _meta_value(material, relative_path, metetype, copied_path, timestamp_ms):
     return value
 
 
-def _material_sets(content):
-    """Yield root and nested compound-draft material dictionaries."""
-    materials = content["materials"]
-    yield materials
-    for draft in materials["drafts"]:
-        yield from _material_sets(draft["draft"])
-
-
-def _replace_value(value, old, new):
-    if isinstance(value, dict):
-        for key, item in value.items():
-            value[key] = _replace_value(item, old, new)
-    elif isinstance(value, list):
-        for index, item in enumerate(value):
-            value[index] = _replace_value(item, old, new)
-    elif isinstance(value, str):
-        if value == old:
-            return new
-    return value
-
-
-def _replace_material_resource_path(material, materials_key, old, new):
-    """Rewrite one declared resource, including the known rich-text JSON field."""
-    _replace_value(material, old, new)
-    if materials_key != "texts" or not isinstance(material.get("content"), str):
-        return
-    content = json.loads(material["content"])
-    _replace_value(content, old, new)
-    material["content"] = json.dumps(content, ensure_ascii=False, separators=(",", ":"))
-
-
-def _safe_resource_target(target_path):
-    normalized = os.path.normpath(str(target_path).replace("\\", "/"))
-    if normalized in {"", "."} or os.path.isabs(normalized):
-        raise ValueError(f"invalid JianYing resource target_path: {target_path}")
-    if normalized == ".." or normalized.startswith("../"):
-        raise ValueError(f"JianYing resource target_path escapes package: {target_path}")
-    return normalized
-
-
-def _extract_zip(source, destination):
-    os.makedirs(destination, exist_ok=False)
-    destination_real = os.path.realpath(destination)
-    with zipfile.ZipFile(source) as archive:
-        for member in archive.infolist():
-            member_path = os.path.realpath(os.path.join(destination, member.filename))
-            if os.path.commonpath((destination_real, member_path)) != destination_real:
-                raise ValueError(f"unsafe path in JianYing resource archive: {member.filename}")
-        archive.extractall(destination)
-
-
-def _copy_resource(source, resource_kind, resources_root, used, target_path=None):
+def _copy_resource(source, resource_kind, resources_root, used):
     resource_dir = os.path.join(resources_root, resource_kind)
     os.makedirs(resource_dir, exist_ok=True)
-    is_zip = os.path.isfile(source) and zipfile.is_zipfile(source)
-    if target_path is None:
-        basename = os.path.basename(source.rstrip(os.sep))
-        if is_zip:
-            basename = os.path.splitext(basename)[0]
-        relative_target = _unused_name(resource_dir, basename, used[resource_kind])
-    else:
-        relative_target = _safe_resource_target(target_path)
+    relative_target = _unused_name(resource_dir, os.path.basename(source), used[resource_kind])
     copied_path = os.path.join(resource_dir, relative_target)
-    copied_real = os.path.realpath(copied_path)
-    if os.path.commonpath((os.path.realpath(resource_dir), copied_real)) != os.path.realpath(resource_dir):
-        raise ValueError(f"JianYing resource target escapes package: {target_path}")
-    os.makedirs(os.path.dirname(copied_path), exist_ok=True)
-    if os.path.exists(copied_path):
-        raise FileExistsError(f"duplicate JianYing resource target: {relative_target}")
-    if is_zip:
-        _extract_zip(source, copied_path)
-    elif os.path.isdir(source):
-        shutil.copytree(source, copied_path)
-    else:
-        shutil.copy2(source, copied_path)
-    relative_path = f"Resources/local/{resource_kind}/{relative_target.replace(os.sep, '/')}"
+    shutil.copy2(source, copied_path)
+    relative_path = f"Resources/local/{resource_kind}/{relative_target}"
     return copied_path, relative_path, f"{DRAFT_PATH_PLACEHOLDER}/{relative_path}"
 
 
 def _is_packaged_path(value):
     return str(value).startswith((DRAFT_PATH_PLACEHOLDER, "Resources/", "./Resources/"))
-
-
-def _descriptor(raw, default_kind, *, required):
-    """`raw` is a contract-validated resource entry: an object with a non-empty source_path."""
-    source = raw["source_path"]
-    resource_kind = raw.get("resource_kind", default_kind)
-    target_path = raw.get("target_path")
-    if not isinstance(resource_kind, str) or resource_kind not in {
-        "audio", "effect", "fonts", "image", "lut", "mask", "sticker",
-        "text", "text_template", "transition", "video",
-    }:
-        raise ValueError(f"invalid JianYing resource kind: {resource_kind}")
-    return {
-        "source_path": source,
-        "resource_kind": resource_kind,
-        "target_path": target_path,
-        "required": required,
-    }
-
-
-def _material_resource_descriptors(material, default_kind):
-    descriptors = [
-        _descriptor(raw, default_kind, required=True)
-        for raw in material.get("_bundle_resources", [])
-    ]
-    path = material.get("path")
-    if isinstance(path, str) and path and not _is_packaged_path(path):
-        if not any(item["source_path"] == path for item in descriptors):
-            descriptors.append({
-                "source_path": path,
-                "resource_kind": default_kind,
-                "target_path": None,
-                "required": False,
-            })
-    return descriptors
 
 
 def bundle_media(content, meta, draft_dir):
@@ -224,83 +106,34 @@ def bundle_media(content, meta, draft_dir):
     """
     resources_root = os.path.join(draft_dir, "Resources", "local")
     copied = {}
-    resource_kinds = {
-        "audio", "effect", "fonts", "image", "lut", "mask", "sticker",
-        "text", "text_template", "transition", "video",
-    }
-    used = {kind: set() for kind in resource_kinds}
+    used = {kind: set() for kind in ("audio", "image", "video")}
     meta_values = []
     notes = []
     timestamp_ms = int(time.time() * 1000)
 
-    material_sets = list(_material_sets(content))
-    for materials in material_sets:
-        for materials_key in ("videos", "audios"):
-            for material in materials.get(materials_key, []):
-                src = material.get("path")
-                if not src:
-                    continue
-                resource_kind, metetype = _resource_kind(material, materials_key)
-                source_key = (resource_kind, os.path.realpath(src))
-                existing = copied.get(source_key)
-                if existing is not None:
-                    material["path"] = existing["draft_path"]
-                    continue
-                if not os.path.isfile(src):
-                    if not _is_packaged_path(src):
-                        notes.append(f"素材缺失，未打包: {src}")
-                    continue
+    materials = content["materials"]
+    for materials_key in ("videos", "audios"):
+        for material in materials[materials_key]:
+            src = material["path"]
+            resource_kind, metetype = _resource_kind(material, materials_key)
+            source_key = (resource_kind, os.path.realpath(src))
+            existing = copied.get(source_key)
+            if existing is not None:
+                material["path"] = existing
+                continue
+            if not os.path.isfile(src):
+                if not _is_packaged_path(src):
+                    notes.append(f"素材缺失，未打包: {src}")
+                continue
 
-                copied_path, relative_path, draft_path = _copy_resource(
-                    src, resource_kind, resources_root, used
-                )
-                material["path"] = draft_path
-                copied[source_key] = {"draft_path": draft_path}
-                meta_values.append(
-                    _meta_value(material, relative_path, metetype, copied_path, timestamp_ms)
-                )
-
-        for materials_key, resource_kind in RESOURCE_DIRECTORY_BY_MATERIALS_KEY.items():
-            for material in materials.get(materials_key, []):
-                descriptors = _material_resource_descriptors(
-                    material, resource_kind
-                )
-                seen_descriptors = set()
-                for descriptor in descriptors:
-                    src = descriptor["source_path"]
-                    if _is_packaged_path(src):
-                        continue
-                    descriptor_key = (
-                        descriptor["resource_kind"],
-                        os.path.realpath(src),
-                        descriptor["target_path"],
-                    )
-                    if descriptor_key in seen_descriptors:
-                        continue
-                    seen_descriptors.add(descriptor_key)
-                    if not os.path.exists(src):
-                        message = f"声明的剪映资源缺失: {src}"
-                        if descriptor["required"]:
-                            raise ValueError(message)
-                        notes.append(message)
-                        continue
-                    kind = descriptor["resource_kind"]
-                    source_key = (kind, os.path.realpath(src), descriptor["target_path"])
-                    existing = copied.get(source_key)
-                    if existing is None:
-                        _copied_path, _relative_path, draft_path = _copy_resource(
-                            src,
-                            kind,
-                            resources_root,
-                            used,
-                            target_path=descriptor["target_path"],
-                        )
-                        copied[source_key] = {"draft_path": draft_path}
-                    else:
-                        draft_path = existing["draft_path"]
-                    _replace_material_resource_path(
-                        material, materials_key, src, draft_path
-                    )
+            copied_path, relative_path, draft_path = _copy_resource(
+                src, resource_kind, resources_root, used
+            )
+            material["path"] = draft_path
+            copied[source_key] = draft_path
+            meta_values.append(
+                _meta_value(material, relative_path, metetype, copied_path, timestamp_ms)
+            )
 
     material_group = next(group for group in meta["draft_materials"] if group["type"] == 0)
     material_group["value"] = meta_values
@@ -309,13 +142,6 @@ def bundle_media(content, meta, draft_dir):
         for value in meta_values
     )
     return notes
-
-
-def strip_internal_resource_fields(content):
-    for materials in _material_sets(content):
-        for entries in materials.values():
-            for material in entries:
-                material.pop("_bundle_resources", None)
 
 
 def draft_dir_has_user_content(draft_dir):
@@ -359,7 +185,6 @@ def write_draft(content, meta, notes, out_dir, draft_name, bundle_media_enabled=
         os.makedirs(tmp_dir, exist_ok=False)
         if bundle_media_enabled:
             notes.extend(bundle_media(content, meta, tmp_dir))
-        strip_internal_resource_fields(content)
         timestamp_ms = int(time.time() * 1000)
         meta["draft_name"] = actual_name
         meta["draft_fold_path"] = draft_dir
