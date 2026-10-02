@@ -5,8 +5,6 @@ import http.client
 import json
 import re
 import shutil
-import subprocess
-import sys
 import threading
 from pathlib import Path
 from urllib.parse import quote
@@ -23,7 +21,6 @@ ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "resource-library"
 SAMPLE_MP4 = EXAMPLE / "samples" / "demo-sample" / "demo-sample.mp4"
 ASSETS = ROOT / "skills" / "video-recap" / "assets" / "dashboard"
-SCRIPT = ROOT / "skills" / "video-recap" / "scripts" / "dashboard_server.py"
 SHARED_TOKENS_SHA1 = "ed9dd31d9e6da2589516ef49e472e59839e0a873"
 
 
@@ -113,7 +110,7 @@ def site(tmp_path_factory):
     root = base / "root"
     root.mkdir()
     info = _build_root(root)
-    server = dashboard_server.make_server(root, "127.0.0.1", 0)
+    server = dashboard_server.make_server(root, 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     yield {"root": root.resolve(), "port": server.server_address[1], **info}
@@ -446,14 +443,12 @@ def test_discovery_is_bounded_and_skips_what_it_must(tmp_path, layout, found, wa
     assert any(warned in w for w in result["warnings"]) if warned else result["warnings"] == []
 
 
-def test_cli_refuses_a_non_loopback_host(tmp_path):
-    result = subprocess.run(
-        [sys.executable, "-X", "utf8", str(SCRIPT), "--root", str(tmp_path), "--host", "0.0.0.0"],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
-    )
-
-    assert result.returncode != 0
-    assert "回环" in result.stderr
+def test_server_always_binds_loopback(tmp_path):
+    server = dashboard_server.make_server(tmp_path)
+    try:
+        assert server.server_address[0] == "127.0.0.1"
+    finally:
+        server.server_close()
 
 
 def test_cross_site_subresource_requests_are_refused_and_marked_same_origin(site):

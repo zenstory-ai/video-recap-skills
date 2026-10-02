@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """Strictly read-only local dashboard over libraries, projects and recap runs.
 
-    python3 scripts/dashboard_server.py --root <dir> [--port 0] [--host 127.0.0.1] [--open]
+    python3 scripts/dashboard_server.py --root <dir> [--port 0] [--open]
 
 Serves ``assets/dashboard/`` and a small GET-only JSON API built by ``dashboard.data``.
-Binds to loopback only, checks Host / Origin against the bound port (DNS-rebinding guard),
+Always binds to 127.0.0.1, checks Host / Origin against the bound port (DNS-rebinding guard),
 answers every method other than GET / HEAD with 405, and serves only files that resolve
 inside ``--root``. Nothing here writes to disk. Runs in the foreground until Ctrl+C.
 """
 from __future__ import annotations
 
 import argparse
-import ipaddress
 import json
 import re
 import sys
@@ -197,40 +196,27 @@ class DashboardHandler(BaseHTTPRequestHandler):
 class DashboardServer(ThreadingHTTPServer):
     daemon_threads = True
 
-    def __init__(self, root: Path, host: str, port: int):
-        super().__init__((host, port), DashboardHandler)
+    def __init__(self, root: Path, port: int):
+        super().__init__(("127.0.0.1", port), DashboardHandler)
         self.root = root
         bound = self.server_address[1]
-        self.allowed_hosts = {f"127.0.0.1:{bound}", f"localhost:{bound}", f"{host.lower()}:{bound}"}
+        self.allowed_hosts = {f"127.0.0.1:{bound}", f"localhost:{bound}"}
 
 
-def _loopback_host(host: str) -> str:
-    if host.lower() == "localhost":
-        return "127.0.0.1"
-    try:
-        address = ipaddress.ip_address(host)
-    except ValueError:
-        address = None
-    if address is None or address.version != 4 or not address.is_loopback:
-        raise SystemExit(f"--host 只允许 IPv4 回环地址（127.0.0.1 或 localhost），收到: {host}")
-    return host
-
-
-def make_server(root, host: str = "127.0.0.1", port: int = 0) -> DashboardServer:
+def make_server(root, port: int = 0) -> DashboardServer:
     root = Path(root).expanduser().resolve()
     if not root.is_dir():
         raise SystemExit(f"--root 不是目录: {root}")
-    return DashboardServer(root, _loopback_host(host), port)
+    return DashboardServer(root, port)
 
 
 def main(argv=None):
     ap = argparse.ArgumentParser(description="video-recap 只读 dashboard：浏览资源库、项目与运行，不修改任何文件。")
     ap.add_argument("--root", required=True, help="要浏览的目录（资源库、项目、work_dir 都在它下面发现）")
     ap.add_argument("--port", type=int, default=0, help="端口，默认 0 = 随机空闲端口")
-    ap.add_argument("--host", default="127.0.0.1", help="只接受回环地址，默认 127.0.0.1")
     ap.add_argument("--open", action="store_true", help="启动后用默认浏览器打开")
     args = ap.parse_args(argv)
-    server = make_server(args.root, args.host, args.port)
+    server = make_server(args.root, args.port)
     url = f"http://127.0.0.1:{server.server_address[1]}/"
     print(f"只读 dashboard: {url}  (root: {server.root}；Ctrl+C 退出)", flush=True)
     if args.open:

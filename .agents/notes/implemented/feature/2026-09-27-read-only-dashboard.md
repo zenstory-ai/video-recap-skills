@@ -16,8 +16,8 @@ Status: implemented
 
 **入口与模块**（全部在 `skills/video-recap/` 内，不 import 其他技能）
 
-- `scripts/dashboard_server.py --root <目录> [--port 0] [--host 127.0.0.1] [--open]`：标准库 `ThreadingHTTPServer`，前台运行、打印地址，
-  Agent 放到后台跑。`--host` 只接受 IPv4 回环（`localhost` 映射为 127.0.0.1），其他地址直接退出并给中文说明。
+- `scripts/dashboard_server.py --root <目录> [--port 0] [--open]`：标准库 `ThreadingHTTPServer`，前台运行、打印地址，
+  Agent 放到后台跑。固定绑定 127.0.0.1；2026-10-02 起没有 `--host`（原来它只能在 127.0.0.0/8 的别名之间选，选非默认值时打印的地址还是错的）。
 - `scripts/dashboard/io.py`：唯一的路径闸门 `resolve_under`、按上限读 JSON 的 `read_json`（2 MB，永不抛异常）、媒体白名单、标记文件发现。
 - `scripts/dashboard/runs.py`：一个 work_dir 的各阶段视图，服务端解析；运行状态复用 `recap_inspect.cmd_state`。
 - `scripts/dashboard/templates.py`：模板参数的中文行与示意几何（字幕带与最长一行、包装图层与安全区）。

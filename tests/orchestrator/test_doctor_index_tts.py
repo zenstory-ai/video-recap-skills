@@ -35,9 +35,7 @@ def test_doctor_accepts_valid_index_configuration_without_exposing_values(
     assert report["checks"]["tts"]["index_tts_configured"] is True
     assert report["checks"]["tts"]["index_tts_endpoint_format_valid"] is True
     assert report["checks"]["tts"]["connectivity_checked"] is False
-    assert "index_tts_configuration" in {
-        item["name"] for item in report["capability_menu"]["ready"]
-    }
+    assert report["warnings"] == []
     serialized = json.dumps(report, ensure_ascii=False) + capsys.readouterr().out
     assert endpoint not in serialized
     assert voice not in serialized
