@@ -78,7 +78,7 @@ def test_local_adoption_route_strict_failure_exits_before_success(
         output_dir=str(tmp_path), tts_meta="tts.json",
         narration_adoption="narration.json", audio_mix_adoption="mix.json",
         burn_subtitles=False, subtitle_y_top=None, subtitle_y_bot=None,
-        require_final_qc=True,
+        require_final_qc=True, material_library_dir=None,
     )
     manifest = {"source_video": str(video), "audio": "audio-id"}
     monkeypatch.setattr(recap_runner, "_write_run_manifest", lambda *_: manifest)

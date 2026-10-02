@@ -153,11 +153,7 @@ def seed_cut_work(
     video, work = seed_full_work(tmp_path, narration, edit_mode="cut", **overrides)
     (work / "clip_plan.json").write_text(json.dumps(clips), encoding="utf-8")
     if rendered:
-        recap_timeline._write_phase_ledger(
-            work,
-            clip_plan_identity=file_identity(work / "clip_plan.json"),
-            edited_source_rendered=True,
-        )
+        recap_timeline._write_phase_ledger(work, file_identity(work / "clip_plan.json"))
     return video, work
 
 

@@ -426,7 +426,7 @@ Yes. Understanding relies on the VLM reading the picture and does not require ex
 
 ### A long video hit a 429 or was interrupted halfway. Do I start over?
 
-No. VLM scene analysis resumes from where it stopped and recovers from rate limits; once `narration.json` is written, repeating the same command continues, cut mode records cut/narrate progress in `recap_phase.json`, and a resume only continues a work directory for the same source video and parameters.
+No. VLM scene analysis resumes from where it stopped and recovers from rate limits; once `narration.json` is written, repeating the same command continues, cut mode records in `recap_phase.json` which clip plan the narration was written for (changing the plan asks for a new narration), and a resume only continues a work directory for the same source video and parameters.
 
 ### The VLM can't tell who is who and the narration is all "a man in black"?
 

@@ -17,6 +17,8 @@ All notable changes to this project are documented here.
 - **暂停时的续跑命令改为回显原命令。** 不再由 `recap_timeline` 按 flag 逐个手写重组（漏写的 flag 续跑时会被悄悄丢掉），而是回显用户输入的参数：保留原写法（如 `--style=悬疑`、`--project` 写的是目录），视频与 `--work-dir` / `--output-dir` / `--voice-ref` / `--material-library-dir` / `--project` 等路径转为绝对路径，补上 `--work-dir` 与来自 `EDIT_MODE` / `TARGET_DURATION` / `TTS_PROVIDER` / `VOICE_REF` / `SUBTITLE_Y_*` 的设置。`recap_run_manifest.json` 新增 `argv`，记录这条续跑参数。此前相对的 `--output-dir` / `--material-library-dir` 原样写进续跑命令，换目录续跑会指向别处；现在从任何目录都能用。
 - **`final_qc.json` 改为最小报告形状（`schema_version: 2`），QC 只收敛到这一份报告。** 通用 QC 契约 `scripts/qc_contract.py` 与 `references/shift-left-qc-schema.md` 删除，字段说明并入 `data-schema.md` 的 `final_qc.json` 一节。报告去掉恒为 `post_render` 的 `stage`；每条 finding 只剩 `code`、`message`、`blocking`、`evidence`、`next_action`，去掉 `finding_id` / `severity` / `confidence` / `sample_policy` / `model_used` / `rule_id` / `decision_reason` / `location` / `category` / `source` 等恒定或重复字段。`ok`、`blocker_count`、`finding_count` 与 `--require-final-qc` 的判定不变。`metadata.probe` 只保留检查用到的流与容器字段，原片带来的容器标签（comment、purl 里的 URL 等）不再写进报告；`metadata.artifacts` 对 `assembly_qc.json` / `visual_qc.json` 改为记录它们的 `verdict` / `blocking` / `blocking_codes`。
 - **`final_qc` 不再把 assembly / visual QC 的阻断码转写成自己的 blocker。** 这两份 QC 阻断时 video-assemble 已经非零退出，流水线走不到 final_qc；只有在失败的 work_dir 上手动跑 `final_qc.py` 时，结果才会不同（这时直接看 `assembly_qc.json` / `visual_qc.json`）。
+- **cut 账本 `recap_phase.json` 只记 `clip_plan_identity`。** 写稿时剪辑计划的身份是它唯一被读取的字段；`edited_source_rendered`、`narration_written`、`multi_source`、`audio_mode`、`audio_stream_index` 不再写入，不带解说的 cut 运行也不再写账本。旧账本里多出的字段在下次写入时丢弃。
+- **素材库按 `material_id` 直接恢复。** recap 把保存时用的 `material_id` 传给恢复，不再扫描 `materials/*/material.json` 按源路径查找；手工改过名的素材目录因此不会再被找到，需改回原名或重新沉淀。素材白名单去掉从未有生产者的 `reference_profile.json` / `reference_match_report.json`。
 
 ### Removed
 
@@ -32,6 +34,8 @@ All notable changes to this project are documented here.
 - **Windows 上经管道运行 recap 时，阶段脚本不再因中文日志崩溃。** recap 调用各阶段脚本时设置 `PYTHONIOENCODING=utf-8`；此前 stdout 被管道捕获（Agent 宿主、CI）时子进程默认 cp1252，第一行中文日志就抛 `UnicodeEncodeError`。
 - **旧 work_dir 里损坏的 `preflight_qc.json` 不再让 narration 运行在解说评审之后崩溃。** 账本删除后不再读取它。
 - **素材库保存并恢复 `consolidation.status.json`。** 从素材库恢复的 work_dir 重建 brief 时，仍会提示 consolidate 失败或缺索引。
+- **cut 终轮先判断解说是否过期，再重剪。** `clip_plan.json` 在写稿后改过时，单视频与多视频 cut 现在在调用 `cut.py` 之前就以"clip_plan.json 已改变"退出，不再先重新归一化、吸附、甚至重编码 `edited_source.mp4` 之后才报错。
+- **参考文档去掉不存在的选项与环境变量。** `data-schema.md` 不再提 `--step script`，`config-playbook.md` 删除把写死常量 `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` 当成环境变量的一行。
 
 ## [0.6.0] - 2026-09-27
 

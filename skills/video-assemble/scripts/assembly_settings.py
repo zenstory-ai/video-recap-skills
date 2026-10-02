@@ -1,4 +1,4 @@
-"""Render-affecting settings payload recorded in the manifest and compared by resume logic."""
+"""Render-affecting settings payload recorded in assembly_manifest.json for audit."""
 
 from pathlib import Path
 
@@ -14,10 +14,10 @@ from packaging import packaging_settings
 
 
 def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
-    """Settings that affect the rendered video, as a plain nested dict compared with ``==`` by
-    pipeline resume logic. When work_dir is given, a user_subtitles presence flag and the
-    ``{size, mtime_ns}`` identity of the overlay/subtitle-track inputs are included so dropping
-    in or rewriting one of those files rebuilds the cached subtitles."""
+    """Settings that affect the rendered video, as a plain nested dict. assembly_manifest.json
+    records it for audit; nothing compares it to decide a rebuild. When work_dir is given, a
+    user_subtitles presence flag and the ``{size, mtime_ns}`` identity of the overlay and
+    subtitle-track inputs are included."""
     burn_subtitles = CONFIG["burn_subtitles"]
     mask_policy = _source_subtitle_mask_policy(work_dir)
     mask_source_subtitles = mask_policy["active"]

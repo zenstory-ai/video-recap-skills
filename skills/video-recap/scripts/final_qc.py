@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable, Mapping, Sequence
 
-from lib import load_json
+from lib import load_json, read_json_object
 
 SCHEMA_VERSION = 2
 FINAL_QC_ARTIFACT = "final_qc.json"
@@ -44,14 +44,6 @@ def _load_fixture(value: Any) -> Any:
 def _resolve_in_work_dir(work_dir: Path, path: str | Path) -> Path:
     p = Path(path)
     return p if p.is_absolute() else work_dir / p
-
-
-def _read_json_mapping(path: Path) -> Mapping[str, Any] | None:
-    try:
-        data = load_json(path)
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, Mapping) else None
 
 
 def _final_output_path(work_dir: Path, final_output: str | Path | None) -> Path | None:
@@ -85,7 +77,7 @@ def _artifact_summary(work_dir: Path, name: str) -> dict[str, Any]:
     path = work_dir / name
     meta = _file_metadata(path, work_dir)
     if meta["exists"]:
-        data = _read_json_mapping(path)
+        data = read_json_object(path)
         if data is None:
             meta["summary"] = {"invalid": True}
         else:

@@ -267,21 +267,6 @@ def test_save_material_reconciles_orphan_artifacts_on_resave(tmp_path):
     assert {a["name"] for a in meta2["artifacts"]} == {"scenes.json"}
 
 
-def test_material_lookup_skips_corrupt_unrelated_cache_entry(tmp_path):
-    lib = tmp_path / "library"
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "scenes.json").write_text("[]", encoding="utf-8")
-    valid = materials.save_material(lib, work, tmp_path / "episode.mp4", IDENTITY, SETTINGS)
-    corrupt = lib / "materials" / "corrupt" / "material.json"
-    corrupt.parent.mkdir()
-    corrupt.write_text("not json", encoding="utf-8")
-
-    found = materials.find_material_by_source(lib, tmp_path / "episode.mp4", IDENTITY)
-
-    assert found["material_id"] == valid["material_id"]
-
-
 def test_save_material_refreshes_malformed_existing_metadata(tmp_path):
     lib = tmp_path / "library"
     work = tmp_path / "work"

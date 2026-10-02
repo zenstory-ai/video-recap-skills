@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lib import load_json, material_id_for, source_id_for
+from lib import load_json, material_id_for, read_json_object, source_id_for
 
 # asr_timing_evidence.json stays out on purpose: it binds asr_result.json and audio.wav by
 # {size, mtime_ns}, and a restore rewrites the former (redacted copy) and never copies the
@@ -40,8 +40,6 @@ ALLOWED_ARTIFACTS = {
     "consolidation.status.json",
     "agent_narration_brief.md",
     "background_research.json",
-    "reference_profile.json",
-    "reference_match_report.json",
     "recap_run_manifest.json",
 }
 # Redaction targets credential VALUE shapes, not English/Chinese dictionary words — the
@@ -182,16 +180,8 @@ def write_material_md(path: Path, metadata: dict, summary: str, tags: list[str])
     path.write_text(text, encoding="utf-8")
 
 
-def _read_material_metadata(path: Path) -> dict | None:
-    try:
-        data = load_json(path)
-    except (OSError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
-
-
 def _material_cache_entry(path: Path) -> dict | None:
-    data = _read_material_metadata(path)
+    data = read_json_object(path)
     if not data or not all(data.get(key) for key in (
         "source_path", "updated_at", "material_id",
     )) or not isinstance(data.get("artifacts"), list):
@@ -236,7 +226,7 @@ def save_material(
         copied.append({"name": src.name, "path": f"artifacts/{src.name}", "bytes": dst.stat().st_size})
 
     meta_path = dest / "material.json"
-    previous = _read_material_metadata(meta_path)
+    previous = read_json_object(meta_path)
     created_at = previous.get("created_at") if previous else None
     if not isinstance(created_at, str) or not created_at:
         created_at = now
@@ -276,32 +266,6 @@ def save_material(
     return metadata
 
 
-def find_material_by_source(
-    library_dir: str | Path, source_path: str | Path, source_identity: dict
-) -> dict | None:
-    """The newest material saved for this exact source file (resolved path + identity)."""
-    root = Path(library_dir) / "materials"
-    if not root.exists():
-        return None
-    resolved = str(Path(source_path).resolve())
-    candidates = []
-    for meta_path in root.glob("*/material.json"):
-        data = _material_cache_entry(meta_path)
-        if (
-            data is not None
-            and data["source_path"] == resolved
-            and data["source_video_identity"] == source_identity
-        ):
-            data["material_dir"] = str(meta_path.parent)
-            candidates.append(data)
-    if not candidates:
-        return None
-    # Deterministic fallback policy for legacy/manual callers that do not know
-    # the expected material_id: newest wins, then material_id for stable ties.
-    candidates.sort(key=lambda d: (d["updated_at"], d["material_id"]), reverse=True)
-    return candidates[0]
-
-
 def restore_material(
     library_dir: str | Path,
     work_dir: str | Path,
@@ -309,7 +273,7 @@ def restore_material(
     source_path: str | Path,
     source_identity: dict,
     settings: dict,
-    material_id: str | None = None,
+    material_id: str,
     overwrite: bool = True,
     prune_stale_allowed: bool = True,
 ) -> dict:
@@ -324,17 +288,11 @@ def restore_material(
     newly restored material. Non-allowed files (for example narration.json or
     clip_plan.json) are never removed here.
     """
-    lib = Path(library_dir)
-    if material_id:
-        meta_path = material_dir(lib, material_id) / "material.json"
-        meta = _material_cache_entry(meta_path)
-        if meta is None:
-            return {"restored": False, "reason": "material missing or invalid"}
-        meta["material_dir"] = str(meta_path.parent)
-    else:
-        meta = find_material_by_source(lib, source_path, source_identity)
-        if meta is None:
-            return {"restored": False, "reason": "material not found"}
+    meta_path = material_dir(Path(library_dir), material_id) / "material.json"
+    meta = _material_cache_entry(meta_path)
+    if meta is None:
+        return {"restored": False, "reason": "material missing or invalid"}
+    meta["material_dir"] = str(meta_path.parent)
     if meta["source_path"] != str(Path(source_path).resolve()) \
             or meta["source_video_identity"] != source_identity:
         return {"restored": False, "reason": "source identity mismatch", "material_id": meta["material_id"]}

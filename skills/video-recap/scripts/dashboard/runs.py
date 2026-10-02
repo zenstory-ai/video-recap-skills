@@ -318,9 +318,3 @@ def run_views(root: Path, rel: str, runs: set) -> dict:
         "stages": _stage_bar(mode, audio_mode, state, views, qc),
         "views": views,
     }
-
-
-def run_brief(root: Path, rel: str, runs: set) -> dict:
-    """The run without its per-stage views, for lists."""
-    full = run_views(root, rel, runs)
-    return {k: v for k, v in full.items() if k not in {"views", "state", "qc"}}

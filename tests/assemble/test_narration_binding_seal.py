@@ -115,7 +115,7 @@ def test_copied_skill_strict_cli_runs_with_isolated_python(render_media, tmp_pat
     segments = [_segment(_tone(tmp_path / "voice.wav"))]
     adoption, meta = _adoption(tmp_path, segments)
     env = {**os.environ, "NARRATION_SPEED": "1.15", "NARRATION_TIGHTEN": "0",
-           "NARRATION_TAIL_PAD_SECONDS": "0", "EXPORT_JIANYING": "0",
+           "EXPORT_JIANYING": "0",
            "BGM_PATH": "", "FINAL_LOUDNORM": "0", "OUTPUT_MAX_HEIGHT": "0"}
     # -I removes caller/repo imports. Only the explicitly copied script directory
     # is made importable by the isolated launcher.

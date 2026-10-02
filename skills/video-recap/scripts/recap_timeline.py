@@ -8,6 +8,7 @@ from pathlib import Path
 
 from lib import load_json
 from lib import file_identity
+from library import LIBRARY_ENV
 from recap_runtime import (
     _entry,
     _load_run_manifest,
@@ -192,20 +193,16 @@ def _read_assembly_output(work_dir):
 
 
 def _read_phase_ledger(work_dir):
-    """Phase ledger (cut mode): which artifacts exist and the clip_plan/narration they match.
-
-    Lets resume be driven by recorded phase state rather than bare file existence — the
-    prerequisite for the cut-first/narrate-second two-pause flow, and the guard that keeps a
-    narration written for one clip_plan from silently driving a different cut into TTS.
-    None before the first cut pass has recorded anything.
+    """Phase ledger (cut mode with narration): the clip_plan identity the narration is
+    written against — the guard that keeps a narration written for one clip_plan from
+    silently driving a different cut into TTS. None before pass 2 has recorded it.
     """
     path = Path(work_dir) / PHASE_LEDGER
     return load_json(path) if path.exists() else None
 
 
-def _write_phase_ledger(work_dir, **fields):
-    ledger = _read_phase_ledger(work_dir) or {}
-    ledger.update(fields)
+def _write_phase_ledger(work_dir, clip_plan_identity):
+    ledger = {"clip_plan_identity": clip_plan_identity}
     (Path(work_dir) / PHASE_LEDGER).write_text(
         json.dumps(ledger, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -522,7 +519,7 @@ def _fmt_range(start, end):
 
 
 def _material_library_dir(args):
-    return args.material_library_dir or os.environ.get("VIDEO_RECAP_MATERIAL_LIBRARY_DIR") or None
+    return args.material_library_dir or os.environ.get(LIBRARY_ENV) or None
 
 
 def _materials_enabled(args):

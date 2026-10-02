@@ -12,6 +12,7 @@ from lib import TTS_PROVIDERS, file_identity, material_id_for, source_id_for
 from recap_cli import parse_args
 from recap_review import run_narration_review
 from recap_runtime import (
+    RUN_MANIFEST,
     _analysis_settings,
     _build_multi_source_records,
     _coerce_videos,
@@ -65,8 +66,6 @@ from recap_timeline import (
     _write_phase_ledger,
 )
 
-RUN_MANIFEST = "recap_run_manifest.json"
-
 
 def _voiceover_args(work_dir, narration_path, args):
     """Build the shared full/cut invocation for video-voiceover."""
@@ -90,12 +89,9 @@ def _approved_validation_args(args):
 
 def _record_resources(work_dir, args):
     """Write resource_lock.json for the finished render and surface anything needing a person."""
-    library_dir = getattr(args, "material_library_dir", None) or os.environ.get(
-        "VIDEO_RECAP_MATERIAL_LIBRARY_DIR"
-    )
     try:
         lock = resource_lock.write_resource_lock(
-            work_dir, library_dir=library_dir, project=getattr(args, "resolved_project", None)
+            work_dir, library_dir=_material_library_dir(args), project=getattr(args, "resolved_project", None)
         )
     except (OSError, ValueError, TypeError, KeyError) as exc:  # a record must never fail a finished render
         print(f"[video-recap] ⚠ 未能写出 resource_lock.json: {type(exc).__name__}: {exc}", flush=True)
@@ -171,6 +167,7 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
             source_path=source_path,
             source_identity=source_identity,
             settings=settings,
+            material_id=source_record["material_id"],
         )
         restored = result["restored"]
         if restored:
@@ -362,18 +359,16 @@ def _run_multi_cut(videos, work_dir, args):
 
     _reject_stale_multi_manifest(work_dir, videos, args, source_records)
     cp_identity = file_identity(clip_plan_json)
+    # A narration written for an older clip_plan aborts before cut.py re-renders anything.
+    if uses_narration(args) and narration_json.exists():
+        _reject_stale_cut_narration(work_dir, cp_identity)
     _render_cut(videos[0], work_dir, args, "--sources-manifest", str(manifest_path))
     if uses_narration(args):
         if not narration_json.exists():
             _write_multi_source_output_brief(
                 work_dir, source_records, work_dir / "clip_plan_validated.json"
             )
-            _write_phase_ledger(
-                work_dir,
-                clip_plan_identity=cp_identity,
-                edited_source_rendered=True,
-                multi_source=True,
-            )
+            _write_phase_ledger(work_dir, cp_identity)
             _pause_for_agent(
                 work_dir,
                 f"{narration_json}（用成片 OUTPUT 时间轴写解说，对着 {edited_source}）",
@@ -384,13 +379,7 @@ def _run_multi_cut(videos, work_dir, args):
                 ),
             )
             return
-        _reject_stale_cut_narration(work_dir, cp_identity)
-        _write_phase_ledger(
-            work_dir,
-            clip_plan_identity=cp_identity,
-            narration_written=True,
-            multi_source=True,
-        )
+        _write_phase_ledger(work_dir, cp_identity)
         _validate_cut_output_narration(work_dir, args)
 
     _deliver(work_dir, args, edited_source, f"multi_{videos[0].stem}", "cut_output")
@@ -590,7 +579,6 @@ def _run_single(video, work_dir, args):
         if uses_narration(args):
             if not narration_json.exists():
                 _understand()
-                _write_run_manifest(work_dir, video, args)
                 _pause(f"{narration_json}", state_hint)
                 return
             _reject_stale_manifest()
@@ -612,36 +600,27 @@ def _run_single(video, work_dir, args):
         if not uses_narration(args) and (work_dir / RUN_MANIFEST).exists():
             _reject_stale_manifest()
         _understand()
-        _write_run_manifest(work_dir, video, args)
         _pause(f"{clip_plan_json}（只写剪辑计划；解说下一步对着剪好的成片写）", state_hint)
         return
     _reject_stale_manifest()
     cp_identity = file_identity(clip_plan_json)
+    # A narration written for an older clip_plan aborts before cut.py re-renders anything.
+    if uses_narration(args) and narration_json.exists():
+        _reject_stale_cut_narration(work_dir, cp_identity)
     _render_cut(video, work_dir, args)
     if uses_narration(args):
         if not narration_json.exists():
             # PASS 2: rebuild the brief (now an OUTPUT-timeline variant) and pause for narration.
             _rebuild_understanding_brief(_single_source_record(video, args), work_dir, args)
-            _write_phase_ledger(
-                work_dir, clip_plan_identity=cp_identity, edited_source_rendered=True
-            )
+            _write_phase_ledger(work_dir, cp_identity)
             _pause(
                 f"{narration_json}（用成片 OUTPUT 时间轴写解说，对着 {edited_source}）",
                 f"python3 {inspect_py} --work-dir {work_dir} "
                 "clip-map --output-start <s> --output-end <e>  # 核对输出↔原片时间轴",
             )
             return
-        _reject_stale_cut_narration(work_dir, cp_identity)
-        _write_phase_ledger(work_dir, clip_plan_identity=cp_identity, narration_written=True)
+        _write_phase_ledger(work_dir, cp_identity)
         _validate_cut_output_narration(work_dir, args)
-    else:
-        _write_phase_ledger(
-            work_dir,
-            clip_plan_identity=cp_identity,
-            edited_source_rendered=True,
-            audio_mode=args.audio_mode,
-            audio_stream_index=args.audio_stream_index,
-        )
     # let the timeline / 剪映 export reference the original clips, not edited_source.mp4
     _deliver(
         work_dir, args, edited_source, video.stem, "cut_output",
