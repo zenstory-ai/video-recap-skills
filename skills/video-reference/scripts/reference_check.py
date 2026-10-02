@@ -283,15 +283,16 @@ def _word_grams(text, size):
 
 
 def _index_names(index):
-    """characters[*].name / aliases / asr_mentions from an optional understanding_index.json."""
+    """name / aliases / asr_mentions of characters, entities and research_glossary in understanding_index.json."""
     names = set()
-    characters = index.get("characters") if isinstance(index, dict) else None
-    for character in characters if isinstance(characters, list) else []:
-        if isinstance(character, dict):
-            names.add(character.get("name"))
-            for key in ("aliases", "asr_mentions"):
-                values = character.get(key)
-                names.update(values if isinstance(values, list) else [])
+    for key in ("characters", "entities", "research_glossary"):
+        items = index.get(key) if isinstance(index, dict) else None
+        for item in items if isinstance(items, list) else []:
+            if isinstance(item, dict):
+                names.add(item.get("name"))
+                for alias_key in ("aliases", "asr_mentions"):
+                    values = item.get(alias_key)
+                    names.update(values if isinstance(values, list) else [])
     return names
 
 
@@ -385,7 +386,7 @@ def leak_errors(text, where, corpus, rule="R6"):
     return errors
 
 
-def _warnings(breakdown, facts, methods, asr_segments, asr_status, research, *, index, asr_evidence, source,
+def _warnings(breakdown, methods, asr_segments, asr_status, research, *, index, asr_evidence, source,
               review_windows=None):
     warnings = []
     for method in methods:
@@ -396,9 +397,9 @@ def _warnings(breakdown, facts, methods, asr_segments, asr_status, research, *, 
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
-    if has_cjk and not research and not _index_names(index) and not any(f.get("entities") for f in facts):
-        warnings.append("ASR 有中文对白，但所有 fact 的 entities 都为空，也没有 background_research.json 或"
-                        " understanding_index.json 的角色：人名泄漏扫描可能漏网")
+    if has_cjk and not research and not _index_names(index):
+        warnings.append("ASR 有中文对白，但 background_research.json 与 understanding_index.json 都没有给出名字："
+                        "泄漏扫描只认 fact entities 里写到的名字，台词里其他人名、地名、组织名会漏网")
     asr_video = (asr_evidence if isinstance(asr_evidence, dict) else {}).get("source_video")
     if isinstance(asr_video, dict) and {k: asr_video.get(k) for k in ("size", "mtime_ns")} != {
             k: source.get(k) for k in ("size", "mtime_ns")}:
@@ -462,7 +463,7 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
     for dimension in DIMENSIONS:
         if dimension not in covered and dimension not in skipped:
             errors.append(f"R7 {dimension}: 至少一条 method，或在 skipped_dimensions 写明原因")
-    warnings = _warnings(breakdown, facts, methods, asr_segments, asr_status, research,
+    warnings = _warnings(breakdown, methods, asr_segments, asr_status, research,
                          index=index, asr_evidence=asr_evidence, source=measurements["source"],
                          review_windows=measurements["shots"].get("review_windows"))
     return {"derived": derived, "errors": errors, "warnings": warnings}

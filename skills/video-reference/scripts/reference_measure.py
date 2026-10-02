@@ -8,6 +8,11 @@ frame within ISOLATION_WINDOW_S (the adjacent frames excluded: they carry the cu
 after-image). Suppressed candidates are grouped into `shots.review_windows` for the agent to look
 at; the agent's corrections live in the breakdown (labels.cut_fixes), never in this file.
 
+The score is min(mafd, |mafd - previous mafd|), so a cut out of fast motion scores near zero (a
+dark hard cut after a fight scored 0.9). Every cut is still a one-sided peak of mafd itself: at
+least every other frame within the window and ISOLATION_RATIO times every frame on one side.
+Such peaks (`mafd_peaks`) join the review windows; they never become cuts on their own.
+
 The result is cached in `reference_measurements.json` by the video's {size, mtime_ns}; the raw
 scores are cached too, so changing the score settings re-derives the cuts without decoding again.
 Shot statistics are computed from these cuts directly; an understanding run's scene list merges
@@ -21,13 +26,14 @@ from pathlib import Path
 from lib import ffprobe, file_identity, log, read_json, run_cmd, write_json
 
 MEASUREMENTS_FILE = "reference_measurements.json"
-MEASUREMENTS_SCHEMA = "video-reference.measurements.v2"
+MEASUREMENTS_SCHEMA = "video-reference.measurements.v3"
 DETECTOR = "scdet-isolated-v1"
 DEFAULT_HARD_SCORE = 10.0     # always a cut
 DEFAULT_SOFT_SCORE = 4.0      # a cut only when isolated
 ISOLATION_RATIO = 2.0
 ISOLATION_WINDOW_S = 0.3
-SCORE_FLOOR = 2.0             # below soft / ratio a frame can neither be a cut nor suppress one
+SCORE_FLOOR = 2.0             # below soft / ratio a frame can neither be a cut nor suppress one;
+                              # also the least mafd a review peak needs
 REVIEW_PAD_S = 0.2
 REVIEW_JOIN_S = 0.5
 CURVE_WINDOW_S = 10.0
@@ -36,6 +42,7 @@ SILENT_LUFS = -70.0          # ebur128 reports -120.7 for digital silence / warm
 
 _SCDET = re.compile(
     r"lavfi\.scd\.score\s*[:=]\s*(-?\d+(?:\.\d+)?)\s*,?\s*lavfi\.scd\.time\s*[:=]\s*(-?\d+(?:\.\d+)?)")
+_MAFD = re.compile(r"\[Parsed_metadata[^\]]*\]\s*(?:frame:.*?pts_time:\s*(\S+)|lavfi\.scd\.mafd=(\S+))")
 _EBU_FRAME = re.compile(r"\bt:\s*(\d+(?:\.\d+)?)\s.*?\bS:\s*(-?\d+(?:\.\d+)?|-?inf|nan)")
 _SUMMARY_I = re.compile(r"\bI:\s*(-?\d+(?:\.\d+)?)\s*LUFS")
 _SUMMARY_LRA = re.compile(r"\bLRA:\s*(-?\d+(?:\.\d+)?)\s*LU\b")
@@ -56,22 +63,48 @@ def parse_scdet(stderr, duration=None):
     return [[t, round(scores[t], 3)] for t in sorted(scores)]
 
 
-def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE):
-    """(cuts, review_windows) from [time, score] pairs; see the module docstring for the rule."""
+def _sides(series, times, i, adjacent):
+    """Highest value before and after series[i] within ISOLATION_WINDOW_S, adjacent frames excluded."""
+    t = series[i][0]
+    lo = bisect.bisect_left(times, t - ISOLATION_WINDOW_S - 1e-9)
+    hi = bisect.bisect_right(times, t + ISOLATION_WINDOW_S + 1e-9)
+    return (max((v for u, v in series[lo:i] if t - u > adjacent), default=0.0),
+            max((v for u, v in series[i + 1:hi] if u - t > adjacent), default=0.0))
+
+
+def mafd_peaks(stderr, fps, duration=None):
+    """[time, mafd] of frames whose mafd (metadata print) is a one-sided peak >= SCORE_FLOOR."""
+    series, t = [], None
+    for time_text, value in _MAFD.findall(stderr or ""):
+        if time_text:
+            t = _number(time_text)
+        elif t is not None:
+            series.append((round(t, 3), _number(value) or 0.0))
+            t = None
+    adjacent = 1.5 / fps if fps else 0.06
+    times = [u for u, _ in series]
+    peaks = []
+    for i, (t, value) in enumerate(series):
+        if value < SCORE_FLOOR or t <= EDGE_S or (duration is not None and t >= duration - EDGE_S):
+            continue
+        before, after = _sides(series, times, i, adjacent)
+        if value >= max(before, after) and value >= ISOLATION_RATIO * min(before, after):
+            peaks.append([t, round(value, 3)])
+    return peaks
+
+
+def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE, peaks=()):
+    """(cuts, review_windows) from [time, score] pairs and mafd peaks; see the module docstring."""
     frame_s = 1.0 / fps if fps else 0.04
     adjacent = 1.5 * frame_s
     times = [t for t, _ in scores]
-    cuts, suppressed = [], []
-    for t, score in scores:
+    cuts, suppressed = [], [t for t, _ in peaks]
+    for i, (t, score) in enumerate(scores):
         if score < soft:
             continue
-        if score < hard:
-            lo = bisect.bisect_left(times, t - ISOLATION_WINDOW_S - 1e-9)
-            hi = bisect.bisect_right(times, t + ISOLATION_WINDOW_S + 1e-9)
-            others = [s for u, s in scores[lo:hi] if abs(u - t) > adjacent]
-            if score < ISOLATION_RATIO * max(others, default=0.0):
-                suppressed.append(t)
-                continue
+        if score < hard and score < ISOLATION_RATIO * max(_sides(scores, times, i, adjacent)):
+            suppressed.append(t)
+            continue
         if cuts and t - cuts[-1][0] <= adjacent:     # one cut spread over two frames
             if score > cuts[-1][1]:
                 cuts[-1] = (t, score)
@@ -79,7 +112,7 @@ def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE
         cuts.append((t, score))
     cut_times = [t for t, _ in cuts]
     windows = []
-    for t in suppressed:
+    for t in sorted(set(suppressed)):
         if any(abs(t - c) <= adjacent for c in cut_times):
             continue
         if windows and t - windows[-1][1] <= REVIEW_JOIN_S:
@@ -160,7 +193,7 @@ def shot_stats(cuts, duration):
 
 
 def _ffmpeg_command(video, scaled, has_audio):
-    video_filter = f"scdet=threshold={SCORE_FLOOR:g}"
+    video_filter = f"scdet=threshold={SCORE_FLOOR:g},metadata=mode=print:key=lavfi.scd.mafd"
     if scaled:
         video_filter = "scale=320:-2," + video_filter
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-map", "0:v:0", "-vf", video_filter]
@@ -196,14 +229,16 @@ def measure(video, work_dir, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE
             return cached
         log("成片未变，只按新的分数设置重算切点（不重新解码）")
         source, scores, loudness = cached["source"], cached["scdet_scores"], cached.get("loudness")
+        peaks = cached.get("mafd_peaks") or []
     else:
         source = {**identity, **ffprobe(video)}
         result = run_cmd(_ffmpeg_command(video, scaled, source["audio_streams"] > 0))
         if result.returncode != 0:
             raise RuntimeError(f"ffmpeg 测量失败: {result.stderr.strip()[-600:]}")
         scores = parse_scdet(result.stderr, source["duration_s"])
+        peaks = mafd_peaks(result.stderr, source.get("fps"), source["duration_s"])
         loudness = parse_ebur128(result.stderr, source["duration_s"]) if source["audio_streams"] else None
-    cuts, review_windows = detect_cuts(scores, source.get("fps"), hard=hard, soft=soft)
+    cuts, review_windows = detect_cuts(scores, source.get("fps"), hard=hard, soft=soft, peaks=peaks)
     payload = {
         "schema": MEASUREMENTS_SCHEMA,
         "source": source,
@@ -211,6 +246,7 @@ def measure(video, work_dir, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE
         "shots": {**shot_stats(cuts, source["duration_s"]), "review_windows": review_windows},
         "loudness": loudness,
         "scdet_scores": scores,
+        "mafd_peaks": peaks,
     }
     write_json(out_path, payload)
     log(f"写入 {out_path}：{len(cuts)} 个切点，{len(review_windows)} 个待复核窗口，时长 {source['duration_s']:.1f}s")

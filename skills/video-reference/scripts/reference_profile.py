@@ -223,7 +223,7 @@ def build_production(breakdown, measurements, derived):
     shots = measurements["shots"]
     loudness = measurements.get("loudness") or {}
     added, removed = cut_fix_counts(labels)
-    shot_provenance = "reviewed" if added or removed else "measured"
+    shot_provenance = "reviewed" if "cut_fixes" in labels else "measured"   # {} = looked, no change
     profile = {
         "shot_median_s": _metric(shots.get("median_s"), shot_provenance),
         "cuts_per_min": _metric(shots.get("cuts_per_min"), shot_provenance),

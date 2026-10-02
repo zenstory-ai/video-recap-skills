@@ -12,7 +12,7 @@
 | `dimension` | `narrative_structure` · `pacing` · `shots_editing` · `narration_subtitles` · `audio_visual` |
 | `applies_to` | `story_plan` · `visual_audio_board` · `clip_plan` · `narration` · `style_card` |
 
-`audio_spans` 记录**谁占有这段声音**（对白下压着的背景乐不算主导）；`sections` 记录叙事功能。两者都必须按时间排序、
+`audio_spans` 记录**谁占有这段声音**（对白下压着的背景乐不算主导；原片自带的画外音、内心独白记 `original_dialogue`）；`sections` 记录叙事功能。两者都必须按时间排序、
 不重叠、间隙不超过 0.5 秒、覆盖整片。
 
 ## `reference_breakdown.json`（Agent 唯一要写的文件）
@@ -64,13 +64,13 @@
 
 ## 测量与派生值
 
-`reference_measurements.json` 由 measure 写（`settings` 记切点规则参数，`scdet_scores` 是 ≥2 分的逐帧分数缓存，二者都不能被引用），
+`reference_measurements.json` 由 measure 写（`settings` 记切点规则参数，`scdet_scores` 是 ≥2 分的逐帧分数缓存，`mafd_peaks` 是帧差单侧峰，三者都不能被引用），
 路径即 target / evidence 可引用的 `shots.*`、`loudness.*`（有 `cut_fixes` 时按复核后的切点）：
 
 | 路径 | 含义 |
 |---|---|
 | `shots.cuts` · `count` · `mean_s` · `median_s` · `p10_s` · `p90_s` | 切点时间与镜长分布 |
-| `shots.review_windows` | 被压下的疑似切点窗口 `[[开始, 结束], …]`，给 `frames --review` 用 |
+| `shots.review_windows` | 被压下的疑似切点与不在切点上的帧差单侧峰，合成窗口 `[[开始, 结束], …]`，给 `frames --review` 用 |
 | `shots.share_under_1s` · `share_over_8s` · `cuts_per_min` · `curve` | 短/长镜头占比、切点密度、10 秒窗口切点曲线（每窗按自身长度折算成每分钟） |
 | `loudness.integrated_lufs` · `lra_lu` · `true_peak_dbtp` · `short_term_1s` | 整体响度、动态范围、真峰值、逐秒短期响度（前约 2 秒为预热空值） |
 
@@ -83,7 +83,7 @@
 | `derived.switch_on_cut_share` | 音轨归属切换点落在画面切点 ±0.25 秒内的比例 |
 | `derived.by_section.<function>` | `seconds` · `cuts_per_min` · `narration_share` |
 | `derived.structure` | `[{function, at:[开始占比, 结束占比], lead_owner}]` |
-| `derived.first_original_at` | 第一次原声对白的 `{s, fraction}` |
+| `derived.first_original_at` | 第一段 `original_dialogue`（含原片自带画外音）的 `{s, fraction}` |
 | `derived.narration_jobs` | 各 job 占旁白时长的比例（标注了 job 时才有） |
 
 ## `production_reference.json`（导出物，消费方只读这个）
@@ -115,7 +115,7 @@
 }
 ```
 
-- `provenance`：路径在 `derived.*` 下为 `labeled`（依赖 Agent 标注）；`shots.*` 在有 `cut_fixes` 增删时为 `reviewed`，
+- `provenance`：路径在 `derived.*` 下为 `labeled`（依赖 Agent 标注）；`shots.*` 在写了 `cut_fixes`（含 `{}`）时为 `reviewed`，
   否则与 `loudness.*` 一样为 `measured`。值为 null 的 profile 项不导出。
 - `cut_detection` 让读者知道这些切点数怎么来的：规则参数与 Agent 增删的切点数。
 - 导出时丢弃 `source_facts`、`labels`、`evidence`、`entities`、`from`、文件身份和任何路径。

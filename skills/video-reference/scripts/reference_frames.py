@@ -22,7 +22,7 @@ def _row(label, start, end, cells):
     """Evenly spaced cell times over [start, end]; a single time when the range is a point."""
     cells = max(1, min(CELLS, cells))
     step = (end - start) / (cells - 1) if cells > 1 else 0.0
-    return {"label": label, "times": [round(start + i * step, 2) for i in range(cells)]}
+    return {"label": label, "times": [round(start + i * step, 2) for i in range(cells)], "step": step}
 
 
 def review_rows(measurements, fps):
@@ -49,16 +49,16 @@ def span_rows(start, end, step):
     if step <= 0 or end <= start:
         raise ValueError("--span 需要 A<B，--step 必须为正数")
     times = [round(start + i * step, 3) for i in range(int(math.floor((end - start) / step + 1e-9)) + 1)]
-    return [{"label": f"{chunk[0]:g}–{chunk[-1]:g}s，每 {step:g}s", "times": chunk}
+    return [{"label": f"{chunk[0]:g}–{chunk[-1]:g}s，每 {step:g}s", "times": chunk, "step": step}
             for chunk in (times[i:i + CELLS] for i in range(0, len(times), CELLS))]
 
 
 def _render_row(video, row, out_path):
-    times = row["times"]
-    step = times[1] - times[0] if len(times) > 1 else 1.0
-    # Cell i is the first frame at or after times[i]. The fps filter would instead pick the frame
-    # nearest each slot, which can be a frame of the *next* shot and hide where a cut is.
-    pick = f"select='gte(t\\,selected_n*{step:.6f}-0.001)'"
+    times, step = row["times"], row["step"]
+    # Cell i is the first frame at or after times[0] + i * step (the unrounded step). The fps filter
+    # would instead pick the frame nearest each slot, which can be a frame of the *next* shot and hide
+    # where a cut is. Only len(times) frames are picked: a short row leaves its other cells blank.
+    pick = f"select='gte(t\\,selected_n*{step:.6f}-0.001)*lt(selected_n\\,{len(times)})'"
     cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-ss", f"{times[0]:.3f}",
            "-t", f"{step * (len(times) - 1) + 0.2:.3f}", "-i", video,
            "-vf", f"{pick},scale={CELL_WIDTH}:-2,tile={CELLS}x1", "-frames:v", "1", out_path]

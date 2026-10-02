@@ -87,17 +87,18 @@ def test_longest_sheet_cells_show_the_frame_at_their_printed_time_not_the_next_s
 def test_frames_cli_renders_a_contact_sheet_page_and_prints_the_legend(tmp_path, capsys):
     video = _two_shots(tmp_path)
 
-    assert reference.main(["frames", str(video), "--work-dir", str(tmp_path), "--span", "0,3.5",
-                           "--step", "0.25"]) == 0
+    assert reference.main(["frames", str(video), "--work-dir", str(tmp_path), "--span", "1.6,2.2",
+                           "--step", "0.04"]) == 0
 
     page = tmp_path / "reference_frames" / "span_1.jpg"
     probe = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "stream=width,height", "-of", "json",
                             str(page)], capture_output=True, text=True, check=True)
     stream = json.loads(probe.stdout)["streams"][0]
     assert stream["width"] == CELLS * CELL_WIDTH
-    assert stream["height"] == 2 * 90, "15 cells make two rows of 160x90 thumbnails"
+    assert stream["height"] == 2 * 90, "16 cells make two rows of 160x90 thumbnails"
+    assert _cell_rgb(page, 1, 3)[2] > 200 and max(_cell_rgb(page, 1, 4)) < 40, "row 2 holds 4 frames, then blanks"
     out = capsys.readouterr().out
-    assert str(page) in out and "第 2 行" in out and "3.5" in out
+    assert str(page) in out and "第 2 行" in out and "2.2" in out
 
 
 def test_frames_review_needs_measurements_first(tmp_path):

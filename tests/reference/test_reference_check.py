@@ -171,7 +171,7 @@ def test_cut_fixes_replace_the_detector_cuts_everywhere_and_mark_shot_values_rev
         "isolation_window_s": 0.3, "scaled": True, "agent_added": 1, "agent_removed": 2}
 
 
-def test_export_without_fixes_records_the_detector_and_measured_provenance(work_dir, tmp_path):
+def test_export_without_fixes_records_the_detector_and_measured_provenance(work_dir, breakdown, tmp_path):
     out = tmp_path / "out" / "production_reference.json"
 
     assert reference.main(["export", "--work-dir", str(work_dir()), "--out", str(out)]) == 0
@@ -180,6 +180,10 @@ def test_export_without_fixes_records_the_detector_and_measured_provenance(work_
     assert production["profile"]["cuts_per_min"] == {"value": 8.0, "provenance": "measured"}
     assert production["cut_detection"]["soft_score"] == 4.0
     assert production["cut_detection"]["agent_added"] == production["cut_detection"]["agent_removed"] == 0
+    breakdown["labels"]["cut_fixes"] = {}
+    assert reference.main(["export", "--work-dir", str(work_dir(breakdown)), "--out", str(out)]) == 0
+    reviewed = json.loads(out.read_text(encoding="utf-8"))["profile"]["cuts_per_min"]
+    assert reviewed == {"value": 8.0, "provenance": "reviewed"}, "{} means looked at and kept"
 
 
 def test_unreviewed_suppressed_candidates_warn_until_cut_fixes_is_written(breakdown, measurements, asr_segments):
@@ -228,16 +232,28 @@ def test_shared_wording_with_a_fact_names_the_fact_side(breakdown, measurements)
     assert any(e.startswith("R6 methods.m1.rule") and "source_facts" in e for e in errors), errors
 
 
-def test_understanding_index_characters_feed_the_name_scan(work_dir, breakdown, research, tmp_path):
-    _append_rule("，学林婉儿的压迫感")(breakdown, research)
+def test_understanding_index_characters_and_entities_feed_the_name_scan(work_dir, breakdown, research, tmp_path):
+    _append_rule("，学林婉儿在鉴查院的压迫感")(breakdown, research)
     root = work_dir(breakdown, {})
     (root / "understanding_index.json").write_text(json.dumps(
-        {"characters": [{"name": "林婉儿", "aliases": ["郡主"], "asr_mentions": ["婉儿"]}]}, ensure_ascii=False),
-        encoding="utf-8")
+        {"characters": [{"name": "林婉儿", "aliases": ["郡主"], "asr_mentions": ["婉儿"]}],
+         "entities": [{"name": "鉴查院", "evidence_ids": []}]}, ensure_ascii=False), encoding="utf-8")
 
     errors = run_check(root)["errors"]
 
     assert any("R6" in e and "林婉儿" in e for e in errors), errors
+    assert any("R6" in e and "鉴查院" in e for e in errors), errors
+
+
+def test_warns_without_a_name_source_even_when_facts_list_names(breakdown, measurements, asr_segments):
+    evidence = {"status": "AVAILABLE_COARSE"}
+    empty_index = {"characters": [], "entities": []}
+
+    report = check_breakdown(breakdown, measurements, asr_segments=asr_segments, asr_evidence=evidence,
+                             index=empty_index)
+
+    assert breakdown["source_facts"][0]["entities"] == ["范闲"]
+    assert any("fact entities" in w for w in report["warnings"])
 
 
 def test_warns_when_understanding_artifacts_describe_another_video(breakdown, measurements, asr_segments):

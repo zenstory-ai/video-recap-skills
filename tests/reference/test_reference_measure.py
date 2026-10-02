@@ -10,7 +10,7 @@ import pytest
 import lib
 import reference
 import reference_measure
-from reference_measure import detect_cuts, measure, parse_ebur128, parse_scdet, shot_stats
+from reference_measure import detect_cuts, mafd_peaks, measure, parse_ebur128, parse_scdet, shot_stats
 
 requires_ffmpeg = pytest.mark.skipif(
     not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe not available"
@@ -87,6 +87,27 @@ def test_detect_cuts_always_keeps_hard_scores_and_merges_a_cut_spread_over_two_f
     assert review == [[19.8, 20.4]], "two equal soft spikes 0.2 s apart cannot be told apart; the agent looks"
 
 
+def _metadata_log(series):
+    return "".join(f"[Parsed_metadata_2 @ 0x1] frame:{i}    pts:{i * 512}    pts_time:{t:g}\n"
+                   f"[Parsed_metadata_2 @ 0x1] lavfi.scd.mafd={m:.3f}\n" for i, (t, m) in enumerate(series))
+
+
+def test_a_cut_out_of_fast_motion_scores_low_but_its_mafd_peak_goes_to_review():
+    # Real dark hard cut after a fight: scdet score 0.9 (it subtracts the previous mafd), but the
+    # frame differs from the moving shot before it more than any neighbour and the still shot after
+    # it differs far less. A steady pan has no such peak.
+    fight = [(105.92 + 0.04 * i, m) for i, m in enumerate([6.9, 8.6, 12.0, 13.6, 13.4, 13.8])]
+    still = [(106.24 + 0.04 * i, m) for i, m in enumerate([1.1, 1.1, 0.8, 0.7, 0.8, 0.7, 0.6])]
+    pan = [(200.0 + 0.04 * i, 5.0 + 0.1 * (i % 3)) for i in range(20)]
+    log = _metadata_log([*fight, (106.2, 16.7), *still, *pan])
+
+    peaks = mafd_peaks(log, FPS, duration=300.0)
+
+    assert peaks == [[106.2, 16.7]]
+    assert detect_cuts([], FPS, peaks=peaks) == ([], [[106.0, 106.4]])
+    assert detect_cuts([[106.2, 12.0]], FPS, peaks=peaks) == ([106.2], []), "a peak at a cut needs no review"
+
+
 def test_measure_rejects_soft_above_hard():
     with pytest.raises(ValueError):
         measure("missing.mp4", ".", hard=4.0, soft=6.0)
@@ -137,6 +158,7 @@ def test_real_ffmpeg_pass_finds_cuts_shot_stats_and_loudness(tmp_path):
 
     assert payload["settings"]["detector"] == "scdet-isolated-v1"
     assert payload["shots"]["review_windows"] == []
+    assert [round(t, 1) for t, _ in payload["mafd_peaks"]] == [2.0, 2.6], "ffmpeg's metadata log is parsed"
     cuts = payload["shots"]["cuts"]
     assert len(cuts) == 2
     assert cuts[0] == pytest.approx(2.0, abs=0.05) and cuts[1] == pytest.approx(2.6, abs=0.05)

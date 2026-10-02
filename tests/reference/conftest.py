@@ -16,7 +16,7 @@ ASR_TEXT = {0: "他是天下最尊贵的私生子", 10: "你可知道我是谁�
 
 def _measurements():
     return {
-        "schema": "video-reference.measurements.v2",
+        "schema": "video-reference.measurements.v3",
         "source": {"size": 1, "mtime_ns": 1, "duration_s": DURATION,
                    "canvas": {"width": 1280, "height": 720}, "fps": 25.0,
                    "subtitle_streams": 0, "audio_streams": 1},
