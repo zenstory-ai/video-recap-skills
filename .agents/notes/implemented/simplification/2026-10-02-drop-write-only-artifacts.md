@@ -14,7 +14,7 @@ Status: implemented
 
 - video-understanding 删除 `briefing/timeline.py` 的 `_write_deslop_qc_requirements` 和 `briefing/builder.py` 的调用，brief 不再写 `deslop_qc_requirements.json`。
 - video-script 的 `deslop_qc.py` 删除 `_style_card_requirement`；`_style_card_issue` 只产出 advisory（`missing_style_card` / `malformed_style_card`），不再读 requirements 文件。报告删掉 `style_card_required` 和 `style_card_requirement_source` 两个键，其余字段与 blocker 规则（破折号、占位符泄漏）不变。旧 work_dir 里残留的 `deslop_qc_requirements.json` 被忽略。
-- 两份 data-schema 删除 `deslop_qc_requirements.json` 小节；recap 的 `deslop_qc.json` 示例改用 `em_dash` blocker，并把缺少 / 空的 `style_card.json` 写进 advisories。
+- 两份 data-schema 删除 `deslop_qc_requirements.json` 小节；recap data-schema 里 `narration_lint.json` 的 `deslop_qc` 报告示例（单独的 `deslop_qc.json` 已不再写，见 [[2026-10-02-drop-review-scorecard]]）改用 `em_dash` blocker，并把缺少 / 空的 `style_card.json` 写进 advisories。
 - video-cut 删除 `cut_render` 的 `_probe_audio_sample_rate`、`_delivery_reencode_reason`、`update_delivery_qc`、`write_cut_delivery_qc`，以及 `build_edited_source_video` 和 `cut_cli` 里的全部写入与清理点。`clip_plan_validated.json` 不再有 `qc.delivery_qc`，cut 不再写 `cut_delivery_qc.json`。渲染参数（libx264 / yuv420p / AAC 48 kHz / faststart）不变，`edited_source.mp4.meta.json` 的缓存判定不变。
 - `cut_contract` 的两个 normalize 函数不再写 `plan["warning"]`，超时长只由 `update_cut_qc` 的 `target_duration_drift` 表达。
 - `narration_review_override.md` 不在本次范围：video-script SKILL.md 把它定义为设计上只写不读的审计记录。
