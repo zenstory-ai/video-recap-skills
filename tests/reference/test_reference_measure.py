@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import shutil
 import subprocess
 from types import SimpleNamespace
 
@@ -10,6 +11,11 @@ import lib
 import reference
 import reference_measure
 from reference_measure import detect_cuts, measure, parse_ebur128, parse_scdet, shot_stats
+
+requires_ffmpeg = pytest.mark.skipif(
+    not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe not available"
+)
+
 
 SCDET_COLON = """\
 [Parsed_scdet_1 @ 0xb34c0f300] lavfi.scd.score: 15.625, lavfi.scd.time: 2
@@ -113,6 +119,7 @@ def test_curve_scales_the_partial_last_window_by_its_own_length():
     assert stats["curve"]["values"] == [6.0, 6.0, 12.0]
 
 
+@requires_ffmpeg
 def test_real_ffmpeg_pass_finds_cuts_shot_stats_and_loudness(tmp_path):
     video = tmp_path / "three_shots.mkv"
     subprocess.run([

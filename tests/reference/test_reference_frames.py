@@ -1,10 +1,16 @@
 import json
+import shutil
 import subprocess
 
 import pytest
 
 import reference
 from reference_frames import CELL_WIDTH, CELLS, longest_rows, review_rows, span_rows
+
+
+requires_ffmpeg = pytest.mark.skipif(
+    not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg/ffprobe not available"
+)
 
 
 def test_span_rows_put_twelve_cells_per_row_with_their_times():
@@ -60,6 +66,7 @@ def _cell_rgb(page, row, col):
     return tuple(raw[:3])
 
 
+@requires_ffmpeg
 def test_longest_sheet_cells_show_the_frame_at_their_printed_time_not_the_next_shot(tmp_path):
     # A 12 s shot sampled at ~1.07 s steps: nearest-frame sampling filled the last cell (11.9 s)
     # with a frame from after the cut.
@@ -76,6 +83,7 @@ def test_longest_sheet_cells_show_the_frame_at_their_printed_time_not_the_next_s
     assert blue[2] > 200 and blue[0] < 60, f"the first cell of the blue shot (12.1 s) shows {blue}"
 
 
+@requires_ffmpeg
 def test_frames_cli_renders_a_contact_sheet_page_and_prints_the_legend(tmp_path, capsys):
     video = _two_shots(tmp_path)
 
