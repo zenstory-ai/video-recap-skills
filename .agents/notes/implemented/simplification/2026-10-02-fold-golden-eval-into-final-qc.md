@@ -16,7 +16,7 @@ Status: implemented
 
 - `final_qc.py` 删除 `build_golden_eval`、`_load_or_build_final_qc`、`GOLDEN_EVAL_ARTIFACT` / `GOLDEN_STAGE` 以及 CLI 的 `--golden-fixture` / `--only`；`run()` 只写 `final_qc.json`，返回 `{"work_dir", "written": ["final_qc.json"], "final_qc": {ok, blocker_count}}`。`--probe-fixture` 保留，离线测试用它注入 ffprobe 结果。
 - `recap_stage_qc._require_final_qc` 只检查 `final_qc` 摘要（`ok is True` 且整数 `blocker_count == 0`），判定与之前相同；`_print_final_qc_pointer` 只提示 `final_qc.json`。
-- `qc_contract.ARTIFACTS` 只剩 `final_qc.json` / `preflight_qc.json`，`STAGES` 去掉 `golden`；`golden` 与 `golden_eval` 都在拒收的阶段名列表里（`test_stage_names_match_approved_gate_matrix_exactly`）。
+- `qc_contract.ARTIFACTS` 只剩 `final_qc.json` / `preflight_qc.json`，`STAGES` 去掉 `golden`；`golden` 与 `golden_eval` 都在拒收的阶段名列表里（`test_stage_names_match_approved_gate_matrix_exactly`）。（`qc_contract.py` 与 `preflight_qc.json` 随后删除，见 [[2026-10-02-converge-qc-on-final-qc]]。）
 - dashboard 的 `QC_FILES` 去掉「黄金评估」，空状态文案不再提 `golden_eval.json`；旧 work_dir 里残留的 `golden_eval.json` 被忽略（dashboard 夹具里放了一份残留文件锁住这一点）。
 - 测试 `test_final_qc_golden_eval.py` 改名为 `test_final_qc.py`，只保留 final_qc 断言；`run()` 不再写 `golden_eval.json` 由 `test_probe_fixture_success_writes_only_a_valid_final_qc` 锁住。
 - SKILL.md 的 `--require-final-qc` 段、`recap_cli` 帮助文本、`references/shift-left-qc-schema.md`、`references/data-schema.md` 同步只写 `final_qc.json`。

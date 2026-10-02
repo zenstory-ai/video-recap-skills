@@ -82,14 +82,11 @@ def test_local_adoption_route_strict_failure_exits_before_success(
     )
     manifest = {"source_video": str(video), "audio": "audio-id"}
     monkeypatch.setattr(recap_runner, "_write_run_manifest", lambda *_: manifest)
-    monkeypatch.setattr(recap_runner, "begin_local_adoption_qc", lambda *_: None)
     monkeypatch.setattr(recap_runner, "_run", lambda *_: None)
     monkeypatch.setattr(recap_runner, "load_local_assembly_evidence", lambda *_: {})
     monkeypatch.setattr(recap_runner, "owned_local_delivery", lambda *_: None)
     monkeypatch.setattr(recap_runner, "verify_local_assembly_evidence", lambda *_: None)
     monkeypatch.setattr(recap_runner, "_read_assembly_output", lambda *_: final)
-    monkeypatch.setattr(recap_runner, "_post_render_qc_metadata", lambda *_: {})
-    monkeypatch.setattr(recap_runner, "_write_shift_left_stage_qc", lambda *_a, **_k: None)
     monkeypatch.setattr(
         recap_runner, "_write_final_qc_reports", lambda *_: _summary(final=False)
     )
@@ -124,12 +121,9 @@ def test_multi_cut_route_strict_failure_exits_before_success(
         lambda *_: work / "multi_source_manifest.json",
     )
     monkeypatch.setattr(recap_runner, "_reject_stale_multi_manifest", lambda *_: None)
-    monkeypatch.setattr(recap_runner, "begin_non_narration_qc", lambda *_: None)
     monkeypatch.setattr(recap_runner, "_run", lambda *_: None)
     monkeypatch.setattr(recap_runner, "_surface_cut_qc", lambda *_: {"status": "pass"})
-    monkeypatch.setattr(recap_runner, "_write_shift_left_stage_qc", lambda *_a, **_k: None)
     monkeypatch.setattr(recap_runner, "_read_assembly_output", lambda *_: final)
-    monkeypatch.setattr(recap_runner, "_post_render_qc_metadata", lambda *_: {})
     monkeypatch.setattr(
         recap_runner, "_write_final_qc_reports", lambda *_: _summary(final_count=2)
     )

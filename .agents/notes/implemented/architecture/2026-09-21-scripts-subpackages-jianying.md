@@ -55,6 +55,7 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
   `TTS_PROVIDERS` 从 `recap_cli.py` 与 `doctor.py` 两份合为 `lib.py` 一份。`materials.py` 留在顶层：`restore_material` /
   `save_material` / `assign_source_ids` 每次运行都会调用。recap 的 `recap_*` 编排模块不进 `pipeline/`（只换 import 路径，没有减法），
   `qc_contract.py` 不动（`shift-left-qc-schema.md` 按路径引用它）。video-recap 顶层从 22 个降到 16 个。
+  （同日稍后 `qc_contract.py` 与 `shift-left-qc-schema.md` 一起删除，见 [[2026-10-02-converge-qc-on-final-qc]]。）
 
 ## Verification
 

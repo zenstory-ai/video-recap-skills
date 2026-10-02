@@ -49,7 +49,6 @@ def test_full_source_audio_routes_directly_to_assemble_without_tts(
     (work / "tts_meta.json").write_text("not-json", encoding="utf-8")
     overlays = work / "visual_overlays.json"
     overlays.write_text('{"author":"keep"}', encoding="utf-8")
-    (work / "preflight_qc.json").write_text("stale-not-json", encoding="utf-8")
     (work / "narration_review.json").write_text("stale-not-read", encoding="utf-8")
     calls = []
     _finish_stubs(monkeypatch, work, calls)
@@ -69,10 +68,6 @@ def test_full_source_audio_routes_directly_to_assemble_without_tts(
     assert overlays.read_text(encoding="utf-8") == '{"author":"keep"}'
     manifest = json.loads((work / "recap_run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["audio"] == {"mode": audio_mode, "selected_stream_index": 0}
-    stages = json.loads((work / "preflight_qc.json").read_text(encoding="utf-8"))
-    policy = stages["metadata"]["stages"]["pre_assemble"]["metadata"]
-    assert policy["tts"] == "not_applicable"
-    assert policy["narration_review"] == "not_applicable"
 
 
 def test_single_cut_source_audio_uses_existing_plan_but_never_pauses_for_narration(
