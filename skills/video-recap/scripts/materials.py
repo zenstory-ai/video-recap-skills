@@ -16,13 +16,12 @@ written into scenes/ASR/VLM/summary JSON.
 from __future__ import annotations
 
 import json
-import os
 import re
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lib import load_json
+from lib import load_json, material_id_for, source_id_for
 
 # asr_timing_evidence.json stays out on purpose: it binds asr_result.json and audio.wav by
 # {size, mtime_ns}, and a restore rewrites the former (redacted copy) and never copies the
@@ -71,30 +70,6 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
-def file_identity(path: str | Path) -> dict:
-    """``{size, mtime_ns}`` of a file: the identity recap records and compares for a source
-    video or adopted artifact. A file rewritten in place gets a new mtime_ns."""
-    st = os.stat(os.fspath(path))
-    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
-
-
-def _slug(text: str, max_len: int = 48) -> str:
-    raw = Path(text).stem.lower()
-    raw = re.sub(r"[^a-z0-9\u4e00-\u9fff._-]+", "-", raw).strip("-._")
-    return (raw or "material")[:max_len].strip("-._") or "material"
-
-
-def _id_stem(source_path: str | Path, max_len: int = 32) -> str:
-    raw = re.sub(r"[^a-z0-9]+", "-", Path(source_path).stem.lower()).strip("-")
-    return (raw or "source")[:max_len].strip("-") or "source"
-
-
-def source_id_for(source_path: str | Path) -> str:
-    """``src_<stem>_<size>``: readable, stable across runs, and distinct for a different cut
-    of the same title (the size changes)."""
-    return f"src_{_id_stem(source_path)}_{os.stat(os.fspath(source_path)).st_size}"
-
-
 def assign_source_ids(sources: list[dict]) -> list[dict]:
     """Assign deterministic source_id values to manifest source records.
 
@@ -117,10 +92,6 @@ def assign_source_ids(sources: list[dict]) -> list[dict]:
         item["source_path"] = path
         assigned.append(item)
     return assigned
-
-
-def material_id_for(source_path: str | Path, source_identity: dict) -> str:
-    return f"{_slug(str(source_path))}-{source_identity['size']}"
 
 
 def material_dir(library_dir: str | Path, material_id: str) -> Path:

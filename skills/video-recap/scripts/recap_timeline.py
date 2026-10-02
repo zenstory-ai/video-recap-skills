@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from lib import load_json
-from materials import file_identity
+from lib import file_identity
 from recap_runtime import (
     _coerce_videos,
     _entry,

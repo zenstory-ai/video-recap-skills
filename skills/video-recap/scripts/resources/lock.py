@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import library as library_lib
-from materials import file_identity
+from lib import file_identity
 
 LOCK_NAME = "resource_lock.json"
 LOCK_SCHEMA = "video-recap.resource-lock.v1"

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 import recap_runner
-import resource_lock
+import resources.lock as resource_lock
 from _helpers import seed_full_work, stub_child_run
 
 ROOT = Path(__file__).resolve().parents[2]

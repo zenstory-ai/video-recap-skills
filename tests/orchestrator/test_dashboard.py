@@ -13,11 +13,11 @@ from urllib.parse import quote
 
 import pytest
 
-import dashboard_data
-import dashboard_io
-import dashboard_runs
+import dashboard.data as dashboard_data
+import dashboard.io as dashboard_io
+import dashboard.runs as dashboard_runs
 import dashboard_server
-import dashboard_templates
+import dashboard.templates as dashboard_templates
 
 ROOT = Path(__file__).resolve().parents[2]
 EXAMPLE = ROOT / "examples" / "resource-library"

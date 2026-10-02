@@ -12,7 +12,7 @@ PR #126 把 `speech_boundary_anchors_output.json` 的新鲜度判断从内容哈
 
 ## Decision
 
-- recap 多源写入方现在写 `clip_plan_identity: file_identity(work_dir / "clip_plan_validated.json")`（用 recap 自己的 `materials.file_identity`），缺 `pause_start` 的锚点默认 `time - 0.12`，与单源一致。
+- recap 多源写入方现在写 `clip_plan_identity: file_identity(work_dir / "clip_plan_validated.json")`（用 recap 自己的 `lib.file_identity`），缺 `pause_start` 的锚点默认 `time - 0.12`，与单源一致。
 - `cut_cli._write_validated_plan(path, plan, raw_plan_paths)`：文件内容已逐字相同、且不早于任何原始计划（`--clip-plan` 指定的文件与 `work_dir/clip_plan.json`）时不重写。复用路径不再先写一份 `rendered=false` 的中间版本，只在最后写一次；渲染路径保持"先写计划事实、渲染后再写最终版"，渲染失败时磁盘上仍是本次的计划事实。
 - 原始计划被重新保存（即使内容没变）时照常重写，"validated 早于 raw 即过期"的约定不受影响；此时 recap 的 ledger 本来就会要求重写旁白、重建证据。
 - 测试：`tests/orchestrator/test_io_fixes.py` 新增两条参数化用例，经 `_run_multi_cut` 跑第二、第三遍，validate 用真子进程：一条断言 lint 无错误，一条断言半句切入时报 `interrupts_source_sentence`，`suggested_start` 取自 recap 写的锚点。`tests/cut/test_required_evidence_cli.py` 新增真 ffmpeg 用例：续跑后计划文件身份不变，重新保存原始计划后身份改变，且不早于原始计划。

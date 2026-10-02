@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import project_binding
+import resources.project_binding as project_binding
 import recap_runner
 import recap_timeline
 from _helpers import seed_full_work, stub_child_run

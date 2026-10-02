@@ -5,10 +5,11 @@ import os
 from pathlib import Path
 
 import materials as material_lib
-import project_binding
-import resource_lock
+import resources.project_binding as project_binding
+import resources.lock as resource_lock
 
-from recap_cli import TTS_PROVIDERS, parse_args
+from lib import TTS_PROVIDERS, file_identity, material_id_for, source_id_for
+from recap_cli import parse_args
 from recap_review import run_narration_review
 from recap_runtime import (
     _analysis_settings,
@@ -220,14 +221,14 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
 
 def _single_source_record(video, args):
     """Identity + settings for the one source of a single-video run."""
-    identity = material_lib.file_identity(video)
+    identity = file_identity(video)
     return {
-        "source_id": material_lib.source_id_for(video),
+        "source_id": source_id_for(video),
         "source_path": str(video),
         "source_name": video.name,
         "source_video_identity": identity,
         "settings": _analysis_settings(args),
-        "material_id": material_lib.material_id_for(video, identity),
+        "material_id": material_id_for(video, identity),
     }
 
 
@@ -386,7 +387,7 @@ def _run_multi_cut(videos, work_dir, args):
         return
 
     _reject_stale_multi_manifest(work_dir, videos, args, source_records)
-    cp_identity = material_lib.file_identity(clip_plan_json)
+    cp_identity = file_identity(clip_plan_json)
     _render_cut(videos[0], work_dir, args, "--sources-manifest", str(manifest_path))
     if uses_narration(args):
         if not narration_json.exists():
@@ -647,7 +648,7 @@ def _run_single(video, work_dir, args):
     _reject_stale_manifest()
     if not uses_narration(args):
         begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
-    cp_identity = material_lib.file_identity(clip_plan_json)
+    cp_identity = file_identity(clip_plan_json)
     _render_cut(video, work_dir, args)
     if uses_narration(args):
         if not narration_json.exists():

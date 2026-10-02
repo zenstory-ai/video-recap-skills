@@ -11,7 +11,7 @@ Status: implemented
 ## Decision
 
 - 新增 `recap_project.json`（`video-recap.project.v1`）：`library`（相对项目文件）与 `bindings`（`subtitle_style` / `packaging` 模板写 `id@vN`，
-  `voice` / `bgm` 写资源 id）。`recap.py --project <文件或目录>` 在任何阶段开始前由 `scripts/project_binding.py` 解析。
+  `voice` / `bgm` 写资源 id）。`recap.py --project <文件或目录>` 在任何阶段开始前由 `scripts/resources/project_binding.py` 解析（2026-10-02 前在顶层 `scripts/project_binding.py`）。
 - 解析只产出各阶段已有的设置：字幕样式 → `SUBTITLE_PLAY_RES_X/Y`（模板画布）、`SUBTITLE_FONT_SIZE`、`SUBTITLE_OUTLINE`、`SUBTITLE_SHADOW`、颜色、
   `SUBTITLE_MAX_CHARS/LINES`、`band` → 底对齐 + `SUBTITLE_MARGIN_V`、字体 → `SUBTITLE_FONT_NAME`（+ `SUBTITLE_FONT_FILE`）；音色 → provider 与
   `--mimo-tts-voice` / `--voice-ref` / `FISH_TTS_REFERENCE_ID` / `INDEX_TTS_VOICE`；BGM → `BGM_PATH`。写进 recap 进程的环境与参数，子进程照常继承；

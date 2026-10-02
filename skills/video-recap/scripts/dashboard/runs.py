@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import recap_inspect
-from dashboard_io import (RUN_FILE, dir_of, media_entry, nearest, raw_text,
+from dashboard.io import (RUN_FILE, dir_of, media_entry, nearest, raw_text,
                           read_json, read_object, unreadable_reason)
 
 # Files cmd_state parses; each must stay under the JSON cap before it is handed over.

@@ -1,7 +1,7 @@
 """Read-only JSON for the dashboard: overview, libraries, projects, runs and search.
 
-Libraries come from ``library.scan_library``; runs from ``dashboard_runs``; every path in
-and out is root-relative and passes ``dashboard_io.resolve_under``. A broken file becomes a
+Libraries come from ``library.scan_library``; runs from ``dashboard.runs``; every path in
+and out is root-relative and passes ``dashboard.io.resolve_under``. A broken file becomes a
 Chinese message on the card or view that owns it and never aborts the rest of the page.
 """
 from __future__ import annotations
@@ -13,11 +13,11 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 import library
-import project_binding
-from dashboard_io import (LIBRARY_FILE, PROJECT_FILE, RUN_FILE, Refused, dir_of, discover,
+import resources.project_binding as project_binding
+from dashboard.io import (LIBRARY_FILE, PROJECT_FILE, RUN_FILE, Refused, dir_of, discover,
                           media_entry, nearest, read_object, rel_of, resolve_under)
-from dashboard_runs import run_views
-from dashboard_templates import param_rows, template_preview
+from dashboard.runs import run_views
+from dashboard.templates import param_rows, template_preview
 
 ATTENTION_CODES = {"license_unknown", "license_restricted", "consent_unknown", "consent_denied",
                    "changed_since_adoption", "sample_offline"}

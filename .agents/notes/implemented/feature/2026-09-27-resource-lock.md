@@ -12,7 +12,7 @@ Status: implemented
 
 - video-voiceover 在 `tts_meta.json` 增加 `voice`：`{provider, model, voice_id, reference}`，由 `tts_settings_payload()` 的同一份
   设置推出（MiMo 预置音色、参考音频克隆、Fish reference id、index-tts 音色）。旧文件没有该字段时按只知道 `engine` 处理。
-- video-recap 新增 `scripts/resource_lock.py`：full / cut（含本地采用路径）合成完成后、写 post_render QC 之前，从已有产物汇总
+- video-recap 新增 `scripts/resources/lock.py`（2026-10-02 前为顶层 `scripts/resource_lock.py`）：full / cut（含本地采用路径）合成完成后、写 post_render QC 之前，从已有产物汇总
   `source_video` / `voice` / `bgm` / `subtitle_font` 写成 `work_dir/resource_lock.json`（`video-recap.resource-lock.v1`）。
   它只读产物，不改变任何渲染；dub 模式不写。
 - 配置了资源库（`--material-library-dir` / `VIDEO_RECAP_MATERIAL_LIBRARY_DIR`）时，用 `library.scan_library()` 按解析后的文件路径

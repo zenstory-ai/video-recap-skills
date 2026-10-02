@@ -9,6 +9,7 @@ import pytest
 
 import doctor
 import materials as material_lib
+from lib import file_identity
 import recap_review
 import recap_runner as recap
 import recap_runtime
@@ -224,7 +225,7 @@ def test_recap_multi_cut_validate_failure_stops_before_review_tts_and_assemble(
 
 
 def _tools_present(monkeypatch, filters=("subtitles", "ass")):
-    monkeypatch.setattr("doctor._ffmpeg_filters", lambda: set(filters))
+    monkeypatch.setattr("doctor.ffmpeg_filters", lambda: set(filters))
     monkeypatch.setattr(
         "doctor._command_path",
         lambda name: f"/usr/bin/{name}" if name in ("ffmpeg", "ffprobe") else None,
@@ -326,7 +327,7 @@ def test_doctor_reports_default_fish_voice_source(monkeypatch, capsys):
 
 
 def test_doctor_missing_ffmpeg_is_failure(monkeypatch):
-    monkeypatch.setattr("doctor._ffmpeg_filters", lambda: set())
+    monkeypatch.setattr("doctor.ffmpeg_filters", lambda: set())
     monkeypatch.setattr("doctor._command_path", lambda name: None)
     monkeypatch.setitem(doctor.CONFIG, "api_key", "tp-x")
 
@@ -1245,7 +1246,7 @@ def _save_seed_material(tmp_path, video, args, brief):
         lib,
         seed,
         video,
-        material_lib.file_identity(video),
+        file_identity(video),
         recap_runtime._analysis_settings(args),
     )
     return lib
@@ -1558,7 +1559,7 @@ def test_multi_source_cut_output_validate_reads_recap_written_evidence(
     evidence = json.loads(
         (work / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
     )
-    assert evidence["clip_plan_identity"] == material_lib.file_identity(
+    assert evidence["clip_plan_identity"] == file_identity(
         work / "clip_plan_validated.json"
     )
     assert evidence["sentence_anchors"][0]["pause_start"] == 1.88
