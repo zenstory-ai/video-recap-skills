@@ -105,8 +105,8 @@ reports the labels present; it is not an aggregate precision verdict.
 - `attribution.kind` is `source` or `narration`; `ref` identifies the source
   utterance or narration item without changing its text.
 - Unknown fields and schema versions other than integer `1` are rejected, so a
-  newer producer cannot be silently interpreted as v1. Legacy `sha256` /
-  `edit_sha256` binding keys are the one exception: they are ignored.
+  newer producer cannot be silently interpreted as v1. That includes `sha256` /
+  `edit_sha256` binding keys.
 
 ## Independent binding checks
 
@@ -175,12 +175,12 @@ as current facts.
 Actual decoded frame PTS are read before projection. Integer cue ticks and the
 rational timebase are retained until each boundary is resolved to the first
 frame at or after it. `subtitle_track_validation.json` records original ticks,
-resolved frame indexes/PTS, quantization deltas, ASS thresholds, validation
-schema and projector version. SRT and timeline consume resolved frame seconds;
-ASS thresholds are chosen to switch on those same frames despite ASS's 10ms
-clock. A cue with no visible frame, or a boundary that ASS cannot distinguish,
-is rejected rather than silently dropped. The original author file is not
-rewritten. Legacy subtitles keep their previous rendering behavior.
+resolved frame indexes/PTS, quantization deltas and ASS thresholds. SRT and
+timeline consume resolved frame seconds; ASS thresholds are chosen to switch on
+those same frames despite ASS's 10ms clock. A cue with no visible frame, or a
+boundary that ASS cannot distinguish, is rejected rather than silently dropped.
+The original author file is not rewritten. Legacy subtitles keep their previous
+rendering behavior.
 
 Each consumption re-checks the track/media/optional edit plan `{size, mtime_ns}`
 and the consumer duration; a rewritten input is stale and must be prepared

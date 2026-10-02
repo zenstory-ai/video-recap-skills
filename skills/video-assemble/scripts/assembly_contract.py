@@ -8,23 +8,10 @@ import wave
 from pathlib import Path
 
 from lib import CONFIG
-from assemble_constants import (
-    ASSEMBLY_MANIFEST,
-    ASSEMBLY_QC,
-    SEGMENT_AUDIO_SCHEMA_VERSION,
-)
+from assemble_constants import ASSEMBLY_MANIFEST, ASSEMBLY_QC
 from audio_mix import _loudness_mode
 from subtitles.track_binding import manifest_subtitle_evidence
-from artifacts import (
-    _load_work_json,
-    _source_video_identity,
-    _timeline_provenance_status,
-)
-
-_AUDIO_QC_CODES = frozenset({
-    "missing_narration", "skipped_segments", "no_safe_fit", "effective_tempo_exceeded",
-    "empty_narration", "truncated_speech", "unsafe_source_handoff", "timeline_audio_mismatch",
-})
+from artifacts import _source_video_identity, _timeline_provenance_status
 
 
 def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
@@ -32,13 +19,12 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                                audio_mode="narration", audio_stream_index=0,
                                narration_input_binding=None, audio_mix_binding=None):
     """Slim render record. The orchestrator reads `final_output` to report the result;
-    `source_video` stays None unless cut mode explicitly passed --source-video, proving a
-    stale ambient SOURCE_VIDEO never leaked into a full-mode timeline / 剪映 export."""
+    `source_video` is set only when cut mode passed --source-video. QC results live in
+    assembly_qc.json (`qc_path`), not here."""
     input_video = Path(input_video)
     output_path = Path(output_path)
     source_video_identity = _source_video_identity()
     qc_path = Path(work_dir) / ASSEMBLY_QC
-    qc = _load_work_json(work_dir, ASSEMBLY_QC)  # always written by publish_render first
     settings = settings_payload(
         work_dir, audio_mode=audio_mode, audio_stream_index=audio_stream_index
     )
@@ -53,27 +39,14 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
         "selected_audio_stream_index": audio_stream_index,
         "assembly_settings": settings,
         "output_path": str(output_path.resolve()),
-        "segment_audio_schema_version": SEGMENT_AUDIO_SCHEMA_VERSION,
         "qc_path": str(qc_path.resolve()),
-        "qc_verdict": qc["verdict"],
-        "qc_blocking_codes": qc["blocking_codes"],
-        # The settings payload records the configured/fallback loudness policy; these QC
-        # fields record what the just-finished render actually used after the loudnorm probe.
-        "qc_loudness_mode": qc["loudness_mode"],
-        "qc_loudnorm_measurement": qc["loudnorm_measurement"],
-        "audio_operations": qc["audio_operations"],
-        "adopted_audio": qc["adopted_audio"],
         "narration_input_binding": narration_input_binding,
         "audio_mix_binding": audio_mix_binding,
         "audio_segments": [
             {
                 "index": seg["index"],
-                # Informational manifest fields: a tts_meta without the schema marker is v1,
-                # and the loudness measurements are None whenever voiceover skipped
-                # normalization (strict adoption fixtures in tests/orchestrator omit both).
-                "segment_audio_schema_version": seg.get(
-                    "segment_audio_schema_version", SEGMENT_AUDIO_SCHEMA_VERSION
-                ),
+                # The loudness measurements are None whenever voiceover skipped
+                # normalization (strict adoption fixtures in tests/orchestrator omit them).
                 "narration": seg["narration"],
                 "spoken_text": seg["spoken_text"],
                 "truncated": seg["truncated"],
@@ -119,33 +92,6 @@ def _write_assembly_manifest(work_dir, manifest):
     return path
 
 
-def _visual_qc_rollup(visual_qc):
-    subtitles = visual_qc["subtitles"]
-    overlays = visual_qc["overlays"]
-    return {
-        "present": True,
-        "artifact": visual_qc["artifact"],
-        "verdict": visual_qc["verdict"],
-        "blocking": visual_qc["blocking"],
-        "blocking_codes": list(visual_qc["blocking_codes"]),
-        "summary": visual_qc["summary"],
-        "geometry": visual_qc["geometry"],
-        "subtitles": {
-            "entries": subtitles["entries"],
-            "multi_line": subtitles["multi_line"],
-            "overflow": subtitles["overflow"],
-            "safe_area": subtitles["safe_area"],
-        },
-        "mask": visual_qc["mask"],
-        "overlays": {
-            "present": overlays["present"],
-            "rendered": overlays["rendered"],
-            "unsupported": overlays["unsupported"],
-            "overflow": overlays["overflow"],
-        },
-    }
-
-
 def _placed_audio_matches_timeline(seg):
     """True when the persisted per-beat WAV is exactly what the serialized timeline window plays."""
     placed_path = Path(seg["placed_audio_path"])
@@ -188,8 +134,8 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
                        source_audio_status=None):
     """Machine-readable assembly release gate.
 
-    Visual facts are rolled up from visual_qc.json. Delivery/render facts live here
-    (or render/delivery QC in future), never in visual_qc.json.
+    Only visual_qc.json's verdict and blocking codes are carried here; its facts stay in
+    visual_qc.json. Delivery/render facts live here, never in visual_qc.json.
     """
     hard_max = CONFIG["narration_cumulative_tempo_hard_max"]
     segments = tts_segments
@@ -235,12 +181,12 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         blocking_codes.append("timeline_audio_mismatch")
     if placed and max(placed) <= 0.0 and not no_safe:
         blocking_codes.append("empty_narration")
-    visual_rollup = (
-        _visual_qc_rollup(visual_qc)
+    visual_verdict = (
+        {"verdict": visual_qc["verdict"], "blocking_codes": list(visual_qc["blocking_codes"])}
         if visual_qc is not None
-        else {"present": False, "verdict": "NOT_RUN", "blocking": False, "blocking_codes": [], "summary": {}}
+        else {"verdict": "NOT_RUN", "blocking_codes": []}
     )
-    if visual_rollup["blocking"]:
+    if visual_qc is not None and visual_qc["blocking"]:
         blocking_codes.append("visual_qc_failed")
     if source_audio_status is not None:
         source_audio = source_audio_status
@@ -278,13 +224,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         "source_audio": source_audio,
         "loudness_mode": loudness_mode or _loudness_mode(loudnorm_measurement),
         "loudnorm_measurement": loudnorm_measurement,
-        "release_gate": {
-            "verdict": "FAIL" if blocking_codes else "PASS",
-            "visual_qc": visual_rollup["verdict"],
-            "delivery_qc": "PASS",
-            "audio_qc": "FAIL" if _AUDIO_QC_CODES.intersection(blocking_codes) else "PASS",
-        },
-        "visual_qc": visual_rollup,
+        "visual_qc": visual_verdict,
         "delivery_qc": {
             "video_encode_passes": render_delivery["video_encode_passes"],
             "reencode_reason": render_delivery["reencode_reason"],

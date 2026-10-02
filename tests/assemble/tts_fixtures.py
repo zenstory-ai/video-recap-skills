@@ -10,7 +10,6 @@ producer's contract instead of relying on consumer-side defaults.
 def tts_segment(**fields):
     narration = fields.get("narration", "解说")
     segment = {
-        "segment_audio_schema_version": 1,
         "index": 0,
         "start": 0.0,
         "end": 1.0,

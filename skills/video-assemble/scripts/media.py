@@ -4,8 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from artifacts import _explicit_source_video
-from lib import log, run_cmd
+from lib import CONFIG, log, run_cmd
 
 def _load_cut_timeline_plan(work_dir):
     """The cut plan, preferring clip_plan_validated.json unless the raw plan is newer; None in full mode."""
@@ -152,10 +151,10 @@ def _build_video_clips(input_video, work_dir, duration_s):
 
     In cut mode each plan entry becomes a clip referencing the ORIGINAL source
     range. Multi-source validated plans carry per-clip source_path and do not
-    require an explicit ambient --source-video. Without any declared source (full
+    require --source-video. Without any declared source (full
     mode, or cut mode rendered without --source-video) the rendered input is one clip.
     """
-    explicit_source_video = _explicit_source_video()
+    explicit_source_video = CONFIG["source_video"]
     spans = _plan_clip_spans(work_dir)
     multi_source = spans is not None and any(span["entry"].get("source_path") for span in spans)
     if spans is None or not (explicit_source_video or multi_source):

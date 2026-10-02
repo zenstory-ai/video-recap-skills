@@ -57,17 +57,8 @@ def _qc(work):
 def test_manifest_only_references_current_bound_subtitle_track(tmp_path):
     track = tmp_path / "subtitle_track.json"
     track.write_bytes(b"current track")
-    (tmp_path / "subtitle_track_validation.json").write_text(
-        json.dumps({"binding": {"inputs": {"track": {"size": 13, "mtime_ns": 0}}},
-                    "metadata": {"entries": 1}}),
-        encoding="utf-8",
-    )
-    (tmp_path / "assembly_qc.json").write_text(json.dumps({
-        "verdict": "PASS", "blocking_codes": [], "loudness_mode": None,
-        "loudnorm_measurement": None, "audio_operations": {}, "adopted_audio": None,
-    }), encoding="utf-8")
     kwargs = dict(settings_payload=lambda _work, **_: {})
-    with pytest.raises(ValueError, match="version"):
+    with pytest.raises(ValueError, match="prepared against current media"):
         assembly_contract._assembly_manifest_payload(
             tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
         )

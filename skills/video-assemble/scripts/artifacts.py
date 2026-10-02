@@ -18,16 +18,9 @@ def _artifact_identity(path):
     return file_identity(path) if path.exists() else None
 
 
-def _explicit_source_video():
-    """Return the cut-mode source video only when the caller opted in explicitly."""
-    if not CONFIG["source_video_explicit"]:
-        return ""
-    return CONFIG["source_video"]
-
-
 def _source_video_identity():
-    """``{path, size, mtime_ns}`` of the explicit cut-mode source video, else None."""
-    source_video = _explicit_source_video()
+    """``{path, size, mtime_ns}`` of the cut-mode --source-video, else None."""
+    source_video = CONFIG["source_video"]
     if not source_video:
         return None
     path = Path(source_video)
