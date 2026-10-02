@@ -17,11 +17,7 @@ from cut_contract import (
     parse_duration_seconds,
     should_reuse_edited_source,
 )
-from cut_render import (
-    build_edited_source_video,
-    update_delivery_qc,
-    write_cut_delivery_qc,
-)
+from cut_render import build_edited_source_video
 from media_geometry import _has_audio_stream, _select_output_geometry
 from narrative_selection import check_required_evidence
 from narration_mapping import update_cut_qc
@@ -237,8 +233,6 @@ def main():
     )
     if isinstance(raw_plan, dict) and 'required_evidence' in raw_plan:
         # Re-evaluate the final snapped ranges even when the media cache can be reused.
-        # A prior rendered receipt must not survive a failed revision preflight.
-        (work_dir / 'cut_delivery_qc.json').unlink(missing_ok=True)
         contract = raw_plan['required_evidence']
         plan_sources = {str(Path(path).resolve()): path for path in source_paths}
         source_audio = {}
@@ -254,11 +248,6 @@ def main():
         validated_plan['qc']['required_evidence'] = {**report, 'contract': contract}
         if report['selection_status'] == 'BLOCK':
             validated_plan['qc'].setdefault('blocking', []).extend(report['findings'])
-    update_delivery_qc(
-        validated_plan,
-        source_paths=source_paths,
-        output_path=work_dir / "edited_source.mp4",
-    )
     plan_path = work_dir / "clip_plan_validated.json"
     raw_plan_paths = {clip_plan_path, work_dir / "clip_plan.json"}
     edited_source_path = work_dir / "edited_source.mp4"
@@ -268,7 +257,6 @@ def main():
         and should_reuse_edited_source(edited_source_path, validated_plan, args.video)
     )
     if not reuse:
-        # Planned (not yet rendered) facts stay on disk if the render below fails.
         _write_validated_plan(plan_path, validated_plan, raw_plan_paths)
     if validated_plan["qc"].get("blocking"):
         raise SystemExit(
@@ -277,9 +265,6 @@ def main():
             "sentence truncation is never allowed. See clip_plan_validated.json['qc']."
         )
     if args.normalize_only:
-        # normalize-only produces planned delivery facts in clip_plan_validated.json, but no
-        # rendered/reused media exists in this run, so remove any stale final delivery artifact.
-        (work_dir / "cut_delivery_qc.json").unlink(missing_ok=True)
         print(
             json.dumps(
                 {
@@ -294,13 +279,6 @@ def main():
 
     if reuse:
         log(f"复用剪辑源视频: {edited_source_path}")
-        update_delivery_qc(
-            validated_plan,
-            source_paths=source_paths,
-            output_path=edited_source_path,
-            rendered=True,
-        )
-        write_cut_delivery_qc(work_dir, validated_plan)
         _write_edited_source_meta(edited_source_path, validated_plan, args.video)
     else:
         build_edited_source_video(

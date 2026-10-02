@@ -224,42 +224,24 @@ CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解�
 }
 ```
 
-## deslop_qc_requirements.json（工具/brief 生成的运行契约）
-
-`deslop_qc_requirements.json` 是 tool/brief generated run contract：工具或 brief 生成本次运行的 QC 要求，供 `deslop_qc` 读取，不由 Agent 手写。字段为 `schema_version` 与 `style_card_required`。
-
-`style_card_required` 默认 `false`（advisory）：缺少 `style_card.json` 只是 warning，不阻断出片。将来的 opt-in 运行可把它设为 `true`，让 `style_card.json` 成为硬性要求——`deslop_qc` 只读这个字段判断缺少 `style_card.json` 是否是 blocker，不扫描 `agent_narration_brief.md` 的 prompt wording 来推断。如果 requirements 文件缺失或损坏，按 legacy/migration advisory 处理，不作为 hard failure。
-
-该契约不改变 `--style`：`--style` 仍是 freeform verbatim guidance，不增加固定风格档位。它也不改变 `deslop_qc` 边界：仍然是 report-only，不是 AIGC detector，不自动改写。
-
-最小示例：
-
-```json
-{
-  "schema_version": 1,
-  "style_card_required": false
-}
-```
-
 ## narration_lint.json 的 deslop_qc（CLI 生成，报告型 QC）
 
 `narration_lint.json` 的 `deslop_qc` 字段由本地 deterministic scanner 生成，Agent 不手写；不再单独写 `deslop_qc.json`。它只是 report-only QC：不是 AIGC detector，不判断文本是不是 AI 写的，不会自动改写。修改仍由 Agent/人工根据报告回到 `narration.json`、`style_card.json` 或字幕源里处理。
 
 报告分两层：
 
-- `blockers`：客观阻断项，会并入 `narration_lint.json` 的 error，例如 requirements 要求但缺少/损坏 `style_card.json`、破折号、占位符泄漏。
-- `advisories`：建议项，只提示可读性/口语化风险，例如模板化“不是……而是……”转折、套话密度、抽象总结词、解释链、比喻标记、过长段落；它们不自动阻断，也不自动改写。
+- `blockers`：客观阻断项，会并入 `narration_lint.json` 的 error，例如破折号、占位符泄漏。
+- `advisories`：建议项，只提示可读性/口语化风险，例如缺少或空的 `style_card.json`、模板化“不是……而是……”转折、套话密度、抽象总结词、解释链、比喻标记、过长段落；它们不自动阻断，也不自动改写。
 
 ```json
 {
   "ok": false,
   "contract": "Local readability/QC report only: this is not an AIGC detector, does not claim AI-generation accuracy, and never rewrites text. Corrections remain human/agent rewrite work.",
   "scanner": "deslop_qc.py",
-  "style_card_required": true,
   "blocker_count": 1,
   "advisory_count": 1,
   "blockers": [
-    {"severity": "blocker", "code": "missing_style_card", "source": "style_card", "index": null, "message": "style_card.json is required by this expression/packaging run but is missing"}
+    {"severity": "blocker", "code": "em_dash", "source": "narration", "index": 3, "message": "破折号（—/——）不得出现在 narration/original_subtitles 中"}
   ],
   "advisories": [
     {"severity": "advisory", "code": "cliche_density", "source": "narration", "index": null, "message": "套话/高频抽象词偏密，建议换成具体行动、选择和后果"}

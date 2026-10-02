@@ -143,23 +143,6 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 ]
 ```
 
-## deslop_qc_requirements.json（工具/brief 生成的运行契约）
-
-`deslop_qc_requirements.json` 是 tool/brief generated run contract：工具或 brief 生成本次运行的 QC 要求，供 `deslop_qc` 读取，不由 Agent 手写。字段为 `schema_version` 与 `style_card_required`。
-
-`style_card_required` 默认 `false`（advisory）：缺少 `style_card.json` 只是 warning，不阻断出片。将来的 opt-in 运行可把它设为 `true`，让 `style_card.json` 成为硬性要求——`deslop_qc` 只读这个字段判断缺少 `style_card.json` 是否是 blocker，不扫描 `agent_narration_brief.md` 的 prompt wording 来推断。如果 requirements 文件缺失或损坏，按 legacy/migration advisory 处理，不作为 hard failure。
-
-该契约不改变 `--style`：`--style` 仍是 freeform verbatim guidance，不增加固定风格档位。它也不改变 `deslop_qc` 边界：仍然是 report-only，不是 AIGC detector，不自动改写。
-
-最小示例：
-
-```json
-{
-  "schema_version": 1,
-  "style_card_required": false
-}
-```
-
 ## background_research.json
 
 可选的背景调研结果（由 Agent 使用任意可用搜索/浏览方式整理）：

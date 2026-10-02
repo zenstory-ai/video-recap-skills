@@ -1,7 +1,4 @@
-"""Render edited source media and write delivery QC."""
-
-import json
-
+"""Render edited source media."""
 
 from pathlib import Path
 
@@ -41,91 +38,6 @@ def _clip_audio_edge_fades(clips, idx, fade_ms):
         else fade_ms
     )
     return fade_in, fade_out
-
-
-def _probe_audio_sample_rate(video_path):
-    """Sample rate of the first audio stream, or None when it cannot be observed.
-
-    Delivery QC is observational and runs even on a plan that was never rendered, so an
-    ffprobe that is absent (OSError) reads the same as one that reports no audio stream.
-    """
-    cmd = [
-        "ffprobe",
-        "-v",
-        "error",
-        "-select_streams",
-        "a:0",
-        "-show_entries",
-        "stream=sample_rate",
-        "-of",
-        "csv=p=0",
-        str(video_path),
-    ]
-    try:
-        result = run_cmd(cmd)
-    except OSError:
-        return None
-    text = result.stdout.strip()
-    if result.returncode != 0 or not text:
-        return None
-    return int(float(text))
-
-
-def _delivery_reencode_reason(source_paths, clips):
-    reasons = ["trim_concat_filter_requires_reencode"]
-    if len(source_paths) > 1:
-        reasons.append("multi_source_geometry_audio_normalization")
-    if any("source_path" not in clip for clip in clips):
-        reasons.append("single_source_filter_concat_no_stream_copy")
-    return "+".join(reasons)
-
-
-def update_delivery_qc(validated_plan, *, source_paths, output_path=None, rendered=False):
-    """Attach cut delivery facts to qc.delivery_qc without writing visual_qc."""
-    qc = validated_plan["qc"]
-    clips = validated_plan["clips"]
-    target_sample_rate = 48000
-    probed_sample_rate = (
-        _probe_audio_sample_rate(output_path)
-        if output_path and Path(output_path).exists()
-        else None
-    )
-    delivery_qc = {
-        "schema_version": 1,
-        "video_encode_passes": 1,
-        "reencode_reason": _delivery_reencode_reason(source_paths, clips),
-        "stream_copy_risk": {
-            "status": "avoided",
-            "reason": "cut uses trim/concat/filtergraph with explicit libx264/aac encode; no risky stream-copy path",
-        },
-        "audio_sample_rate": {
-            "target": target_sample_rate,
-            "probed": probed_sample_rate,
-        },
-        "final_compat_notes": [
-            "video encoded with libx264/yuv420p-compatible filter path",
-            "audio encoded as AAC with 48000 Hz target for delivery compatibility",
-            "edited_source.mp4 is an intermediate; downstream assembly may perform another intentional encode",
-        ],
-        "output_geometry": qc["output_geometry"],
-        "rendered": rendered,
-        "planned": not rendered,
-    }
-    if probed_sample_rate and probed_sample_rate != target_sample_rate:
-        delivery_qc["final_compat_notes"].append(
-            f"probed audio sample rate {probed_sample_rate} differs from target {target_sample_rate}"
-        )
-    qc["delivery_qc"] = delivery_qc
-    return delivery_qc
-
-
-def write_cut_delivery_qc(work_dir, validated_plan):
-    path = Path(work_dir) / "cut_delivery_qc.json"
-    path.write_text(
-        json.dumps(validated_plan["qc"]["delivery_qc"], ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return path
 
 
 def build_edited_source_video(input_video, validated_plan, work_dir, output_path=None):
@@ -291,13 +203,6 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     if result.returncode != 0:
         raise RuntimeError(f"剪辑源视频失败: {result.stderr}")
 
-    update_delivery_qc(
-        validated_plan,
-        source_paths=source_paths,
-        output_path=output_path,
-        rendered=True,
-    )
-    write_cut_delivery_qc(work_dir, validated_plan)
     _write_edited_source_meta(output_path, validated_plan, input_video)
     duration = get_video_duration(output_path)
     log(f"剪辑源视频: {output_path} ({duration:.1f}s, {len(clips)} clips)")

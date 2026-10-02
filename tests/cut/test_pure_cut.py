@@ -114,11 +114,7 @@ def test_cut_main_normalize_only_writes_validated_plan_without_render(monkeypatc
 
     validated = json.loads((tmp_path / "clip_plan_validated.json").read_text(encoding="utf-8"))
     assert validated["clips"]
-    delivery_qc = validated["qc"]["delivery_qc"]
-    assert delivery_qc["video_encode_passes"] == 1
-    assert delivery_qc["audio_sample_rate"]["target"] == 48000
-    assert delivery_qc["rendered"] is False
-    assert delivery_qc["planned"] is True
+    assert "delivery_qc" not in validated["qc"]
     assert not (tmp_path / "cut_delivery_qc.json").exists()
     assert rendered == []
     assert not (tmp_path / "edited_source.mp4").exists()
@@ -870,27 +866,22 @@ def test_select_output_geometry_qc_exposes_rotation_sar_dar_facts(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_build_edited_source_video_writes_delivery_qc_and_meta_without_visual_qc(monkeypatch, tmp_path):
+def test_build_edited_source_video_writes_meta_without_delivery_or_visual_qc(monkeypatch, tmp_path):
     def probe(cmd):
         joined = " ".join(cmd)
         if "-of json" in joined:
             return CompletedProcess(cmd, 0, stdout=json.dumps({"streams": [{
                 "width": 1280, "height": 720, "r_frame_rate": "30/1", "sample_aspect_ratio": "1:1"}]}), stderr="")
-        if "stream=sample_rate" in joined:
-            return CompletedProcess(cmd, 0, stdout="48000\n", stderr="")
         return CompletedProcess(cmd, 0, stdout="0\n", stderr="")
 
     output, plan, _ = _capture_render(
         monkeypatch, tmp_path, [{"start": 0, "end": 1}, {"start": 2, "end": 3}], 4, probe=probe)
     work_dir = tmp_path / "work"
-    delivery = json.loads((work_dir / "cut_delivery_qc.json").read_text(encoding="utf-8"))
     assert output.exists()
-    assert delivery == plan["qc"]["delivery_qc"]
-    assert delivery["video_encode_passes"] == 1
-    assert delivery["audio_sample_rate"] == {"target": 48000, "probed": 48000}
-    assert "trim_concat_filter_requires_reencode" in delivery["reencode_reason"]
-    assert delivery["stream_copy_risk"]["status"] == "avoided"
-    assert delivery["output_geometry"]["width"] == 1280
+    meta = json.loads(Path(str(output) + ".meta.json").read_text(encoding="utf-8"))
+    assert meta["plan"] == plan["clips"]
+    assert "delivery_qc" not in plan["qc"]
+    assert not (work_dir / "cut_delivery_qc.json").exists()
     assert not (work_dir / "visual_qc.json").exists()
 
 
