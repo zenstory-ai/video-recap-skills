@@ -6,46 +6,31 @@ from pathlib import Path
 
 from lib import CONFIG, log, run_cmd
 
-def _load_cut_timeline_plan(work_dir):
-    """The cut plan, preferring clip_plan_validated.json unless the raw plan is newer; None in full mode."""
-    raw_plan_path = Path(work_dir) / "clip_plan.json"
-    validated_plan_path = Path(work_dir) / "clip_plan_validated.json"
-    if not validated_plan_path.exists():
-        return json.loads(raw_plan_path.read_text(encoding="utf-8")) if raw_plan_path.exists() else None
-    if not raw_plan_path.exists():
-        return json.loads(validated_plan_path.read_text(encoding="utf-8"))
-    if validated_plan_path.stat().st_mtime_ns >= raw_plan_path.stat().st_mtime_ns:
-        return json.loads(validated_plan_path.read_text(encoding="utf-8"))
-    return json.loads(raw_plan_path.read_text(encoding="utf-8"))
-
-
 def _plan_clip_spans(work_dir):
     """Cut-mode clip spans [{source_start, source_end, output_start, output_end, entry}], or None.
 
-    clip_plan.json is either a bare list or {"clips": [...]}; a clip names its source range as
-    source_start/source_end or start/end. Clips without explicit output_start/output_end are laid
-    out back to back on the output timeline.
+    Read only clip_plan_validated.json: edited_source.mp4 was rendered from it, and its clips
+    carry explicit source/output spans. Without it this is full mode (None = identity mapping).
+    A validated plan older than clip_plan.json no longer describes the picture, so it fails.
     """
-    plan = _load_cut_timeline_plan(work_dir)
-    if plan is None:
+    work_dir = Path(work_dir)
+    validated_path = work_dir / "clip_plan_validated.json"
+    if not validated_path.exists():
         return None
-    entries = plan["clips"] if isinstance(plan, dict) else plan
-    spans, cursor = [], 0.0
-    for entry in entries:
-        ss = float(entry.get("source_start", entry.get("start")))
-        se = float(entry.get("source_end", entry.get("end")))
-        if "output_start" in entry:
-            out_s, out_e = float(entry["output_start"]), float(entry["output_end"])
-            cursor = max(cursor, out_e)
-        else:
-            out_s, out_e = cursor, cursor + (se - ss)
-            cursor = out_e
-        spans.append({
-            "source_start": ss, "source_end": se,
-            "output_start": out_s, "output_end": out_e,
+    raw_path = work_dir / "clip_plan.json"
+    if raw_path.exists() and validated_path.stat().st_mtime_ns < raw_path.stat().st_mtime_ns:
+        raise ValueError(
+            "clip_plan.json 在剪辑之后被修改，clip_plan_validated.json 已过期；请先重新剪辑再组装"
+        )
+    plan = json.loads(validated_path.read_text(encoding="utf-8"))
+    return [
+        {
+            "source_start": float(entry["source_start"]), "source_end": float(entry["source_end"]),
+            "output_start": float(entry["output_start"]), "output_end": float(entry["output_end"]),
             "entry": entry,
-        })
-    return spans
+        }
+        for entry in plan["clips"]
+    ]
 
 
 def _ratio_to_float(value, default=1.0):

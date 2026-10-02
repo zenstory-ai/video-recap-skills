@@ -22,6 +22,8 @@ All notable changes to this project are documented here.
 - **素材库按 `material_id` 直接恢复。** recap 把保存时用的 `material_id` 传给恢复，不再扫描 `materials/*/material.json` 按源路径查找；手工改过名的素材目录因此不会再被找到，需改回原名或重新沉淀。素材白名单去掉从未有生产者的 `reference_profile.json` / `reference_match_report.json`。
 - **剪映导出只接受 `schema_version: 2` 的 `timeline.json`。** v0.4.0 起流水线就只写 v2；0.3 时代的 v1 时间线不再静默迁移，`export_jianying.py` 直接报 `unsupported timeline schema_version 1`，把版本号改成 2 即可导出。
 - **`subtitle_track.json` 的 binding 不再容忍 `sha256` / `edit_sha256`。** 这两个摘要键按未知字段拒绝（`unknown field(s)`），删掉即可；没有任何已发布版本写过带这两个键的字幕轨。
+- **assemble 的时间线溯源只认 `clip_plan_validated.json`。** `clip_plan.json` 比它新（改了计划却没重新剪）时，assemble 在渲染前报 `clip_plan_validated.json 已过期`，不再改用原始计划拼出与画面不符的 `timeline.json` 和重映射字幕；重新剪辑即可。没有 validated 计划时按整片处理，散落的 `clip_plan.json` 不再参与字幕重映射。
+- **voiceover 的参考音频每次运行只转码一次，并按参数传给各段。** 有段落需要合成时才转码，全部命中缓存的重跑仍不调用 ffmpeg；配音期间参考音频被改动会报 `参考音频在配音期间被修改`，不再静默沿用旧快照。`tts_meta.json` 与 TTS 段缓存键不变。
 
 ### Removed
 
@@ -37,6 +39,8 @@ All notable changes to this project are documented here.
 - **删除 assemble 的独立命令 `pair_media.py` 与 `compose_foreground.py`。** 两者只能手写计划 JSON 单独调用，编排器从不调用：前者把独立画面与已采用音轨按流复制配对成 `paired.mp4`，后者把调用方渲染的 RGBA 序列（可选片尾卡）叠到锁定母版。对应的 `references/pair-media.md`、`references/foreground-compose.md` 一并删除；动画或透明包装改由项目级渲染器自己合成到锁定母版，整片不动的包装继续用 `packaging_layers.json`。`--audio-mode adopted-packet-copy` 与显式混音用到的画面帧钟、AAC 包区间检查移入 `scripts/adoption/av_clock.py`，判定不变，只是三条报错不再以 “Pairing” 开头。脚本净少约 400 行、测试少约 715 行。
 - **删除走不到的 ducking 模式与 `tts_dynamic_params` 开关。** video-assemble 的混音只保留默认的 fixed 包络：`sidechaincompress` / `none` 两种模式以及 `ducking_mode`、`ducking_threshold` / `ducking_ratio` / `ducking_attack` / `ducking_release` / `ducking_level_sc` / `ducking_makeup` 配置键删除（它们没有任何环境变量或参数能打开），`assembly_manifest.json` 的 `assembly_settings.audio_mix` 不再写这七个键。video-voiceover 删除恒为开启的 `tts_dynamic_params`，MiMo 与 Fish 段落总是按内容计算语速/音高。渲染结果不变；TTS 段缓存的设置载荷少了这个键，已有 work_dir 重跑时会重新合成一次 TTS。
 - **assemble 产物不再镜像 QC 结论，删掉无效的 `SOURCE_VIDEO`。** `assembly_manifest.json` 去掉从 `assembly_qc.json` 抄来的 `qc_verdict` / `qc_blocking_codes` / `qc_loudness_mode` / `qc_loudnorm_measurement` / `audio_operations` / `adopted_audio`（`qc_path` 仍指向它），以及顶层和每段的 `segment_audio_schema_version`；`assembly_qc.json` 去掉恒等的 `release_gate` 块，`visual_qc` 只保留 `verdict` 与 `blocking_codes`，视觉细节请读 `visual_qc.json`。`subtitle_track_validation.json` 不再写 `validation_schema` / `projector_version`。环境变量 `SOURCE_VIDEO` 不再被读取（`assemble.py` 一直用 `--source-video` 覆盖它）。QC 判定、渲染结果和缓存都不变；仓库内没有读这些字段的代码。
+- **删除 19 个未文档化的调参环境变量和旧版旁白入场延迟。** video-assemble 不再读取 `FADE_MS`、`DUCKING_ORIG_VOLUME`、`TARGET_TRUE_PEAK`、`TARGET_LRA`、`FINAL_LIMITER_PEAK`、`NARRATION_RUN_GAP_SECONDS`、`NARRATION_TIGHT_PAUSE_SECONDS`、`NARRATION_MAX_PULL_SECONDS`、`SUBTITLE_MARGIN_L`、`SUBTITLE_MARGIN_R`、`NARRATION_TIGHTEN`、`NARRATION_DELAY_SECONDS`；video-voiceover 不再读取 `MIMO_TTS_STYLE`、`TTS_SEGMENT_NORMALIZE`、`TTS_SEGMENT_TARGET_RMS_DBFS`、`TTS_SEGMENT_PEAK_LIMIT`；两者都不再读取 `NARRATION_CUMULATIVE_TEMPO_MAX`、`NARRATION_CUMULATIVE_TEMPO_HARD_MAX`、`TTS_SEGMENT_TEMPO_MAX`。它们的默认值成为固定值，设置后不再生效；`NARRATION_TIGHTEN=0` 的按 slot 锚定放置和 `NARRATION_DELAY_SECONDS` 的隐藏入场延迟随之删除，段落起点一律严格采用作者写的 `start`。`assembly_manifest.json` 的 `assembly_settings.narration_timing` 不再写 `delay_seconds` / `tail_pad_seconds`。`SUBTITLE_ORIGINAL_IN_GAPS` 等文档列出的变量不变；默认渲染结果与 TTS 缓存都不变。
+- **删除 `dub.py` 的 `--asr-window` / `--ref-start` / `--ref-dur`。** 传入即报 unrecognized arguments；ASR 窗口 6 秒、克隆参考从第 2 秒取 10 秒的默认值不变。
 
 ### Fixed
 

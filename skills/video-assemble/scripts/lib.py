@@ -52,12 +52,9 @@ _foreign_source_audio = env_bool("FOREIGN_SOURCE_AUDIO", False)
 _foreign_under_narration_volume = 0.05  # original volume under narration when source audio is foreign
 
 CONFIG = {
-    "fade_ms": env_int("FADE_MS", 120, minimum=0),  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
+    "fade_ms": 120,  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
     "ducking_narr_weight": 1.5,
-    "ducking_orig_volume": env_float("DUCKING_ORIG_VOLUME", 0.3, minimum=0.0),  # 解说时原声基准音量
-    # Derived report of the FOREIGN_SOURCE_AUDIO knob this skill implements: it selects the
-    # ducking volumes below. Declared so callers can see which policy is in effect.
-    "foreign_source_audio": _foreign_source_audio,
+    "ducking_orig_volume": 0.3,  # 解说时原声基准音量；仅在 beat 无放置信息时兜底
     "zone_ducking_volume": env_float("ZONE_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.12, minimum=0.0),  # 解说时原声压低到的音量
     "idle_orig_volume": env_float("IDLE_ORIG_VOLUME", 1.0, minimum=0.0),  # 解说块之间的"原声块"音量：默认满音量(1.0)，让精彩原声整段放出来，不被压低（用户要求解说成块、原声也成块）
@@ -71,9 +68,9 @@ CONFIG = {
     "bgm_volume": env_float("BGM_VOLUME", 0.18, minimum=0.0),  # BGM 铺底音量
     "bgm_ducking_volume": env_float("BGM_DUCKING_VOLUME", 0.10, minimum=0.0),  # 旁白时 BGM 压低到的音量
     "narration_speed": env_float("NARRATION_SPEED", 1.15, minimum=0.5),  # 解说整体提速(atempo)，默认回到可懂区间；长片可设 1.0
-    "narration_cumulative_tempo_max": env_float("NARRATION_CUMULATIVE_TEMPO_MAX", 1.35, minimum=1.0),  # TTS rate × 全局 atempo × 段内 atempo 的累计上限
-    "narration_cumulative_tempo_hard_max": env_float("NARRATION_CUMULATIVE_TEMPO_HARD_MAX", 1.40, minimum=1.0),  # QC/阻断硬上限
-    "tts_segment_tempo_max": env_float("TTS_SEGMENT_TEMPO_MAX", 1.20, minimum=1.0),  # 兼容旧段内 atempo 上限；实际会被累计预算收紧
+    "narration_cumulative_tempo_max": 1.35,  # TTS rate × 全局 atempo × 段内 atempo 的累计上限
+    "narration_cumulative_tempo_hard_max": 1.40,  # QC/阻断硬上限
+    "tts_segment_tempo_max": 1.20,  # 兼容旧段内 atempo 上限；实际会被累计预算收紧
     "mask_source_subtitles": env_bool("MASK_SOURCE_SUBTITLES", False),  # 遮挡原片烧录字幕；必须配合显式 SOURCE_SUBTITLE_MASK_POLICY
     "source_subtitle_mask_policy_declared": bool(os.environ.get("SOURCE_SUBTITLE_MASK_POLICY", "").strip()),
     "source_subtitle_mask_policy": (
@@ -86,12 +83,10 @@ CONFIG = {
     "subtitle_mask_padding": env_int("SUBTITLE_MASK_PADDING", 4, minimum=0),
     "subtitle_y_top": env_int("SUBTITLE_Y_TOP", -1, minimum=-1),  # 自动旋转后的显示画布坐标；top/bot 同时有效时贴合原字幕带
     "subtitle_y_bot": env_int("SUBTITLE_Y_BOT", -1, minimum=-1),
-    "narration_delay_seconds": env_float("NARRATION_DELAY_SECONDS", 0.0, minimum=0.0),  # 默认严格采用 Agent 写入的 start；旧项目可显式恢复延迟
-    "narration_tighten": env_bool("NARRATION_TIGHTEN", True),  # 段落内把句子紧贴上一句实际收尾播放，句间间隔稳定≤tight_pause，杜绝"一句解说一段空白"的卡顿
-    "narration_run_gap_seconds": env_float("NARRATION_RUN_GAP_SECONDS", 1.6, minimum=0.0),  # 作者留白超过此值=新段落（让精彩原声透出）；小于则视为同一连续段落
-    "narration_tight_pause_seconds": env_float("NARRATION_TIGHT_PAUSE_SECONDS", 0.35, minimum=0.0),  # 段落内句间固定间隔(秒)
-    "narration_max_pull_seconds": env_float("NARRATION_MAX_PULL_SECONDS", 1.2, minimum=0.0),  # 收紧时一句最多比作者标注提前的秒数（漂移上限，越小越贴画面）
-    "narration_tail_pad_seconds": 0.1,  # 解说尾部最少留白；短 slot 会自动压低 delay 避免截断
+    # 段落内把句子紧贴上一句实际收尾播放，句间间隔稳定≤tight_pause，杜绝"一句解说一段空白"的卡顿
+    "narration_run_gap_seconds": 1.6,  # 作者留白超过此值=新段落（让精彩原声透出）；小于则视为同一连续段落
+    "narration_tight_pause_seconds": 0.35,  # 段落内句间固定间隔(秒)
+    "narration_max_pull_seconds": 1.2,  # 收紧时一句最多比作者标注提前的秒数（漂移上限，越小越贴画面）
     "quiet_overlap_min_ratio": 0.8,  # 解说段至少多少比例落在安静窗口内才标记为非对白重叠
     "speech_ducking_volume": env_float("SPEECH_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.2, minimum=0.0),    # 解说与对白重叠时原声音量
@@ -105,9 +100,9 @@ CONFIG = {
     # 成片末端整体响度归一（默认混音偏轻，归一后更接近常见短视频响度；样片约 -11.9，默认取更安全的 -14）
     "final_loudnorm": env_bool("FINAL_LOUDNORM", True),  # 组装末端做一次整体响度归一
     "target_lufs": env_float("TARGET_LUFS", -14.0),       # 目标综合响度 (LUFS)
-    "target_true_peak": env_float("TARGET_TRUE_PEAK", -1.0),  # 目标真峰值 (dBTP)
-    "target_lra": env_float("TARGET_LRA", 11.0),          # 目标响度范围 (LU)
-    "final_limiter_peak": env_float("FINAL_LIMITER_PEAK", 0.98, minimum=0.1),  # loudnorm 后峰值保护 limiter
+    "target_true_peak": -1.0,  # 目标真峰值 (dBTP)
+    "target_lra": 11.0,          # 目标响度范围 (LU)
+    "final_limiter_peak": 0.98,  # loudnorm 后峰值保护 limiter
     "subtitle_font_name": os.environ.get("SUBTITLE_FONT_NAME", "Arial"),
     # 可选字体文件：ASS 烧录经 fontsdir 加载，画面文字经 drawtext fontfile 使用；family 名仍由 SUBTITLE_FONT_NAME 指定
     "subtitle_font_file": os.environ.get("SUBTITLE_FONT_FILE", "").strip(),
@@ -117,8 +112,8 @@ CONFIG = {
     "subtitle_outline": env_float("SUBTITLE_OUTLINE", 2.0, minimum=0.0),
     "subtitle_shadow": env_float("SUBTITLE_SHADOW", 1.0, minimum=0.0),
     "subtitle_margin_v": env_int("SUBTITLE_MARGIN_V", 48, minimum=0),
-    "subtitle_margin_l": env_int("SUBTITLE_MARGIN_L", 40, minimum=0),
-    "subtitle_margin_r": env_int("SUBTITLE_MARGIN_R", 40, minimum=0),
+    "subtitle_margin_l": 40,
+    "subtitle_margin_r": 40,
     "subtitle_alignment": env_int("SUBTITLE_ALIGNMENT", 2, minimum=1),
     "subtitle_max_chars": env_int("SUBTITLE_MAX_CHARS", 20, minimum=6),
     "subtitle_max_lines": env_int("SUBTITLE_MAX_LINES", 2, minimum=1),

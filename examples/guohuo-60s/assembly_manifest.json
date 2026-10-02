@@ -32,8 +32,6 @@
       }
     },
     "narration_timing": {
-      "delay_seconds": 0.0,
-      "tail_pad_seconds": 0.1,
       "fade_ms": 120,
       "narration_speed": 1.1,
       "narration_cumulative_tempo_max": 1.35,

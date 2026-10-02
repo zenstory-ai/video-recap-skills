@@ -75,6 +75,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         audio_mode != "narration" or narration_adoption_path is None or tts_meta_path is None
     ):
         raise RuntimeError("audio mix adoption 要求 narration 模式及显式 narration adoption/tts_meta")
+    media._plan_clip_spans(work_dir)  # a stale cut plan fails here, not after the render
 
     published_output = Path(output_path)
     if audio_mix_adoption_path is not None and published_output.exists():
