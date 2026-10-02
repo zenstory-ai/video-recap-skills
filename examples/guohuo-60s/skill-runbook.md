@@ -63,10 +63,11 @@
 
 1. 把新 placed audio 对齐得到的 cue 写入 Remotion `captions.json`。
 2. 抽检开头、亮背景、暗背景、人物近景和最长字幕。
-3. 渲染完整透明层并叠到锁定母版。
+3. 渲染完整透明层，由本项目自己叠到锁定母版。
 4. 包装合成时 stream-copy 已通过的音频；复核字幕边界、片名安全区和花字信息增量。
 
-这是 `video-assemble` Skill 的可选包装路径，Remotion 是本案例的实现。
+这是 `video-assemble` Skill 的可选包装路径，Remotion 是本案例的项目级实现；渲染与合成都在项目里完成，
+`video-assemble` 只负责锁定母版，不提供逐帧前景合成命令。
 
 ### 6. REVISION：看片反馈后 conform / 再剪
 

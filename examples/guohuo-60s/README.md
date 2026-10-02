@@ -61,7 +61,7 @@ video-understanding
 
 案例首选字体是 `Hannotate SC`（字幕）和 `Xingkai SC`（片名/花字），源码包含系统字体 fallback。不同平台字体指标会改变视觉结果，正式交付前应在目标机器抽检长字幕、亮背景、暗背景和人物近景。
 
-Agent 按 [`skill-runbook.md`](skill-runbook.md) 走到 `video-assemble` 的可选包装阶段后，在该目录安装锁定依赖、渲染透明 PNG 序列并叠到音画锁定母版；音轨从母版 stream-copy，避免包装步骤意外改变音频。
+Agent 按 [`skill-runbook.md`](skill-runbook.md) 走到 `video-assemble` 的可选包装阶段后，在该目录安装锁定依赖、渲染透明 PNG 序列，再由本项目自己把它叠到音画锁定母版（`video-assemble` 不提供逐帧前景合成命令）；音轨从母版 stream-copy，避免包装步骤意外改变音频。
 
 ## REVISION：最终接点修复
 

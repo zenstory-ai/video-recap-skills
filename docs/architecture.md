@@ -26,7 +26,7 @@ video-understanding ─▶ Agent 按 video-script 写计划与旁白 ─▶ [vid
 | video-script | 创作方法与产物格式；旁白确定性校验；建议型评审 | `validate.py`、`review.py` | — |
 | video-cut | 按 `clip_plan.json` 渲染 `edited_source.mp4` 与 `clip_plan_validated.json`；修短残镜复核 | `cut.py`、`shot_review.py` | — |
 | video-voiceover | 旁白 TTS（MiMo / Fish Audio / index-tts）与英译中克隆配音 | `voiceover.py`、`dub.py` | `providers/` |
-| video-assemble | 混音、字幕、渲染、`timeline.json`、组装 QC、剪映导出、严格采用路径 | `assemble.py`、`export_jianying.py`、`pair_media.py`、`source_score.py`、`compose_foreground.py` | `subtitles/`、`adoption/`、`jianying/` |
+| video-assemble | 混音、字幕、渲染、`timeline.json`、组装 QC、剪映导出、严格采用路径 | `assemble.py`、`export_jianying.py`、`source_score.py` | `subtitles/`、`adoption/`、`jianying/` |
 | video-recap | 编排、断点续跑、素材库与资源库、成片 QC、只读 dashboard | `recap.py`、`recap_inspect.py`、`library.py`、`dashboard_server.py`、`doctor.py`、`final_qc.py` | `dashboard/`、`resources/` |
 
 功能子包的划分规则见 `architecture/2026-09-21-scripts-subpackages-jianying.md` 与

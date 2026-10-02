@@ -96,9 +96,9 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 ## 7. 字幕与可选包装
 
 先锁定画面、剪点、旁白和混音，再投入字幕动画或边框包装；字幕样式不能掩盖叙事、剪点或声音问题。
-普通交付优先使用现有 ASS 路径；只有用户需要逐 cue 排版、动画或透明图层时，才用项目级代码渲染器，
-并按 `references/foreground-compose.md` 把它生成的 RGBA 序列叠到锁定母版。包装顺序与样帧抽检清单见
-`references/packaging.md`。
+普通交付优先使用现有 ASS 路径；整片不动的包框、标题条和角标用 `packaging_layers.json` 静态叠加；
+只有用户需要逐 cue 排版、动画或透明图层时，才用项目级代码渲染器，由该项目自己把透明层合成到锁定母版。
+包装顺序与样帧抽检清单见 `references/packaging.md`。
 
 ## 8. 能力边界
 
@@ -106,7 +106,3 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 字幕烧录默认开启；关闭时不会重编码绘制字幕区域。
 
 显式输出轴字幕轨的独立合同、完整替换语义和当前边界见 `references/subtitle-track.md`。
-
-画面回原片重建后，若需保留另一文件中的已采用完整混音，先按
-`references/pair-media.md` 显式配对独立画面与音轨。配对只复制流，不补字幕或片名卡；
-后续字幕轨必须重新绑定配对后的容器与 `a:0`，不能继续沿用旧版本身份。

@@ -10,11 +10,11 @@ import assembly_contract
 import assembly_settings
 import audio_mix
 import adoption.audio_mix_binding as audio_mix_binding
+import adoption.av_clock as av_clock
 import adoption.frozen_audio as frozen_audio
 import media
 import narration_audio
 import adoption.narration_binding as narration_binding
-import pair_media
 import render_preflight
 import adoption.strict_publish as strict_publish
 import subtitles.render as subtitle_render
@@ -381,7 +381,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             adopted_audio = frozen_audio.verify_adopted_audio(
                 input_video, output_path, audio_stream_index
             )
-            pair_media.validate_aac_packet_interval(adopted_audio["output"])
+            av_clock.validate_aac_packet_interval(adopted_audio["output"])
         except (RuntimeError, ValueError):
             output_path.unlink(missing_ok=True)
             raise

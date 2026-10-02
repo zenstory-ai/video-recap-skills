@@ -15,9 +15,10 @@ speech_ownership / timeline_fusion`）名字相近却归属不同。
 
 - 按需适配不拆成独立 skill，留在拥有其产物契约的 skill 内，用子包标出边界
   （子包机制见 [[2026-09-21-scripts-subpackages-jianying]]）：
-  - `video-assemble/scripts/adoption/{narration_binding,audio_mix_binding,strict_inputs,strict_publish,frozen_audio}.py`。
-    `source_score.py`、`pair_media.py`、`compose_foreground.py` 有 `__main__` 且被 SKILL.md / references 点名，
-    留在顶层作入口；`frozen_audio` 只服务 adoption 家族与 adopted 模式的字幕轨，一并进包。
+  - `video-assemble/scripts/adoption/{narration_binding,audio_mix_binding,strict_inputs,strict_publish,frozen_audio,av_clock}.py`。
+    `source_score.py` 有 `__main__` 且被 SKILL.md / references 点名，留在顶层作入口；`frozen_audio` 只服务 adoption
+    家族与 adopted 模式的字幕轨，一并进包。原先同为顶层入口的 `pair_media.py`、`compose_foreground.py` 已删除，
+    它们的画面帧钟 / AAC 包区间 helper 移入 `adoption/av_clock.py`，见 [[2026-10-02-drop-pair-media-compose-foreground]]。
   - `video-understanding/scripts/briefing/{builder,context,inputs,timeline}.py`
     （原 `agent_brief / brief_context / brief_inputs / brief_timeline`）；入口 `brief.py` 与 `agent_text`、`timeline_fusion` 留在顶层。
 - 顶层保留的模块就是"每次成片都会经过"的核心与公开入口；子包名即功能族名。
