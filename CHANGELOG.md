@@ -25,6 +25,7 @@ All notable changes to this project are documented here.
 - **assemble 的时间线溯源只认 `clip_plan_validated.json`。** `clip_plan.json` 比它新（改了计划却没重新剪）时，assemble 在渲染前报 `clip_plan_validated.json 已过期`，不再改用原始计划拼出与画面不符的 `timeline.json` 和重映射字幕；重新剪辑即可。没有 validated 计划时按整片处理，散落的 `clip_plan.json` 不再参与字幕重映射。
 - **voiceover 的参考音频每次运行只转码一次，并按参数传给各段。** 有段落需要合成时才转码，全部命中缓存的重跑仍不调用 ffmpeg；配音期间参考音频被改动会报 `参考音频在配音期间被修改`，不再静默沿用旧快照。`tts_meta.json` 与 TTS 段缓存键不变。
 - **cut 与 understanding 收掉只为测试存在的门面。** `cut.py` 只导出 `main`，video-understanding 删除再导出用的 `brief.py`，`narration_mapping.py` 改名 `cut_qc.py`；进程内导入这些名字的脚本需改从所属模块导入。cut 计划里源区间重叠的报错结尾改为 `split or remove duplicate source footage in the clip plan`。命令行、参数与产物不变。
+- **ASR 缓存缺少 `asr_timing_evidence.json` 时重跑 ASR。** video-understanding 删除 `LEGACY_UNVERIFIED` 状态：sidecar 被删掉、或重跑 ASR 时被 Ctrl-C 中断的 work_dir 不再离线复用旧转写，旧版本写下的 `LEGACY_UNVERIFIED` sidecar 也视为未命中。VLM prompt 模板缺失时直接报错，不再静默换用一份已过时的两段式兜底 prompt。
 
 ### Removed
 
@@ -50,6 +51,7 @@ All notable changes to this project are documented here.
 - **多视频 cut 的旁白校验不再以 `KeyError` 崩溃。** recap 写的多源 `speech_boundary_anchors_output.json` 现在带 `clip_plan_identity`；源锚点缺 `pause_start` 时与单源一样按 `time − 0.12` 处理。
 - **Windows 上经管道运行 recap 时，阶段脚本不再因中文日志崩溃。** recap 调用各阶段脚本时设置 `PYTHONIOENCODING=utf-8`；此前 stdout 被管道捕获（Agent 宿主、CI）时子进程默认 cp1252，第一行中文日志就抛 `UnicodeEncodeError`。
 - **旧 work_dir 里损坏的 `preflight_qc.json` 不再让 narration 运行在解说评审之后崩溃。** 账本删除后不再读取它。
+- **`MIMO_VIDEO_API_KEY` 被拒（401）时报错点名它本身**，不再让用户去检查 `MIMO_API_KEY`。
 - **素材库保存并恢复 `consolidation.status.json`。** 从素材库恢复的 work_dir 重建 brief 时，仍会提示 consolidate 失败或缺索引。
 - **cut 终轮先判断解说是否过期，再重剪。** `clip_plan.json` 在写稿后改过时，单视频与多视频 cut 现在在调用 `cut.py` 之前就以"clip_plan.json 已改变"退出，不再先重新归一化、吸附、甚至重编码 `edited_source.mp4` 之后才报错。
 - **参考文档去掉不存在的选项与环境变量。** `data-schema.md` 不再提 `--step script`，`config-playbook.md` 删除把写死常量 `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` 当成环境变量的一行。

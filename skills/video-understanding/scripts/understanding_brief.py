@@ -143,17 +143,39 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
     if CONFIG["mimo_video_overview"]:
         scenes = _merge_overview_into_scenes(scenes, overview_path)
 
+    _finish_brief(
+        video, work_dir, args, video_duration,
+        storyboard_scenes=scenes, brief_scenes=scenes,
+        asr_result=asr_result, silence_periods=silence_periods,
+        status="brief_only", done_label="brief-only 完成", force=False,
+    )
+
+
+def _finish_brief(
+    video, work_dir, args, video_duration, *, storyboard_scenes, brief_scenes,
+    asr_result, silence_periods, status, done_label, force,
+):
+    """Storyboards, substrate banner, writing brief and the JSON status line.
+
+    Shared by the full analysis run and --brief-only. The full run passes the detected
+    scenes to the storyboard and the VLM analysis to the brief; --brief-only has only the
+    VLM analysis, so it passes that for both.
+    """
+    work_dir = Path(work_dir)
+    # Storyboard contact sheets (advisory, never blocking). Source uses scene anchors over the
+    # source timeline; edited is gated on clip_plan_validated.json file-presence (NOT edit_mode —
+    # recap.py forwards --edit-mode cut in BOTH passes, so the validated plan is the only reliable
+    # pass2 signal). Both cache via _write_stage_meta/_stage_cache_valid with fps + frame-set in the key.
     source_storyboard = None
-    edited_storyboard = None
-    scenes_json = Path(work_dir) / "scenes.json"
+    scenes_json = work_dir / "scenes.json"
     if scenes_json.exists():
         source_storyboard = _generate_source_storyboard(
-            work_dir, Path(video), scenes, scenes_json, force=False
+            work_dir, Path(video), storyboard_scenes, scenes_json, force=force
         )
-    edited_storyboard = _generate_edited_storyboard(work_dir, video, force=False)
-    cut_mode = (Path(work_dir) / "clip_plan_validated.json").exists()
+    edited_storyboard = _generate_edited_storyboard(work_dir, video, force=force)
+    cut_mode = (work_dir / "clip_plan_validated.json").exists()
 
-    substrate = assess_understanding_substrate(scenes, asr_result)
+    substrate = assess_understanding_substrate(brief_scenes, asr_result)
     if substrate["level"] != "rich":
         banner = "理解素材为空" if substrate["level"] == "empty" else "理解素材偏薄"
         log(
@@ -161,7 +183,7 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
             f"带 frame_facts 的场景 {substrate['scenes_with_frame_facts']} | 平均画面描述 {substrate['avg_description_len']} 字"
         )
     brief_path = build_agent_brief(
-        scenes,
+        brief_scenes,
         asr_result,
         silence_periods,
         video_duration,
@@ -171,19 +193,20 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
         mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )
+    # C1: prepend a storyboard header to the returned brief file, pointing the agent at the sheet(s).
     _prepend_storyboard_brief_header(
         brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode
     )
     log("=" * 50)
-    log(f"brief-only 完成。写作 brief: {brief_path}")
+    log(f"{done_label}。写作 brief: {brief_path}")
     print(
         json.dumps(
             {
-                "status": "brief_only",
+                "status": status,
                 "work_dir": str(work_dir),
                 "brief": str(brief_path),
                 "substrate": substrate["level"],
-                "scenes": len(scenes),
+                "scenes": len(storyboard_scenes),
                 "asr_segments": len(asr_result),
             },
             ensure_ascii=False,

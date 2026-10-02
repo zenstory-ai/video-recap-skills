@@ -17,6 +17,18 @@ from lib import log, api_call, load_prompt, mimo_video_api_call, run_cmd, file_i
 
 # ── Step 4: VLM 视觉分析 ─────────────────────────────────────────────
 
+def vlm_prompt_payload():
+    """The exact prompt/context text the VLM stage sends; the VLM cache key compares it by
+    equality, so the prompt that is sent and the one that is keyed are built in one place."""
+    prompt = load_prompt("VLM_DEPTH_PROMPT")
+    if not prompt:
+        raise RuntimeError("references/prompt-templates.md 缺少 VLM_DEPTH_PROMPT 模板")
+    context = CONFIG.get("context_info", "")
+    if context:
+        prompt = f"已知信息：{context}\n\n{prompt}"
+    return {"prompt_text": prompt, "context_info": context}
+
+
 def _parse_vlm_depth_response(raw_text):
     """解析 VLM 深度分析响应，提取【描述】、【帧标签】和【深层分析】"""
     if not raw_text or not raw_text.strip():
@@ -119,13 +131,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     if fps <= 0:
         raise ValueError("CONFIG['fps'] 必须大于 0；请先运行完整 pipeline 或指定 --fps")
 
-    vlm_prompt = load_prompt("VLM_DEPTH_PROMPT")
-    if not vlm_prompt:
-        vlm_prompt = "仔细观察这些视频帧。分两部分输出：\n【描述】不超过80字，描述画面中正在发生什么。\n【深层分析】不超过120字，分析角色情绪、关系动态、潜台词。"
-
-    ctx = CONFIG["context_info"]
-    if ctx:
-        vlm_prompt = f"已知信息：{ctx}\n\n{vlm_prompt}"
+    vlm_prompt = vlm_prompt_payload()["prompt_text"]
 
     # 构建帧时间映射 (frame_NNNNN.jpg -> time in seconds)。换算规则由 extract.py 独家定义：
     # ffmpeg 首帧在 t=0 而文件编号从 1 起，所以是 (n-1)/fps，不是 n/fps。

@@ -187,7 +187,7 @@ def test_empty_provider_text_is_unknown_not_proven_silence_and_not_cached(
     assert _cache_state_after_meta(tmp_path, video) == "MISS"
 
 
-def test_missing_sidecar_is_legacy_unverified_without_network(tmp_path):
+def test_missing_or_legacy_sidecar_is_a_miss(tmp_path):
     video = _video(tmp_path)
     result_path = tmp_path / "asr_result.json"
     result_path.write_text(
@@ -197,18 +197,23 @@ def test_missing_sidecar_is_legacy_unverified_without_network(tmp_path):
     meta = _asr_cache_payload(video)
     _write_stage_meta(result_path, meta)
 
-    assert _asr_cache_state(result_path, meta, video) == "LEGACY_UNVERIFIED"
+    # A valid stage meta without its evidence sidecar (hand-deleted, or Ctrl-C during a
+    # re-ASR) re-runs ASR instead of reusing an unprovable result.
+    assert _asr_cache_state(result_path, meta, video) == "MISS"
 
+    # A sidecar left by an older build with the retired LEGACY_UNVERIFIED status is not
+    # reusable either.
     write_asr_timing_evidence(
-        tmp_path,
-        video,
-        "LEGACY_UNVERIFIED",
+        tmp_path, video, "EXPLICITLY_SKIPPED",
         final_segments=json.loads(result_path.read_text()),
     )
-    evidence = _read_evidence(tmp_path)
-    assert evidence["windows"][0]["observed_text"] is None
-    assert evidence["windows"][0]["post_glossary_text"] == "legacy"
-    assert _asr_cache_state(result_path, meta, video) == "LEGACY_UNVERIFIED"
+    sidecar = _read_evidence(tmp_path)
+    sidecar["status"] = "LEGACY_UNVERIFIED"
+    sidecar["glossary"] = {"names": None, "name_count": None}
+    (tmp_path / "asr_timing_evidence.json").write_text(json.dumps(sidecar), encoding="utf-8")
+    assert _asr_cache_state(result_path, meta, video) == "MISS"
+    with pytest.raises(ValueError):
+        write_asr_timing_evidence(tmp_path, video, "LEGACY_UNVERIFIED", final_segments=[])
 
 
 def test_explicit_skip_sidecar_is_result_bound(tmp_path):
