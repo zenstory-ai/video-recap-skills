@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 LIBS = {
     "assemble": ROOT / "skills/video-assemble/scripts/lib.py",
+    "cut": ROOT / "skills/video-cut/scripts/lib.py",
     "voiceover": ROOT / "skills/video-voiceover/scripts/lib.py",
     "script": ROOT / "skills/video-script/scripts/lib.py",
     "recap": ROOT / "skills/video-recap/scripts/lib.py",

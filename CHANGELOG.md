@@ -27,6 +27,7 @@ All notable changes to this project are documented here.
 - **cut 与 understanding 收掉只为测试存在的门面。** `cut.py` 只导出 `main`，video-understanding 删除再导出用的 `brief.py`，`narration_mapping.py` 改名 `cut_qc.py`；进程内导入这些名字的脚本需改从所属模块导入。cut 计划里源区间重叠的报错结尾改为 `split or remove duplicate source footage in the clip plan`。命令行、参数与产物不变。
 - **ASR 缓存缺少 `asr_timing_evidence.json` 时重跑 ASR。** video-understanding 删除 `LEGACY_UNVERIFIED` 状态：sidecar 被删掉、或重跑 ASR 时被 Ctrl-C 中断的 work_dir 不再离线复用旧转写，旧版本写下的 `LEGACY_UNVERIFIED` sidecar 也视为未命中。VLM prompt 模板缺失时直接报错，不再静默换用一份已过时的两段式兜底 prompt。
 - **video-cut 的 `--sources-manifest` 只接受一种形状。** 清单必须是 `{"sources": [{"source_id", "source_path"[, "duration", "source_work_dir"]}]}`（即 recap 写出的 `multi_source_manifest.json`）；裸数组、以 `source_id` 为键的映射，以及 `id` / `name`、`path` / `video_path` / `video` / `file`、`duration_seconds` / `source_duration` 等别名一律报错，报错写明期望形状。多源 `clip_plan.json` 的片段必须写 `source_id`，不再把 `id` 当来源；顶层目标时长只认 `target_duration`，不再认 `target_duration_seconds`。形状写进了 video-cut SKILL.md。
+- **测试组 `inspect` 并入 `orchestrator`。** `python3 scripts/test.py` 现在跑六组，`scripts/test.py inspect` 不再是有效组名，`recap_inspect` 的测试随 `orchestrator` 一起跑；跨 skill 的评审门禁测试与 `tools/measure_subtitle.py` 的测试也移到 `orchestrator`。剪映协议测试直接读 `references/jianying/` 的模板并钉住哈希，不再在测试目录里保留一份相同的副本。
 
 ### Removed
 
