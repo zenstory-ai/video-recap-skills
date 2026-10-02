@@ -2,7 +2,7 @@
 
 Status: implemented
 
-后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-video-reference-integration]]，尚未落地。
+后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-production-reference-binding]]，尚未落地。
 
 ## Problem
 
@@ -17,7 +17,7 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
 - 新增第七个 skill `skills/video-reference/`（`user-invocable: true`），入口 `scripts/reference.py`，子命令 `measure` / `check` / `export`；
   模块为 `lib.py`、`reference_measure.py`、`reference_profile.py`、`reference_check.py`，全部带 `reference_` 前缀，不与标准库或其他 skill 重名。
 - **measure**：一次 ffprobe 加一次 ffmpeg（`scale=320:-2,scdet=threshold=10` + `ebur128=peak=true:framelog=info`），写
-  `U/reference_measurements.json`（镜头切点、镜长分布、切点密度、10 秒切点曲线、整体响度/LRA/真峰值、逐秒短期响度）。
+  `U/reference_measurements.json`（镜头切点、镜长分布、切点密度、10 秒切点曲线（每个窗口按自身长度折算成每分钟，末尾不满 10 秒的窗口不再被低估）、整体响度/LRA/真峰值、逐秒短期响度）。
   缓存键为成片 `{size, mtime_ns}` 加阈值与是否缩放。镜头统计不读 `scenes.json`：理解阶段会把短于 4 秒的镜头并掉，中位镜长会被拉高。
 - **Agent 只写一个文件** `U/reference_breakdown.json`：`labels`（`audio_spans` 音轨归属、`sections` 叙事功能、`subtitles`、`basis`）、
   `source_facts`、`methods`、`skipped_dimensions`。枚举照搬写稿手册：function 为 `hook|setup|turn|escalation|payoff`，
@@ -25,12 +25,19 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
 - **derived 只在内存里**：`reference_profile.derive()` 由 labels 与测量算出各音轨占比/块数/段内切点密度/平均短期响度、
   旁白语速（只用被旁白覆盖 ≥80% 的 ASR 窗口，ASR 失败或跳过时为 null）、声音切换落在画面切点 ±0.25 秒内的比例、
   各叙事功能的切点密度与旁白占比、分数位置的 `structure`、第一次原声出现位置。check 打印，export 写入用到的部分。
-- **target 只写 `{"from": "<路径>"}`**，根只能是 `shots` / `loudness` / `derived`；数值和 `provenance`（`derived.*` 为 `labeled`，其余为 `measured`）
-  由 export 填入，Agent 从不手写数字。
+- **target 只写 `{"from": "<路径>"}`**，根只能是 `shots` / `loudness` / `derived`，路径不得带列表下标；解析结果必须是数值叶子，
+  或白名单里的派生对象（`derived.structure`、`derived.first_original_at`、`derived.narration_jobs`、`derived.by_owner.<owner>`、
+  `derived.by_section.<function>`）。`derived.first_original_at` 与 profile 一样只导出 `{fraction}`，`.s` 不能做 target。
+  数值和 `provenance`（`derived.*` 为 `labeled`，其余为 `measured`）由 export 填入，Agent 从不手写数字。
+  fact 的 `measure` 与 method 的 `measure:` 证据同样只认这三个根，且不能落在字符串叶子上（`source.size`、`schema` 之类不算证据）。
 - **check（R1–R7）与 export（R8）**：封闭 schema 与枚举、标注覆盖整片、事实有时间或测量锚点且显式写 `entities`、方法有证据、
   target 可解析、`rule`/`applies_when`/`avoid_when` 的泄漏扫描（实体名来自 fact entities、`background_research.characters`、
-  ASR glossary；与 ASR 全文或 fact statement 共有连续 8 个汉字或 5 个英文词；绝对时间码与"第 N 秒"；绝对路径）、五维覆盖。
-  有 error 时退出码 1 且不写文件；导出后对每个字符串再扫一遍，并拒绝 `source_facts`/`labels`/`entities`/`evidence`/`statement`/`from`/`path` 键。
+  ASR glossary 与可选 `understanding_index.json` 的 `characters[*].name/aliases/asr_mentions`，比对前去掉空白；与 ASR 全文或
+  fact statement 共有连续 8 个汉字或 5 个英文词，按无标点的汉字段与去掉全部非汉字后的整串各算一遍；绝对时间码、"第 N 秒"与"N 分 M 秒"；
+  绝对路径，含 `/tmp`、`/Users` 等常见根目录的单段路径）、五维覆盖。`subtitles` 的值有类型约束（`burned` 布尔、`max_lines` ≥1 整数、
+  `marks_original` 字符串、`evidence_t` 数字列表），`skipped_dimensions` 的每个值不论该维度是否已有 method 都必须是非空字符串。
+  有 error 时退出码 1 且不写文件；导出后对每个键和字符串再扫一遍，并拒绝 `source_facts`/`labels`/`entities`/`evidence`/`statement`/`from`/`path` 键。
+  `asr_timing_evidence.json` 的 `source_video` 与测量的成片 `{size, mtime_ns}` 不一致时给警告（理解产物可能来自另一部视频）。
 - **消费方只有写稿 Agent**：video-script `SKILL.md` §2 读取清单加一条、§3 加一段：只在 `work_dir` 有 `production_reference.json` 时阅读，
   优先级"用户指令 > 本片证据 > 参考"，可在 `recap_story_plan.json` 写可选的 `reference_methods`。没有脚本对 story plan 做封闭键检查，
   所以不改 playbook 的 schema 示例。video-recap `SKILL.md` §1 加一段路由说明；`recap.py`、runner、doctor、final_qc 不变。
@@ -54,11 +61,11 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
 - **谁读取产物**：只有写稿 Agent（prose 指引）。`reference_methods` 是 story plan 的可选字段，没有代码读取；
   建议型评审会把 story plan 整体放进上下文，因此能看到这个字段，但不据此判定。
 - **Agent 表面增量**：1 个 skill（SKILL.md 约 3.3K 字符，只在调用时加载），frontmatter description 约 150 字常驻；
-  video-script SKILL.md 多 3 行，video-recap SKILL.md 多 4 行；新增 1 个 CLI。脚本约 920 行（5 个模块，最大 375 行），测试 46 个用例。
+  video-script SKILL.md 多 3 行，video-recap SKILL.md 多 4 行；新增 1 个 CLI。脚本约 985 行（5 个模块，最大 437 行），测试 67 个用例。
 - **代价与盲区**：
   - 旁白占比与语速是 `labeled` 精度，受标注与 ASR 窗口限制，不是逐词对齐。
   - scdet 只认硬切：叠化会漏，闪光会多报。
-  - 泄漏扫描只拦字面：改写过的剧情、ASR 缺失时的旁白原句都拦不住（check 给出警告）。
+  - 泄漏扫描只拦字面：改写过的剧情、ASR 缺失时的旁白原句、7 个汉字以内的短引文都拦不住（check 给出警告）。
   - R1–R8 不判断语义：真实验证中初稿方法"旁白段用短镜头推进信息"与派生值相反，只能靠 Agent 先读 derived 再写；
     SKILL.md 与 schema 示例已据此改写。
 - **删除信号**：连续两个版本没有任何运行写 `reference_methods`，也没有资源库绑定它。

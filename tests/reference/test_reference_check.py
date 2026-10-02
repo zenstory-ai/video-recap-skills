@@ -26,7 +26,7 @@ def test_valid_breakdown_passes_and_export_carries_methods_without_source_facts(
     methods = {m["id"]: m for m in production["methods"]}
     assert methods["m1"]["targets"]["narration_cuts_per_min"] == {"value": 8.0, "provenance": "labeled"}
     assert methods["m3"]["targets"]["shot_median_s"] == {"value": 5.0, "provenance": "measured"}
-    assert methods["m2"]["targets"]["first_original"]["value"] == {"s": 10.0, "fraction": 0.167}
+    assert methods["m2"]["targets"]["first_original"]["value"] == {"fraction": 0.167}
     assert production["profile"]["narration_share"] == {"value": 0.5, "provenance": "labeled"}
     assert production["profile"]["first_original_at"]["value"] == {"fraction": 0.167}
     assert production["subtitles"] == {"burned": True, "max_lines": 1, "marks_original": "「」"}
@@ -67,6 +67,21 @@ REJECTIONS = [
     ("absolute-timecode", _append_rule("，在 1:23 处收束"), "R6"),
     ("absolute-second", _append_rule("，第12秒切原声"), "R6"),
     ("absolute-path", _append_rule("，参考 /Users/me/clip.mp4"), "R6"),
+    ("quote-split-by-punctuation", _append_rule("，用「你可知道，我是谁的儿子」收尾"), "R6"),
+    ("name-split-by-space", _append_rule("，像范 闲那样"), "R6"),
+    ("chinese-clock-time", _append_rule("，在1分23秒收束"), "R6"),
+    ("one-segment-root-path", _append_rule("，参考 /tmp 下的片子"), "R6"),
+    ("object-valued-skipped-reason", _set(["skipped_dimensions"], {"pacing": {"范闲在京都被刺杀": "x"}}), "R1"),
+    ("object-valued-marks-original", _set(["labels", "subtitles", "marks_original"], {"范闲你给我站住": 1}), "R1"),
+    ("non-integer-max-lines", _set(["labels", "subtitles", "max_lines"], "1"), "R1"),
+    ("non-bool-burned", _set(["labels", "subtitles", "burned"], 1), "R1"),
+    ("evidence-on-file-identity", _set(["methods", 0, "evidence"], ["measure:source.size"]), "R4"),
+    ("evidence-on-schema-string", _set(["methods", 0, "evidence"], ["measure:schema"]), "R4"),
+    ("fact-measure-outside-roots", _set(["source_facts", 1, "measure"], ["source.mtime_ns"]), "R3"),
+    ("target-whole-derived", _set(["methods", 2, "targets"], {"x": {"from": "derived"}}), "R5"),
+    ("target-list-index", _set(["methods", 2, "targets"], {"x": {"from": "shots.cuts.3"}}), "R5"),
+    ("target-absolute-first-original", _set(["methods", 2, "targets"], {"x": {"from": "derived.first_original_at.s"}}), "R5"),
+    ("target-raw-cut-list", _set(["methods", 2, "targets"], {"x": {"from": "shots.cuts"}}), "R5"),
     ("dangling-evidence", _set(["methods", 0, "evidence"], ["f9"]), "R4"),
     ("empty-evidence", _set(["methods", 0, "evidence"], []), "R4"),
     ("target-with-value", _set(["methods", 2, "targets"], {"x": {"from": "shots.median_s", "value": 3}}), "R5"),
@@ -118,6 +133,45 @@ def test_export_with_errors_exits_1_and_writes_nothing(work_dir, breakdown, rese
     assert not out.exists()
 
 
+def test_export_rescan_blocks_a_leak_that_only_r8_scans(work_dir, breakdown, tmp_path):
+    # pacing is covered by m3, so this reason is never R6-scanned at check time; only R8 sees it.
+    breakdown["skipped_dimensions"] = {"pacing": "范闲那条线没有可迁移的节奏"}
+    out = tmp_path / "out" / "production_reference.json"
+
+    assert reference.main(["check", "--work-dir", str(work_dir(breakdown))]) == 0
+    assert reference.main(["export", "--work-dir", str(tmp_path), "--out", str(out)]) == 1
+    assert not out.exists()
+
+
+def test_understanding_index_characters_feed_the_name_scan(work_dir, breakdown, research, tmp_path):
+    _append_rule("，学林婉儿的压迫感")(breakdown, research)
+    root = work_dir(breakdown, {})
+    (root / "understanding_index.json").write_text(json.dumps(
+        {"characters": [{"name": "林婉儿", "aliases": ["郡主"], "asr_mentions": ["婉儿"]}]}, ensure_ascii=False),
+        encoding="utf-8")
+
+    errors = run_check(root)["errors"]
+
+    assert any("R6" in e and "林婉儿" in e for e in errors), errors
+
+
+def test_warns_when_understanding_artifacts_describe_another_video(breakdown, measurements, asr_segments):
+    evidence = {"status": "AVAILABLE_COARSE", "source_video": {"size": 999, "mtime_ns": 1}}
+
+    report = check_breakdown(breakdown, measurements, asr_segments=asr_segments, asr_evidence=evidence)
+
+    assert report["errors"] == []
+    assert any("source_video" in w for w in report["warnings"])
+
+
+def test_export_rescan_scans_keys_for_leaks():
+    corpus = leak_corpus([{"statement": "x", "entities": ["范闲"]}], [], None, None)
+
+    errors = export_errors({"subtitles": {"marks_original": {"范闲你给我站住": 1}}}, corpus)
+
+    assert any("R8 $.subtitles.marks_original.范闲你给我站住" in e for e in errors), errors
+
+
 def test_export_rescan_rejects_source_only_keys_and_leaks():
     corpus = leak_corpus([{"statement": "x", "entities": ["范闲"]}], [], None, None)
     production = {"methods": [{"rule": "像范闲那样", "evidence": ["f1"]}], "statement": "x"}
@@ -151,6 +205,7 @@ EMPTY_CORPUS = {"names": [], "cjk": set(), "latin": set()}
     ("开场15秒内给出问题", None),          # relative durations are allowed
     ("旁白/原声/音乐整块交替", None),      # prose slashes are not paths
     ("比例保持在 3:2 左右", None),          # ratios are not timecodes
+    ("原声/BGM 整块交替", None),             # a one-segment prose slash is not a path
 ])
 def test_leak_scan_handles_text_glued_to_cjk(text, flagged):
     errors = leak_errors(text, "m1.rule", EMPTY_CORPUS)

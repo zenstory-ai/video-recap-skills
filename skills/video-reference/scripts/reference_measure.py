@@ -89,7 +89,9 @@ def shot_stats(cuts, duration):
     curve = [0] * windows
     for cut in cuts:
         curve[min(windows - 1, int(cut // CURVE_WINDOW_S))] += 1
-    per_min = 60.0 / CURVE_WINDOW_S
+    # Scale each window by its own length: the last one is usually partial (6.66 s on a 126.66 s
+    # video). Floor at 1 s so a sliver of a window cannot turn one cut into hundreds per minute.
+    per_min = [60.0 / max(1.0, min(CURVE_WINDOW_S, duration - i * CURVE_WINDOW_S)) for i in range(windows)]
     return {
         "cuts": list(cuts),
         "count": count,
@@ -100,7 +102,7 @@ def shot_stats(cuts, duration):
         "share_under_1s": round(sum(1 for x in lengths if x < 1.0) / count, 3) if count else None,
         "share_over_8s": round(sum(1 for x in lengths if x > 8.0) / count, 3) if count else None,
         "cuts_per_min": round(len(cuts) / minutes, 2) if minutes > 0 else None,
-        "curve": {"window_s": CURVE_WINDOW_S, "values": [round(c * per_min, 1) for c in curve]},
+        "curve": {"window_s": CURVE_WINDOW_S, "values": [round(c * k, 1) for c, k in zip(curve, per_min)]},
     }
 
 

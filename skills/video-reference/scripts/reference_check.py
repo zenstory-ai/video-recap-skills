@@ -21,6 +21,10 @@ APPLIES_TO = ("story_plan", "visual_audio_board", "clip_plan", "narration", "sty
 FUNCTIONS = ("hook", "setup", "turn", "escalation", "payoff")
 NARRATION_JOBS = ("context", "causal_link", "foreshadow", "interpretation", "transition")
 TARGET_ROOTS = ("shots", "loudness", "derived")
+# Objects a target may export whole; every other target must be a numeric leaf. No list indexing,
+# and first_original_at is exported as {fraction} only (its absolute `s` stays local).
+_TARGET_OBJECTS = re.compile(
+    r"derived\.(?:structure|first_original_at|narration_jobs|by_owner\.[a-z_]+|by_section\.[a-z]+)")
 GAP_S = 0.5
 T_EPSILON_S = 0.05
 CJK_RUN_MIN = 8
@@ -52,9 +56,13 @@ _CJK = re.compile(r"[㐀-鿿豈-﫿]+")
 _WORD = re.compile(r"[A-Za-z0-9']+")
 # Python's \b treats CJK as word characters, so "在1:23处" has no boundary before "1"; use
 # digit/ASCII lookarounds instead. Path segments are ASCII so prose like "旁白/原声/音乐" stays legal.
-_TIMECODE = re.compile(r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])|第\s*[0-9一二三四五六七八九十百零两]+\s*秒")
+_TIMECODE = re.compile(
+    r"(?<![\d:])\d{1,2}:\d{2}(?::\d{2})?(?![\d:])|第\s*[0-9一二三四五六七八九十百零两]+\s*秒|\d+\s*分\s*\d+\s*秒")
+# One-segment absolute paths only for well-known roots, so prose like "原声/BGM" stays legal.
 _ABS_PATH = re.compile(
-    r"(?<![A-Za-z0-9_.])/(?:[A-Za-z0-9_.-]+/)+[\w.-]*|~/[\w.-]+|(?<![A-Za-z0-9_])[A-Za-z]:[\\/][\w.-]+")
+    r"(?<![A-Za-z0-9_.])/(?:[A-Za-z0-9_.-]+/)+[\w.-]*|~/[\w.-]+|(?<![A-Za-z0-9_])[A-Za-z]:[\\/][\w.-]+"
+    r"|(?<![A-Za-z0-9_.])/(?:tmp|Users|home|var|private|mnt|Volumes|opt|srv|root|data)(?![\w.-])")
+_SPACE = re.compile(r"\s+")
 _NUMBER_IN_RULE = re.compile(r"\d+(?:\.\d+)?\s*(?:秒|%|％|字)")
 
 
@@ -124,7 +132,19 @@ def _check_labels(labels, duration, errors):
     _check_cover(sections, "sections", duration, errors)
     subtitles = labels.get("subtitles")
     if subtitles is not None and _closed(subtitles, "subtitles", "labels.subtitles", errors):
-        for t in subtitles.get("evidence_t") or []:
+        where = "R1 labels.subtitles"
+        if "burned" in subtitles and not isinstance(subtitles["burned"], bool):
+            errors.append(f"{where}.burned: 必须是 true/false")
+        lines = subtitles.get("max_lines")
+        if "max_lines" in subtitles and (not isinstance(lines, int) or isinstance(lines, bool) or lines < 1):
+            errors.append(f"{where}.max_lines: 必须是 ≥1 的整数")
+        if "marks_original" in subtitles and not isinstance(subtitles["marks_original"], str):
+            errors.append(f"{where}.marks_original: 必须是字符串")
+        evidence_t = subtitles.get("evidence_t", [])
+        if not isinstance(evidence_t, list):
+            errors.append(f"{where}.evidence_t: 必须是数字列表")
+            evidence_t = []
+        for t in evidence_t:
             if not _num(t) or not 0 <= t <= duration:
                 errors.append(f"R2 labels.subtitles.evidence_t: {t!r} 不在 [0, {duration}] 内")
     return spans, sections
@@ -140,6 +160,14 @@ def _check_ids(items, prefix, where, errors):
             errors.append(f"R1 {where}[{i}]: id {ident} 重复")
         seen.add(ident)
     return seen
+
+
+def _anchor_ok(path, measurements, derived):
+    """A `measure` anchor: resolves under shots/loudness/derived and is not a string leaf."""
+    if not isinstance(path, str) or path.split(".")[0] not in TARGET_ROOTS:
+        return False
+    value = resolve(path, measurements, derived)
+    return is_resolved(value) and not isinstance(value, str)
 
 
 def _check_facts(facts, measurements, derived, duration, errors):
@@ -164,14 +192,17 @@ def _check_facts(facts, measurements, derived, duration, errors):
             if not isinstance(paths, list) or not paths:
                 errors.append(f"R3 {where}: measure 必须是非空路径列表")
             for path in paths if isinstance(paths, list) else []:
-                if not is_resolved(resolve(path, measurements, derived)):
-                    errors.append(f"R3 {where}: 测量路径 {path!r} 无法解析")
+                if not _anchor_ok(path, measurements, derived):
+                    errors.append(f"R3 {where}: 测量路径 {path!r} 无法解析到 shots/loudness/derived 下的测量值")
 
 
 def _target_ok(path, value):
-    if not isinstance(path, str) or path.split(".")[0] not in TARGET_ROOTS or not is_resolved(value):
+    if not isinstance(path, str) or not is_resolved(value) or value is None:
         return False
-    return _num(value) or isinstance(value, dict) or (path == "derived.structure" and isinstance(value, list))
+    parts = path.split(".")
+    if parts[0] not in TARGET_ROOTS or any(p.isdigit() for p in parts) or path == "derived.first_original_at.s":
+        return False
+    return _num(value) or _TARGET_OBJECTS.fullmatch(path) is not None
 
 
 def _check_methods(methods, fact_ids, measurements, derived, errors):
@@ -191,7 +222,7 @@ def _check_methods(methods, fact_ids, measurements, derived, errors):
         for item in evidence if isinstance(evidence, list) else []:
             ok = item in fact_ids or (
                 isinstance(item, str) and item.startswith("measure:")
-                and is_resolved(resolve(item[len("measure:"):], measurements, derived)))
+                and _anchor_ok(item[len("measure:"):], measurements, derived))
             if not ok:
                 errors.append(f"R4 {where}: evidence {item!r} 既不是已有 fact id，也不是可解析的 measure:路径")
         targets = method.get("targets", {})
@@ -208,12 +239,14 @@ def _check_methods(methods, fact_ids, measurements, derived, errors):
                 errors.append(f"R5 {twhere}: 数值与 provenance 由 export 填写，只写 from")
             path = target.get("from")
             if "from" in target and not _target_ok(path, resolve(path, measurements, derived)):
-                errors.append(f"R5 {twhere}: from {path!r} 必须解析到 shots/loudness/derived 下的数值或对象")
+                errors.append(f"R5 {twhere}: from {path!r} 必须是 shots/loudness/derived 下的数值叶子或允许的派生对象")
 
 
 def _ngrams(text, size):
+    """CJK n-grams per punctuation-free run, plus over all CJK joined (so「你可知道，我是…」still matches)."""
+    runs = _CJK.findall(text)
     grams = set()
-    for run in _CJK.findall(text):
+    for run in [*runs, "".join(runs)]:
         grams.update(run[i:i + size] for i in range(len(run) - size + 1))
     return grams
 
@@ -223,9 +256,23 @@ def _word_grams(text, size):
     return {tuple(words[i:i + size]) for i in range(len(words) - size + 1)}
 
 
-def leak_corpus(facts, asr_segments, asr_evidence, research):
+def _index_names(index):
+    """characters[*].name / aliases / asr_mentions from an optional understanding_index.json."""
+    names = set()
+    characters = index.get("characters") if isinstance(index, dict) else None
+    for character in characters if isinstance(characters, list) else []:
+        if isinstance(character, dict):
+            names.add(character.get("name"))
+            for key in ("aliases", "asr_mentions"):
+                values = character.get(key)
+                names.update(values if isinstance(values, list) else [])
+    return names
+
+
+def leak_corpus(facts, asr_segments, asr_evidence, research, index=None):
     """Entity names and source text that must never reach a transferable method."""
     names = {e for f in facts for e in (f.get("entities") or []) if isinstance(e, str)}
+    names.update(_index_names(index))
     research = research if isinstance(research, dict) else {}
     asr_evidence = asr_evidence if isinstance(asr_evidence, dict) else {}
     characters = research.get("characters")
@@ -237,7 +284,8 @@ def leak_corpus(facts, asr_segments, asr_evidence, research):
     texts = [str(s.get("text") or "") for s in asr_segments or [] if isinstance(s, dict)]
     texts += [str(f.get("statement") or "") for f in facts]
     return {
-        "names": sorted({n for n in names if isinstance(n, str) and len(n.strip()) >= 2}, key=len, reverse=True),
+        "names": sorted({_SPACE.sub("", n) for n in names if isinstance(n, str) and len(_SPACE.sub("", n)) >= 2},
+                        key=len, reverse=True),
         "cjk": set().union(*(_ngrams(t, CJK_RUN_MIN) for t in texts)) if texts else set(),
         "latin": set().union(*(_word_grams(t, LATIN_RUN_MIN) for t in texts)) if texts else set(),
     }
@@ -246,7 +294,7 @@ def leak_corpus(facts, asr_segments, asr_evidence, research):
 def leak_errors(text, where, corpus, rule="R6"):
     """R6 a–d on one string; each error quotes the offending substring."""
     errors = []
-    lowered = text.lower()
+    lowered = _SPACE.sub("", text).lower()
     for name in corpus["names"]:
         if name.lower() in lowered:
             errors.append(f"{rule} {where}: 含原片实体名「{name}」")
@@ -261,7 +309,7 @@ def leak_errors(text, where, corpus, rule="R6"):
     return errors
 
 
-def _warnings(breakdown, facts, methods, asr_segments, asr_status, research):
+def _warnings(breakdown, facts, methods, asr_segments, asr_status, research, *, index, asr_evidence, source):
     warnings = []
     for method in methods:
         if not method.get("applies_when"):
@@ -271,15 +319,21 @@ def _warnings(breakdown, facts, methods, asr_segments, asr_status, research):
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
-    if has_cjk and not research and not any(f.get("entities") for f in facts):
-        warnings.append("ASR 有中文对白，但所有 fact 的 entities 都为空且没有 background_research.json：人名泄漏扫描可能漏网")
+    if has_cjk and not research and not _index_names(index) and not any(f.get("entities") for f in facts):
+        warnings.append("ASR 有中文对白，但所有 fact 的 entities 都为空，也没有 background_research.json 或"
+                        " understanding_index.json 的角色：人名泄漏扫描可能漏网")
+    asr_video = (asr_evidence if isinstance(asr_evidence, dict) else {}).get("source_video")
+    if isinstance(asr_video, dict) and {k: asr_video.get(k) for k in ("size", "mtime_ns")} != {
+            k: source.get(k) for k in ("size", "mtime_ns")}:
+        warnings.append("asr_timing_evidence.json 的 source_video 与测量的成片身份不一致：理解产物可能来自另一部视频，"
+                        "语速与泄漏扫描会用错台词和人名")
     labels = breakdown.get("labels") if isinstance(breakdown.get("labels"), dict) else {}
     if not str(labels.get("basis") or "").strip():
         warnings.append("labels.basis 为空：写明标注依据（如 5s ASR 窗口 + 故事板）")
     return warnings
 
 
-def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None, research=None):
+def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None, research=None, index=None):
     """Run R1–R7; return {derived, errors, warnings}."""
     errors = []
     duration = measurements["source"]["duration_s"]
@@ -304,7 +358,7 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
     _check_facts(facts, measurements, derived, duration, errors)
     _check_methods(methods, fact_ids, measurements, derived, errors)
 
-    corpus = leak_corpus(facts, asr_segments, asr_evidence, research)
+    corpus = leak_corpus(facts, asr_segments, asr_evidence, research, index)
     for method in methods:
         for field in METHOD_TEXT_FIELDS:
             if isinstance(method.get(field), str):
@@ -314,12 +368,15 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
     if not isinstance(skipped, dict) or set(skipped) - set(DIMENSIONS):
         errors.append(f"R1 skipped_dimensions: 键只能是 {'|'.join(DIMENSIONS)}")
         skipped = {}
+    for dimension, reason in skipped.items():
+        if not (isinstance(reason, str) and reason.strip()):
+            errors.append(f"R1 skipped_dimensions.{dimension}: 原因必须是非空字符串")
     covered = {m.get("dimension") for m in methods}
     for dimension in DIMENSIONS:
-        reason = skipped.get(dimension)
-        if dimension not in covered and not (isinstance(reason, str) and reason.strip()):
+        if dimension not in covered and dimension not in skipped:
             errors.append(f"R7 {dimension}: 至少一条 method，或在 skipped_dimensions 写明原因")
-    warnings = _warnings(breakdown, facts, methods, asr_segments, asr_status, research)
+    warnings = _warnings(breakdown, facts, methods, asr_segments, asr_status, research,
+                         index=index, asr_evidence=asr_evidence, source=measurements["source"])
     return {"derived": derived, "errors": errors, "warnings": warnings}
 
 
@@ -332,6 +389,7 @@ def _load(work_dir):
         "asr_segments": read_json(work_dir / "asr_result.json", []),
         "asr_evidence": read_json(work_dir / "asr_timing_evidence.json"),
         "research": read_json(work_dir / "background_research.json"),
+        "index": read_json(work_dir / "understanding_index.json"),
     }, missing
 
 
@@ -355,13 +413,12 @@ def _walk(node, where="$"):
 
 
 def export_errors(production, corpus):
-    """R8: re-scan every string of the serialized export and reject source-only keys."""
+    """R8: re-scan every key and string of the serialized export and reject source-only keys."""
     errors = []
     for kind, text, where in _walk(json.loads(json.dumps(production, ensure_ascii=False))):
         if kind == "key" and text in BANNED_EXPORT_KEYS:
             errors.append(f"R8 {where}: 导出物不能含键 {text!r}")
-        elif kind == "str":
-            errors.extend(leak_errors(text, where, corpus, rule="R8"))
+        errors.extend(leak_errors(text, where, corpus, rule="R8"))
     return errors
 
 
@@ -373,7 +430,7 @@ def run_export(work_dir, out_path):
     measurements, breakdown, extra, _ = _load(work_dir)
     production = build_production(breakdown, measurements, report["derived"])
     facts = [f for f in breakdown.get("source_facts") or [] if isinstance(f, dict)]
-    corpus = leak_corpus(facts, extra["asr_segments"], extra["asr_evidence"], extra["research"])
+    corpus = leak_corpus(facts, extra["asr_segments"], extra["asr_evidence"], extra["research"], extra["index"])
     report["errors"] = export_errors(production, corpus)
     if not report["errors"]:
         report["written"] = str(write_json(out_path, production))

@@ -220,7 +220,10 @@ def build_production(breakdown, measurements, derived):
         for name, target in (method.get("targets") or {}).items():
             source = target["from"]
             provenance = "labeled" if source.startswith("derived.") else "measured"
-            targets[name] = _metric(resolve(source, measurements, derived), provenance)
+            value = resolve(source, measurements, derived)
+            if source == "derived.first_original_at":   # the absolute `s` stays local, as in the profile
+                value = {"fraction": value["fraction"]}
+            targets[name] = _metric(value, provenance)
         if targets:
             entry["targets"] = targets
         methods.append(entry)

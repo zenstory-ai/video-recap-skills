@@ -19,7 +19,8 @@ Agent 的角色是**拆片编辑**：先如实记录"这部片子怎么做的"�
 
 - 成片文件（`.mp4 / .mov / .mkv / .webm`）。
 - 对**这部成片**跑出的视频理解产物目录 `U`（建议 `ASR_SEGMENT_SECONDS=5`，窗口越短，旁白语速越准）。
-  本技能读取其中可选的 `asr_result.json`、`asr_timing_evidence.json`、`background_research.json`；
+  本技能读取其中可选的 `asr_result.json`、`asr_timing_evidence.json`、`background_research.json`、`understanding_index.json`
+  （其 `characters` 的名字、别名与 ASR 提及都进入人名泄漏扫描）；
   标注时 Agent 还应看故事板 / contact sheet 与 `vlm_analysis.json`。
 
 没有理解产物也能跑，但旁白语速为空，泄漏扫描只剩 Agent 自己写的 `entities`，check 会给出警告。
@@ -52,16 +53,17 @@ check 的 error（退出码 1）：
 
 | 规则 | 要求 |
 |---|---|
-| R1 | 顶层、labels、fact、method、target 都是封闭键集与封闭枚举；fact 不能带方法字段，method 不能带事实字段；id 为 `f1…` / `m1…` 且唯一 |
+| R1 | 顶层、labels、fact、method、target 都是封闭键集与封闭枚举；fact 不能带方法字段，method 不能带事实字段；id 为 `f1…` / `m1…` 且唯一；`subtitles` 值类型固定；`skipped_dimensions` 的值都是非空字符串 |
 | R2 | `audio_spans`、`sections` 按时间排序、不重叠、间隙 ≤0.5s、覆盖整片；字幕证据时间在时长内 |
-| R3 | 每条 fact 二选一锚定：`t:[a,b]` 在时长内，或 `measure:[路径]` 可解析；必须显式写 `entities` |
-| R4 | 每条 method 至少一条证据：已有 fact id 或可解析的 `measure:<路径>` |
-| R5 | target 只写 `from`，且解析到 `shots` / `loudness` / `derived` 下的数值或对象 |
-| R6 | `rule` / `applies_when` / `avoid_when` 不得含：原片实体名、与台词或事实共有的连续 8 个汉字（或 5 个英文词）、绝对时间码或"第 N 秒"、绝对路径 |
+| R3 | 每条 fact 二选一锚定：`t:[a,b]` 在时长内，或 `measure:[路径]` 解析到 `shots` / `loudness` / `derived` 下的非字符串值；必须显式写 `entities` |
+| R4 | 每条 method 至少一条证据：已有 fact id 或同样只认这三个根的 `measure:<路径>` |
+| R5 | target 只写 `from`：`shots` / `loudness` / `derived` 下的数值叶子，或白名单派生对象（见 schema）；不得带列表下标 |
+| R6 | `rule` / `applies_when` / `avoid_when` 不得含：原片实体名（忽略空白）、与台词或事实共有的连续 8 个汉字（标点隔开也算）或 5 个英文词、绝对时间码、"第 N 秒"或"N 分 M 秒"、绝对路径 |
 | R7 | 五个维度各至少一条 method，或在 `skipped_dimensions` 写明原因 |
-| R8 | 导出物再扫一遍 R6，且不得出现 `source_facts`、`labels`、`entities`、`evidence`、`statement`、`from`、`path` 键 |
+| R8 | 导出物的每个键和字符串再扫一遍 R6，且不得出现 `source_facts`、`labels`、`entities`、`evidence`、`statement`、`from`、`path` 键 |
 
-警告不阻断：method 缺 `applies_when`、rule 正文写了数字、ASR 不是 `AVAILABLE_COARSE`、有中文对白却没有任何人名来源、`basis` 为空。
+警告不阻断：method 缺 `applies_when`、rule 正文写了数字、ASR 不是 `AVAILABLE_COARSE`、有中文对白却没有任何人名来源、`basis` 为空、
+理解产物记录的成片身份与测量的成片不一致。
 
 R6 只能拦住字面泄漏，拦不住改写过的剧情；写方法时要写"什么情况下怎么做"，不要复述"这部片里发生了什么"。
 规则也不判断语义：方法的方向必须与 check 打印的派生值一致（例如先看各音轨的 `cuts_per_min` 再写"哪类段落切得密"）。

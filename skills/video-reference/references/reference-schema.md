@@ -49,11 +49,15 @@
 }
 ```
 
-- `subtitles` 可选：`burned`、`max_lines` 必填，`marks_original`、`evidence_t` 可选。
+- `subtitles` 可选：`burned`（布尔）、`max_lines`（≥1 整数）必填，`marks_original`（字符串）、`evidence_t`（秒数列表）可选。
+- `skipped_dimensions` 的值是一句非空的原因；它会原样导出，同样受 R8 泄漏扫描。
 - fact：`id`、`dimension`、`statement`、`entities` 必填，`t` 与 `measure` 二选一。`entities` 写这条事实涉及的人名、地名、
   组织名，没有就写空列表——它同时是泄漏扫描的词表。
 - method：`id`、`dimension`、`rule`、`applies_to`、`evidence` 必填；`applies_when`、`avoid_when`、`targets` 可选。
-- target：只写 `from`，路径根只能是 `shots`、`loudness` 或 `derived`，解析结果必须是数值或对象（`derived.structure` 可为列表）。
+- target：只写 `from`，路径根只能是 `shots`、`loudness` 或 `derived`，不得带列表下标；解析结果必须是数值叶子，或以下派生对象之一：
+  `derived.structure`、`derived.first_original_at`（只导出 `{fraction}`）、`derived.narration_jobs`、`derived.by_owner.<owner>`、
+  `derived.by_section.<function>`。`shots.cuts`、`shots.curve`、`loudness.short_term_1s` 这类逐时刻序列不能做 target。
+- fact 的 `measure` 与 method 的 `measure:` 证据也只认这三个根，且不能落在字符串值上。
 
 ## 测量与派生值
 
@@ -62,7 +66,7 @@
 | 路径 | 含义 |
 |---|---|
 | `shots.cuts` · `count` · `mean_s` · `median_s` · `p10_s` · `p90_s` | 硬切时间与镜长分布 |
-| `shots.share_under_1s` · `share_over_8s` · `cuts_per_min` · `curve` | 短/长镜头占比、切点密度、10 秒窗口切点曲线 |
+| `shots.share_under_1s` · `share_over_8s` · `cuts_per_min` · `curve` | 短/长镜头占比、切点密度、10 秒窗口切点曲线（每窗按自身长度折算成每分钟） |
 | `loudness.integrated_lufs` · `lra_lu` · `true_peak_dbtp` · `short_term_1s` | 整体响度、动态范围、真峰值、逐秒短期响度（前约 2 秒为预热空值） |
 
 `derived.*` 由 check 在内存里计算，export 写入用到的部分：

@@ -63,7 +63,14 @@ def test_shot_stats_counts_lengths_and_density():
     assert stats["median_s"] == 2.0
     assert stats["share_under_1s"] == pytest.approx(1 / 3, abs=1e-3)
     assert stats["cuts_per_min"] == 20.0
-    assert stats["curve"] == {"window_s": 10.0, "values": [12.0]}
+    assert stats["curve"] == {"window_s": 10.0, "values": [20.0]}   # 2 cuts in a 6 s window
+
+
+def test_curve_scales_the_partial_last_window_by_its_own_length():
+    stats = shot_stats([3.0, 12.0, 21.0], 25.0)
+
+    # full 10 s windows count x6; the last 5 s window counts x12
+    assert stats["curve"]["values"] == [6.0, 6.0, 12.0]
 
 
 @pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="ffmpeg not installed")
