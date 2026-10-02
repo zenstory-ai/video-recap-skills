@@ -23,7 +23,7 @@ Status: implemented
   family 名仍由 `SUBTITLE_FONT_NAME` 给出。`assembly_manifest` 的 `subtitle_style.font_file` 记录它，`resource_lock` 据此对上 `font` 资源。
 - `library.py check` 增加：字幕样式引用的字体资源必须有 `font.family`；字幕样式出现不认识的参数即报错；字幕样式必须给出 `max_chars`，
   且 `size_px × max_chars` 不得超过画布宽减去两侧默认边距——真实端到端运行里，只给字号的模板让 18 字一行宽到 936px，被合成阶段的视觉 QC 拦下，这类问题应在登记时发现。
-- `--project` 在解析前转成绝对路径，续跑命令从任何目录都能用。
+- `--project` 在解析前转成绝对路径；续跑命令回显用户写的 `--project`（目录或文件）并转成绝对路径，从任何目录都能用（见 [[2026-10-02-resume-command-echoes-argv]]）。
 - 示例项目 `examples/demo-project/recap_project.json` 绑定合成示例库。
 - 被绑定的资源、以及模板引用的资源，只要 `check` 对其记录报了错误就拒绝绑定（缺文件、Fish / index-tts 缺 `voice_id`、未知 provider 等），
   不会在花钱的阶段之后才崩溃或悄悄换成默认音色；数值型字幕参数（字号、每行字数、行数、字幕带）必须是整数；

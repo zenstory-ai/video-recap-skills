@@ -337,9 +337,9 @@ def test_unsupported_audio_combinations_fail_before_pipeline(monkeypatch, tmp_pa
 
 
 def test_narration_preserve_approved_text_forwards_and_continues(monkeypatch, tmp_path):
-    args = _args(preserve_approved_text=True)
+    _, args = recap_cli.parse_args([str(tmp_path / "in.mp4"), "--preserve-approved-text"])
     voiceover = recap_runner._voiceover_args(tmp_path, tmp_path / "narration.json", args)
-    continuation = recap_timeline._continuation_command(tmp_path / "in.mp4", tmp_path, args)
+    continuation = recap_timeline._continuation_command(tmp_path, args)
 
     assert "--preserve-approved-text" in voiceover
     assert "--preserve-approved-text" in continuation

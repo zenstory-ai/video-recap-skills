@@ -142,8 +142,37 @@ def _run_manifest_payload(video, args):
     }
 
 
+# Settings main() can take from the environment rather than argv, with their no-env value.
+# A resume shell may not carry the same environment, so the resume argv pins them.
+_ENV_FILLED = (
+    ("edit_mode", "full"),
+    ("target_duration", None),
+    ("tts_provider", "auto"),
+    ("voice_ref", None),
+    ("subtitle_y_top", None),
+    ("subtitle_y_bot", None),
+)
+
+
+def _resume_argv(work_dir, args):
+    """The argv that resumes this run: what the user typed (paths made absolute by
+    recap_cli), plus the work dir and any environment-filled setting it did not spell out.
+    Values a --project binding filled in are re-derived from --project on resume."""
+    argv = list(args._argv)
+    explicit = args._explicit_options
+    bound = getattr(args, "_bound_from_project", frozenset())
+    if "--work-dir" not in explicit:
+        argv += ["--work-dir", str(work_dir)]
+    for dest, unset in _ENV_FILLED:
+        flag = "--" + dest.replace("_", "-")
+        value = getattr(args, dest)
+        if flag not in explicit and dest not in bound and value != unset:
+            argv += [flag, str(value)]
+    return argv
+
+
 def _write_run_manifest(work_dir, video, args):
-    payload = _run_manifest_payload(video, args)
+    payload = {**_run_manifest_payload(video, args), "argv": _resume_argv(work_dir, args)}
     (work_dir / RUN_MANIFEST).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -190,7 +219,10 @@ def _multi_run_manifest_payload(videos, args, source_records):
 
 
 def _write_project_run_manifest(work_dir, videos, args, source_records):
-    payload = _multi_run_manifest_payload(videos, args, source_records)
+    payload = {
+        **_multi_run_manifest_payload(videos, args, source_records),
+        "argv": _resume_argv(work_dir, args),
+    }
     (work_dir / RUN_MANIFEST).write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )

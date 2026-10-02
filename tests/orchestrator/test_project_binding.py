@@ -154,7 +154,7 @@ def test_resume_command_carries_the_project_not_the_values_it_bound(tmp_path, cl
     _, args = parse_args([str(video), "--project", str(path)])
     project_binding.apply_project(project_binding.resolve_project(args.project, args), args)
 
-    command = recap_timeline._continuation_command(video, tmp_path / "work", args)
+    command = recap_timeline._continuation_command(tmp_path / "work", args)
 
     assert "--project" in command
     assert "--mimo-tts-voice" not in command and "--material-library-dir" not in command
@@ -209,7 +209,10 @@ def test_resume_command_names_the_project_by_absolute_path(monkeypatch, tmp_path
 
     recap_runner.main()
 
-    assert f"--project {shlex.quote(str(path.resolve()))}" in capsys.readouterr().out
+    # The typed directory is kept, made absolute, and still names the same project file.
+    typed = (tmp_path / "project").resolve()
+    assert f"--project {shlex.quote(str(typed))}" in capsys.readouterr().out
+    assert project_binding.project_path(typed) == path.resolve()
 
 
 @pytest.mark.parametrize(
