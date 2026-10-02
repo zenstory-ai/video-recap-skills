@@ -12,7 +12,6 @@ PUBLIC_ENTRYPOINTS = (
     "skills/video-cut/scripts/cut.py",
     "skills/video-recap/scripts/recap.py",
     "skills/video-script/scripts/review.py",
-    "skills/video-understanding/scripts/brief.py",
     "skills/video-understanding/scripts/understand.py",
 )
 

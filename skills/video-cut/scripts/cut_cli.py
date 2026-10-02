@@ -20,7 +20,7 @@ from cut_contract import (
 from cut_render import build_edited_source_video
 from media_geometry import _has_audio_stream, _select_output_geometry
 from narrative_selection import check_required_evidence
-from narration_mapping import update_cut_qc
+from cut_qc import update_cut_qc
 from sentence_boundaries import (
     _combine_boundary_windows,
     _load_sentence_boundary_windows,

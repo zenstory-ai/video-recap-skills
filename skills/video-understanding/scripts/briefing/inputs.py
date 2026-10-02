@@ -6,8 +6,7 @@ from pathlib import Path
 from lib import CONFIG, file_identity
 from briefing.context import _consolidation_model
 
-# Shared with consolidate.py, which this byte-identical copy cannot import (the sibling
-# skill ships no consolidate.py). Keep both literals in sync.
+# Same literal as consolidate._ASR_SPAN_TOL; test_asr_span_tol_matches_across_files pins them.
 _ASR_SPAN_TOL = 0.05
 
 _MIMO_REJECTION_MARKERS = (

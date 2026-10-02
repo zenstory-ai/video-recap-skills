@@ -34,7 +34,7 @@ Status: proposed
 - **Phase 0 修 bug：** 补上多源 anchors 的 `clip_plan_identity`，加一条不 mock 子进程的回归测试；补齐素材库白名单。
 - **Phase 1 零破坏删减**（约 4,000 行）：
   - parity 改为函数级（只覆盖 5 个真正共用的函数），删掉 understanding 里的 lint/ownership/deslop 副本和 script 里的 timeline_fusion。约 1,390 行，是最大的一刀，必须最先做。已落地，见 [[2026-10-02-function-level-parity]]。
-  - 删除只写不读的产物、走不到的分支和门面层。`deslop_qc_requirements.json`、cut 交付 QC 与 `plan["warning"]` 已落地，见 [[2026-10-02-drop-write-only-artifacts]]。
+  - 删除只写不读的产物、走不到的分支和门面层。`deslop_qc_requirements.json`、cut 交付 QC 与 `plan["warning"]` 已落地，见 [[2026-10-02-drop-write-only-artifacts]]；cut / brief 门面与 `narration_mapping` → `cut_qc` 改名已落地，见 [[2026-10-02-collapse-cut-brief-facades]]。
   - 修正 SKILL.md 中与代码不符的内容。
   - recap 的 dashboard 和资源模块归位到子包。
   - 续跑提示改为回显原始 argv。

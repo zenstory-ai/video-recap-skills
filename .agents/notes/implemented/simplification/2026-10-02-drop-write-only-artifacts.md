@@ -8,7 +8,7 @@ Status: implemented
 
 - **`deslop_qc_requirements.json`**：video-understanding 的 brief 每次都写 `{"schema_version": 1, "style_card_required": false}`。video-script 的 `deslop_qc.py` 读它来决定缺少 `style_card.json` 是 blocker 还是 advisory，但仓库里只有测试会写 `true`，所以 blocker 分支在生产里走不到；文件缺失时的默认值也是 advisory。两份 data-schema 各用 17 行描述这个契约。
 - **cut 的交付 QC**：`cut_render.update_delivery_qc` 把编码次数、重编码原因、stream copy 风险、ffprobe 探到的采样率写进 `clip_plan_validated.json` 的 `qc.delivery_qc`，`write_cut_delivery_qc` 再写一份 `cut_delivery_qc.json`。写入点有三个（`cut_cli` 规划时、复用缓存时、`build_edited_source_video` 渲染后），`cut_cli` 还要在 normalize-only 和 required_evidence 预检时删掉陈旧的 `cut_delivery_qc.json`。仓库内没有读者：recap 的 `_surface_cut_qc` 和 dashboard 只读 `target_duration_status`、`output_geometry`、`blocking` 等键；assemble 的 `assembly_qc.json["delivery_qc"]` 是 assemble 自己算的成片交付检查，与 cut 无关。cut 的 SKILL.md 本来就写明它只做一次中间编码、不承担最终交付。
-- **`plan["warning"]`**：`normalize_clip_plan` / `normalize_multi_source_clip_plan` 在总时长超出目标 15% 时写一个顶层 `warning` 字段并打日志。没有代码读这个键；`narration_mapping.update_cut_qc` 已经用同样的 1.15 阈值产出 `target_duration_drift`，并决定是否 blocking。
+- **`plan["warning"]`**：`normalize_clip_plan` / `normalize_multi_source_clip_plan` 在总时长超出目标 15% 时写一个顶层 `warning` 字段并打日志。没有代码读这个键；`update_cut_qc`（现位于 `cut_qc.py`，原 `narration_mapping.py`，见 [[2026-10-02-collapse-cut-brief-facades]]）已经用同样的 1.15 阈值产出 `target_duration_drift`，并决定是否 blocking。
 
 ## Decision
 
