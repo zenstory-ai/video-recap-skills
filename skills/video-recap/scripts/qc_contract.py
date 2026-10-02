@@ -1,7 +1,7 @@
 """Shared shift-left QC report contract for video-recap artifacts.
 
 This module is intentionally standalone: it defines a small schema and local
-validation helpers only. It does not call MiMo, read credentials, connect the
+validation helpers only. It does not call a model, read credentials, connect the
 pipeline, or attempt automatic fixes.
 """
 from __future__ import annotations
@@ -27,7 +27,7 @@ STAGES = frozenset({
 SEVERITIES = frozenset({"info", "advisory", "warning", "blocker"})
 CONFIDENCES = frozenset({"low", "medium", "high", "objective"})
 SAMPLE_POLICIES = frozenset({"all", "deterministic", "sampled", "semantic", "aesthetic"})
-ARTIFACTS = frozenset({"final_qc.json", "golden_eval.json", "mimo_qc.json", "preflight_qc.json"})
+ARTIFACTS = frozenset({"final_qc.json", "golden_eval.json", "preflight_qc.json"})
 
 DETERMINISTIC_CATEGORIES = frozenset({
     "missing_artifact",
@@ -38,7 +38,7 @@ DETERMINISTIC_CATEGORIES = frozenset({
     "schema_invalid",
     "placement",
 })
-NON_DETERMINISTIC_CATEGORIES = frozenset({"semantic", "aesthetic", "mimo_semantic", "mimo_aesthetic"})
+NON_DETERMINISTIC_CATEGORIES = frozenset({"semantic", "aesthetic"})
 BLOCKING_SEVERITIES = frozenset({"blocker"})
 _SECRET_KEY_RE = re.compile(r"(?i)(api[_-]?key|token|secret|password|authorization|credential)")
 _SECRET_VALUE_RE = re.compile(r"\b(?:sk|tp)-[A-Za-z0-9_-]{6,}\b")
@@ -154,9 +154,9 @@ def build_finding(
 ) -> dict[str, Any]:
     """Build and validate one normalized QC finding.
 
-    Deterministic objective findings may block. MiMo semantic/aesthetic findings
+    Deterministic objective findings may block. Semantic/aesthetic findings
     default to advisory and may never block. Objective checks belong in the
-    deterministic QC producers instead of upgrading subjective model findings.
+    deterministic QC producers instead of upgrading subjective findings.
     """
     if finding_id is None:
         finding_id = id

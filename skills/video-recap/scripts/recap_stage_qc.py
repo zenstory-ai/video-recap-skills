@@ -1,10 +1,9 @@
-"""Write shift-left, MiMo, and final QC stage reports."""
+"""Write shift-left and final QC stage reports."""
 
 import json
 from pathlib import Path
 
 import final_qc
-import mimo_qc
 import qc_contract
 
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
@@ -21,7 +20,7 @@ def _load_preflight_stage_reports(work_dir):
 def _write_shift_left_stage_qc(work_dir, stage, metadata, findings=None):
     """Write/roll up local shift-left QC for one pipeline stage.
 
-    This is a local contract artifact only: no MiMo/deep eval calls, no repair, and no
+    This is a local contract artifact only: no model calls, no repair, and no
     credential persistence (qc_contract redacts every report it builds).
     """
     stage_report = qc_contract.build_report(
@@ -106,55 +105,3 @@ def _require_final_qc(result, work_dir):
             "严格最终 QC 未通过或摘要格式无效: " + ", ".join(invalid)
         )
 
-
-def _mimo_qc_stage_enabled(args, stage):
-    return (
-        args.mimo_qc == "both"
-        or (args.mimo_qc == "pre-assemble" and stage == "pre_assemble")
-        or (args.mimo_qc == "post-render" and stage == "post_render")
-    )
-
-
-def _prepare_mimo_qc(work_dir, args):
-    """Remove an old advisory artifact when this run has MiMo QC disabled."""
-    if args.mimo_qc == "off":
-        mimo_qc.clear_report(work_dir)
-
-
-def _print_mimo_qc_pointer(result, stage):
-    report = result["report"]
-    metadata = report["metadata"]
-    status = metadata["status"]
-    stage_findings = [f for f in report["findings"] if f["stage"] == stage]
-    if status in {"failed", "unavailable"}:
-        print(
-            f"[video-recap] ⚠ MiMo QC {stage}: {status} ({metadata['error']})；建议性检查不可用，继续流水线"
-        )
-        return
-    print(
-        f"[video-recap] ℹ MiMo QC {stage}: {status}, {len(stage_findings)} 条建议；详见 {result['path']}"
-    )
-    for finding in stage_findings[:5]:
-        print(f"[video-recap]   - {finding['message']}")
-
-
-def _run_mimo_qc_stage(work_dir, args, stage, *, final_output=None):
-    """Run one selected advisory stage and never propagate a failure."""
-    if not _mimo_qc_stage_enabled(args, stage):
-        return None
-    try:
-        result = mimo_qc.run(
-            work_dir,
-            stage=stage,
-            live=True,
-            refresh=args.mimo_qc_refresh,
-            final_output=final_output,
-        )
-    except Exception as exc:
-        print(
-            f"[video-recap] ⚠ MiMo QC {stage}: {type(exc).__name__}；"
-            "建议性检查失败，继续流水线"
-        )
-        return None
-    _print_mimo_qc_pointer(result, stage)
-    return result

@@ -202,7 +202,7 @@ def test_probe_failure_on_existing_nonempty_mp4_is_deterministic_blocker(tmp_pat
     assert qc.validate_report(report) is True
 
 
-def test_corrupt_advisory_mimo_qc_is_metadata_only(tmp_path):
+def test_leftover_mimo_qc_from_an_older_run_is_not_read(tmp_path):
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
     (tmp_path / "mimo_qc.json").write_text("not json", encoding="utf-8")
@@ -212,7 +212,7 @@ def test_corrupt_advisory_mimo_qc_is_metadata_only(tmp_path):
     )
 
     assert report["ok"] is True
-    assert report["metadata"]["artifacts"]["mimo_qc.json"]["summary"] == {"invalid": True}
+    assert "mimo_qc.json" not in report["metadata"]["artifacts"]
 
 
 def test_corrupt_upstream_qc_becomes_schema_invalid_blocker(tmp_path):
@@ -348,7 +348,7 @@ def test_no_secret_persistence_in_final_qc_or_golden_eval(tmp_path):
         tmp_path / "assembly_manifest.json",
         {"final_output": str(output), "api_key": "sk-manifest-secret"},
     )
-    _write_json(tmp_path / "mimo_qc.json", {"ok": True, "token": "tp-mimo-secret"})
+    _write_json(tmp_path / "preflight_qc.json", {"ok": True, "token": "tp-preflight-secret"})
 
     final_qc.run(
         tmp_path,
@@ -370,7 +370,7 @@ def test_no_secret_persistence_in_final_qc_or_golden_eval(tmp_path):
     ).read_text(encoding="utf-8")
 
     assert "sk-manifest-secret" not in text
-    assert "tp-mimo-secret" not in text
+    assert "tp-preflight-secret" not in text
     assert "sk-probe-secret" not in text
     assert "tp-golden-secret" not in text
     assert "<redacted>" in text

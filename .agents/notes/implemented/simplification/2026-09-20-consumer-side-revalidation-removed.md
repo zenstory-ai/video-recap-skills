@@ -19,7 +19,7 @@ Status: implemented
   voiceover 的 dub ffmpeg 调用检查返回码、`_run_asr` 畸形响应抛错、缓存 sidecar 损坏抛错；recap 的
   `mimo_qc_report._stage_reports`、`recap_inspect._load_optional`。缺失文件仍按各自语义处理（缓存未命中 / 阶段未跑）。
 - CLI 组合检查只在 API 层做一次；`CONFIG.get(key, default)` 对已声明键改为 `CONFIG[key]`；未读取的 CONFIG 键删除。
-- 保留：agent 手写输入与第三方响应的解析防御；文档标明的建议型/失败开放阶段（MiMo QC、解说评审、剪映导出）；
+- 保留：agent 手写输入与第三方响应的解析防御；文档标明的建议型/失败开放阶段（MiMo QC——已删除，见 [[2026-10-02-delete-mimo-qc]]——、解说评审、剪映导出）；
   `--require-final-qc` 文档标明的形状检查；recap 对 adoption 三件套的独立验证（tamper boundary）。
 - 指令：跨技能共识只在拥有它的技能里写一次；删除"不发布不调度"等没有对应工具的禁令与描述代码行为的禁令。
 

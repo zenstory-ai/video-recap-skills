@@ -14,6 +14,10 @@ All notable changes to this project are documented here.
 
 - **理解与写稿技能不再整文件复制旁白 lint 链。** video-understanding 去掉从不执行的 `narration_lint` / `speech_ownership` / `deslop_qc`，video-script 去掉 `timeline_fusion` 和 brief 分块代码，两个技能的脚本合计少约 1,440 行；一致性测试改为只比对两边真正共用的五个文本预算函数及其预算配置默认值。产物、命令与默认值不变。
 
+### Removed
+
+- **删除 MiMo 多模态建议型 QC。** `recap.py` 不再接受 `--mimo-qc` / `--mimo-qc-refresh`（传入即报 unrecognized arguments），`MIMO_QC` / `MIMO_QC_REFRESH` / `MIMO_QC_MODEL` 环境变量不再被读取；入口 `mimo_qc.py` 与 `scripts/qc/` 子包删除，流水线不再写 `mimo_qc.json`。`final_qc.json` 的 `metadata.artifacts` 不再汇总 `mimo_qc.json`，QC 契约的 `artifact` 只接受 `final_qc.json` / `golden_eval.json` / `preflight_qc.json`，dashboard 的 QC 页去掉「MiMo 复核」卡片；旧 work_dir 里残留的 `mimo_qc.json` 不再被任何环节读取。该功能默认关闭、不能阻断也不能自动修复，却是代码与测试里成本最高的建议型功能（约 1,200 行代码、约 900 行测试）。确定性的 `preflight_qc.json` / `final_qc.json` / `golden_eval.json` 与解说评审不受影响。
+
 ### Fixed
 
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。

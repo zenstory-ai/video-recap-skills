@@ -124,15 +124,6 @@
     "MIMO_MODEL": {
       "classification": "value"
     },
-    "MIMO_QC": {
-      "classification": "value"
-    },
-    "MIMO_QC_MODEL": {
-      "classification": "value"
-    },
-    "MIMO_QC_REFRESH": {
-      "classification": "value"
-    },
     "MIMO_TOKEN_PLAN_CLUSTER": {
       "classification": "value"
     },

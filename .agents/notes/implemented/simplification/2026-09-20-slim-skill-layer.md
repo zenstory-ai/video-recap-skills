@@ -19,7 +19,7 @@ references 里有两个放错位置的文件：`video-recap/references/timeline-
 （这两个 skill 都不声明另外三个 tempo 键，parity 测试不要求它们实现）、understanding 的 `step_cache_key` /
 `video_fingerprint`、assemble 的 `_VISUAL_DELIVERY_FORBIDDEN_KEYS` / `SCRIPT_DIR`、未用的 `DEFAULT_MIMO_*_MODEL`
 常量、asr.py 与 detect.py 各一份字节相同的 `_write_audio_meta`、recap_runner 两处只差“多视频”三字的过期 manifest 守卫、
-mimo_qc.py 两个 12 参数的纯透传函数。
+mimo_qc.py 两个 12 参数的纯透传函数（`mimo_qc.py` 已于 2026-10-02 删除，见 [[2026-10-02-delete-mimo-qc]]）。
 
 ## Decision
 

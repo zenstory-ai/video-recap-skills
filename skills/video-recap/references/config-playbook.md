@@ -26,8 +26,6 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | Fish Audio endpoint | `FISH_TTS_API_URL` | `https://api.fish.audio/v1/tts` | returns WAV directly to the existing voiceover pipeline |
 | Self-hosted TTS | `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` | — | explicit `--tts-provider index-tts` only; the endpoint is never written to disk, and segment `emotion`/style is rejected |
 | TTS transport | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | request timeout, parallel segments, and per-segment retries for all providers |
-| Advisory MiMo QC | `MIMO_QC` / `--mimo-qc {off,pre-assemble,post-render,both}` | `off` | optional subjective review at the selected stage(s), one request per stage. Always fail-open: results only point the agent/user to `mimo_qc.json`, never block or auto-repair |
-| MiMo QC refresh/model | `MIMO_QC_REFRESH` / `--mimo-qc-refresh`; `MIMO_QC_MODEL` | cache on / VLM fallback | the reuse check compares evidence file sizes/mtimes, model and prompt, never absolute paths. Post-render temporarily samples at most 6 JPEGs (≤768px); base64 is never persisted. The standalone adapter requires explicit `mimo_qc.py --live` for network access |
 | Narration block coverage | `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` | `0.7` / `9.0` | current block-recap density controls |
 | Narration speed | `NARRATION_SPEED` | `1.15` | global atempo on the voiceover; set `1.0` for long-form/documentary |
 | Narration authored start | `NARRATION_DELAY_SECONDS` | `0` | the renderer uses the Agent-authored `start` exactly. Set a non-zero value only for legacy drafts; hidden delay can move a validated sentence-boundary entry back into source speech |

@@ -544,10 +544,8 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
 > 最终 `dub_<name>.mp4` 显式输出 48 kHz AAC；不能沿用 `loudnorm` 内部的 96 kHz 分析采样率。
 ## shift-left QC artifacts
 
-`preflight_qc.json`、`final_qc.json`、`golden_eval.json`、`mimo_qc.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render` / `golden`，其中 `mimo_qc.json` 是 artifact 而不是 stage。详见 `shift-left-qc-schema.md`。
+`preflight_qc.json`、`final_qc.json`、`golden_eval.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render` / `golden`。详见 `shift-left-qc-schema.md`。
 
-`recap.py` 可通过 `--mimo-qc pre-assemble|post-render|both`（默认 `off`）在组装前和/或成片后写 `mimo_qc.json`。每个 stage 最多一次 live request；报告的 `metadata.cache_input`（证据文件的 kind/bytes/mtime_ns、模型、提示与抽帧元数据）与本次完全相等时复用上次结果，`--mimo-qc-refresh` 可刷新。`post_render` 最多临时抽取 6 张、最长边 768px 的 JPEG；base64 只进入请求，不写进 artifact。多 stage 报告聚合在 `metadata.stages`，状态为 `completed` / `cached` / `unavailable` / `failed`，任何状态都不阻断、也不自动修复。关闭功能会清理旧 `mimo_qc.json`，避免陈旧建议被误认为本轮结果。
+`cut_output` 解说评审按 `source_id` 映射 `multi_source_manifest.json` 指向的逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
 
-QC 证据把 `source_asr` 与 `generated_subtitles` 分开：前者只用于源事实/原声时序，后者是本轮旁白派生字幕，不能反过来充当事实证据。多视频项目从 `multi_source_manifest.json` 指向的逐源 work dir 汇集 ASR；`cut_output` 解说评审同样按 `source_id` 映射逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
-
-渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再运行可选 MiMo 提示，最后写 `final_qc.json` 和 `golden_eval.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json`、`mimo_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。MiMo 和其他 non-deterministic finding 永远不能成为 blocker；客观佐证必须由 deterministic producer 另发 finding。`golden_eval.json` 默认要求 `final_qc.json.ok=true`，也可用 golden fixture 做简单的时长、codec 和必需 artifact 断言。所有 QC metadata/evidence 写入前都经过 `qc_contract.redact_secrets`：secret-looking key/value 会被替换，URL userinfo/query/fragment 会被移除，仅保留必要 host/path 诊断信息。
+渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再写 `final_qc.json` 和 `golden_eval.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。non-deterministic finding 永远不能成为 blocker；客观佐证必须由 deterministic producer 另发 finding。`golden_eval.json` 默认要求 `final_qc.json.ok=true`，也可用 golden fixture 做简单的时长、codec 和必需 artifact 断言。所有 QC metadata/evidence 写入前都经过 `qc_contract.redact_secrets`：secret-looking key/value 会被替换，URL userinfo/query/fragment 会被移除，仅保留必要 host/path 诊断信息。

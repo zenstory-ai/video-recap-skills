@@ -27,10 +27,8 @@ from recap_runtime import (
 )
 from recap_stage_qc import (
     _post_render_qc_metadata,
-    _prepare_mimo_qc,
     _print_final_qc_pointer,
     _require_final_qc,
-    _run_mimo_qc_stage,
     _tts_qc_metadata,
     _write_final_qc_reports,
     _write_shift_left_stage_qc,
@@ -306,7 +304,6 @@ def _narrate(work_dir, args, timeline):
     _write_shift_left_stage_qc(
         work_dir, "pre_assemble", metadata={"visual_overlays": str(overlays_path)}
     )
-    _run_mimo_qc_stage(work_dir, args, "pre_assemble")
     return review_ran
 
 
@@ -348,8 +345,6 @@ def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assembl
         "post_render",
         metadata=_post_render_qc_metadata(work_dir, final_output),
     )
-    if uses_narration(args):
-        _run_mimo_qc_stage(work_dir, args, "post_render", final_output=final_output)
     _finish_recap(work_dir, final_output, args)
     if uses_narration(args):
         _print_narration_review_pointer(work_dir, review_ran=review_ran)
@@ -447,12 +442,6 @@ def main():
             doctor_args += ["--tts-provider", args.tts_provider]
         _run("video-recap", "doctor.py", *doctor_args)
         return
-    if not uses_local_adoption(args) and args.mimo_qc not in {
-        "off", "pre-assemble", "post-render", "both"
-    }:
-        ap.error(
-            "MIMO_QC/--mimo-qc must be one of: off, pre-assemble, post-render, both"
-        )
     if not args.video:
         ap.error("video is required (unless --doctor)")
     validate_audio_routing(ap, args)
@@ -555,9 +544,8 @@ def _execute_pipeline(args, videos):
             if args.work_dir
             else videos[0].parent / f"work_dir_multi_{videos[0].stem}"
         )
-        # Validate the work-directory audio policy before any run-local QC state is reset.
+        # Validate the work-directory audio policy before any stage writes into it.
         reject_unbound_narration_workdir(work_dir, args)
-        _prepare_mimo_qc(work_dir, args)
         _run_multi_cut(videos, work_dir, args)
         return
 
@@ -570,7 +558,6 @@ def _execute_pipeline(args, videos):
     work_dir.mkdir(parents=True, exist_ok=True)
     reject_unbound_narration_workdir(work_dir, args)
     reject_unsupported_subtitle_track(work_dir, args)
-    _prepare_mimo_qc(work_dir, args)
     if args.edit_mode == "dub":
         _run_dub(video, work_dir, args)
     else:

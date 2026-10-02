@@ -14,7 +14,7 @@ must / never：
 
 - 新增创作环节时，先给 Agent 写 brief 和一个确定性校验器，never 让 CLI 生成最终文案或替 Agent 选片段。
 - 两份创作计划 JSON 是 Agent 与建议型评审的工作记录，不是渲染门禁；渲染只校验当前阶段硬输入（`clip_plan.json` / `narration.json`）。
-- 硬门禁只能是确定性检查（`validate.py`、`assembly_qc.json`、dub lint）。LLM 评审（`review.py`、MiMo QC）默认建议型、失败开放；只有调用方显式 `--require-narration-review` 时，事实矛盾、残句、解析失败或评审不可用才在 TTS 前阻断，文笔类意见永远不阻断。
+- 硬门禁只能是确定性检查（`validate.py`、`assembly_qc.json`、dub lint）。LLM 评审（`review.py`；MiMo QC 已删除，见 [[2026-10-02-delete-mimo-qc]]）默认建议型、失败开放；只有调用方显式 `--require-narration-review` 时，事实矛盾、残句、解析失败或评审不可用才在 TTS 前阻断，文笔类意见永远不阻断。
 - 编排器不是无人值守调度器，不向任何平台发布。
 
 来源：3843c39、b739126、2ae220e (#47)、d104333 (#27)、727a8a5 (#49)、468182c (#63)

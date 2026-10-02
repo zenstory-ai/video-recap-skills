@@ -20,7 +20,6 @@ QC_FILES = (
     ("final_qc.json", "成片 QC"),
     ("golden_eval.json", "黄金评估"),
     ("assembly_qc.json", "合成 QC"),
-    ("mimo_qc.json", "MiMo 复核"),
 )
 STAGES = (("home", "概况"), ("understanding", "理解"), ("cut", "剪辑"), ("narration", "旁白"),
           ("film", "成片"), ("qc", "QC"), ("resources", "资源"))
@@ -190,13 +189,6 @@ def _qc_card(rdir: Path, name: str, label: str) -> dict | None:
             detail = f"：{', '.join(map(str, codes))}" if codes else ""
             return {**card, "level": "error", "blockers": max(len(codes), 1), "text": f"未通过{detail}"}
         return {**card, "level": "warn", "blockers": 0, "text": f"结论未知（{verdict}）"}
-    if name == "mimo_qc.json":
-        meta = data.get("metadata") if isinstance(data.get("metadata"), dict) else {}
-        texts = {"completed": ("ok", f"已完成，{data.get('finding_count', 0)} 条建议（不阻断）"),
-                 "dry_run": ("ok", "演练模式，未请求模型"),
-                 "failed": ("warn", "请求失败，只记录不阻断")}
-        level, text = texts.get(meta.get("status"), ("warn", f"状态：{meta.get('status')}"))
-        return {**card, "level": level, "blockers": 0, "text": text, "findings": _findings(data)}
     ok, count = data.get("ok"), data.get("blocker_count")
     card["findings"] = _findings(data)
     if ok is True and count == 0:
