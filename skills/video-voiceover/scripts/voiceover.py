@@ -31,9 +31,7 @@ from lib import (
     narration_tempo_budget,
     run_cmd,
 )
-
-# Re-exported: tests and callers reach these through voiceover, the module owns the flow.
-from tts_audio import _maybe_normalize_tts_wav, _normalize_tts_wav_rms  # noqa: F401
+from tts_audio import _maybe_normalize_tts_wav
 
 SUPPORTED_TTS_ENGINES = {"mimo-tts", "fish-audio", "index-tts"}
 SEGMENT_AUDIO_SCHEMA_VERSION = 1
@@ -429,10 +427,8 @@ def _prepare_tts_segment(index, seg, narration, tts_dir, engine):
     output_wav = tts_dir / f"narr_{index:03d}.wav"
     if engine == "index-tts":
         rate, pitch = index_provider.default_controls(seg)
-    elif CONFIG["tts_dynamic_params"]:
-        rate, pitch = _compute_tts_params(text, narration, index)
     else:
-        rate, pitch = "+0%", "+0Hz"
+        rate, pitch = _compute_tts_params(text, narration, index)
     cache_inputs = _tts_segment_cache_inputs(engine, index, seg, text, rate, pitch)
     return text, output_wav, rate, pitch, cache_inputs
 
@@ -555,7 +551,6 @@ def tts_settings_payload(engine):
     """Return non-secret TTS settings that materially affect generated audio."""
     settings = {
         "engine": engine,
-        "tts_dynamic_params": CONFIG["tts_dynamic_params"],
         "narration_speed": CONFIG["narration_speed"],
         "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
         "narration_cumulative_tempo_hard_max": CONFIG["narration_cumulative_tempo_hard_max"],

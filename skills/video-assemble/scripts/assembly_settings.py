@@ -107,7 +107,6 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
     if audio_mode in {"narration", "source-mix"} and not explicit_mix:
         # adopted-packet-copy never decodes or mixes, so mix settings cannot change it.
         settings["audio_mix"] = {
-            "ducking_mode": CONFIG["ducking_mode"],
             "duck_fade_seconds": CONFIG["duck_fade_seconds"],
             "duck_bridge_seconds": CONFIG["duck_bridge_seconds"],
             "ducking_narr_weight": CONFIG["ducking_narr_weight"],
@@ -115,12 +114,6 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
             "idle_orig_volume": CONFIG["idle_orig_volume"],
             "speech_ducking_volume": CONFIG["speech_ducking_volume"],
             "zone_ducking_volume": CONFIG["zone_ducking_volume"],
-            "ducking_threshold": CONFIG["ducking_threshold"],
-            "ducking_ratio": CONFIG["ducking_ratio"],
-            "ducking_attack": CONFIG["ducking_attack"],
-            "ducking_release": CONFIG["ducking_release"],
-            "ducking_level_sc": CONFIG["ducking_level_sc"],
-            "ducking_makeup": CONFIG["ducking_makeup"],
             "final_loudnorm": final_loudnorm_filter(),
             "loudness_mode": _loudness_mode(),
             "bgm_path": CONFIG["bgm_path"],

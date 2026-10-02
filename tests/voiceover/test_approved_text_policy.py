@@ -15,7 +15,6 @@ from lib import CONFIG
 
 
 def _configure_offline_tts(monkeypatch):
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
     monkeypatch.setitem(CONFIG, "tts_segment_normalize", False)
     monkeypatch.setitem(CONFIG, "narration_speed", 1.0)
     monkeypatch.setitem(CONFIG, "narration_cumulative_tempo_max", 1.2)

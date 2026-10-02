@@ -573,7 +573,6 @@ def _interp_keyframe_gain(keyframes, t):
 
 def test_p0_ducking_ffmpeg_expression_matches_timeline_keyframes(monkeypatch):
     """Rendered mp4 ducking and timeline/JianYing ducking share the same outside-ramp semantics."""
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
     monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.85)
     monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
     monkeypatch.setitem(CONFIG, "zone_ducking_volume", 0.12)

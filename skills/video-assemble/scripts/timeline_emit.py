@@ -81,11 +81,10 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
                "volume": CONFIG["bgm_volume"],
                "ducking_volume": CONFIG["bgm_ducking_volume"],
                "fade": fade}
-    # carry ducking automation whenever ducking is on at all; even under sidechain
-    # mode the draft gets editable volume keyframes (ffmpeg stays the canonical mix)
+    # narration mode always ducks; the draft carries the same envelope as editable
+    # volume keyframes (ffmpeg stays the canonical mix)
     ducking = None
-    if audio_mode == "narration" and explicit_audio_mix is None \
-            and CONFIG["ducking_mode"] != "none":
+    if audio_mode == "narration" and explicit_audio_mix is None:
         ducking = {"idle": CONFIG["idle_orig_volume"],
                    "speech": CONFIG["speech_ducking_volume"],
                    "quiet": CONFIG["zone_ducking_volume"],

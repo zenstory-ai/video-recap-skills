@@ -12,7 +12,7 @@ description: >
 本技能负责最终合成：
 
 1. 把各段旁白音频放到视频时间线上。
-2. 在旁白窗口内压低原声，支持 fixed / sidechain / zone 模式。
+2. 在旁白窗口内用固定包络压低原声（盖住原声对白时与落在安静段时各用一档音量），间隙恢复原声。
 3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。
 4. 可选把最终响度标准化到目标 LUFS。
 

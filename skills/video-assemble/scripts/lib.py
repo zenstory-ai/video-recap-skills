@@ -55,13 +55,6 @@ _foreign_under_narration_volume = 0.05  # original volume under narration when s
 
 CONFIG = {
     "fade_ms": env_int("FADE_MS", 120, minimum=0),  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
-    "ducking_mode": "fixed",  # fixed | sidechaincompress | none
-    "ducking_threshold": 0.15,
-    "ducking_ratio": 3,
-    "ducking_attack": 10,
-    "ducking_release": 300,
-    "ducking_level_sc": 2.0,
-    "ducking_makeup": 1.2,
     "ducking_narr_weight": 1.5,
     "ducking_orig_volume": env_float("DUCKING_ORIG_VOLUME", 0.3, minimum=0.0),  # 解说时原声基准音量
     # Derived report of the FOREIGN_SOURCE_AUDIO knob this skill implements: it selects the
