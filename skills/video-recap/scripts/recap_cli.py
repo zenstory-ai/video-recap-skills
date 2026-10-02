@@ -145,7 +145,7 @@ def parse_args(argv=None):
     review.add_argument(
         "--require-final-qc",
         action="store_true",
-        help="full/cut: require literal passing final_qc and golden_eval summaries",
+        help="full/cut: require a literal passing final_qc summary",
     )
     review.add_argument(
         "--export-jianying",

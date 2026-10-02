@@ -511,9 +511,9 @@ full / cut 流程（含本地采用路径）合成完成后，video-recap 在 `w
 `assembly_qc.json` 用 `timeline_audio_mismatch` 阻断。原声恢复在 `pause_start` 前保持压低，
 只在实测停顿内渐强，并于 `source_restore_at` 完成，避免渐强提前泄露上一句尾音。
 
-## dub_lint.json / dub_review.json
+## dub_lint.json
 
-Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 deterministic lint，把明显不可发布的脚本挡在昂贵的克隆 TTS 之前。空译文、相邻行重叠、时间越界、`room < 0.4s` 等 **error** 会 `verdict=FAIL` 并阻断 render；`fast_speech`、`trim_risk` 等是 warning，不阻断。
+Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 deterministic lint，把明显不可发布的脚本挡在昂贵的克隆 TTS 之前。空译文、相邻行重叠、时间越界、`room < 0.4s` 等 **error** 会 `verdict=FAIL` 并阻断 render；`fast_speech`、`trim_risk`（有效字数 ≥ 7 字/秒；`dub_brief.md` 要求的目标约 5 字/秒）等是 warning，不阻断。
 
 每行 voiceclone 原始 WAV 会把中文台词、模型/提示等合成设置和参考音频信息写入相邻的 `*.wav.meta.json`。台词与设置完全相等且 WAV 可读取时，dub render 直接复用并在 `dub_manifest.json.lines[].tts_cache` 记录 `hit`；台词、参考音频、模型或提示变化都会重新合成。
 
@@ -528,24 +528,12 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
 }
 ```
 
-`dub_review.json` 是脚本级 review scaffold（确定性派生自 lint，语义忠实/语气仍需 agent/人工判断）：
-
-```json
-{
-  "schema_version": 1,
-  "verdict": "PASS|REVISE|FAIL",
-  "checks": {"faithful_to_source": "needs_agent_review", "spoken_chinese": "PASS", "speaker_tone": "needs_agent_review", "timing_fit": "PASS", "platform_fit": "needs_agent_review"},
-  "highest_return_edits": [],
-  "coverage": {"transcript_windows": 8, "script_lines": 12}
-}
-```
-
-> CLI：`dub.py --stage lint|review`（无需 video）、`dub.py --print-schema` 打印以上全部 dub artifact 契约；`--stage render` 会在克隆前自动写 `dub_lint.json` / `dub_review.json`，lint 非 PASS 即中止。
+> dub 渲染阶段在克隆前写 `dub_lint.json`，lint 非 PASS 即中止；dub 只有 `--edit-mode dub` 驱动的准备 / 渲染两个阶段，没有单独的手动 lint / review 入口。
 > 最终 `dub_<name>.mp4` 显式输出 48 kHz AAC；不能沿用 `loudnorm` 内部的 96 kHz 分析采样率。
 ## shift-left QC artifacts
 
-`preflight_qc.json`、`final_qc.json`、`golden_eval.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render` / `golden`。详见 `shift-left-qc-schema.md`。
+`preflight_qc.json`、`final_qc.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render`。详见 `shift-left-qc-schema.md`。
 
 `cut_output` 解说评审按 `source_id` 映射 `multi_source_manifest.json` 指向的逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
 
-渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再写 `final_qc.json` 和 `golden_eval.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。non-deterministic finding 永远不能成为 blocker；客观佐证必须由 deterministic producer 另发 finding。`golden_eval.json` 默认要求 `final_qc.json.ok=true`，也可用 golden fixture 做简单的时长、codec 和必需 artifact 断言。所有 QC metadata/evidence 写入前都经过 `qc_contract.redact_secrets`：secret-looking key/value 会被替换，URL userinfo/query/fragment 会被移除，仅保留必要 host/path 诊断信息。
+渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再写 `final_qc.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。non-deterministic finding 永远不能成为 blocker；客观佐证必须由 deterministic producer 另发 finding。所有 QC metadata/evidence 写入前都经过 `qc_contract.redact_secrets`：secret-looking key/value 会被替换，URL userinfo/query/fragment 会被移除，仅保留必要 host/path 诊断信息。

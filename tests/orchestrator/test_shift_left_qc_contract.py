@@ -166,7 +166,7 @@ def test_pre_cut_null_timecode_source_span_valid():
     assert (
         qc.validate_report(
             qc.build_report(
-                artifact="golden_eval.json", stage="pre_cut", findings=[finding]
+                artifact="preflight_qc.json", stage="pre_cut", findings=[finding]
             )
         )
         is True
@@ -174,7 +174,7 @@ def test_pre_cut_null_timecode_source_span_valid():
 
 
 def test_unknown_schema_version_and_missing_required_fields_validation_errors():
-    report = qc.build_report(artifact="final_qc.json", stage="golden", findings=[])
+    report = qc.build_report(artifact="final_qc.json", stage="post_render", findings=[])
 
     with pytest.raises(qc.QCContractError, match="unsupported schema_version"):
         qc.validate_report({**report, "schema_version": 999})
@@ -200,10 +200,11 @@ def test_unknown_schema_version_and_missing_required_fields_validation_errors():
 
 def test_stage_names_match_approved_gate_matrix_exactly():
     assert qc.ARTIFACTS == frozenset(
-        {"final_qc.json", "golden_eval.json", "preflight_qc.json"}
+        {"final_qc.json", "preflight_qc.json"}
     )
-    with pytest.raises(qc.QCContractError, match="unsupported artifact"):
-        qc.build_report(artifact="mimo_qc.json", stage="post_render", findings=[])
+    for old_artifact in ("mimo_qc.json", "golden_eval.json"):
+        with pytest.raises(qc.QCContractError, match="unsupported artifact"):
+            qc.build_report(artifact=old_artifact, stage="post_render", findings=[])
     assert qc.STAGES == frozenset(
         {
             "pre_cut",
@@ -212,7 +213,6 @@ def test_stage_names_match_approved_gate_matrix_exactly():
             "post_tts",
             "pre_assemble",
             "post_render",
-            "golden",
         }
     )
     for old_stage in (
@@ -221,6 +221,7 @@ def test_stage_names_match_approved_gate_matrix_exactly():
         "pre_export",
         "post_export",
         "final",
+        "golden",
         "golden_eval",
         "mimo_qc",
     ):

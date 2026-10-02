@@ -170,11 +170,6 @@ def test_dub_lint_rejects_non_list_script(tmp_path):
     assert report["blocking"] is True
     assert report["errors"][0]["code"] == "script_not_a_list"
     assert (tmp_path / "dub_lint.json").exists()
-    # build_dub_review must also tolerate the non-list input without raising
-    review = dub.build_dub_review(
-        {"start": 0, "zh": "x"}, {"duration": 5.0, "windows": []}
-    )
-    assert review["verdict"] == "FAIL"
 
 
 def test_dub_lint_tolerates_subframe_rounding():
@@ -190,17 +185,14 @@ def test_dub_lint_tolerates_subframe_rounding():
     assert "overlap" not in codes and "time_out_of_range" not in codes
 
 
-def test_dub_review_maps_lint_to_revise_edits():
-    script = [{"start": 0.0, "end": 1.0, "zh": "这是一句非常非常非常长的中文配音台词"}]
-    transcript = {
-        "duration": 3.0,
-        "windows": [{"start": 0.0, "end": 3.0, "text": "hello"}],
-    }
-    review = dub.build_dub_review(script, transcript)
-
-    assert review["verdict"] == "REVISE"
-    assert review["checks"]["faithful_to_source"] == "needs_agent_review"
-    assert review["highest_return_edits"]
+def test_brief_speech_rate_agrees_with_the_lint_threshold():
+    """The brief's target rate sits below the density lint warns at, and names that threshold."""
+    md = dub._brief_md([{"start": 0.0, "end": 6.0, "text": "Hello there."}], 6.0)
+    assert dub.DUB_TARGET_CPS < dub.DUB_FAST_SPEECH_CPS
+    assert f"{dub.DUB_TARGET_CPS:g} 字/秒" in md
+    assert f"{dub.DUB_FAST_SPEECH_CPS:g} 字/秒" in md
+    lint = dub.lint_dub_script([{"start": 0.0, "end": 1.0, "zh": "一二三四五六七"}], duration=3.0)
+    assert {i["code"] for i in lint["issues"]} >= {"fast_speech"}
 
 
 def test_dub_lint_reports_blocking_script_errors(tmp_path):
@@ -224,32 +216,17 @@ def test_dub_lint_reports_blocking_script_errors(tmp_path):
     assert persisted == report
 
 
-def test_dub_stage_lint_and_review_write_artifacts(tmp_path, capsys):
-    (tmp_path / "dub_transcript.json").write_text(
-        json.dumps(
-            {"duration": 3.0, "windows": [{"start": 0.0, "end": 3.0, "text": "hello"}]}
-        ),
-        encoding="utf-8",
-    )
-    (tmp_path / "dub_script.json").write_text(
-        json.dumps([{"start": 0.0, "end": 1.0, "zh": "你好"}]),
-        encoding="utf-8",
-    )
-
-    dub.stage_lint(tmp_path)
-    dub.stage_review(tmp_path)
-
-    assert (
-        json.loads((tmp_path / "dub_lint.json").read_text(encoding="utf-8"))["verdict"]
-        == "PASS"
-    )
-    assert (
-        json.loads((tmp_path / "dub_review.json").read_text(encoding="utf-8"))[
-            "verdict"
-        ]
-        == "PASS"
-    )
-    assert "dub_reviewed" in capsys.readouterr().out
+@pytest.mark.parametrize("argv", [
+    ["--stage", "lint", "--work-dir", "w"],
+    ["--stage", "review", "--work-dir", "w"],
+    ["--print-schema"],
+])
+def test_side_cli_stages_are_gone(monkeypatch, argv):
+    """Only the orchestrator's prepare/render stages remain."""
+    monkeypatch.setattr(sys, "argv", ["dub.py", *argv])
+    with pytest.raises(SystemExit) as exc:
+        dub.main()
+    assert exc.value.code == 2
 
 
 def test_dub_render_stops_before_tts_when_lint_blocks(monkeypatch, tmp_path):
@@ -272,6 +249,8 @@ def test_dub_render_stops_before_tts_when_lint_blocks(monkeypatch, tmp_path):
 
     with pytest.raises(SystemExit, match="dub_lint.json"):
         dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
+    assert json.loads((tmp_path / "dub_lint.json").read_text(encoding="utf-8"))["verdict"] == "FAIL"
+    assert not (tmp_path / "dub_review.json").exists()
 
 
 def _write_test_wav(path, *, seconds=0.1):
@@ -368,15 +347,6 @@ def test_dub_mux_pins_delivery_sample_rate_after_loudnorm(monkeypatch, tmp_path)
     command = commands[0]
     assert command[command.index("-ar") + 1] == "48000"
     assert command.index("-ar") > command.index("-af")
-
-
-def test_dub_print_schema_includes_new_artifacts(capsys):
-    dub.print_schemas()
-    schemas = json.loads(capsys.readouterr().out)
-
-    assert "dub_lint.json" in schemas
-    assert "dub_review.json" in schemas
-    assert "dub_manifest.json" in schemas
 
 
 def test_p0_dub_chars_per_second_ignores_punctuation_for_density():

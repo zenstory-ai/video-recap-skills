@@ -18,7 +18,7 @@ video-recap 带着一个可选的 MiMo 多模态 QC：`--mimo-qc pre-assemble|po
 - 删除 `skills/video-recap/scripts/mimo_qc.py` 与整个 `scripts/qc/` 子包；`lib.py` 删除 `MiMoQCRequestError`、`mimo_qc_api_call` 及随之不用的 `socket` / `urllib` 导入，CONFIG 删除只有 QC 读取的 11 个键（由 `test_no_skill_declares_config_it_never_reads` 强制）。
 - `recap_cli` 删除 `--mimo-qc` / `--mimo-qc-refresh`；传入时 argparse 报 unrecognized arguments（`test_removed_mimo_qc_flags_are_rejected`）。`MIMO_QC` / `MIMO_QC_REFRESH` / `MIMO_QC_MODEL` 不再被读取，也从 `env-inventory-v1.json` 删除。
 - `recap_runner` 不再在 `pre_assemble` / `post_render` 调 MiMo，也不再在运行开头清理 `mimo_qc.json`；`recap_stage_qc` 只剩 shift-left 与 final QC。`recap_source` 去掉 `--mimo-qc` 相关的 adoption 冲突项和 source 模式检查，`recap_timeline` 的续跑命令不再回传这两个 flag。
-- 没有任何环节再读 `mimo_qc.json`：`final_qc._COLLECT_ARTIFACTS` 去掉它，`qc_contract.ARTIFACTS` 只剩 `final_qc.json` / `golden_eval.json` / `preflight_qc.json`，非确定性类别只剩通用的 `semantic` / `aesthetic`；dashboard 的 `QC_FILES` 去掉「MiMo 复核」卡片。旧 work_dir 里残留的 `mimo_qc.json` 被忽略，测试用残留文件锁住这一点（`test_leftover_mimo_qc_from_an_older_run_is_not_read`、dashboard 夹具）。
+- 没有任何环节再读 `mimo_qc.json`：`final_qc._COLLECT_ARTIFACTS` 去掉它，`qc_contract.ARTIFACTS` 只剩 `final_qc.json` / `preflight_qc.json`（`golden_eval.json` 随后并入 final_qc，见 [[2026-10-02-fold-golden-eval-into-final-qc]]），非确定性类别只剩通用的 `semantic` / `aesthetic`；dashboard 的 `QC_FILES` 去掉「MiMo 复核」卡片。旧 work_dir 里残留的 `mimo_qc.json` 被忽略，测试用残留文件锁住这一点（`test_leftover_mimo_qc_from_an_older_run_is_not_read`、dashboard 夹具）。
 - SKILL.md、`references/{shift-left-qc-schema,data-schema,config-playbook,audio-routing}.md`、两份 README 与 `docs/architecture.md` 删掉 MiMo QC 段落；README 进阶请求只保留"导出剪映草稿"。
 - 旧笔记里把 MiMo QC 写成现状的地方各加了一行指向本篇的事实注记，决定本身没有改写。
 

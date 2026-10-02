@@ -41,7 +41,8 @@ CLONE_SR = 24000  # mimo voiceclone returns 24kHz mono PCM16 wav
 DUB_DELIVERY_SR = 48000  # explicit delivery rate; loudnorm otherwise exposes its 96kHz internal rate
 ASR_MIME = "audio/wav"
 ATEMPO_CAP = 2.0  # max compression before we trim instead (atempo>2 also sounds rushed)
-DUB_FAST_SPEECH_CPS = 7.0
+DUB_TARGET_CPS = 5.0  # what the brief asks the translator for
+DUB_FAST_SPEECH_CPS = 7.0  # lint warns at or above this density
 DUB_TRIM_RISK_CPS = 7.0
 DUB_MIN_ASR_WINDOW_SECONDS = 0.5
 DUB_TTS_STYLE_PROMPT = "自然、清晰，保持原说话人的音色与节奏，语气平稳。"
@@ -50,41 +51,6 @@ DUB_SCHEMA_VERSION = 1
 # Tolerate ~1-frame rounding in agent-estimated timings so the gate blocks only GENUINE
 # errors, not rounding noise (the old render clamped such cases via min(slot_end, nxt)).
 DUB_TIMING_EPS = 0.05
-DUB_LINT_SCHEMA = {
-    "schema_version": DUB_SCHEMA_VERSION,
-    "artifact": "dub_lint.json",
-    "fields": {
-        "verdict": "PASS|FAIL",
-        "issues": "[{severity, code, line, message, start, end}]",
-        "summary": "{lines, errors, warnings, max_chars_per_second, trim_risk_lines}",
-    },
-}
-DUB_REVIEW_SCHEMA = {
-    "schema_version": DUB_SCHEMA_VERSION,
-    "artifact": "dub_review.json",
-    "fields": {
-        "verdict": "PASS|REVISE|FAIL",
-        "checks": "{faithful_to_source, spoken_chinese, speaker_tone, timing_fit, platform_fit}",
-        "highest_return_edits": "[{line, start, issue, suggestion}]",
-        "notes": "human/agent review notes; script-level output is deterministic pre-review guidance",
-    },
-}
-DUB_ARTIFACT_SCHEMAS = {
-    "dub_transcript.json": {
-        "schema_version": DUB_SCHEMA_VERSION,
-        "shape": {"video": "path", "duration": "seconds", "windows": [{"start": 0.0, "end": 6.0, "text": "English ASR"}]},
-    },
-    "dub_script.json": {
-        "schema_version": DUB_SCHEMA_VERSION,
-        "shape": [{"start": 0.0, "end": 2.4, "zh": "中文台词"}],
-    },
-    "dub_manifest.json": {
-        "schema_version": DUB_SCHEMA_VERSION,
-        "shape": {"video": "path", "duration": "seconds", "lines": [{"start": 0.0, "end": 2.4, "zh": "中文台词", "tts_cache": "hit|miss", "fitted_wav": "path", "fitted_dur": 1.8, "room": 2.4}]},
-    },
-    "dub_lint.json": DUB_LINT_SCHEMA,
-    "dub_review.json": DUB_REVIEW_SCHEMA,
-}
 
 
 def _chars_per_second(text, room):
@@ -203,37 +169,6 @@ def lint_dub_script(script, duration, work_dir=None):
     if work_dir is not None:
         _write_json(Path(work_dir) / "dub_lint.json", report)
     return report
-
-
-def build_dub_review(script, transcript, lint=None):
-    """Script-level review scaffold: deterministic timing/naturalness signals for agent review."""
-    duration = float(transcript["duration"])
-    lint = lint or lint_dub_script(script, duration)
-    lines = _normalize_dub_script(script) if isinstance(script, list) else []
-    edits = []
-    for issue in lint["issues"]:
-        if issue["severity"] in {"error", "warning"}:
-            edits.append({
-                "line": issue["line"],
-                "start": issue.get("start"),  # _issue only records start when the line had one
-                "issue": f"{issue['code']}: {issue['message']}",
-                "suggestion": "缩短译文、调整 start/end，或回到 transcript 核对原句边界。",
-            })
-    verdict = "FAIL" if lint["verdict"] == "FAIL" else ("REVISE" if edits else "PASS")
-    return {
-        "schema_version": DUB_SCHEMA_VERSION,
-        "verdict": verdict,
-        "checks": {
-            "faithful_to_source": "needs_agent_review",
-            "spoken_chinese": "REVISE" if any(i["code"] == "fast_speech" for i in lint["issues"]) else "PASS",
-            "speaker_tone": "needs_agent_review",
-            "timing_fit": verdict,
-            "platform_fit": "needs_agent_review",
-        },
-        "highest_return_edits": edits[:8],
-        "notes": "Deterministic script-level review; an agent/human should fill semantic fidelity and tone judgments against dub_transcript.json.",
-        "coverage": {"transcript_windows": len(transcript["windows"]), "script_lines": len(lines)},
-    }
 
 
 def _write_json(path, payload):
@@ -484,7 +419,8 @@ def _brief_md(windows, duration):
         "原声重复，配音也跟着重复。",
         "2. 每句放在它在原声里被说出的时间，`start`/`end` 取那句话的起止——这样配音才跟着原声节奏走"
         "（该停顿处自然留白）。",
-        "3. 译文忠实精简，能在自己的 `start`→`end` 区间内用正常语速说完（约 5 字/秒）。",
+        f"3. 译文忠实精简，能在自己的 `start`→`end` 区间内用正常语速说完（目标约 {DUB_TARGET_CPS:g} 字/秒；"
+        f"达到 {DUB_FAST_SPEECH_CPS:g} 字/秒 lint 会警告，渲染时可能被大幅加速或截断）。",
         "4. 只有完全被截断、没法说完整的残句，才取其中说得完整的部分。",
         "",
         "输出 `dub_script.json` = `[{\"start\": 起秒, \"end\": 止秒, \"zh\": \"中文台词\"}, ...]`，按 start "
@@ -506,10 +442,7 @@ def stage_render(video, work, ref_start, ref_dur):
     script = json.loads((work / "dub_script.json").read_text(encoding="utf-8"))
     # Mechanical hard gate BEFORE any voiceclone spend: empty/overlapping/out-of-range lines
     # cannot produce a publishable dub, so fail fast instead of paying for a broken render.
-    lint = lint_dub_script(script, duration)
-    _write_json(work / "dub_lint.json", lint)
-    review = build_dub_review(script, transcript, lint)
-    _write_json(work / "dub_review.json", review)
+    lint = lint_dub_script(script, duration, work_dir=work)
     if lint["verdict"] != "PASS":
         raise SystemExit(f"[dub] dub_script.json failed lint; see {work / 'dub_lint.json'}")
     lines = [{"start": ln["start"], "end": ln["end"], "zh": ln["zh"]}
@@ -556,65 +489,25 @@ def stage_render(video, work, ref_start, ref_dur):
                      ensure_ascii=False))
 
 
-def stage_lint(work):
-    transcript = json.loads((work / "dub_transcript.json").read_text(encoding="utf-8"))
-    script = json.loads((work / "dub_script.json").read_text(encoding="utf-8"))
-    lint = lint_dub_script(script, transcript["duration"])
-    path = _write_json(work / "dub_lint.json", lint)
-    print(json.dumps({"status": "dub_linted", "verdict": lint["verdict"], "issues": len(lint["issues"]), "dub_lint": str(path)}, ensure_ascii=False))
-    return lint
-
-
-def stage_review(work):
-    transcript = json.loads((work / "dub_transcript.json").read_text(encoding="utf-8"))
-    script = json.loads((work / "dub_script.json").read_text(encoding="utf-8"))
-    lint = lint_dub_script(script, transcript["duration"])
-    _write_json(work / "dub_lint.json", lint)
-    review = build_dub_review(script, transcript, lint)
-    path = _write_json(work / "dub_review.json", review)
-    print(json.dumps({"status": "dub_reviewed", "verdict": review["verdict"], "edits": len(review["highest_return_edits"]), "dub_review": str(path)}, ensure_ascii=False))
-    return review
-
-
-def print_schemas():
-    print(json.dumps(DUB_ARTIFACT_SCHEMAS, ensure_ascii=False, indent=2))
-
-
 def main():
     ap = argparse.ArgumentParser(
         description=(
-            "English→Chinese dub workflow. Artifacts: dub_transcript.json, "
-            "agent-authored dub_script.json, dub_lint.json, dub_review.json, dub_manifest.json. "
+            "English→Chinese dub workflow, run by recap.py --edit-mode dub. Artifacts: "
+            "dub_transcript.json, agent-authored dub_script.json, dub_lint.json, dub_manifest.json. "
             "Uses MiMo ASR plus mimo-v2.5-tts-voiceclone; ordinary narration TTS config is separate."
         )
     )
-    ap.add_argument("--stage", choices=["prepare", "lint", "review", "render"], required=False,
-                    help="prepare ASR brief; lint/review dub_script.json; render writes lint/review before voiceclone")
-    ap.add_argument("--video", required=False, help="source video (required for prepare/render)")
-    ap.add_argument("--work-dir", required=False, help="work directory containing dub artifacts")
+    ap.add_argument("--stage", choices=["prepare", "render"], required=True,
+                    help="prepare writes the ASR brief; render lints dub_script.json before voiceclone")
+    ap.add_argument("--video", required=True, help="source video")
+    ap.add_argument("--work-dir", required=True, help="work directory containing dub artifacts")
     ap.add_argument("--asr-window", type=float, default=6.0)
     ap.add_argument("--ref-start", type=float, default=2.0)
     ap.add_argument("--ref-dur", type=float, default=10.0)
-    ap.add_argument("--print-schema", action="store_true",
-                    help="print JSON schemas for dub_transcript/script/lint/review/manifest and exit")
     args = ap.parse_args()
-    if args.print_schema:
-        print_schemas()
-        return
-    if not args.stage:
-        ap.error("--stage is required unless --print-schema is used")
-    if not args.work_dir:
-        ap.error("--work-dir is required")
-    work = Path(args.work_dir)
-    if args.stage in {"prepare", "render"} and not args.video:
-        ap.error("--video is required for prepare/render")
-    video = Path(args.video) if args.video else None
+    video, work = Path(args.video), Path(args.work_dir)
     if args.stage == "prepare":
         stage_prepare(video, work, args.asr_window, args.ref_start, args.ref_dur)
-    elif args.stage == "lint":
-        stage_lint(work)
-    elif args.stage == "review":
-        stage_review(work)
     else:
         stage_render(video, work, args.ref_start, args.ref_dur)
 

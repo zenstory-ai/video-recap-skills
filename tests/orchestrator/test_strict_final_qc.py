@@ -17,24 +17,22 @@ import recap_timeline
 from _helpers import SCRIPTS
 
 
-def _summary(final=True, final_count=0, golden=True, golden_count=0):
-    return {
-        "final_qc": {"ok": final, "blocker_count": final_count},
-        "golden_eval": {"ok": golden, "blocker_count": golden_count},
-    }
+def _summary(final=True, final_count=0):
+    return {"final_qc": {"ok": final, "blocker_count": final_count}}
 
 
 @pytest.mark.parametrize(
     "summary",
     [
         {},
-        {"final_qc": {}, "golden_eval": {}},
+        {"final_qc": {}},
         _summary(final=False),
-        _summary(golden=False),
+        _summary(final=None),
         _summary(final_count=1),
-        _summary(golden_count=True),
+        _summary(final_count=True),
         _summary(final_count=0.0),
-        {"final_qc": [], "golden_eval": {"ok": True, "blocker_count": 0}},
+        {"final_qc": []},
+        {"golden_eval": {"ok": True, "blocker_count": 0}},
     ],
 )
 def test_strict_summary_gate_fails_closed_and_prints_report_paths(
@@ -44,14 +42,14 @@ def test_strict_summary_gate_fails_closed_and_prints_report_paths(
         recap_stage_qc._require_final_qc(summary, tmp_path)
     output = capsys.readouterr().out
     assert str(tmp_path / "final_qc.json") in output
-    assert str(tmp_path / "golden_eval.json") in output
+    assert "golden_eval" not in output
 
 
 def test_strict_summary_gate_accepts_only_literal_pass(tmp_path, capsys):
     recap_stage_qc._require_final_qc(_summary(), tmp_path)
     output = capsys.readouterr().out
     assert str(tmp_path / "final_qc.json") in output
-    assert str(tmp_path / "golden_eval.json") in output
+    assert "golden_eval" not in output
 
 
 def test_completion_helper_gates_before_success_and_default_stays_advisory(
@@ -133,7 +131,7 @@ def test_multi_cut_route_strict_failure_exits_before_success(
     monkeypatch.setattr(recap_runner, "_read_assembly_output", lambda *_: final)
     monkeypatch.setattr(recap_runner, "_post_render_qc_metadata", lambda *_: {})
     monkeypatch.setattr(
-        recap_runner, "_write_final_qc_reports", lambda *_: _summary(golden=False)
+        recap_runner, "_write_final_qc_reports", lambda *_: _summary(final_count=2)
     )
 
     with pytest.raises(SystemExit):

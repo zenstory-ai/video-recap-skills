@@ -79,9 +79,8 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 - dub voiceclone 原始 WAV 也会按模型、提示、台词和参考音频的 `size`/`mtime_ns` 缓存；匹配重跑不再重复请求或计费，`dub_manifest.json` 逐行记录 `tts_cache=hit|miss`；
   参考音频文件变化会使旧缓存失效。仅在获得授权后使用，参考音频会发送到 MiMo。
 - `TTS_WORKERS`、`TTS_TIMEOUT`、`TTS_RETRIES`、`ALLOW_PARTIAL_TTS` 用于调整并发、超时、重试与部分成功策略。
-- dub 模式有独立的确定性门禁：`dub_lint.json` 会在语音克隆前阻止空行、重叠或越界译文；
-  `dub_review.json` 用于记录忠实度、语气、时长和平台适配复核。可通过
-  `dub.py --stage lint|review` 或 `dub.py --print-schema` 单独调用。
+- dub 模式有独立的确定性门禁：`dub.py --stage render` 在语音克隆前写 `dub_lint.json`，
+  空行、重叠或越界译文即中止。`dub.py` 只由编排入口的 `--edit-mode dub` 调用，没有单独的手动阶段。
 
 ## 7. 能力边界
 

@@ -65,7 +65,7 @@ def _post_render_qc_metadata(work_dir, final_output):
 
 
 def _write_final_qc_reports(work_dir, final_output):
-    """Write report-only final QC artifacts after render.
+    """Write the report-only final_qc.json after render.
 
     final_qc.run converts ffprobe unavailability/failure into deterministic
     blockers; only unexpected schema/write errors propagate.
@@ -74,33 +74,23 @@ def _write_final_qc_reports(work_dir, final_output):
 
 
 def _print_final_qc_pointer(result):
-    """Surface a report-only final_qc/golden_eval FAIL so the shift-left QC is
-    not a silent no-op. Advisory only: it never changes the exit status."""
-    problems = [
-        f"{key} blocker_count={result[key].get('blocker_count', '?')}"
-        for key in ("final_qc", "golden_eval")
-        if result[key].get("ok") is False
-    ]
-    if problems:
+    """Surface a report-only final_qc FAIL so the shift-left QC is not a silent
+    no-op. Advisory only: it never changes the exit status."""
+    summary = result["final_qc"]
+    if summary.get("ok") is False:
         print(
             "[video-recap] ⚠️  最终 QC 未通过（仅报告，不阻断）: "
-            + "; ".join(problems)
-            + "；详见 final_qc.json / golden_eval.json"
+            f"final_qc blocker_count={summary.get('blocker_count', '?')}"
+            "；详见 final_qc.json"
         )
 
 
 def _require_final_qc(result, work_dir):
-    """Fail closed unless both final summaries are literal blocker-free passes."""
-    paths = [Path(work_dir) / name for name in ("final_qc.json", "golden_eval.json")]
-    print("[video-recap] 最终 QC 报告: " + "; ".join(map(str, paths)))
-    invalid = []
-    for name in ("final_qc", "golden_eval"):
-        summary = result.get(name) if isinstance(result, dict) else None
-        blockers = summary.get("blocker_count") if isinstance(summary, dict) else None
-        if not isinstance(summary, dict) or summary.get("ok") is not True or \
-                type(blockers) is not int or blockers != 0:
-            invalid.append(name)
+    """Fail closed unless the final_qc summary is a literal blocker-free pass."""
+    print(f"[video-recap] 最终 QC 报告: {Path(work_dir) / 'final_qc.json'}")
+    summary = result.get("final_qc") if isinstance(result, dict) else None
+    blockers = summary.get("blocker_count") if isinstance(summary, dict) else None
+    invalid = not isinstance(summary, dict) or summary.get("ok") is not True or \
+        type(blockers) is not int or blockers != 0
     if invalid:
-        raise SystemExit(
-            "严格最终 QC 未通过或摘要格式无效: " + ", ".join(invalid)
-        )
+        raise SystemExit("严格最终 QC 未通过或摘要格式无效: final_qc")

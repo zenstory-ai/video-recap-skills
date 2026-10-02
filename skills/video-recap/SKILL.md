@@ -175,8 +175,8 @@ python3 tools/measure_subtitle.py <video>
 scene score、亮度统计、contact sheet 与自动 QC 只负责定位候选问题；最终判断以真实播放为准。密集切点的来源判断与处理规则按剪辑技能执行。修复失败时回到剪点、声音或文案层，不用更多包装掩盖。
 
 full/cut 交付如需让确定性的最终检查影响命令退出状态，显式传
-`--require-final-qc`。只有 `final_qc.json` 与 `golden_eval.json` 的摘要均为
-`ok: true` 且整数 `blocker_count: 0` 才打印完成并返回成功；缺失、畸形或 blocker
+`--require-final-qc`。只有 `final_qc.json` 的摘要为 `ok: true` 且整数
+`blocker_count: 0` 才打印完成并返回成功；缺失、畸形或 blocker
 会保留报告和已渲染诊断媒体，但命令非零退出且不打印完成。默认仍是仅报告、不阻断。
 该参数不支持 `--edit-mode dub`；dub 未传该参数时的准备和渲染行为不变。
 
@@ -202,19 +202,13 @@ python3 scripts/recap.py adopted.mp4 --work-dir packaging_work --audio-mode adop
 python3 scripts/recap.py <video> --edit-mode dub --work-dir <work_dir>
 ```
 
-准备阶段会转写英文、提取一段参考音频，并写出 `dub_brief.md` 与 `dub_transcript.json`。Agent 随后写：
+准备阶段会转写英文、提取一段参考音频，并写出 `dub_brief.md` 与 `dub_transcript.json`。Agent 按 `dub_brief.md` 里的翻译要求（逐句忠实、时间窗、语速）写 `dub_script.json`：
 
 ```json
 [{"start": 0.0, "end": 2.0, "zh": "中文译文"}]
 ```
 
-要求：
-
-- 逐句忠实翻译，不删钩子、不合并、不擅自压缩；原文重复，译文也按时间重复。
-- 每句沿用原声 `[start, end]`，相邻句不重叠。
-- 译文尽量控制在约 5 字/秒，使其能在原时间窗内说完。
-
-重复同一命令后输出 `dub_<name>.mp4`。每句单独克隆并贴回原时间线；只有即将覆盖下一句时才局部加速。当前版本只支持单说话者、整轨替换，不分离背景音乐。
+重复同一命令后先做确定性 lint（`dub_lint.json`，空行、重叠、越界即中止），再输出 `dub_<name>.mp4`。每句单独克隆并贴回原时间线；只有即将覆盖下一句时才局部加速。当前版本只支持单说话者、整轨替换，不分离背景音乐。
 
 ## 6. 自检与只读 dashboard
 

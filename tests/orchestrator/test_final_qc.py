@@ -86,41 +86,21 @@ def test_missing_and_empty_final_output_are_valid_blockers(tmp_path):
     assert qc.validate_report(report) is True
 
 
-def test_probe_fixture_success_writes_valid_final_qc_and_passing_golden_eval(tmp_path):
+def test_probe_fixture_success_writes_only_a_valid_final_qc(tmp_path):
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
     _write_json(tmp_path / "assembly_manifest.json", {"final_output": str(output)})
     probe_fixture = tmp_path / "probe.json"
     _write_json(probe_fixture, _probe(duration=9.5, codec="h264"))
-    golden_fixture = tmp_path / "golden.json"
-    _write_json(
-        golden_fixture,
-        {
-            "expected_final_qc_ok": True,
-            "min_duration": 9.0,
-            "max_duration": 10.0,
-            "expected_codec": "h264",
-            "required_artifacts": ["assembly_manifest.json"],
-        },
-    )
 
-    summary = final_qc.run(
-        tmp_path,
-        final_output=output,
-        probe_fixture=probe_fixture,
-        golden_fixture=golden_fixture,
-    )
+    summary = final_qc.run(tmp_path, final_output=output, probe_fixture=probe_fixture)
     final_report = json.loads((tmp_path / "final_qc.json").read_text(encoding="utf-8"))
-    golden_report = json.loads(
-        (tmp_path / "golden_eval.json").read_text(encoding="utf-8")
-    )
 
     assert summary["final_qc"] == {"ok": True, "blocker_count": 0}
-    assert summary["golden_eval"] == {"ok": True, "blocker_count": 0}
+    assert summary["written"] == ["final_qc.json"]
+    assert not (tmp_path / "golden_eval.json").exists()
     assert qc.validate_report(final_report) is True
-    assert qc.validate_report(golden_report) is True
     assert final_report["metadata"]["probe"]["format"]["duration"] == "9.5"
-    assert golden_report["metadata"]["observed"]["codec"] == "h264"
 
 
 def test_probe_fixture_missing_objective_media_metadata_are_valid_blockers(tmp_path):
@@ -318,30 +298,7 @@ def test_assembly_and_visual_qc_artifact_verdict_blocking_codes_are_blockers(tmp
     assert qc.validate_report(report) is True
 
 
-def test_golden_fixture_mismatch_blocker(tmp_path):
-    output = tmp_path / "recap.mp4"
-    output.write_bytes(b"fake mp4 bytes")
-    final_report = final_qc.build_final_qc(
-        tmp_path, final_output=output, probe_fixture=_probe(duration=5.0, codec="h264")
-    )
-
-    golden = final_qc.build_golden_eval(
-        tmp_path,
-        final_qc_report=final_report,
-        golden_fixture={
-            "expected_final_qc_ok": True,
-            "min_duration": 8.0,
-            "expected_codec": "hevc",
-        },
-    )
-
-    codes = {f["code"] for f in golden["findings"]}
-    assert {"min_duration_mismatch", "codec_mismatch"} <= codes
-    assert golden["ok"] is False
-    assert qc.validate_report(golden) is True
-
-
-def test_no_secret_persistence_in_final_qc_or_golden_eval(tmp_path):
+def test_no_secret_persistence_in_final_qc(tmp_path):
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
     _write_json(
@@ -359,30 +316,16 @@ def test_no_secret_persistence_in_final_qc_or_golden_eval(tmp_path):
                 {"codec_type": "video", "codec_name": "h264", "avg_frame_rate": "30/1"}
             ],
         },
-        golden_fixture={
-            "expected_final_qc_ok": True,
-            "required_artifacts": ["assembly_manifest.json"],
-            "password": "tp-golden-secret",
-        },
     )
-    text = (tmp_path / "final_qc.json").read_text(encoding="utf-8") + (
-        tmp_path / "golden_eval.json"
-    ).read_text(encoding="utf-8")
+    text = (tmp_path / "final_qc.json").read_text(encoding="utf-8")
 
     assert "sk-manifest-secret" not in text
     assert "tp-preflight-secret" not in text
     assert "sk-probe-secret" not in text
-    assert "tp-golden-secret" not in text
     assert "<redacted>" in text
     assert (
         qc.validate_report(
             json.loads((tmp_path / "final_qc.json").read_text(encoding="utf-8"))
-        )
-        is True
-    )
-    assert (
-        qc.validate_report(
-            json.loads((tmp_path / "golden_eval.json").read_text(encoding="utf-8"))
         )
         is True
     )

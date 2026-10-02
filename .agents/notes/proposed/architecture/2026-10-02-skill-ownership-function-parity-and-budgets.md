@@ -72,7 +72,7 @@ Status: proposed
   - Phase 3 删除 3 个 CLI 入口，需要升到 0.7.0 并写入 CHANGELOG。
   - 预算数字会带来"提预算要写笔记"的流程摩擦。
 - **待 owner 拍板：**
-  - `golden_eval.json` 是否并入 final_qc（建议并入）。
+  - `golden_eval.json` 是否并入 final_qc（建议并入）。（owner 已选择并入，落地见 [[2026-10-02-fold-golden-eval-into-final-qc]]。）
   - recap 的 data-schema.md 是否改成索引（建议改）。
   - MiMo 多模态 QC 去留：一个版本周期内没人用就整体删除，约 2,170 行。（owner 已选择删除，落地见 [[2026-10-02-delete-mimo-qc]]。）
   - full 模式的旧版文本改写：建议本轮不动，另做 A/B 实验。
