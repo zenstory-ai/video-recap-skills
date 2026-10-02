@@ -29,7 +29,8 @@
     ],
     "sections": [{"start": 0, "end": 30.6, "function": "hook"}],
     "subtitles": {"burned": true, "max_lines": 1, "marks_original": "「」", "evidence_t": [12.0]},
-    "basis": "5s ASR 窗口 + 故事板"
+    "basis": "5s ASR 窗口 + 故事板；切点经 frames --review / --longest 5 复核",
+    "cut_fixes": {"add": [10.8], "remove": []}
   },
   "source_facts": [
     {"id": "f1", "dimension": "narrative_structure", "statement": "开场旁白交代主角身世后切入原声冲突",
@@ -49,6 +50,8 @@
 }
 ```
 
+- `cut_fixes` 可选，键只有 `add`、`remove`（秒数列表）：`remove` 的每个值必须在某个测得切点 ±0.1 秒内，`add` 的值不得在测得切点
+  ±0.1 秒内。写了（哪怕是 `{}`）就表示看过待复核窗口；有增删时所有 `shots.*` 与切点相关的 `derived.*` 都按复核后的切点重算。
 - `subtitles` 可选：`burned`（布尔）、`max_lines`（≥1 整数）必填，`marks_original`（字符串）、`evidence_t`（秒数列表）可选。
 - `skipped_dimensions` 的值是一句非空的原因；它会原样导出，同样受 R8 泄漏扫描。
 - fact：`id`、`dimension`、`statement`、`entities` 必填，`t` 与 `measure` 二选一。`entities` 写这条事实涉及的人名、地名、
@@ -61,11 +64,13 @@
 
 ## 测量与派生值
 
-`reference_measurements.json` 由 measure 写，路径即 target / evidence 可引用的 `shots.*`、`loudness.*`：
+`reference_measurements.json` 由 measure 写（`settings` 记切点规则参数，`scdet_scores` 是 ≥2 分的逐帧分数缓存，二者都不能被引用），
+路径即 target / evidence 可引用的 `shots.*`、`loudness.*`（有 `cut_fixes` 时按复核后的切点）：
 
 | 路径 | 含义 |
 |---|---|
-| `shots.cuts` · `count` · `mean_s` · `median_s` · `p10_s` · `p90_s` | 硬切时间与镜长分布 |
+| `shots.cuts` · `count` · `mean_s` · `median_s` · `p10_s` · `p90_s` | 切点时间与镜长分布 |
+| `shots.review_windows` | 被压下的疑似切点窗口 `[[开始, 结束], …]`，给 `frames --review` 用 |
 | `shots.share_under_1s` · `share_over_8s` · `cuts_per_min` · `curve` | 短/长镜头占比、切点密度、10 秒窗口切点曲线（每窗按自身长度折算成每分钟） |
 | `loudness.integrated_lufs` · `lra_lu` · `true_peak_dbtp` · `short_term_1s` | 整体响度、动态范围、真峰值、逐秒短期响度（前约 2 秒为预热空值） |
 
@@ -88,9 +93,11 @@
   "schema": "video-reference.production.v1",
   "duration_s": 302.66,
   "canvas": {"width": 1280, "height": 676},
+  "cut_detection": {"detector": "scdet-isolated-v1", "hard_score": 10.0, "soft_score": 4.0, "isolation_ratio": 2.0,
+                    "isolation_window_s": 0.3, "scaled": true, "agent_added": 3, "agent_removed": 0},
   "profile": {
-    "shot_median_s": {"value": 3.06, "provenance": "measured"},
-    "cuts_per_min": {"value": 11.7, "provenance": "measured"},
+    "shot_median_s": {"value": 2.58, "provenance": "reviewed"},
+    "cuts_per_min": {"value": 16.85, "provenance": "reviewed"},
     "integrated_lufs": {"value": -14.8, "provenance": "measured"},
     "narration_share": {"value": 0.65, "provenance": "labeled"},
     "narration_chars_per_s": {"value": 4.0, "provenance": "labeled", "precision": "coarse_asr_windows"},
@@ -108,7 +115,9 @@
 }
 ```
 
-- `provenance`：路径在 `derived.*` 下为 `labeled`（依赖 Agent 标注），否则为 `measured`。值为 null 的 profile 项不导出。
+- `provenance`：路径在 `derived.*` 下为 `labeled`（依赖 Agent 标注）；`shots.*` 在有 `cut_fixes` 增删时为 `reviewed`，
+  否则与 `loudness.*` 一样为 `measured`。值为 null 的 profile 项不导出。
+- `cut_detection` 让读者知道这些切点数怎么来的：规则参数与 Agent 增删的切点数。
 - 导出时丢弃 `source_facts`、`labels`、`evidence`、`entities`、`from`、文件身份和任何路径。
 - 保留键 `written_by`、`template` 给以后的资源库绑定副本使用，本技能不写。
 

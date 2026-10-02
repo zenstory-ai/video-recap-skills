@@ -98,6 +98,13 @@ REJECTIONS = [
     ("overlapping-spans", _set(["labels", "audio_spans", 1, "start"], 8), "R2"),
     ("span-gap-over-half-second", _set(["labels", "audio_spans", 1, "start"], 11), "R2"),
     ("spans-do-not-reach-the-end", _set(["labels", "audio_spans", 4, "end"], 58), "R2"),
+    ("chinese-numeral-clock-time", _append_rule("，在一分三十秒左右切到原声"), "R6"),
+    ("leak-in-skipped-reason", _set(["skipped_dimensions"], {"pacing": "范闲那条线没有可迁移的节奏"}), "R6"),
+    ("cut-fix-removes-nothing", _set(["labels", "cut_fixes"], {"remove": [13.0]}), "R2"),
+    ("cut-fix-adds-a-detected-cut", _set(["labels", "cut_fixes"], {"add": [10.05]}), "R2"),
+    ("cut-fix-outside-the-video", _set(["labels", "cut_fixes"], {"add": [61.0]}), "R2"),
+    ("cut-fix-not-numbers", _set(["labels", "cut_fixes"], {"add": ["12s"]}), "R1"),
+    ("cut-fix-unknown-key", _set(["labels", "cut_fixes"], {"move": [12.0]}), "R1"),
 ]
 
 
@@ -133,14 +140,92 @@ def test_export_with_errors_exits_1_and_writes_nothing(work_dir, breakdown, rese
     assert not out.exists()
 
 
-def test_export_rescan_blocks_a_leak_that_only_r8_scans(work_dir, breakdown, tmp_path):
-    # pacing is covered by m3, so this reason is never R6-scanned at check time; only R8 sees it.
+def test_skipped_reason_is_leak_scanned_at_check_time_not_only_at_export(work_dir, breakdown, tmp_path):
+    # pacing is covered by m3, but the reason is exported verbatim, so check must already reject it.
     breakdown["skipped_dimensions"] = {"pacing": "范闲那条线没有可迁移的节奏"}
     out = tmp_path / "out" / "production_reference.json"
 
-    assert reference.main(["check", "--work-dir", str(work_dir(breakdown))]) == 0
+    assert reference.main(["check", "--work-dir", str(work_dir(breakdown))]) == 1
     assert reference.main(["export", "--work-dir", str(tmp_path), "--out", str(out)]) == 1
     assert not out.exists()
+
+
+def test_cut_fixes_replace_the_detector_cuts_everywhere_and_mark_shot_values_reviewed(work_dir, breakdown, tmp_path):
+    breakdown["labels"]["cut_fixes"] = {"remove": [12.0, 31.0], "add": [45.0]}
+    out = tmp_path / "out" / "production_reference.json"
+
+    report = run_check(work_dir(breakdown))
+    assert report["errors"] == []
+    # narration spans 0-10 and 20-40 now hold 5.0, 20.2 and 30.0 (31.0 removed)
+    assert report["derived"]["by_owner"]["narration"]["cuts_per_min"] == 6.0
+    assert reference.main(["export", "--work-dir", str(tmp_path), "--out", str(out)]) == 0
+
+    production = json.loads(out.read_text(encoding="utf-8"))
+    assert production["profile"]["cuts_per_min"] == {"value": 7.0, "provenance": "reviewed"}
+    assert production["profile"]["shot_median_s"] == {"value": 7.4, "provenance": "reviewed"}
+    methods = {m["id"]: m for m in production["methods"]}
+    assert methods["m3"]["targets"]["shot_median_s"] == {"value": 7.4, "provenance": "reviewed"}
+    assert methods["m1"]["targets"]["narration_cuts_per_min"] == {"value": 6.0, "provenance": "labeled"}
+    assert production["cut_detection"] == {
+        "detector": "scdet-isolated-v1", "hard_score": 10.0, "soft_score": 4.0, "isolation_ratio": 2.0,
+        "isolation_window_s": 0.3, "scaled": True, "agent_added": 1, "agent_removed": 2}
+
+
+def test_export_without_fixes_records_the_detector_and_measured_provenance(work_dir, tmp_path):
+    out = tmp_path / "out" / "production_reference.json"
+
+    assert reference.main(["export", "--work-dir", str(work_dir()), "--out", str(out)]) == 0
+
+    production = json.loads(out.read_text(encoding="utf-8"))
+    assert production["profile"]["cuts_per_min"] == {"value": 8.0, "provenance": "measured"}
+    assert production["cut_detection"]["soft_score"] == 4.0
+    assert production["cut_detection"]["agent_added"] == production["cut_detection"]["agent_removed"] == 0
+
+
+def test_unreviewed_suppressed_candidates_warn_until_cut_fixes_is_written(breakdown, measurements, asr_segments):
+    measurements["shots"]["review_windows"] = [[3.0, 3.6]]
+    evidence = {"status": "AVAILABLE_COARSE"}
+
+    before = check_breakdown(breakdown, measurements, asr_segments=asr_segments, asr_evidence=evidence)
+    breakdown["labels"]["cut_fixes"] = {}
+    after = check_breakdown(breakdown, measurements, asr_segments=asr_segments, asr_evidence=evidence)
+
+    assert before["errors"] == after["errors"] == []
+    assert any("frames --review" in w for w in before["warnings"])
+    assert not any("frames --review" in w for w in after["warnings"])
+
+
+def test_quote_split_across_two_asr_windows_is_still_caught(breakdown, measurements):
+    # No single window holds 8 of the shared characters; only the joined pair does.
+    windows = [{"start": 5.0, "end": 10.0, "text": "么好地方啊"}, {"start": 0.0, "end": 5.0, "text": "城里不是什"}]
+    breakdown["methods"][0]["rule"] += "，城里不是什么好地方"
+
+    report = check_breakdown(breakdown, measurements, asr_segments=windows, asr_evidence={"status": "AVAILABLE_COARSE"})
+
+    assert any(e.startswith("R6 methods.m1.rule") and "城里不是什么好地" in e for e in report["errors"]), report["errors"]
+
+
+@pytest.mark.parametrize("leak", ["小范大人", "监察院", "红楼梦", "那座城"])
+def test_research_aliases_cultural_items_and_quoted_terms_feed_the_name_scan(breakdown, measurements, leak):
+    research = {
+        "characters": {"范闲": "主角"},
+        "character_details": {"范闲": {"aliases": ["小范大人"], "role": "主角"}},
+        "cultural_notes": [{"item": "监察院", "explanation": "特务机构"}, {"item": "转世/重生设定", "explanation": "x"}],
+        "synopsis": "书名出自《红楼梦》，老太太说「那座城」凶险。",
+    }
+    breakdown["methods"][0]["rule"] += f"，让{leak}尽早露面"
+
+    errors = check_breakdown(breakdown, measurements, research=research)["errors"]
+
+    assert any(leak in e for e in errors), errors
+
+
+def test_shared_wording_with_a_fact_names_the_fact_side(breakdown, measurements):
+    breakdown["methods"][0]["rule"] += "，开场旁白交代主角身世"
+
+    errors = check_breakdown(breakdown, measurements)["errors"]
+
+    assert any(e.startswith("R6 methods.m1.rule") and "source_facts" in e for e in errors), errors
 
 
 def test_understanding_index_characters_feed_the_name_scan(work_dir, breakdown, research, tmp_path):
@@ -206,6 +291,8 @@ EMPTY_CORPUS = {"names": [], "cjk": set(), "latin": set()}
     ("旁白/原声/音乐整块交替", None),      # prose slashes are not paths
     ("比例保持在 3:2 左右", None),          # ratios are not timecodes
     ("原声/BGM 整块交替", None),             # a one-segment prose slash is not a path
+    ("在一分三十秒左右切原声", "一分三十秒"),
+    ("这句十分重要，留给原声", None),       # 十分 without 秒 is an adverb, not a clock time
 ])
 def test_leak_scan_handles_text_glued_to_cjk(text, flagged):
     errors = leak_errors(text, "m1.rule", EMPTY_CORPUS)

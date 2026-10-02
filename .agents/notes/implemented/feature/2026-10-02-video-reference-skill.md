@@ -14,11 +14,12 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
 
 ## Decision
 
-- 新增第七个 skill `skills/video-reference/`（`user-invocable: true`），入口 `scripts/reference.py`，子命令 `measure` / `check` / `export`；
-  模块为 `lib.py`、`reference_measure.py`、`reference_profile.py`、`reference_check.py`，全部带 `reference_` 前缀，不与标准库或其他 skill 重名。
-- **measure**：一次 ffprobe 加一次 ffmpeg（`scale=320:-2,scdet=threshold=10` + `ebur128=peak=true:framelog=info`），写
+- 新增第七个 skill `skills/video-reference/`（`user-invocable: true`），入口 `scripts/reference.py`，子命令 `measure` / `frames` / `check` / `export`；
+  模块为 `lib.py`、`reference_measure.py`、`reference_frames.py`、`reference_profile.py`、`reference_check.py`，全部带 `reference_` 前缀，不与标准库或其他 skill 重名。
+- **measure**：一次 ffprobe 加一次 ffmpeg（`scale=320:-2,scdet=threshold=2` 逐帧分数 + `ebur128=peak=true:framelog=info`），
+  切点取孤立峰，被压下的候选进 `shots.review_windows`，由 Agent 用 `frames` 看图后写 `labels.cut_fixes`（见 [[2026-10-02-reference-cut-detection]]）；写
   `U/reference_measurements.json`（镜头切点、镜长分布、切点密度、10 秒切点曲线（每个窗口按自身长度折算成每分钟，末尾不满 10 秒的窗口不再被低估）、整体响度/LRA/真峰值、逐秒短期响度）。
-  缓存键为成片 `{size, mtime_ns}` 加阈值与是否缩放。镜头统计不读 `scenes.json`：理解阶段会把短于 4 秒的镜头并掉，中位镜长会被拉高。
+  缓存键为成片 `{size, mtime_ns}` 加是否缩放；只改分数参数时用缓存的逐帧分数重算，不重新解码。镜头统计不读 `scenes.json`：理解阶段会把短于 4 秒的镜头并掉，中位镜长会被拉高。
 - **Agent 只写一个文件** `U/reference_breakdown.json`：`labels`（`audio_spans` 音轨归属、`sections` 叙事功能、`subtitles`、`basis`）、
   `source_facts`、`methods`、`skipped_dimensions`。枚举照搬写稿手册：function 为 `hook|setup|turn|escalation|payoff`，
   owner 与 narration_job 与 `visual_audio_board.json` 一致。
@@ -60,16 +61,16 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
 - **默认路径**：没有变化。recap 不调用它，不加参数，不加 QC；有没有 `production_reference.json`，所有阶段的代码行为都一样（守卫测试保证没有脚本读取它）。
 - **谁读取产物**：只有写稿 Agent（prose 指引）。`reference_methods` 是 story plan 的可选字段，没有代码读取；
   建议型评审会把 story plan 整体放进上下文，因此能看到这个字段，但不据此判定。
-- **Agent 表面增量**：1 个 skill（SKILL.md 约 3.3K 字符，只在调用时加载），frontmatter description 约 150 字常驻；
-  video-script SKILL.md 多 3 行，video-recap SKILL.md 多 4 行；新增 1 个 CLI。脚本约 985 行（5 个模块，最大 437 行），测试 67 个用例。
+- **Agent 表面增量**：1 个 skill（SKILL.md 约 8.7K 字节，只在调用时加载），frontmatter description 约 150 字常驻；
+  video-script SKILL.md 多 3 行，video-recap SKILL.md 多 4 行；新增 1 个 CLI。脚本约 1,315 行（6 个模块，最大 526 行），测试 100 个用例。
 - **代价与盲区**：
   - 旁白占比与语速是 `labeled` 精度，受标注与 ASR 窗口限制，不是逐词对齐。
-  - scdet 只认硬切：叠化会漏，闪光会多报。
+  - 切点检测认不出慢叠化和遮挡转场（详见 [[2026-10-02-reference-cut-detection]]）。
   - 泄漏扫描只拦字面：改写过的剧情、ASR 缺失时的旁白原句、7 个汉字以内的短引文都拦不住（check 给出警告）。
   - R1–R8 不判断语义：真实验证中初稿方法"旁白段用短镜头推进信息"与派生值相反，只能靠 Agent 先读 derived 再写；
     SKILL.md 与 schema 示例已据此改写。
 - **删除信号**：连续两个版本没有任何运行写 `reference_methods`，也没有资源库绑定它。
-- **真实验证（2026-10-02，本机 ffmpeg 8.0 / 9.0.1）**：
+- **真实验证（2026-10-02，本机 ffmpeg 8.0 / 9.0.1；以下切点数是旧的固定阈值 10 测得的，换检测器后的对照见 [[2026-10-02-reference-cut-detection]]）**：
   - 庆余年 recap（302.66 秒，1280x676）：59 个切点、60 个镜头，中位镜长 3.06 秒，11.7 切/分钟，整体 -14.8 LUFS，LRA 6.4，真峰值 -0.8。
     `clip_plan_validated.json` 的 9 个衔接点全部在 ±0.15 秒内对上切点（最大偏差 0.08 秒）。`scale=320` 与 `--no-scale` 切点完全相同，
     召回无下降，保留缩放默认；两者并行时墙钟各约 71 秒（单独 CPU 时间 36 秒 / 28 秒）。

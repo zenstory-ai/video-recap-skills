@@ -1,10 +1,19 @@
 """One ffmpeg pass over a finished video: hard-cut times (scdet) and loudness (ebur128).
 
-The result is cached in `reference_measurements.json` by the video's {size, mtime_ns} plus the
-settings, so re-running `measure` on an unchanged file never re-decodes it. Shot statistics are
-computed from scdet cuts directly; an understanding run's scene list merges short shots and
-would inflate the median shot length.
+scdet reports a per-frame score; a fixed score threshold is wrong in both directions on real
+recaps (threshold 10 missed about a third of the cuts in a dark scene; threshold 6 counted a
+fast-moving single shot as nine cuts). So every frame scoring >= SCORE_FLOOR is kept and a cut is
+a frame that scores >= hard, or >= soft while scoring at least ISOLATION_RATIO times every other
+frame within ISOLATION_WINDOW_S (the adjacent frames excluded: they carry the cut's own
+after-image). Suppressed candidates are grouped into `shots.review_windows` for the agent to look
+at; the agent's corrections live in the breakdown (labels.cut_fixes), never in this file.
+
+The result is cached in `reference_measurements.json` by the video's {size, mtime_ns}; the raw
+scores are cached too, so changing the score settings re-derives the cuts without decoding again.
+Shot statistics are computed from these cuts directly; an understanding run's scene list merges
+short shots and would inflate the median shot length.
 """
+import bisect
 import math
 import re
 from pathlib import Path
@@ -12,13 +21,21 @@ from pathlib import Path
 from lib import ffprobe, file_identity, log, read_json, run_cmd, write_json
 
 MEASUREMENTS_FILE = "reference_measurements.json"
-MEASUREMENTS_SCHEMA = "video-reference.measurements.v1"
-DEFAULT_SCENE_THRESHOLD = 10.0
+MEASUREMENTS_SCHEMA = "video-reference.measurements.v2"
+DETECTOR = "scdet-isolated-v1"
+DEFAULT_HARD_SCORE = 10.0     # always a cut
+DEFAULT_SOFT_SCORE = 4.0      # a cut only when isolated
+ISOLATION_RATIO = 2.0
+ISOLATION_WINDOW_S = 0.3
+SCORE_FLOOR = 2.0             # below soft / ratio a frame can neither be a cut nor suppress one
+REVIEW_PAD_S = 0.2
+REVIEW_JOIN_S = 0.5
 CURVE_WINDOW_S = 10.0
 EDGE_S = 0.05                # cuts this close to either end are not cuts between two shots
 SILENT_LUFS = -70.0          # ebur128 reports -120.7 for digital silence / warm-up blocks
 
-_SCDET_TIME = re.compile(r"lavfi\.scd\.time\s*[:=]\s*(-?\d+(?:\.\d+)?)")
+_SCDET = re.compile(
+    r"lavfi\.scd\.score\s*[:=]\s*(-?\d+(?:\.\d+)?)\s*,?\s*lavfi\.scd\.time\s*[:=]\s*(-?\d+(?:\.\d+)?)")
 _EBU_FRAME = re.compile(r"\bt:\s*(\d+(?:\.\d+)?)\s.*?\bS:\s*(-?\d+(?:\.\d+)?|-?inf|nan)")
 _SUMMARY_I = re.compile(r"\bI:\s*(-?\d+(?:\.\d+)?)\s*LUFS")
 _SUMMARY_LRA = re.compile(r"\bLRA:\s*(-?\d+(?:\.\d+)?)\s*LU\b")
@@ -26,14 +43,50 @@ _SUMMARY_PEAK = re.compile(r"True peak:\s*\n\s*Peak:\s*(-?\d+(?:\.\d+)?|-inf)")
 
 
 def parse_scdet(stderr, duration=None):
-    """Sorted, de-duplicated cut times from scdet log lines (`time: 2.6` or `time=2.6`)."""
-    cuts = set()
-    for match in _SCDET_TIME.finditer(stderr or ""):
-        t = round(float(match.group(1)), 3)
+    """Sorted [time, score] pairs from scdet log lines (`score: 4.2, time: 2.6` or `score=4.2 time=2.6`).
+
+    Frames within EDGE_S of either end are dropped: they are not cuts between two shots.
+    """
+    scores = {}
+    for match in _SCDET.finditer(stderr or ""):
+        score, t = float(match.group(1)), round(float(match.group(2)), 3)
         if t <= EDGE_S or (duration is not None and t >= duration - EDGE_S):
             continue
-        cuts.add(t)
-    return sorted(cuts)
+        scores[t] = max(score, scores.get(t, score))
+    return [[t, round(scores[t], 3)] for t in sorted(scores)]
+
+
+def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE):
+    """(cuts, review_windows) from [time, score] pairs; see the module docstring for the rule."""
+    frame_s = 1.0 / fps if fps else 0.04
+    adjacent = 1.5 * frame_s
+    times = [t for t, _ in scores]
+    cuts, suppressed = [], []
+    for t, score in scores:
+        if score < soft:
+            continue
+        if score < hard:
+            lo = bisect.bisect_left(times, t - ISOLATION_WINDOW_S - 1e-9)
+            hi = bisect.bisect_right(times, t + ISOLATION_WINDOW_S + 1e-9)
+            others = [s for u, s in scores[lo:hi] if abs(u - t) > adjacent]
+            if score < ISOLATION_RATIO * max(others, default=0.0):
+                suppressed.append(t)
+                continue
+        if cuts and t - cuts[-1][0] <= adjacent:     # one cut spread over two frames
+            if score > cuts[-1][1]:
+                cuts[-1] = (t, score)
+            continue
+        cuts.append((t, score))
+    cut_times = [t for t, _ in cuts]
+    windows = []
+    for t in suppressed:
+        if any(abs(t - c) <= adjacent for c in cut_times):
+            continue
+        if windows and t - windows[-1][1] <= REVIEW_JOIN_S:
+            windows[-1][1] = t
+        else:
+            windows.append([t, t])
+    return cut_times, [[round(max(0.0, a - REVIEW_PAD_S), 2), round(b + REVIEW_PAD_S, 2)] for a, b in windows]
 
 
 def _number(text):
@@ -106,8 +159,8 @@ def shot_stats(cuts, duration):
     }
 
 
-def _ffmpeg_command(video, threshold, scaled, has_audio):
-    video_filter = f"scdet=threshold={threshold:g}"
+def _ffmpeg_command(video, scaled, has_audio):
+    video_filter = f"scdet=threshold={SCORE_FLOOR:g}"
     if scaled:
         video_filter = "scale=320:-2," + video_filter
     cmd = ["ffmpeg", "-hide_banner", "-nostats", "-i", video, "-map", "0:v:0", "-vf", video_filter]
@@ -116,38 +169,49 @@ def _ffmpeg_command(video, threshold, scaled, has_audio):
     return cmd + ["-f", "null", "-"]
 
 
-def _cache_hit(cached, identity, settings):
+def _reusable(cached, identity, scaled):
+    """The cached decode (scores + loudness) is valid for this file and scaling."""
     if not isinstance(cached, dict) or cached.get("schema") != MEASUREMENTS_SCHEMA:
         return False
     source = cached.get("source") or {}
+    settings = cached.get("settings") or {}
     same_file = {k: source.get(k) for k in identity} == identity
-    return same_file and cached.get("settings") == settings
+    return same_file and settings.get("scaled") == scaled and settings.get("score_floor") == SCORE_FLOOR
 
 
-def measure(video, work_dir, *, threshold=DEFAULT_SCENE_THRESHOLD, scaled=True):
-    """Measure `video` into work_dir/reference_measurements.json; reuse it when nothing changed."""
+def measure(video, work_dir, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE, scaled=True):
+    """Measure `video` into work_dir/reference_measurements.json; reuse the decode when the file is unchanged."""
+    if not SCORE_FLOOR * ISOLATION_RATIO <= soft <= hard:
+        raise ValueError(f"需要 {SCORE_FLOOR * ISOLATION_RATIO:g} ≤ soft ≤ hard，收到 soft={soft} hard={hard}")
     video = Path(video)
     out_path = Path(work_dir) / MEASUREMENTS_FILE
     identity = file_identity(video)
-    settings = {"scene_threshold": float(threshold), "scaled": bool(scaled)}
+    settings = {"detector": DETECTOR, "hard_score": float(hard), "soft_score": float(soft),
+                "isolation_ratio": ISOLATION_RATIO, "isolation_window_s": ISOLATION_WINDOW_S,
+                "score_floor": SCORE_FLOOR, "scaled": bool(scaled)}
     cached = read_json(out_path)
-    if _cache_hit(cached, identity, settings):
-        log(f"复用 {MEASUREMENTS_FILE}（成片与设置未变）")
-        return cached
-
-    probe = ffprobe(video)
-    duration = probe["duration_s"]
-    result = run_cmd(_ffmpeg_command(video, threshold, scaled, probe["audio_streams"] > 0))
-    if result.returncode != 0:
-        raise RuntimeError(f"ffmpeg 测量失败: {result.stderr.strip()[-600:]}")
-    cuts = parse_scdet(result.stderr, duration)
+    if _reusable(cached, identity, bool(scaled)):
+        if cached.get("settings") == settings:
+            log(f"复用 {MEASUREMENTS_FILE}（成片与设置未变）")
+            return cached
+        log("成片未变，只按新的分数设置重算切点（不重新解码）")
+        source, scores, loudness = cached["source"], cached["scdet_scores"], cached.get("loudness")
+    else:
+        source = {**identity, **ffprobe(video)}
+        result = run_cmd(_ffmpeg_command(video, scaled, source["audio_streams"] > 0))
+        if result.returncode != 0:
+            raise RuntimeError(f"ffmpeg 测量失败: {result.stderr.strip()[-600:]}")
+        scores = parse_scdet(result.stderr, source["duration_s"])
+        loudness = parse_ebur128(result.stderr, source["duration_s"]) if source["audio_streams"] else None
+    cuts, review_windows = detect_cuts(scores, source.get("fps"), hard=hard, soft=soft)
     payload = {
         "schema": MEASUREMENTS_SCHEMA,
-        "source": {**identity, **probe},
+        "source": source,
         "settings": settings,
-        "shots": shot_stats(cuts, duration),
-        "loudness": parse_ebur128(result.stderr, duration) if probe["audio_streams"] else None,
+        "shots": {**shot_stats(cuts, source["duration_s"]), "review_windows": review_windows},
+        "loudness": loudness,
+        "scdet_scores": scores,
     }
     write_json(out_path, payload)
-    log(f"写入 {out_path}：{len(cuts)} 个切点，时长 {duration:.1f}s")
+    log(f"写入 {out_path}：{len(cuts)} 个切点，{len(review_windows)} 个待复核窗口，时长 {source['duration_s']:.1f}s")
     return payload

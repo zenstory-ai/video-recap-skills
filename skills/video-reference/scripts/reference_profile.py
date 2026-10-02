@@ -3,14 +3,38 @@
 `derived` only ever lives in memory: `check` prints it so the agent can write methods against
 it, `export` copies the needed values into production_reference.json. The agent never types a
 number — a method target names a measurement path and the export fills the value in.
+
+The agent's cut review (labels.cut_fixes) is applied first: every shot number, derived cut
+density and export value is computed from the reviewed cut list, never from the raw detector.
 """
 import statistics
 
+from reference_measure import shot_stats
+
 PRODUCTION_SCHEMA = "video-reference.production.v1"
+CUT_MATCH_S = 0.1          # a removal or addition this close to a detected cut refers to that cut
 OWNERS = ("narration", "original_dialogue", "action_sound", "ambience", "music", "silence")
 SWITCH_TOLERANCE_S = 0.25
 MIN_WINDOW_COVERAGE = 0.8
 NULL_ASR_STATUSES = ("EXPLICITLY_SKIPPED",)
+
+
+def cut_fix_counts(labels):
+    fixes = (labels or {}).get("cut_fixes") or {}
+    return len(fixes.get("add") or []), len(fixes.get("remove") or [])
+
+
+def apply_cut_fixes(measurements, labels):
+    """Measurements whose `shots` come from the reviewed cut list (unchanged without fixes)."""
+    fixes = (labels or {}).get("cut_fixes") or {}
+    if not any(cut_fix_counts(labels)):
+        return measurements
+    removed = fixes.get("remove") or []
+    cuts = [c for c in measurements["shots"]["cuts"] if not any(abs(c - r) <= CUT_MATCH_S for r in removed)]
+    cuts = sorted({*cuts, *(round(float(t), 3) for t in fixes.get("add") or [])})
+    shots = shot_stats(cuts, measurements["source"]["duration_s"])
+    shots["review_windows"] = measurements["shots"].get("review_windows") or []
+    return {**measurements, "shots": shots}
 
 
 def _overlap(a0, a1, b0, b1):
@@ -198,9 +222,11 @@ def build_production(breakdown, measurements, derived):
     labels = breakdown["labels"]
     shots = measurements["shots"]
     loudness = measurements.get("loudness") or {}
+    added, removed = cut_fix_counts(labels)
+    shot_provenance = "reviewed" if added or removed else "measured"
     profile = {
-        "shot_median_s": _metric(shots.get("median_s"), "measured"),
-        "cuts_per_min": _metric(shots.get("cuts_per_min"), "measured"),
+        "shot_median_s": _metric(shots.get("median_s"), shot_provenance),
+        "cuts_per_min": _metric(shots.get("cuts_per_min"), shot_provenance),
         "integrated_lufs": _metric(loudness.get("integrated_lufs"), "measured"),
         "narration_share": _metric(
             (derived["by_owner"].get("narration") or {}).get("share", 0.0), "labeled"),
@@ -219,7 +245,8 @@ def build_production(breakdown, measurements, derived):
         targets = {}
         for name, target in (method.get("targets") or {}).items():
             source = target["from"]
-            provenance = "labeled" if source.startswith("derived.") else "measured"
+            provenance = ("labeled" if source.startswith("derived.")
+                          else shot_provenance if source.startswith("shots.") else "measured")
             value = resolve(source, measurements, derived)
             if source == "derived.first_original_at":   # the absolute `s` stays local, as in the profile
                 value = {"fraction": value["fraction"]}
@@ -228,10 +255,14 @@ def build_production(breakdown, measurements, derived):
             entry["targets"] = targets
         methods.append(entry)
     subtitles = {k: v for k, v in (labels.get("subtitles") or {}).items() if k != "evidence_t"}
+    settings = measurements.get("settings") or {}
+    cut_detection = {key: settings.get(key) for key in (
+        "detector", "hard_score", "soft_score", "isolation_ratio", "isolation_window_s", "scaled")}
     return {
         "schema": PRODUCTION_SCHEMA,
         "duration_s": measurements["source"]["duration_s"],
         "canvas": measurements["source"]["canvas"],
+        "cut_detection": {**cut_detection, "agent_added": added, "agent_removed": removed},
         "profile": {name: metric for name, metric in profile.items() if metric["value"] is not None},
         "structure": derived["structure"],
         "subtitles": subtitles,

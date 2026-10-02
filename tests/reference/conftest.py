@@ -16,12 +16,13 @@ ASR_TEXT = {0: "他是天下最尊贵的私生子", 10: "你可知道我是谁�
 
 def _measurements():
     return {
-        "schema": "video-reference.measurements.v1",
+        "schema": "video-reference.measurements.v2",
         "source": {"size": 1, "mtime_ns": 1, "duration_s": DURATION,
                    "canvas": {"width": 1280, "height": 720}, "fps": 25.0,
                    "subtitle_streams": 0, "audio_streams": 1},
-        "settings": {"scene_threshold": 10.0, "scaled": True},
-        "shots": {"cuts": list(CUTS), "count": 9, "median_s": 5.0, "cuts_per_min": 8.0},
+        "settings": {"detector": "scdet-isolated-v1", "hard_score": 10.0, "soft_score": 4.0,
+                     "isolation_ratio": 2.0, "isolation_window_s": 0.3, "score_floor": 2.0, "scaled": True},
+        "shots": {"cuts": list(CUTS), "count": 9, "median_s": 5.0, "cuts_per_min": 8.0, "review_windows": []},
         "loudness": {"integrated_lufs": -14.8, "lra_lu": 6.4, "true_peak_dbtp": -1.0,
                      "short_term_1s": [-16.0] * 10 + [-20.0] * 50},
     }
