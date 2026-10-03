@@ -155,7 +155,6 @@ def _adjust_result_parts(result):
 
 def _duck_config(monkeypatch, **overrides):
     values = {
-        "ducking_mode": "fixed",
         "idle_orig_volume": 0.85,
         "speech_ducking_volume": 0.2,
         "zone_ducking_volume": 0.12,
@@ -1385,18 +1384,6 @@ def test_build_audio_filter_complex_bgm_adds_third_track(monkeypatch):
     assert "[2:a]" not in fc2
 
 
-def test_build_audio_filter_complex_explicit_modes(monkeypatch):
-    segs = [
-        {"actual_place_start": 0.0, "actual_place_end": 2.0, "overlaps_speech": True}
-    ]
-    monkeypatch.setitem(CONFIG, "ducking_mode", "none")
-    none_fc = _build_audio_filter_complex(segs)
-    assert "sidechaincompress" not in none_fc
-    assert "volume='" not in none_fc  # no envelope in 'none' mode
-    monkeypatch.setitem(CONFIG, "ducking_mode", "sidechaincompress")
-    assert "sidechaincompress" in _build_audio_filter_complex(segs)
-
-
 def test_assembly_settings_payload_tracks_burn_style(monkeypatch):
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     plain = assembly_settings_payload()
@@ -1867,7 +1854,6 @@ def test_emit_timeline_uses_exact_placed_audio_not_longer_prefit_source(
     original.write_bytes(b"long")
     placed.write_bytes(b"fit")
     monkeypatch.setattr(timeline_emit, "_timeline_subtitle_segments", lambda *args: [])
-    monkeypatch.setitem(CONFIG, "ducking_mode", "none")
 
     timeline = _emit_timeline(
         tmp_path / "input.mp4",
@@ -1900,7 +1886,6 @@ def test_emit_timeline_maps_adopted_mix_by_index_across_a_skipped_segment(
     prepared = tmp_path / "prepared_bed.wav"
     prepared.write_bytes(b"bed")
     monkeypatch.setattr(timeline_emit, "_timeline_subtitle_segments", lambda *args: [])
-    monkeypatch.setitem(CONFIG, "ducking_mode", "none")
     segments = [
         tts_segment(index=0, placed_audio_path=str(placed), actual_place_start=0.5,
                     actual_place_end=1.5, narration="第一句。"),

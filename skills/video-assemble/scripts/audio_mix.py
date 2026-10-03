@@ -404,17 +404,8 @@ def _build_audio_filter_complex(
         the gaps so the recap never drops to dead air between sentences.
       - bgm (input [2:a], optional): a looped music bed, gently ducked under narration.
       - narration (input [1:a]): the TTS, boosted and laid on top.
-    CONFIG["ducking_mode"] (default "fixed") selects the original-track strategy:
-    fixed = the gap-fill envelope above; sidechaincompress = auto-duck keyed off the
-    narration; none = no ducking. Placement comes from actual_place_start/end.
+    Placement comes from actual_place_start/end.
     """
-    ducking_mode = CONFIG["ducking_mode"]
-    if ducking_mode == "sidechaincompress" and any(
-        "source_duck_end" in seg and seg["source_duck_end"] > seg["actual_place_end"] + 1e-6
-        for seg in tts_segments
-    ):
-        log("sidechaincompress 无法保持句末交接窗口，已回退 fixed ducking")
-        ducking_mode = "fixed"
     narr_vol = CONFIG["ducking_narr_weight"]
     fade = CONFIG["duck_fade_seconds"]
     bridge = CONFIG["duck_bridge_seconds"]
@@ -431,25 +422,7 @@ def _build_audio_filter_complex(
         else:
             bgm_chain = f"{bgm_in}volume={base},aresample=48000[bgm];"
 
-    if ducking_mode == "sidechaincompress":
-        # The narration keys the compressor; split it so it can also be mixed in.
-        head = (
-            f"{original_in}aresample=48000[o0];"
-            "[1:a]aresample=48000,asplit=2[sckey][scnarr];"
-            f"[o0][sckey]sidechaincompress="
-            f"threshold={CONFIG['ducking_threshold']}:ratio={CONFIG['ducking_ratio']}"
-            f":attack={CONFIG['ducking_attack']}:release={CONFIG['ducking_release']}"
-            f":knee=2.5:makeup={CONFIG['ducking_makeup']}:level_sc={CONFIG['ducking_level_sc']}[orig];"
-        )
-        narr = f"[scnarr]volume={narr_vol}[narr];"
-        if bgm_chain:
-            return head + bgm_chain + narr + "[orig][bgm][narr]amix=inputs=3:duration=first:dropout_transition=0:normalize=0[aout]"
-        return head + narr + "[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
-
-    if ducking_mode == "none":
-        return f"{original_in}aresample=48000[orig];" + _amix_tail(narr_vol, bgm_chain)
-
-    # fixed (default): gap-fill ducking envelope on the original track.
+    # Gap-fill ducking envelope on the original track.
     idle = CONFIG["idle_orig_volume"]
     speech_vol = CONFIG["speech_ducking_volume"]
     quiet_vol = CONFIG["zone_ducking_volume"]

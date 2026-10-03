@@ -121,7 +121,6 @@ def test_adopted_timeline_uses_current_whole_input_and_flat_selected_audio(tmp_p
                                 "source_end": 9, "output_start": 0, "output_end": 1}]}),
         encoding="utf-8",
     )
-    monkeypatch.setitem(CONFIG, "ducking_mode", "fixed")
     monkeypatch.setitem(CONFIG, "idle_orig_volume", 0.25)
     monkeypatch.setattr(timeline_emit, "_timeline_subtitle_segments", lambda *_: [])
 

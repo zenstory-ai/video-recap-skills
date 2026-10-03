@@ -340,8 +340,7 @@ def test_explicit_index_provider_requires_endpoint_and_voice_at_config_load(endp
     assert config["index_tts_endpoint"] == endpoint
 
 
-def test_index_preparation_uses_provider_default_speed_despite_dynamic_params(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", True)
+def test_index_preparation_uses_provider_default_speed_not_dynamic_params(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
     segment = {"start": 0.0, "end": 2.0, "narration": "很长很长的感叹句！"}
@@ -367,7 +366,6 @@ def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", True)
     monkeypatch.setitem(CONFIG, "tts_segment_normalize", False)
     monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
     monkeypatch.setitem(CONFIG, "allow_partial_tts", False)

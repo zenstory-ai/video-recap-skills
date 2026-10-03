@@ -33,13 +33,6 @@ TEMPO_KEYS = (
 )
 MIX_KEYS = (
     "fade_ms",
-    "ducking_mode",
-    "ducking_threshold",
-    "ducking_ratio",
-    "ducking_attack",
-    "ducking_release",
-    "ducking_level_sc",
-    "ducking_makeup",
     "ducking_narr_weight",
     "ducking_orig_volume",
     "zone_ducking_volume",
