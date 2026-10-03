@@ -7,7 +7,7 @@ import subprocess
 from assemble_constants import frame_clock_samples
 from adoption.frozen_audio import probe_audio_packets
 import adoption.narration_binding as narration_binding
-from pair_media import probe_picture, validate_pair_timing
+from adoption.av_clock import probe_picture, validate_pair_timing
 import source_score
 from adoption.strict_inputs import (
     read_json_bytes, require_fields, require_integer, require_local_path, require_number,

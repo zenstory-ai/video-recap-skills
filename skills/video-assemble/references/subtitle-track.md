@@ -15,7 +15,7 @@ from subtitles.track import load_subtitle_track
 loaded = load_subtitle_track(
     "subtitle_track.json",
     expected_picture_identity={
-        "path": "/project/paired.mp4",
+        "path": "/project/master.mp4",
         "edit_plan": "/project/edit_plan.json",
     },
     expected_audio_identity={
@@ -66,7 +66,7 @@ reports the labels present; it is not an aggregate precision verdict.
   "overlap_policy": "forbid",
   "bindings": {
     "picture": {
-      "path": "/project/paired.mp4",
+      "path": "/project/master.mp4",
       "edit_plan": "/project/edit_plan.json"
     },
     "audio": {

@@ -1,4 +1,4 @@
-"""A fractional-second AAC interval must survive producing, pairing and packaging."""
+"""A fractional-second AAC interval must survive producing and packaging."""
 
 from fractions import Fraction
 import json
@@ -12,9 +12,9 @@ import pytest
 SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
-import pair_media  # noqa: E402
 import source_score  # noqa: E402
 import lib  # noqa: E402
+from adoption.av_clock import probe_picture, validate_pair_timing  # noqa: E402
 from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
 from lib import CONFIG  # noqa: E402
 from test_explicit_audio_mix import explicit_case, _quiet  # noqa: E402, F401
@@ -37,7 +37,7 @@ def assert_sample_clock(video):
     assert abs(end - header_end) <= Fraction(1, audio['sample_rate']), (
         end, header_end, audio['sample_rate'],
     )
-    pair_media.validate_pair_timing(pair_media.probe_picture(video), audio)
+    validate_pair_timing(probe_picture(video), audio)
 
 
 def base_media(tmp_path, rate):
@@ -51,16 +51,13 @@ def base_media(tmp_path, rate):
         '-color_trc', 'bt709', '-x264-params',
         'colorprim=bt709:transfer=bt709:colormatrix=bt709:range=limited',
         '-c:a', 'aac', '-movie_timescale', rate, video)
-    assert pair_media.probe_picture(video)['frame_count'] == 32
+    assert probe_picture(video)['frame_count'] == 32
     assert_sample_clock(video)
     return video
 
 
 @pytest.mark.parametrize('rate', [48000, 44100])
-@pytest.mark.parametrize('operation', ['pair', 'adopted_assemble'])
-def test_frozen_aac_fractional_interval_survives_each_consumer(
-    tmp_path, monkeypatch, rate, operation,
-):
+def test_frozen_aac_fractional_interval_survives_adopted_assemble(tmp_path, monkeypatch, rate):
     base = base_media(tmp_path, rate)
     output_dir = tmp_path / 'output'
     commands = []
@@ -71,26 +68,14 @@ def test_frozen_aac_fractional_interval_survives_each_consumer(
         return original_run(command, *args, **kwargs)
 
     monkeypatch.setattr(lib, 'run_cmd', capture_command)
-    if operation == 'pair':
-        plan = tmp_path / 'pair.json'
-        plan.write_text(json.dumps({
-            'artifact': 'media_pair', 'schema_version': 1,
-            'picture': {'path': str(base)}, 'audio': {'path': str(base), 'selected_stream': 0},
-        }))
-        pair_media.run_pair(plan, output_dir)
-        output = output_dir / 'paired.mp4'
-    else:
-        _quiet(monkeypatch)
-        monkeypatch.setitem(CONFIG, 'bgm_path', '')
-        output_dir.mkdir()
-        output = output_dir / 'output.mp4'
-        assemble.assemble_video(base, [], output_dir, output, audio_mode='adopted-packet-copy')
+    _quiet(monkeypatch)
+    monkeypatch.setitem(CONFIG, 'bgm_path', '')
+    output_dir.mkdir()
+    output = output_dir / 'output.mp4'
+    assemble.assemble_video(base, [], output_dir, output, audio_mode='adopted-packet-copy')
     assert_sample_clock(output)
     verify_adopted_audio(base, output, 0, 0)
-    if operation == 'pair':
-        command = json.loads((output_dir / 'mux.command.json').read_text())
-    else:
-        command = next(c for c in commands if '-c:a' in c and 'copy' in c)
+    command = next(c for c in commands if '-c:a' in c and 'copy' in c)
     assert command.count('-movie_timescale') == 1
     assert command[command.index('-movie_timescale') + 1] == str(rate)
     assert '-t' not in command and '-shortest' not in command
@@ -190,4 +175,4 @@ def test_millisecond_quantized_header_is_rejected(tmp_path):
     except RuntimeError as exc:
         assert 'side data' in str(exc)
     with pytest.raises(ValueError, match='packet clock'):
-        pair_media.validate_pair_timing(pair_media.probe_picture(bad), probe_audio_packets(bad, 0))
+        validate_pair_timing(probe_picture(bad), probe_audio_packets(bad, 0))
