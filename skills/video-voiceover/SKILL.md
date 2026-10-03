@@ -69,7 +69,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
   缓存 WAV 的 `size`/`mtime_ns` 变了即失效。`narr_NNN.wav` 是指向缓存的硬链接（不支持时为副本），`tts_meta.json`
   照旧引用它。删掉、插入或挪动某段后，只重生成文本或发给供应商的请求变了的段（名义语速随首段、末两段的位置变化）；
   旧版的 `narr_NNN.wav.cache.json` 不再读取。
-- 批准稿保护策略属于缓存设置：严格模式与默认策略（`report-over-budget-v2`）互不命中，旧的自动缩稿缓存也不再复用；只有同一严格策略下、
+- 批准稿保护策略属于缓存设置：严格模式往缓存键里加入策略与原稿，与默认策略（`report-over-budget-v2`，不进键）互不命中；旧版逐段缓存（含自动缩稿音频）不再读取；只有同一严格策略下、
   `spoken_text` 完整匹配且 WAV 存在非空的缓存才可离线复用；复用时仍按当前时间窗检查，放不下照样失败。
 - 严格 CLI 在本轮合成前把旧 `tts_meta.json` 按时间戳归档至 `tts_meta.history/`，因此失败时
   当前路径不会继续冒充本轮成功；成功元数据通过同目录临时文件原子替换。
