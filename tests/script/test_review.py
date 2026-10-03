@@ -427,6 +427,25 @@ def test_review_markdown_numbers_blocks_from_one_while_json_keeps_draft_index():
     assert "段 0" not in md
 
 
+def test_review_markdown_never_prints_a_raw_zero_based_segment():
+    r = _parse(
+        {
+            "verdict": "REVISE",
+            "summary": "s",
+            "findings": [
+                {"segment": 0.0, "severity": "warning", "category": "weak_hook", "issue": "浮点段号"},
+                {"segment": [0, 1], "severity": "warning", "category": "cliche", "issue": "列表段号"},
+                {"segment": -1, "severity": "warning", "category": "other", "issue": "负段号"},
+            ],
+        }
+    )
+    md = review_response.format_review_md(r)
+    assert "] 段 1** — 浮点段号" in md
+    assert "] 段 ?（模型返回 [0, 1]）** — 列表段号" in md
+    assert "] 段 ?（模型返回 -1）** — 负段号" in md
+    assert "段 0" not in md and "段 [" not in md
+
+
 def test_build_review_messages_includes_optional_planning_and_style_artifacts(tmp_path):
     _write_json(tmp_path / "packaging_plan.json", {"viewer_promise": "看到反转"})
     _write_json(

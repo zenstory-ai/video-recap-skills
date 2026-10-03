@@ -2,7 +2,9 @@
 
 narration_lint.json keeps every field; this summary repeats, per failing block, the
 numbers needed to fix it without opening that file. Block numbers are 1-based ("段 N",
-the block's position in narration.json); the report's `index` fields stay 0-based.
+the block's position in narration.json); the report's `index` fields stay 0-based. A
+deslop blocker found in original_subtitles.json carries `source: "original_subtitles"`
+and an index into that file, so it is labelled "原声字幕第 N 条", never "段 N".
 """
 
 MAX_LISTED_ERRORS = 12
@@ -15,12 +17,34 @@ _HINTS = {
     "out_of_order": "按 start 从小到大排列各块",
     "outside_clip_plan": "把这块挪进某个选中片段的时间范围",
     "ambiguous_source_clip": "给这块写 source_clip_id",
+    "em_dash": "删掉破折号，改用逗号、句号或把句子拆开",
+    "placeholder_leakage": "把示例占位（如【主角】）换成真实人名或内容",
 }
+
+_ORIGINAL_SUBTITLE_HINTS = {
+    "em_dash": "在 original_subtitles.json 里删掉这条的破折号（不是改 narration.json）",
+    "placeholder_leakage": "在 original_subtitles.json 里替换这条的示例占位（不是改 narration.json）",
+}
+_ORIGINAL_SUBTITLE_FALLBACK_HINT = "改 original_subtitles.json 里的这一条，不是 narration.json"
 
 
 def block_label(index):
     """'段 N' for a 0-based block index; '整体' for a file-level issue."""
     return "整体" if index is None else f"段 {index + 1}"
+
+
+def _label(e):
+    if e.get("source") == "original_subtitles":
+        index = e.get("index")
+        return "原声字幕" if index is None else f"原声字幕第 {index + 1} 条"
+    return block_label(e.get("index"))
+
+
+def _hint(e):
+    code = e.get("code")
+    if e.get("source") == "original_subtitles":
+        return _ORIGINAL_SUBTITLE_HINTS.get(code, _ORIGINAL_SUBTITLE_FALLBACK_HINT)
+    return _HINTS.get(code)
 
 
 def _seconds(value):
@@ -68,8 +92,8 @@ def format_lint_failure(report, lint_path=None):
     errors = report.get("errors", [])
     lines = [f"narration.json 预检失败：{len(errors)} 个 error，修改后重跑 validate。"]
     for e in errors[:MAX_LISTED_ERRORS]:
-        line = f"- {block_label(e.get('index'))} {e.get('code')}：{_details(e)}"
-        hint = _HINTS.get(e.get("code"))
+        line = f"- {_label(e)} {e.get('code')}：{_details(e)}"
+        hint = _hint(e)
         if hint:
             line += f"。改法：{hint}"
         lines.append(line)

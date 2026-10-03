@@ -495,9 +495,12 @@ def _segment_label(segment):
         return "整体"
     if isinstance(segment, str) and segment.strip().isdigit():
         segment = int(segment)
-    if isinstance(segment, int) and not isinstance(segment, bool):
+    elif isinstance(segment, float) and segment.is_integer():
+        segment = int(segment)
+    if isinstance(segment, int) and not isinstance(segment, bool) and segment >= 0:
         return f"段 {segment + 1}"
-    return f"段 {segment}"
+    # Any other shape is not a block index; show the raw value, never as a 段 number.
+    return f"段 ?（模型返回 {json.dumps(segment, ensure_ascii=False, default=str)}）"
 
 
 def format_review_md(review):

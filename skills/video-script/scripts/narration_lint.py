@@ -637,11 +637,9 @@ def lint_narration(
                 )
             )
 
+    # Unfiltered, so narration-sourced blocker indices are narration.json positions.
     deslop_qc = analyze_deslop_qc(
-        [seg for seg in narration if isinstance(seg, dict)]
-        if isinstance(narration, list)
-        else [],
-        work_dir=work_dir,
+        narration if isinstance(narration, list) else [], work_dir=work_dir,
     )
     for blocker in deslop_qc["blockers"]:
         errors.append(

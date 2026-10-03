@@ -6,12 +6,12 @@ Status: implemented
 
 video-script 的 lint 用 brief 同一个公式给每块算字数预算：`_recommended_char_budget(start, end) = int((end - start - 0.1) × speech_rate × speech_safety_margin × narration_speed)`。这只按字数折算朗读时长，没算每块作为一次 TTS 合成自带的首尾静音。voiceover 不裁这段静音，assemble 判断能否放进时间窗时用的是整段音频时长。
 
-本机真实运行留下的 98 个 MiMo 段（有 `tts_meta.json` 文本对照，-40 dBFS 门限）实测：首尾静音合计 p10 / p50 / p90 = 0.40 / 0.54 / 0.62 秒（未经 1.15 倍 narration atempo），放进时间线约 0.35 / 0.47 / 0.54 秒。2–3 秒的窗口里这占了五分之一的空间，所以短窗口的稿子能过 lint，TTS 计费之后才在 assemble 以 `no_safe_fit` 阻断。[[2026-10-02-voiceover-no-default-truncation]] 已经记下估算偏乐观、标定是后续工作。
+本机真实运行留下的 98 个 MiMo 段（有 `tts_meta.json` 文本对照，-40 dBFS 门限）实测：首尾静音合计 p10 / p50 / p90 = 0.40 / 0.54 / 0.62 秒（未经 1.15 倍 narration atempo），放进时间线约 0.35 / 0.47 / 0.54 秒。这 98 段所在的 work_dir 当时没有记下来，数据不能原样复查；复测办法：在带 `tts_meta.json` 的真实运行目录上，对每段 TTS 音频按 -40 dBFS 门限量出开头与结尾静音（例如 ffmpeg `silencedetect=noise=-40dB`），两段相加，再除以 1.15 换算成放进时间线的秒数。2–3 秒的窗口里这占了五分之一的空间，所以短窗口的稿子能过 lint，TTS 计费之后才在 assemble 以 `no_safe_fit` 阻断。[[2026-10-02-voiceover-no-default-truncation]] 已经记下估算偏乐观、标定是后续工作。
 
 ## Decision
 
 - video-script `agent_text.py` 新增 `TTS_UTTERANCE_OVERHEAD_SECONDS = 0.45`（实测中位数，放进时间线的秒数）和 `_lint_char_budget(start, end) = _recommended_char_budget(start, end - 0.45)`。共享的 `_recommended_char_budget` 不变，仍与 video-understanding 那份逐函数一致（[[2026-10-02-function-level-parity]]）；lint 在它之上加这一项。
-- `narration_lint.lint_narration` 用 `_lint_char_budget` 算 `budget_chars`，full 模式超过它的 1.25 倍仍是 `over_budget` error；`over_budget` / `slot_too_short` warning 的条件不变，但 `estimated_tts_seconds` 加上这 0.45 秒再和时间窗比。full 报 error、cut_output 只报 warning 的分工不变。`over_budget` error 多一个字段 `tts_overhead_seconds`。
+- `narration_lint.lint_narration` 用 `_lint_char_budget` 算 `budget_chars`，full 模式超过它的 1.25 倍仍是 `over_budget` error；`over_budget` / `slot_too_short` warning 的判定式不变，但输入变了：`over_budget` warning 的 `estimated_tts_seconds` 加上这 0.45 秒再和时间窗比；`slot_too_short` 仍是 `budget_chars < 5`，而 `budget_chars` 变小了，所以默认配置（speech_rate 3.9）下它对约 1.87 秒以下的窗口出现，以前是约 1.42 秒以下。full 报 error、cut_output 只报 warning 的分工不变。`over_budget` error 多一个字段 `tts_overhead_seconds`。
 - video-script SKILL.md 的控量规则和 validate 一节写明每块另加约 0.45 秒，brief 的每窗字数没扣这一项。
 - brief（video-understanding）的每窗 `char_budget` 和头部 "Effective speech budget" 仍按旧公式，本次不改那个技能；它们比 lint 宽 1–2 字，短窗口按 brief 写满会被 lint 退回。
 - 测试：`tests/script/test_approved_validation.py` 钉住 `_lint_char_budget` 与 brief 公式的关系、2.5 秒窗口按 brief 写满在 full 模式报 error、cut_output 的 warning 估算含首尾静音，原有超预算用例按新预算更新数字（10–13 秒窗口 9→8 字）；1.2 秒短槽用例改为 1.4 秒，3 个字在 1.2 秒里加上首尾静音已经放不下。
@@ -25,5 +25,5 @@ video-script 的 lint 用 brief 同一个公式给每块算字数预算：`_reco
 ## Consequences
 
 - **收益**：2–3 秒窗口的超长稿在 validate 就退回 Agent，不再先付 TTS 费用、等 assemble 阻断；cut_output 的 warning 也更早出现。
-- **代价**：full 模式里以前刚好过线的短窗口稿会被退回多一轮；每块预算少约 1–2 字，长窗口影响很小。brief 的每窗字数与 lint 暂时不一致，需要 Agent 读 SKILL.md 的说明，直到 understanding 那边同步。
+- **代价**：full 模式里以前刚好过线的短窗口稿会被退回多一轮；`slot_too_short` warning 覆盖的窗口从约 1.4 秒以下变成约 1.9 秒以下，短窗口会多出这条 warning；每块预算少约 1–2 字，长窗口影响很小。brief 的每窗字数与 lint 暂时不一致，需要 Agent 读 SKILL.md 的说明，直到 understanding 那边同步。
 - 0.45 秒来自一种音色（MiMo 默认）、98 段的实测；换供应商或音色后首尾静音可能不同。重访信号：真实运行里仍有窗口 ≥ 3 秒的块在 assemble 报 `no_safe_fit`，或首尾静音中位数明显偏离 0.45 秒。
