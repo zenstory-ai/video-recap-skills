@@ -93,18 +93,19 @@ def _metadata_log(series):
 
 
 def test_a_cut_out_of_fast_motion_scores_low_but_its_mafd_peak_goes_to_review():
-    # Real dark hard cut after a fight: scdet score 0.9 (it subtracts the previous mafd), but the
-    # frame differs from the moving shot before it more than any neighbour and the still shot after
-    # it differs far less. A steady pan has no such peak.
-    fight = [(105.92 + 0.04 * i, m) for i, m in enumerate([6.9, 8.6, 12.0, 13.6, 13.4, 13.8])]
-    still = [(106.24 + 0.04 * i, m) for i, m in enumerate([1.1, 1.1, 0.8, 0.7, 0.8, 0.7, 0.6])]
+    # mafd series re-extracted from the real dark hard cut at 106.20 s in recap_庆余年-EP01: scdet
+    # scores it 0.9 (it subtracts the previous mafd), yet it tops the moving shot before it by only
+    # ~19% and the still shot after it differs far less. A steady pan has no such peak.
+    fight = [(105.92 + 0.04 * i, m) for i, m in enumerate([2.58, 2.56, 3.17, 4.33, 4.94, 4.83, 4.97])]
+    still = [(106.24 + 0.04 * i, m) for i, m in enumerate([1.14, 1.14, 0.82])]
     pan = [(200.0 + 0.04 * i, 5.0 + 0.1 * (i % 3)) for i in range(20)]
-    log = _metadata_log([*fight, (106.2, 16.7), *still, *pan])
+    log = _metadata_log([*fight, (106.2, 5.91), *still, *pan])
 
     peaks = mafd_peaks(log, FPS, duration=300.0)
 
-    assert peaks == [[106.2, 16.7]]
-    assert detect_cuts([], FPS, peaks=peaks) == ([], [[106.0, 106.4]])
+    # The frame before the cut also tops its own neighbourhood; both land in one review window.
+    assert peaks == [[106.16, 4.97], [106.2, 5.91]]
+    assert detect_cuts([], FPS, peaks=peaks) == ([], [[105.96, 106.4]])
     assert detect_cuts([[106.2, 12.0]], FPS, peaks=peaks) == ([106.2], []), "a peak at a cut needs no review"
 
 

@@ -397,7 +397,7 @@ def _warnings(breakdown, methods, asr_segments, asr_status, research, *, index, 
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
-    if has_cjk and not research and not _index_names(index):
+    if has_cjk and not ((_research_names(research or {}) | _index_names(index)) - {None, ""}):
         warnings.append("ASR 有中文对白，但 background_research.json 与 understanding_index.json 都没有给出名字："
                         "泄漏扫描只认 fact entities 里写到的名字，台词里其他人名、地名、组织名会漏网")
     asr_video = (asr_evidence if isinstance(asr_evidence, dict) else {}).get("source_video")

@@ -46,7 +46,7 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 2. **复核切点**：固定阈值在真实成片上两头都错（暗场硬切只有 5–7 分；快速运动的单个镜头每 0.2 秒一个 7–8 分的峰），
    所以每次都要看图。`frames --review` 逐帧拼出每个待复核窗口，`frames --longest 5` 在最长的 5 个镜头里均匀取 12 帧；
    页面在 `U/reference_frames/`，命令打印每格对应的秒数。看完写 `labels.cut_fixes`：`add` 漏掉的切点秒数，
-   `remove` 误报的切点秒数（±0.1 秒内对上测得的切点）；看过无需改动就写 `{}`。之后所有镜头数值、段内切点密度和导出都用复核后的切点。
+   `remove` 误报的切点秒数（±0.1 秒内对上测得的切点）；看过无需改动就写 `{}`。重新 `measure` 后待复核窗口数变了，旧的 `cut_fixes` 不再算数，按新窗口重看一遍。之后所有镜头数值、段内切点密度和导出都用复核后的切点。
 3. **标注**：Agent 写 `U/reference_breakdown.json` 的 `labels`——音轨归属 `audio_spans`、叙事段落 `sections`、
    字幕形态 `subtitles`、标注依据 `basis`。`audio_spans` 的边界放在**声音实际起止**处（听得到的人声起点与止点），
    不放在字幕或旁白块的开始处（按字幕出现帧定的旁白结束点实测晚 0.24–0.42 秒）。`U/speech_boundary_anchors.json` 存在时，
