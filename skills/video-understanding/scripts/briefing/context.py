@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+from index_normalize import normalize_index
 from lib import CONFIG, file_identity
 
 
@@ -303,7 +304,10 @@ def _load_consolidation(work_dir, scenes_analysis):
         return {}
     if not all(isinstance(item, dict) for item in index["relationships"]):
         return {}
-    return index
+    # An index written before the deterministic repairs existed is repaired here too, so a
+    # --brief-only run does not wait for the next full understand.py run (pure, no model call).
+    # No duration cap: the brief's scenes may be an edited timeline, plot times are source times.
+    return normalize_index(index)[0]
 
 
 def _format_consolidation(index):

@@ -399,6 +399,10 @@ def test_offline_rerun_reuses_a_transcript_made_with_a_key(monkeypatch, tmp_path
 
 
 def test_legacy_sidecar_with_key_presence_flag_stays_fresh(monkeypatch, tmp_path):
+    """Forward-compat guard: a sidecar written before the flag was dropped must stay a hit.
+
+    This passes on the pre-fix code too (its payload carried the flag), so it is not evidence
+    for the offline fix; test_offline_rerun_reuses_a_transcript_made_with_a_key is."""
     video, result_path, _evidence = _valid_available_evidence(tmp_path)
     monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
     meta = _asr_cache_payload(video)

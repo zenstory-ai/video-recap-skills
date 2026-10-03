@@ -361,6 +361,13 @@ def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path
         ("1:02:03", "1:02:03"),
         (125, "02:05"),
         ("12.5s", "00:12"),
+        ("12.5秒", "00:12"),
+        ("约01:20", "01:20"),
+        ("大约 1:20", "01:20"),
+        ("01:20-01:45", "01:20"),
+        ("01:20 ~ 01:45", "01:20"),
+        ("80秒-95秒", "01:20"),
+        ("01:20至01:45", "01:20"),
     ],
 )
 def test_plot_time_is_canonical_mm_ss(raw, expected):
@@ -419,11 +426,56 @@ def test_a_later_entry_bridging_two_groups_folds_both():
     chars, renames = merge_characters([
         {"name": "甲", "aliases": ["阿甲"]},
         {"name": "乙", "aliases": ["阿乙"]},
-        {"name": "丙", "aliases": ["阿甲", "阿乙"]},
+        {"name": "丙", "aliases": ["甲", "乙"]},
     ])
     assert [c["name"] for c in chars] == ["甲"]
     assert chars[0]["aliases"] == ["阿甲", "乙", "阿乙", "丙"]
     assert renames == {"乙": "甲", "丙": "甲"}
+
+
+def test_a_shared_alias_alone_does_not_merge_two_characters():
+    """A generic alias the model gives two people must not fold them into one."""
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "王大锤", "aliases": ["男子", "老板"]},
+            {"name": "李警官", "aliases": ["男子"]},
+        ],
+        "relationships": [{"a": "王大锤", "b": "李警官", "relation": "对峙"}],
+        "plot_points": [],
+    }
+    out, report = normalize_index(index)
+    assert [c["name"] for c in out["characters"]] == ["王大锤", "李警官"]
+    assert out["relationships"] == index["relationships"]
+    assert report["merged_characters"] == 0
+
+
+def test_a_string_alias_is_one_alias_not_its_characters():
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "大", "aliases": []},
+            {"name": "王二", "aliases": "王大锤"},
+            {"name": "王大锤", "aliases": "老王"},
+        ],
+        "relationships": [],
+        "plot_points": [],
+    }
+    out, report = normalize_index(index)
+    # "大" is not split out of "王大锤"; the second and third entries are one person.
+    assert [c["name"] for c in out["characters"]] == ["大", "王二"]
+    assert out["characters"][1]["aliases"] == ["王大锤", "老王"]
+    assert report["merged_characters"] == 1
+
+
+def test_parse_index_response_reads_a_string_alias_as_a_list():
+    out = consolidate.parse_index_response(
+        '{"characters":[{"name":"王大锤","aliases":"老王"}],"relationships":[],'
+        '"plot_points":[],"entities":[]}'
+    )
+    assert out["characters"][0]["aliases"] == ["老王"]
 
 
 def test_consolidate_index_repairs_a_cached_index_without_a_model_call(monkeypatch, tmp_path):

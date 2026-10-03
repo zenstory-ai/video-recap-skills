@@ -389,6 +389,29 @@ def test_producer_only_meta_keys_never_reject_a_fresh_index(tmp_path):
     assert _load_clean_asr(tmp_path, ASR) is not None
 
 
+def test_brief_repairs_a_legacy_index_with_split_characters(tmp_path):
+    """--brief-only reads the index through this loader, so a legacy index whose same person
+    is split in two is repaired for the brief without a full understand.py run."""
+    index = {
+        "characters": [
+            {"name": "范闲", "description": "主角"},
+            {"name": "小范大人", "aliases": ["范闲"]},
+        ],
+        "relationships": [{"a": "小范大人", "b": "王启年", "relation": "上下级"}],
+        "plot_points": [{"time": "00:95", "text": "转折"}],
+        "entities": [],
+    }
+    _write_index_with_meta(tmp_path, index)
+
+    loaded = _load_consolidation(tmp_path, SCENES)
+
+    assert [c["name"] for c in loaded["characters"]] == ["范闲"]
+    assert loaded["relationships"] == [{"a": "范闲", "b": "王启年", "relation": "上下级"}]
+    assert loaded["plot_points"] == [{"time": "01:35", "text": "转折"}]
+    rendered = "\n".join(_format_consolidation(loaded))
+    assert rendered.count("范闲") == 2 and "小范大人 —" not in rendered
+
+
 def _write_json(path, payload):
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 

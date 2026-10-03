@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 
 from lib import CONFIG, log, api_call, file_identity, load_background_research
-from index_normalize import normalize_index
+from index_normalize import coerce_character_aliases, normalize_index, scenes_end
 from understanding_cache import _fresh
 
 # Shared tolerance for the per-segment span check. The brief-side gate inlines the SAME
@@ -365,6 +365,7 @@ def parse_index_response(text):
     ):
         val = data.get(key)
         out[key] = val if isinstance(val, list) else []
+    out["characters"] = coerce_character_aliases(out["characters"])
     for item in out["research_glossary"]:
         if isinstance(item, dict):
             item["support"] = "context_only"
@@ -435,17 +436,6 @@ def _extract_json(text):
         return json.loads(candidate)
     except ValueError:
         return None
-
-
-def _scenes_end(vlm_analysis):
-    """Latest scene end (source seconds), or None when no scene carries a usable end."""
-    ends = []
-    for scene in vlm_analysis or []:
-        try:
-            ends.append(float(scene["end"]))
-        except (KeyError, TypeError, ValueError):
-            continue
-    return max(ends) if ends else None
 
 
 def _index_meta_path(work_dir):
@@ -584,10 +574,10 @@ def consolidate_index(work_dir):
 
 def _normalized_index(index, vlm_analysis):
     """Merge split characters and canonicalize plot times (index_normalize)."""
-    index, repairs = normalize_index(index, duration=_scenes_end(vlm_analysis))
+    index, repairs = normalize_index(index, duration=scenes_end(vlm_analysis))
     if repairs["merged_characters"] or repairs["dropped_plot_times"]:
         log(
-            f"consolidate(index): 合并同名/同别名角色 {repairs['merged_characters']} 个，"
+            f"consolidate(index): 合并重复角色 {repairs['merged_characters']} 个，"
             f"丢弃无效剧情时间 {repairs['dropped_plot_times']} 个"
         )
     return index

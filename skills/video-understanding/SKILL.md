@@ -36,7 +36,7 @@ description: >
 export MIMO_API_KEY=***
 ```
 
-ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。`--mimo-video-overview` 可开启按场景块的视频概览。未设置 key 时重跑会复用已缓存的转写、画面分析、概览与故事索引（key 决定的默认 endpoint 不参与比对）；需要请求模型的 consolidation 记为 `skipped_no_key`，不发请求。
+ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。`--mimo-video-overview` 可开启按场景块的视频概览。未设置 key 时重跑会复用已缓存的转写、画面分析、概览与故事索引（key 决定的默认 endpoint 不参与比对）；需要请求模型的 consolidation 记为 `skipped_no_key`，不发请求。缓存对不上（例如复制 work_dir 时没保留文件时间）而已有转写时，运行停下并保留转写，设置 key 或显式 `--skip-asr` 后重跑。
 
 若 `work_dir/background_research.json` 存在，本技能会把剧情梗概和角色名折入 VLM 上下文；`--context` 可补充一条简短提示。
 

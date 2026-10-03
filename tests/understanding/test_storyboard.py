@@ -401,6 +401,58 @@ def test_edited_storyboard_skipped_without_validated_plan(tmp_path):
     assert understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4") is None
 
 
+def test_copied_work_dir_edited_storyboard_names_its_own_pages(monkeypatch, tmp_path):
+    """The edited storyboard's cache hit relocates a legacy sidecar too: absolute page paths
+    and an absolute edited_video_path become work_dir-relative, without a rebuild."""
+    _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
+    monkeypatch.setitem(CONFIG, "storyboard", True)
+    monkeypatch.setitem(CONFIG, "fps", 2.0)
+    _mock_run_cmd_makes_output(monkeypatch)
+    _with_font(monkeypatch)
+    (tmp_path / "clip_plan_validated.json").write_text(
+        json.dumps(_validated_plan()), encoding="utf-8"
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    builds = {"n": 0}
+    real_build = storyboard.build_edited_storyboard
+
+    def counting_build(*a, **k):
+        builds["n"] += 1
+        return real_build(*a, **k)
+
+    monkeypatch.setattr("understanding_storyboard.build_edited_storyboard", counting_build)
+
+    def generate():
+        return understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4")
+
+    first = generate()
+    assert first["page_images"] == ["storyboard/edited_storyboard.jpg"]
+    assert first["edited_video_path"] == "edited_source.mp4"
+
+    json_path = tmp_path / "storyboard" / "edited_storyboard.json"
+    legacy = json.loads(json_path.read_text(encoding="utf-8"))
+    legacy["page_images"] = ["/elsewhere/original_work_dir/storyboard/edited_storyboard.jpg"]
+    legacy["edited_video_path"] = "/elsewhere/original_work_dir/edited_source.mp4"
+    json_path.write_text(json.dumps(legacy), encoding="utf-8")
+    meta_path = json_path.with_name(json_path.name + ".meta.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.pop("artifact")
+    understanding_storyboard._write_stage_meta(json_path, meta)  # as the old build stamped it
+
+    reused = generate()
+
+    assert builds["n"] == 1  # cache hit, no rebuild
+    expected = {
+        "page_images": ["storyboard/edited_storyboard.jpg"],
+        "edited_video_path": "edited_source.mp4",
+    }
+    assert {k: reused[k] for k in expected} == expected
+    on_disk = json.loads(json_path.read_text(encoding="utf-8"))
+    assert {k: on_disk[k] for k in expected} == expected
+    assert {k: generate()[k] for k in expected} == expected
+    assert builds["n"] == 1  # the rewrite re-stamped the sidecar, so it still hits
+
+
 def test_brief_header_branches_on_labels_burned(tmp_path):
     brief = tmp_path / "agent_narration_brief.md"
     brief.write_text("# body\n", encoding="utf-8")

@@ -46,6 +46,25 @@ from understanding_cache import (
 )
 
 
+def _refuse_keyless_overwrite(asr_json):
+    """Stop before a key-less ASR miss replaces a real transcript with the [] placeholder.
+
+    The cache can miss for reasons that say nothing about the transcript, e.g. a work_dir
+    copied without keeping mtimes changes the recorded artifact identity."""
+    if CONFIG["mimo_asr_api_key"] or not asr_json.exists():
+        return
+    try:
+        existing = json.loads(asr_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(existing, list) and existing:
+        raise SystemExit(
+            "ASR 缓存与当前视频、设置或文件时间不匹配，且未设置 MIMO_ASR_API_KEY / MIMO_API_KEY，"
+            f"无法重新转写；已保留现有 asr_result.json（{len(existing)} 段），未覆盖。"
+            "请设置 MIMO_ASR_API_KEY 或 MIMO_API_KEY 后重跑，或显式使用 --skip-asr。"
+        )
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="Analyze a video into an understanding index + narration brief."
@@ -145,6 +164,17 @@ def main():
         scenes = detect_scenes(video, work_dir, CONFIG["scene_threshold"])
         _write_stage_meta(scenes_json, scenes_meta)
 
+    # The VLM cache does not depend on ASR, so an offline run that would stop at Step 4 stops
+    # here instead, before Step 3 can rewrite the transcript or the silence windows.
+    vlm_meta = _vlm_cache_payload(video, work_dir, scenes_json, frames)
+    vlm_offline = offline_ignored_settings(CONFIG["api_key"], "api_url")
+    vlm_cached = not args.force and _stage_cache_valid(
+        vlm_json, vlm_meta, ignore_settings=vlm_offline
+    )
+    if not vlm_cached and not CONFIG["api_key"]:
+        key_name = CONFIG["api_env_var"]
+        raise SystemExit(f"请设置 {key_name} 环境变量（VLM 画面分析需要）")
+
     # Step 3: ASR
     asr_meta = _asr_cache_payload(video, skip_asr=args.skip_asr)
     cache_state = None
@@ -164,6 +194,7 @@ def main():
         asr_result = _load_json(asr_json)
         log(f"跳过 ASR（证据匹配，已存在 {len(asr_result)} 段）")
     else:
+        _refuse_keyless_overwrite(asr_json)
         try:
             asr_result = transcribe_audio(video, work_dir)
         except Exception as e:
@@ -185,15 +216,10 @@ def main():
         _write_stage_meta(silence_json, silence_meta)
 
     # Step 4: VLM analysis (the only stage that requires the chat API key)
-    vlm_meta = _vlm_cache_payload(video, work_dir, scenes_json, frames)
-    vlm_offline = offline_ignored_settings(CONFIG["api_key"], "api_url")
-    if not args.force and _stage_cache_valid(vlm_json, vlm_meta, ignore_settings=vlm_offline):
+    if vlm_cached:
         vlm_analysis = _load_json(vlm_json)
         log(f"跳过 VLM 分析（已存在 {len(vlm_analysis)} 个场景）")
     else:
-        if not CONFIG["api_key"]:
-            key_name = CONFIG["api_env_var"]
-            raise SystemExit(f"请设置 {key_name} 环境变量（VLM 画面分析需要）")
         log("VLM API 连通性预检...")
         api_call(
             {

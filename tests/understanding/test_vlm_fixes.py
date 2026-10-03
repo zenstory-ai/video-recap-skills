@@ -505,6 +505,7 @@ def test_refusal_markers_are_defined_once_in_lib():
     import lib
 
     assert set(lib.MODERATION_REFUSAL_MARKERS) <= set(lib.OVERVIEW_REJECTION_MARKERS)
+    broad = {marker.lower() for marker in lib.OVERVIEW_REJECTION_MARKERS}
     scripts = Path(lib.__file__).parent
     for path in scripts.rglob("*.py"):
         if path.name == "lib.py" or "__pycache__" in path.parts:
@@ -512,8 +513,19 @@ def test_refusal_markers_are_defined_once_in_lib():
         tree = ast.parse(path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
-                assert "considered high risk" not in node.value.lower(), (
-                    f"{path.name} carries its own MiMo refusal marker; import it from lib"
+                low = node.value.lower()
+                assert not any(m in low for m in lib.MODERATION_REFUSAL_MARKERS), (
+                    f"{path.name}:{node.lineno} carries its own MiMo refusal marker; "
+                    "import it from lib"
+                )
+            if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+                members = {
+                    elt.value.lower() for elt in node.elts
+                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
+                }
+                assert len(members & broad) < 2, (
+                    f"{path.name}:{node.lineno} carries a private copy of the refusal marker "
+                    "list; import OVERVIEW_REJECTION_MARKERS from lib"
                 )
 
 

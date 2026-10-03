@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -165,6 +166,8 @@ def _patch_runner(monkeypatch, tmp_path, *, overview=False, mimo_key="", real_br
 
     monkeypatch.setitem(understand.CONFIG, "fps", 1.0)
     monkeypatch.setitem(understand.CONFIG, "api_key", "tp-test")
+    # Tests stub transcribe_audio as a keyed run; offline tests clear the key explicitly.
+    monkeypatch.setitem(understand.CONFIG, "mimo_asr_api_key", "tp-test")
     monkeypatch.setitem(understand.CONFIG, "mimo_video_overview", overview)
     monkeypatch.setitem(understand.CONFIG, "mimo_video_api_key", mimo_key)
     monkeypatch.setattr("understanding_runner.get_video_duration", lambda path: 10.0)
@@ -555,14 +558,16 @@ def _set_keys(monkeypatch, key, url):
         monkeypatch.setitem(understand.CONFIG, name, url)
 
 
-def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch, tmp_path):
-    """Without MIMO_API_KEY a rerun must reuse the transcript, scene analysis and index made
-    with a Token-Plan key (whose default endpoint differs), and must not send a request."""
+TRANSCRIPT = [{"start": 0.0, "end": 10.0, "text": "你给我站住。"}]
+
+
+def _keyed_run_then_offline(monkeypatch, tmp_path):
+    """Run understanding once with a Token-Plan key, then remove the key and make every
+    provider entry point fail the test. Returns the video path."""
     from asr_timing_evidence import write_asr_timing_evidence
     from lib import file_identity
 
     video = _video(tmp_path)
-    transcript = [{"start": 0.0, "end": 10.0, "text": "你给我站住。"}]
 
     def fake_asr(video_path, work_dir):
         work_dir = Path(work_dir)
@@ -570,13 +575,13 @@ def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch,
         (work_dir / "audio.wav.meta.json").write_text(
             json.dumps({"source_video_identity": file_identity(video_path)}), encoding="utf-8"
         )
-        (work_dir / "asr_result.json").write_text(json.dumps(transcript), encoding="utf-8")
+        (work_dir / "asr_result.json").write_text(json.dumps(TRANSCRIPT), encoding="utf-8")
         write_asr_timing_evidence(
             work_dir, video_path, "AVAILABLE_COARSE",
-            observed_segments=transcript, final_segments=transcript,
+            observed_segments=TRANSCRIPT, final_segments=TRANSCRIPT,
             audio_path=work_dir / "audio.wav",
         )
-        return transcript
+        return TRANSCRIPT
 
     def analyze_and_write(scenes, frames, work_dir, **kwargs):
         analysis = _fresh_analysis(scenes, frames, work_dir)
@@ -601,9 +606,21 @@ def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch,
     monkeypatch.setattr("understanding_runner.analyze_scenes", no_request)
     monkeypatch.setattr("understanding_runner.api_call", no_request)
     monkeypatch.setattr("consolidate.api_call", no_request)
+    return video
+
+
+def _bump_mtime(path):
+    stat = path.stat()
+    os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
+
+
+def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch, tmp_path):
+    """Without MIMO_API_KEY a rerun must reuse the transcript, scene analysis and index made
+    with a Token-Plan key (whose default endpoint differs), and must not send a request."""
+    video = _keyed_run_then_offline(monkeypatch, tmp_path)
     _run_main(monkeypatch, video, tmp_path)
 
-    assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == transcript
+    assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == TRANSCRIPT
     status = json.loads((tmp_path / "consolidation.status.json").read_text())
     assert status["status"] == "ok"  # the fresh index is reused without a request
 
@@ -613,3 +630,40 @@ def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch,
     assert status["status"] == "skipped_no_key"
     assert "MIMO_API_KEY" in status["message"]
     assert not (tmp_path / "understanding_index.json").exists()
+
+
+def test_offline_asr_miss_keeps_the_transcript_and_fails(monkeypatch, tmp_path):
+    """A work_dir copied without mtimes misses the ASR cache; offline, that must stop the run
+    rather than replace the real transcript with the key-less [] placeholder."""
+    video = _keyed_run_then_offline(monkeypatch, tmp_path)
+    asr_json = tmp_path / "asr_result.json"
+    _bump_mtime(asr_json)
+    silence_meta = tmp_path / "silence_periods.json.meta.json"
+    silence_before = silence_meta.read_bytes()
+
+    with pytest.raises(SystemExit, match="已保留现有 asr_result.json（1 段）"):
+        _run_main(monkeypatch, video, tmp_path)
+
+    assert json.loads(asr_json.read_text(encoding="utf-8")) == TRANSCRIPT
+    assert silence_meta.read_bytes() == silence_before
+
+    # The explicit opt-out still works offline.
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
+    assert json.loads(asr_json.read_text(encoding="utf-8")) == []
+
+
+def test_offline_vlm_miss_stops_before_asr(monkeypatch, tmp_path):
+    """When the VLM stage would need the missing key, the run stops before touching ASR,
+    even when the ASR cache misses too (so the ASR step's own refusal is never reached)."""
+    video = _keyed_run_then_offline(monkeypatch, tmp_path)
+    asr_json = tmp_path / "asr_result.json"
+    (tmp_path / "vlm_analysis.json").unlink()
+    _bump_mtime(asr_json)
+    asr_before = asr_json.read_bytes()
+    asr_meta_before = (tmp_path / "asr_result.json.meta.json").read_bytes()
+
+    with pytest.raises(SystemExit, match="VLM 画面分析需要"):
+        _run_main(monkeypatch, video, tmp_path)
+
+    assert asr_json.read_bytes() == asr_before
+    assert (tmp_path / "asr_result.json.meta.json").read_bytes() == asr_meta_before
