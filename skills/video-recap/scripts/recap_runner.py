@@ -576,10 +576,7 @@ def _run_dub(video, work_dir, args):
         cont = _continuation_command(video, work_dir, args)
         print("=" * 50)
         print(
-            f"[video-recap] ⏸  阅读 {work_dir / 'dub_brief.md'}，把英文原声转写切分并翻译成中文，写入 {dub_script}"
-        )
-        print(
-            '[video-recap]    格式 [{"start": 起秒, "end": 止秒, "zh": "译文"}]（按 start 升序）；逐句忠实、跟原声节奏一致、保留原音色'
+            f"[video-recap] ⏸  按 {work_dir / 'dub_brief.md'} 的要求翻译英文原声，写入 {dub_script}"
         )
         print(f"[video-recap]    写完后重跑继续: {cont}")
         print("=" * 50)

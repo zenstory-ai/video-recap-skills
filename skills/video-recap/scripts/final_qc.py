@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Final post-render QC and golden-eval reports for video-recap.
+"""Final post-render QC report (final_qc.json) for video-recap.
 
 Local deterministic/report-only checks only: no network, no repair, no secrets.
 """
@@ -18,9 +18,7 @@ import qc_contract
 from lib import load_json
 
 FINAL_QC_ARTIFACT = "final_qc.json"
-GOLDEN_EVAL_ARTIFACT = "golden_eval.json"
 POST_RENDER_STAGE = "post_render"
-GOLDEN_STAGE = "golden"
 _COLLECT_ARTIFACTS = (
     "assembly_manifest.json",
     "assembly_qc.json",
@@ -95,12 +93,12 @@ def _artifact_summary(work_dir: Path, name: str) -> dict[str, Any]:
 
 
 def _finding(*, finding_id: str, code: str, message: str, category: str = "schema_invalid",
-             stage: str = POST_RENDER_STAGE, source: Mapping[str, Any] | None = None,
+             source: Mapping[str, Any] | None = None,
              evidence: Mapping[str, Any] | None = None,
              next_action: str = "manual_review") -> dict[str, Any]:
     return qc_contract.build_finding(
         finding_id=finding_id,
-        stage=stage,
+        stage=POST_RENDER_STAGE,
         severity="blocker",
         confidence="objective",
         sample_policy={"type": "deterministic"},
@@ -381,142 +379,30 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
     )
 
 
-def _load_or_build_final_qc(work_dir: Path, final_qc_report: Mapping[str, Any] | None) -> dict[str, Any]:
-    if final_qc_report is not None:
-        return dict(final_qc_report)
-    path = work_dir / FINAL_QC_ARTIFACT
-    return load_json(path) if path.exists() else build_final_qc(work_dir)
-
-
-def build_golden_eval(work_dir: str | Path, final_qc_report: Mapping[str, Any] | None = None,
-                      golden_fixture: Any = None) -> dict[str, Any]:
-    root = Path(work_dir)
-    final_report = _load_or_build_final_qc(root, final_qc_report)
-    fixture = _load_fixture(golden_fixture) if golden_fixture is not None else {}
-    metadata = {
-        "work_dir": str(root),
-        "fixture": fixture,
-        "final_qc": {key: final_report[key] for key in ("ok", "blocker_count", "artifact", "stage")},
-        "auto_repair": False,
-    }
-    findings: list[dict[str, Any]] = []
-    expected_ok = fixture.get("expected_final_qc_ok", True)
-    if final_report["ok"] != expected_ok:
-        findings.append(_finding(
-            finding_id="golden-final-qc-ok-mismatch",
-            stage=GOLDEN_STAGE,
-            code="expected_final_qc_ok_mismatch",
-            message="final_qc ok state does not match golden expectation",
-            category="schema_invalid",
-            source={"artifact": FINAL_QC_ARTIFACT},
-            evidence={"expected": expected_ok, "actual": final_report["ok"]},
-            next_action="fix_final_qc_blockers",
-        ))
-    final_meta = final_report["metadata"]["final_output"]
-    probe = final_report["metadata"]["probe"]
-    duration = _probe_duration(probe)[0] if probe else None
-    video_stream = _first_video_stream(probe) if probe else None
-    codec = video_stream.get("codec_name") if video_stream else None
-    min_duration = fixture.get("min_duration")
-    if min_duration is not None and (duration is None or duration < min_duration):
-        findings.append(_finding(
-            finding_id="golden-min-duration-mismatch",
-            stage=GOLDEN_STAGE,
-            code="min_duration_mismatch",
-            message="final output duration is below golden minimum",
-            category="duration",
-            source={"artifact": final_meta["path"]},
-            evidence={"expected_min_duration": min_duration, "actual_duration": duration},
-            next_action="adjust_render_duration",
-        ))
-    max_duration = fixture.get("max_duration")
-    if max_duration is not None and (duration is None or duration > max_duration):
-        findings.append(_finding(
-            finding_id="golden-max-duration-mismatch",
-            stage=GOLDEN_STAGE,
-            code="max_duration_mismatch",
-            message="final output duration is above golden maximum",
-            category="duration",
-            source={"artifact": final_meta["path"]},
-            evidence={"expected_max_duration": max_duration, "actual_duration": duration},
-            next_action="adjust_render_duration",
-        ))
-    expected_codec = fixture.get("expected_codec")
-    if expected_codec is not None and codec != expected_codec:
-        findings.append(_finding(
-            finding_id="golden-codec-mismatch",
-            stage=GOLDEN_STAGE,
-            code="codec_mismatch",
-            message="final output video codec does not match golden expectation",
-            category="stream",
-            source={"artifact": final_meta["path"]},
-            evidence={"expected_codec": expected_codec, "actual_codec": codec},
-            next_action="adjust_render_codec",
-        ))
-    for idx, name in enumerate(fixture.get("required_artifacts", [])):
-        artifact_path = root / name
-        if not artifact_path.is_file() or artifact_path.stat().st_size == 0:
-            findings.append(_finding(
-                finding_id=f"golden-required-artifact-missing-{idx}",
-                stage=GOLDEN_STAGE,
-                code="required_artifact_missing",
-                message="golden fixture requires an artifact that is missing or empty",
-                category="missing_artifact",
-                source={"artifact": name},
-                evidence={"required_artifact": name},
-                next_action="produce_required_artifact",
-            ))
-    metadata["observed"] = {"duration": duration, "codec": codec, "final_output": final_meta}
-    return qc_contract.build_report(
-        artifact=GOLDEN_EVAL_ARTIFACT,
-        stage=GOLDEN_STAGE,
-        findings=findings,
-        metadata=metadata,
-    )
-
-
 def _write_report(path: Path, report: Mapping[str, Any]) -> None:
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
 
 def run(work_dir: str | Path, final_output: str | Path | None = None,
-        probe_fixture: Any = None, golden_fixture: Any = None,
-        probe_runner: ProbeRunner | None = None, only: str = "all") -> dict[str, Any]:
+        probe_fixture: Any = None, probe_runner: ProbeRunner | None = None) -> dict[str, Any]:
     root = Path(work_dir)
     root.mkdir(parents=True, exist_ok=True)
-    mode = {"final": "final_qc", "golden": "golden_eval"}.get(only, only)
-    if mode not in {"all", "final_qc", "golden_eval"}:
-        raise ValueError("only must be one of all, final_qc, golden_eval, final, golden")
-    result: dict[str, Any] = {"work_dir": str(root), "written": []}
-    final_report: dict[str, Any] | None = None
-    if mode in {"all", "final_qc"}:
-        final_report = build_final_qc(root, final_output=final_output, probe_fixture=probe_fixture, probe_runner=probe_runner)
-        _write_report(root / FINAL_QC_ARTIFACT, final_report)
-        result["final_qc"] = {"ok": final_report["ok"], "blocker_count": final_report["blocker_count"]}
-        result["written"].append(FINAL_QC_ARTIFACT)
-    if mode in {"all", "golden_eval"}:
-        golden_report = build_golden_eval(root, final_qc_report=final_report, golden_fixture=golden_fixture)
-        _write_report(root / GOLDEN_EVAL_ARTIFACT, golden_report)
-        result["golden_eval"] = {"ok": golden_report["ok"], "blocker_count": golden_report["blocker_count"]}
-        result["written"].append(GOLDEN_EVAL_ARTIFACT)
-    return result
+    report = build_final_qc(root, final_output=final_output, probe_fixture=probe_fixture, probe_runner=probe_runner)
+    _write_report(root / FINAL_QC_ARTIFACT, report)
+    return {
+        "work_dir": str(root),
+        "written": [FINAL_QC_ARTIFACT],
+        "final_qc": {"ok": report["ok"], "blocker_count": report["blocker_count"]},
+    }
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description="Write final_qc.json and golden_eval.json for a video-recap work_dir.")
+    ap = argparse.ArgumentParser(description="Write final_qc.json for a video-recap work_dir.")
     ap.add_argument("--work-dir", required=True)
     ap.add_argument("--final-output", default=None)
     ap.add_argument("--probe-fixture", default=None)
-    ap.add_argument("--golden-fixture", default=None)
-    ap.add_argument("--only", choices=["all", "final_qc", "golden_eval", "final", "golden"], default="all")
     args = ap.parse_args(argv)
-    summary = run(
-        args.work_dir,
-        final_output=args.final_output,
-        probe_fixture=args.probe_fixture,
-        golden_fixture=args.golden_fixture,
-        only=args.only,
-    )
+    summary = run(args.work_dir, final_output=args.final_output, probe_fixture=args.probe_fixture)
     print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
     return 0
 

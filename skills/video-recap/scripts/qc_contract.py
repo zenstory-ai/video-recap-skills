@@ -22,12 +22,11 @@ STAGES = frozenset({
     "post_tts",
     "pre_assemble",
     "post_render",
-    "golden",
 })
 SEVERITIES = frozenset({"info", "advisory", "warning", "blocker"})
 CONFIDENCES = frozenset({"low", "medium", "high", "objective"})
 SAMPLE_POLICIES = frozenset({"all", "deterministic", "sampled", "semantic", "aesthetic"})
-ARTIFACTS = frozenset({"final_qc.json", "golden_eval.json", "preflight_qc.json"})
+ARTIFACTS = frozenset({"final_qc.json", "preflight_qc.json"})
 
 DETERMINISTIC_CATEGORIES = frozenset({
     "missing_artifact",

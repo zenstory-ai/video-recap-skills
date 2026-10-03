@@ -56,7 +56,7 @@ Status: implemented
 - `#/run/<rel>[/<view>]`：阶段栏 概况 · 理解 · 剪辑 · 旁白 · 成片 · QC · 资源，每格一个状态点加一个数字；
   full 模式没有「剪辑」，非 narration 声音模式没有「旁白」。剪辑 = `clip_plan_validated.json` 的节奏条（宽度 ∝ 时长）与片段表；
   旁白 = `narration.json` 按输出时间排列；成片 = 绑定 `assembly_manifest.json` `final_output` 的播放器，加 `timeline.json` 的
-  画面 / 旁白 / 背景音乐 / 字幕四轨，播放头随 `currentTime` 移动、点轨道可跳转；QC = `final_qc` / `golden_eval` / `assembly_qc`（`mimo_qc` 卡片随 MiMo QC 删除，见 [[2026-10-02-delete-mimo-qc]]）
+  画面 / 旁白 / 背景音乐 / 字幕四轨，播放头随 `currentTime` 移动、点轨道可跳转；QC = `final_qc` / `assembly_qc`（`mimo_qc` 卡片随 MiMo QC 删除，见 [[2026-10-02-delete-mimo-qc]]；`golden_eval` 卡片随它并入 final_qc 删除，见 [[2026-10-02-fold-golden-eval-into-final-qc]]）
   的中文结论与前 20 条发现；资源 = `resource_lock.json`，需要注意的条目排最前，角色显示为中文（原片 / 音色 / 背景音乐 /
   字幕字体 / 包装图层），文件名突出、目录灰色截断并在悬停时显示全路径。每条资源归到一处登记：`library`（资源库，附授权与声音授权）、
   `material`（原片按设计只在素材库，不算未登记）、`unregistered`（配了资源库却没登记）或 `none`。

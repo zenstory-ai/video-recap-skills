@@ -18,7 +18,6 @@ from dashboard_io import (RUN_FILE, dir_of, media_entry, nearest, raw_text,
 # Files cmd_state parses; each must stay under the JSON cap before it is handed over.
 QC_FILES = (
     ("final_qc.json", "成片 QC"),
-    ("golden_eval.json", "黄金评估"),
     ("assembly_qc.json", "合成 QC"),
 )
 STAGES = (("home", "概况"), ("understanding", "理解"), ("cut", "剪辑"), ("narration", "旁白"),

@@ -1,13 +1,13 @@
 # 前置 QC 数据契约
 
-`final_qc.json`、`golden_eval.json` 与 `preflight_qc.json` 共用一套最小结构，由本技能的 `scripts/qc_contract.py` 实现。
+`final_qc.json` 与 `preflight_qc.json` 共用一套最小结构，由本技能的 `scripts/qc_contract.py` 实现。
 
 ## 字段契约
 
 - `schema_version`：整数 `1`。
-- `artifact`：只能是 `final_qc.json`、`golden_eval.json` 或 `preflight_qc.json`。
-- `stage`：只能是 `pre_cut`、`post_cut`、`pre_tts`、`post_tts`、`pre_assemble`、`post_render`、`golden`。
-  - 不得使用 `pre_voiceover`、`post_voiceover`、`pre_export`、`post_export`、`final`、`golden_eval` 或 `mimo_qc` 作为阶段值。
+- `artifact`：只能是 `final_qc.json` 或 `preflight_qc.json`。
+- `stage`：只能是 `pre_cut`、`post_cut`、`pre_tts`、`post_tts`、`pre_assemble`、`post_render`。
+  - 不得使用 `pre_voiceover`、`post_voiceover`、`pre_export`、`post_export`、`final`、`golden`、`golden_eval` 或 `mimo_qc` 作为阶段值。
 - `findings[]`：每项必须包含 `finding_id`、`stage`、`severity`、`blocking`、`deterministic`、`confidence`、`rule_id`、`decision_reason`、`location`、`evidence`、`sample_policy`、`model_used` 与 `next_action`。
 - `sample_policy`：至少包含 `type`；其值只能是 `all`、`deterministic`、`sampled`、`semantic` 或 `aesthetic`。
 - `location.timecode` 与 `location.source_span` 必须存在；剪辑前阶段可以把任一字段设为 `null`。
