@@ -19,7 +19,7 @@ from lib import CONFIG, file_identity  # noqa: E402
 import briefing.context as brief_context  # noqa: E402
 import briefing.inputs as brief_inputs  # noqa: E402
 import briefing.timeline as brief_timeline  # noqa: E402
-from briefing.builder import build_agent_brief  # noqa: E402
+from briefing.builder import _duration_label, build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
 from briefing.context import (  # noqa: E402
     _format_consolidation,
@@ -517,6 +517,73 @@ def test_build_agent_brief_cut_pass2_narrates_output_timeline_sized_to_validated
     assert "~1min" not in text
 
 
+@pytest.mark.parametrize(
+    "seconds, label",
+    [
+        (20.0, "20s"),
+        (59.6, "1min"),
+        (60.0, "1min"),
+        (90.0, "1m30s"),
+        (101.5, "1m42s"),
+        (600.0, "10min"),
+        (7265.0, "121m05s"),
+    ],
+)
+def test_duration_labels_keep_the_seconds(seconds, label):
+    assert _duration_label(seconds) == label
+
+
+def test_cut_brief_shows_a_90s_target_in_seconds(monkeypatch, tmp_path):
+    _set_brief_mode(monkeypatch, "cut", target_duration="90s")
+    scenes = [{"scene_id": 0, "start": 0.0, "end": 600.0, "description": "画面"}]
+    text = _agent_brief_text(scenes, [], [], 600.0, tmp_path)
+    assert "across the ~1m30s CUT OUTPUT (sized to the kept clips, NOT the 10min source)" in text
+    assert "Goal: a ~1m30s recap cut from a 10min source." in text
+    assert "~2min" not in text
+
+
+def test_cut_pass2_scene_guide_lists_only_kept_footage_in_output_time(
+    monkeypatch, tmp_path
+):
+    """Pass 2 narrates edited_source.mp4: the guide is on the OUTPUT clock and leaves out
+    scenes the cut dropped (credits), instead of the full source-time guide."""
+    _set_brief_mode(monkeypatch, "cut", target_duration="20s")
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {
+            "clips": [
+                {"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0},
+                {"source_start": 40.0, "source_end": 50.0, "output_start": 10.0, "output_end": 20.0},
+            ],
+        },
+    )
+    scenes = [
+        {
+            "scene_id": 0,
+            "start": 10.0,
+            "end": 50.0,
+            "description": "对峙",
+            "frame_facts": {"12.0": ["抬头"], "30.0": ["剪掉的动作"]},
+        },
+        {"scene_id": 1, "start": 50.0, "end": 60.0, "description": "片尾演职员表"},
+    ]
+    asr = [{"start": 41.0, "end": 43.0, "text": "保留的对白。"}]
+    silence = [{"start": 44.0, "end": 47.0, "duration": 3.0, "has_speech": False}]
+
+    text = _agent_brief_text(scenes, asr, silence, 60.0, tmp_path)
+
+    guide = text.split("## Scene timing guide (OUTPUT time)")[1]
+    assert "## Scene timing guide\n" not in text
+    assert "### OUTPUT 0.0-10.0s (source scene 1 part 1)" in guide
+    assert "### OUTPUT 10.0-20.0s (source scene 1 part 2)" in guide
+    assert "2.000s: 抬头" in guide and "剪掉的动作" not in guide
+    assert "[11.0-13.0] 保留的对白。" in guide
+    assert "Quiet windows: 14.0-17.0s" in guide
+    assert "片尾演职员表" not in guide
+    assert "### Scene " not in text and "10.0-50.0s" not in text
+
+
 def test_build_agent_brief_keeps_plan_linkage_in_the_board_not_narration_schema(
     monkeypatch, tmp_path
 ):
@@ -942,6 +1009,33 @@ def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):
     anchors = brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
 
     assert [row["time"] for row in anchors] == [4.0, 14.0]
+
+
+def test_cut_output_anchors_outside_the_output_are_dropped(tmp_path):
+    """The 0.05 s source slack must not place an anchor before 0 or past the output end."""
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {"clips": [{"source_start": 100.0, "source_end": 181.40,
+                    "output_start": 0.0, "output_end": 81.40}]},
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(
+        tmp_path / "speech_boundary_anchors.json",
+        {"sentence_anchors": [
+            {"time": 99.97, "confidence": "high"},
+            {"time": 150.0, "confidence": "high"},
+            {"time": 181.40, "confidence": "high"},
+            {"time": 181.42, "confidence": "high"},
+        ]},
+    )
+
+    anchors = brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
+
+    assert [row["time"] for row in anchors] == [50.0, 81.4]
+    output = json.loads(
+        (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )
+    assert [row["source_time"] for row in output["sentence_anchors"]] == [150.0, 181.4]
 
 
 def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path):

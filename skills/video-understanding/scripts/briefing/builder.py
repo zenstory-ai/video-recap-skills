@@ -36,6 +36,24 @@ from timeline_fusion import (
     _scene_asr_lines,
 )
 
+
+def _duration_label(seconds):
+    """'45s' / '2min' / '1m42s': whole minutes only when the duration is one.
+
+    A minute-rounded label hid the real length: a 90 s target read '~2min'."""
+    whole = int(seconds + 0.5)
+    if whole < 60:
+        return f"{whole}s"
+    minutes, secs = divmod(whole, 60)
+    return f"{minutes}min" if secs == 0 else f"{minutes}m{secs:02d}s"
+
+
+def _scene_number(scene_id):
+    """1-based source scene number; a scene split across kept clips ("3.1") reads "4 part 2"."""
+    base, _, part = str(scene_id).partition(".")
+    return f"{int(base) + 1} part {int(part) + 1}" if part else str(int(base) + 1)
+
+
 def build_agent_brief(
     scenes_analysis,
     asr_result,
@@ -87,16 +105,8 @@ def build_agent_brief(
     beat_count_phrase = (
         f"at most ~{target_count}" if thin_substrate else f"roughly {target_count}"
     )
-    output_label = (
-        f"{output_seconds / 60:.0f}min"
-        if output_seconds >= 60
-        else f"{output_seconds:.0f}s"
-    )
-    source_label = (
-        f"{video_duration / 60:.0f}min"
-        if video_duration >= 60
-        else f"{video_duration:.0f}s"
-    )
+    output_label = _duration_label(output_seconds)
+    source_label = _duration_label(video_duration)
 
     lines = [
         "# Agent Narration Brief",
@@ -205,7 +215,8 @@ def build_agent_brief(
         asr_result,
         silence_periods,
     )
-    if edit_mode == "cut" and (Path(work_dir) / "edited_source.mp4").exists():
+    cut_pass2 = edit_mode == "cut" and (Path(work_dir) / "edited_source.mp4").exists()
+    if cut_pass2:
         chunk_scenes, chunk_asr, _ = _remap_brief_evidence_to_output_timeline(
             work_dir, scenes_analysis, asr_for_chunks, [], required=True
         )
@@ -237,7 +248,7 @@ def build_agent_brief(
         cut_target_example = (
             target_duration if target_duration != "(not set)" else "30m"
         )
-        if not (Path(work_dir) / "edited_source.mp4").exists():
+        if not cut_pass2:
             # PASS 1 of 2 (cut-first): pick the footage. Narration comes AFTER the cut is
             # rendered, so it can be written against the real OUTPUT timeline — no source->output
             # mapping, no silent drop/clamp, no desync.
@@ -366,19 +377,36 @@ def build_agent_brief(
             '- ✗ "一个蒙眼的男人抱着一个篮子走在雨里。"  (just describes the frame)',
             '- ✓ "护送者本可以独自离开，却为了保护那个孩子，主动把追兵引向自己。"  (who, why, stakes)',
             "",
-            "## Scene timing guide",
-            "",
         ]
     )
-
-    for scene in scenes_analysis:
-        duration = scene["end"] - scene["start"]
-        max_chars = max(5, int(max(1.0, duration - breath_sec) * effective_rate))
-        quiets = _quiet_windows_for_scene(silence_periods, scene)
-        quiet_text = ", ".join(f"{s:.1f}-{e:.1f}s" for s, e in quiets) or "none"
+    # Cut pass 2 narrates edited_source.mp4, so its guide lists only the kept footage on the
+    # OUTPUT clock; the source-time guide (cut-away scenes, credits) belongs to pass 1.
+    if cut_pass2:
+        guide_scenes, guide_asr, guide_silence = fusion_scenes, fusion_asr, fusion_silence
         lines.extend(
             [
-                f"### Scene {scene['scene_id'] + 1}: {scene['start']:.1f}-{scene['end']:.1f}s",
+                "## Scene timing guide (OUTPUT time)",
+                "",
+                "Only footage kept in `edited_source.mp4`, timed on its OUTPUT timeline (0 .. total); "
+                "scenes the cut left out are not listed.",
+                "",
+            ]
+        )
+    else:
+        guide_scenes, guide_asr, guide_silence = scenes_analysis, asr_result, silence_periods
+        lines.extend(["## Scene timing guide", ""])
+
+    for scene in guide_scenes:
+        duration = scene["end"] - scene["start"]
+        max_chars = max(5, int(max(1.0, duration - breath_sec) * effective_rate))
+        quiets = _quiet_windows_for_scene(guide_silence, scene)
+        quiet_text = ", ".join(f"{s:.1f}-{e:.1f}s" for s, e in quiets) or "none"
+        span = f"{scene['start']:.1f}-{scene['end']:.1f}s"
+        lines.extend(
+            [
+                f"### OUTPUT {span} (source scene {_scene_number(scene['scene_id'])})"
+                if cut_pass2
+                else f"### Scene {scene['scene_id'] + 1}: {span}",
                 f"- Duration: {duration:.1f}s; max budget if fully narrated: {max_chars} chars",
                 f"- Quiet windows: {quiet_text}",
                 f"- Description: {scene.get('description', '')}"
@@ -395,7 +423,7 @@ def build_agent_brief(
         facts = _format_frame_facts(scene)
         if facts:
             lines.append(facts.rstrip())
-        asr_lines = _scene_asr_lines(asr_result, scene)
+        asr_lines = _scene_asr_lines(guide_asr, scene)
         if asr_lines:
             lines.append("- ASR overlap:")
             lines.extend(asr_lines[:8])
