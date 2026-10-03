@@ -413,7 +413,12 @@ def _detect_shot_changes(video, win_start, win_end, threshold, lead=0.25):
     return sorted(changes)
 
 
-def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5):
+# How far past each edge's own search window the shot-change scan also looks, so a hard cut
+# within a frame on the other side of the edge is known to the frame-grid pass.
+_FRAME_CUT_SCAN_PAD = 0.1
+
+
+def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5, found_cuts=None):
     """Nudge each clip's boundaries clear of the ORIGINAL footage's hard cuts to avoid 闪烁.
 
     A clip whose source_start sits just before a shot-change opens on a brief sliver of the old
@@ -423,9 +428,14 @@ def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5):
       - move source_end   BACK   onto a shot-change in [end-margin, end)       → clean close
     Boundaries already on a cut, or with no nearby cut, are left untouched. Snaps that would shrink
     a clip below `min_keep` are skipped. Recomputes the output timeline cursor-based.
+
+    `found_cuts` (a set) collects every cut the scan saw, including those up to
+    `_FRAME_CUT_SCAN_PAD` on the far side of each edge, for the frame-grid pass's tie-break.
     """
     if margin <= 0:
         return plan
+    pad = _FRAME_CUT_SCAN_PAD if found_cuts is not None else 0.0
+    found_cuts = set() if found_cuts is None else found_cuts
     clips = [dict(c) for c in plan["clips"]]
     n_start = n_end = 0
     events = []
@@ -442,11 +452,9 @@ def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5):
             "end_action": "kept",
         }
         # Opening: a shot-change just AFTER source_start leaves an old-shot sliver before it.
-        start_changes = [
-            c
-            for c in _detect_shot_changes(video, s, min(e, s + margin), threshold)
-            if c > s + 1e-3
-        ]
+        seen = _detect_shot_changes(video, max(0.0, s - pad), min(e, s + margin), threshold)
+        found_cuts.update(seen)
+        start_changes = [c for c in seen if c > s + 1e-3]
         if start_changes:
             cand = max(start_changes)  # open after the last rapid cut in the window
             if cand < e - min_keep:
@@ -456,11 +464,9 @@ def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5):
             else:
                 event["start_unsnapped_reason"] = "collapse"
         # Closing: a shot-change just BEFORE source_end leaves a next-shot sliver after it.
-        end_changes = [
-            c
-            for c in _detect_shot_changes(video, max(new_s, e - margin), e, threshold)
-            if c < e - 1e-3
-        ]
+        seen = _detect_shot_changes(video, max(new_s, e - margin), e + pad, threshold)
+        found_cuts.update(seen)
+        end_changes = [c for c in seen if c < e - 1e-3]
         if end_changes:
             cand = min(end_changes)  # close before the first rapid cut in the window
             if cand > new_s + min_keep:
@@ -552,14 +558,16 @@ def snap_source_clips(
     clean picture is never allowed to reintroduce a mid-sentence audio cut (a shot-change
     move line snapping cannot repair is reverted when the plan's own edge was gate-safe);
     the frame-grid pass only moves an edge by under a frame and prefers the side that keeps
-    it safe, and the gate judges the final, frame-aligned edges. source_id None reads the
+    it safe, then the side that does not straddle a hard cut the shot-change scan saw, and
+    the gate judges the final, frame-aligned edges. source_id None reads the
     project-level understanding artifacts (single-source layout). frame_grid is a
     frame_grid.source_frame_grids() entry; None leaves edges off the grid.
     """
     before_shot_snap = [dict(c) for c in plan["clips"]]
+    scene_cuts = set()
     if do_scene_snap:
         plan = snap_clips_off_shot_changes(
-            plan, video, margin=scene_margin, threshold=scene_threshold
+            plan, video, margin=scene_margin, threshold=scene_threshold, found_cuts=scene_cuts
         )
     boundaries = _combine_boundary_windows(
         _load_silence_for_source(work_dir, source_id, source_work_dir),
@@ -579,6 +587,7 @@ def snap_source_clips(
     if frame_grid is None:
         return enforce_clip_sentence_boundaries(plan, boundaries, speech_spans, duration)
 
+    frame_grid = {**frame_grid, "scene_cuts": sorted(scene_cuts)}
     clips = plan["clips"]
     joined = [idx > 0 and _continuous_source_join(clips[idx - 1], clip)
               for idx, clip in enumerate(clips)]

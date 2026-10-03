@@ -92,8 +92,11 @@ def _nearest_safe_edges(classify, edge, clip, boundary_windows, speech_spans, vi
     Candidates are pause-window bounds, the first instants clear of a speech span (past the
     gate tolerance), and the source start/end; each is re-checked with the gate itself and
     must leave the clip a positive length. With `frame_snap(edge, clip, ts)` (where the
-    frame-grid pass would move that edge) a candidate is reported only when its
-    frame-aligned landing is safe too, so sending it back cannot be blocked again.
+    frame-grid pass would move that edge) each candidate is reported where it lands on the
+    source frame grid, and only when that landing is safe too: a candidate between two frames
+    (a speech start minus the 60 ms clearance is half a frame at 25 fps) is never handed back
+    for the frame pass to re-decide, so sending the suggestion back cannot be blocked again or
+    moved onto the other side of a source hard cut.
     """
     ts = clip["source_start"] if edge == "start" else clip["source_end"]
 
@@ -108,20 +111,23 @@ def _nearest_safe_edges(classify, edge, clip, boundary_windows, speech_spans, vi
         candidates.update((row["start"], row["end"]))
     for row in speech_spans:
         candidates.update((row["start"] - margin, row["end"] + margin))
-    found = {"before": None, "after": None}
+    safe = {}
     for when in sorted(round(c, 3) for c in candidates):
-        if not usable(when):
+        if not usable(when) or classify(edge, when)[0] != "safe":
             continue
+        if frame_snap is not None:
+            when = round(frame_snap(edge, clip, when), 3)
         status, reason = classify(edge, when)
-        if status != "safe":
-            continue
-        if frame_snap is not None and classify(edge, frame_snap(edge, clip, when))[0] != "safe":
-            continue
-        if when < ts:
-            found["before"] = {"time": when, "reason": reason, "delta": round(when - ts, 3)}
-        elif when > ts and found["after"] is None:
-            found["after"] = {"time": when, "reason": reason, "delta": round(when - ts, 3)}
-    return found
+        if status == "safe" and usable(when):
+            safe.setdefault(when, reason)
+    before = [when for when in safe if when < ts]
+    after = [when for when in safe if when > ts]
+
+    def suggestion(when):
+        return {"time": when, "reason": safe[when], "delta": round(when - ts, 3)}
+
+    return {"before": suggestion(max(before)) if before else None,
+            "after": suggestion(min(after)) if after else None}
 
 
 def enforce_clip_sentence_boundaries(

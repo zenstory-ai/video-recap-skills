@@ -206,6 +206,63 @@ def test_a_shot_change_move_off_an_unsafe_plan_edge_is_not_reverted(tmp_path, mo
     assert _edge_status(out, "end")["status"] == "blocking"
 
 
+@pytest.mark.parametrize("rate", [24, 25, 29.97, 30])
+def test_nearest_safe_suggestions_are_reported_on_the_source_frame_grid(tmp_path, rate):
+    """Speech starts at 3.0: the raw candidate 2.94 (60 ms clear) sits between two 25 fps
+    frames. It is reported where the frame pass lands it, not handed back off the grid."""
+    rate = frame_grid.canvas_frame_rate(rate)
+    speech = [(0.0, 2.0), (3.0, 10.0)]
+    blocked = _snap_with_gate(tmp_path, [(3.5, 8.0), (0.0, 1.5)], rate, speech)
+    start = _edge_status(blocked, "start", clip_id=0)["nearest_safe"]["before"]
+    end = _edge_status(blocked, "end", clip_id=1)["nearest_safe"]["after"]
+    for suggestion in (start, end):
+        frames = suggestion["time"] * rate
+        assert abs(frames - round(frames)) * float(1 / rate) < 0.001, (suggestion, rate)
+    assert start["time"] < 2.95 and end["time"] > 2.05
+    retried = _snap_with_gate(tmp_path, [(start["time"], 8.0), (0.0, end["time"])], rate, speech)
+    assert [(c["source_start"], c["source_end"]) for c in retried["clips"]] == [
+        (start["time"], retried["clips"][0]["source_end"]), (0.0, end["time"])]
+    assert _edge_status(retried, "start", clip_id=0)["status"] == "safe"
+    assert _edge_status(retried, "end", clip_id=1)["status"] == "safe"
+
+
+@pytest.mark.parametrize("spans,cuts,expected", [
+    # Equally safe frames either side of 9.94: the later one starts on the hard cut at 9.96
+    # instead of one old-shot frame before it.
+    ([(9.94, 12.0)], [9.96], (9.96, 12.0)),
+    ([(9.93, 12.0)], [9.95], (9.96, 12.0)),
+    # An end nearer the later frame still closes before a cut between the two frames.
+    ([(8.0, 9.625)], [9.61], (8.0, 9.6)),
+])
+def test_frame_snap_does_not_straddle_a_source_hard_cut(spans, cuts, expected):
+    windows = [{"start": 9.5, "end": 10.0}]
+    grid = dict(_grid(25), scene_cuts=cuts)
+    clips, _ = _snap(spans, grid, windows)
+    assert (clips[0]["source_start"], clips[0]["source_end"]) == expected
+    # Without the cut the old nearest-then-earlier tie-break stands.
+    clips, _ = _snap(spans, _grid(25), windows)
+    assert (clips[0]["source_start"], clips[0]["source_end"]) != expected
+
+
+def test_a_hard_cut_never_outranks_the_sentence_gate():
+    """9.96 is inside speech: the start keeps the safe frame even though it opens on the old shot."""
+    clips, _ = _snap([(9.94, 12.0)], dict(_grid(25), scene_cuts=[9.96]),
+                     speech=[{"start": 10.0, "end": 11.0}])
+    assert clips[0]["source_start"] == 9.92
+
+
+def test_shot_change_scan_hands_its_cuts_to_the_frame_grid_pass(tmp_path, monkeypatch):
+    """A clip too short to open on the cut at 9.96 (shot-change pass: collapse) still starts on
+    it after frame snapping instead of one old-shot frame before it."""
+    monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes",
+                        lambda _v, a, b, _t, **_k: [c for c in (9.96,) if a <= c <= b])
+    (tmp_path / "silence_periods.json").write_text(
+        json.dumps([{"start": 9.5, "end": 10.0}]), encoding="utf-8")
+    out = _snap_with_gate(tmp_path, [(9.94, 10.4)], 25, [], duration=20.0, all_passes=True)
+    assert out["qc"]["boundary_status"]["shot_snaps"][0]["start_unsnapped_reason"] == "collapse"
+    assert out["clips"][0]["source_start"] == 9.96
+
+
 @pytest.mark.parametrize("origin,start,status,reason", [
     (0.1, 0.1, "safe", "source_start"),
     # A picture starting 1.5 s into the audio is not waived: the start lands mid-sentence.
