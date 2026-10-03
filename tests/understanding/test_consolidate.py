@@ -271,3 +271,72 @@ def test_index_v2_deterministic_asr_mentions_when_llm_omits(monkeypatch, tmp_pat
     assert char["asr_mentions"][0]["evidence_id"] == "asr:0"
     assert "asr:0" in char["evidence_ids"]
     assert idx["research_glossary"][0]["support"] == "context_only"
+
+
+# ── cut-off / unparseable replies (a real 5-min recap hit finish_reason=length) ──
+
+_TRUNCATED_INDEX = '```json\n{"characters":[{"name":"范闲","description":"主角"},{"name":"五'
+_FULL_INDEX = '{"characters":[{"name":"范闲"}],"relationships":[],"plot_points":[],"entities":[]}'
+
+
+def _scripted_api(monkeypatch, replies):
+    """Patch consolidate.api_call to return (content, finish_reason) replies in order."""
+    seen = []
+
+    def fake(payload):
+        seen.append(payload["max_tokens"])
+        content, finish = replies[len(seen) - 1]
+        return {"choices": [{"message": {"content": content}, "finish_reason": finish}]}
+
+    monkeypatch.setattr("consolidate.api_call", fake)
+    return seen
+
+
+def _one_scene(tmp_path):
+    _write_json(tmp_path, "vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 5, "description": "d"}])
+
+
+def test_index_retries_once_with_larger_budget_when_cut_off(monkeypatch, tmp_path):
+    _one_scene(tmp_path)
+    seen = _scripted_api(monkeypatch, [(_TRUNCATED_INDEX, "length"), (_FULL_INDEX, "stop")])
+
+    idx = consolidate.consolidate_index(tmp_path)
+
+    assert seen == [consolidate._INDEX_MAX_TOKENS, consolidate._INDEX_MAX_TOKENS * 2]
+    assert idx["characters"][0]["name"] == "范闲"
+    assert (tmp_path / "understanding_index.json").exists()
+
+
+def test_index_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path):
+    _one_scene(tmp_path)
+    seen = _scripted_api(monkeypatch, [(_TRUNCATED_INDEX, "length"), (_TRUNCATED_INDEX, "length")])
+
+    with pytest.raises(consolidate.ConsolidateIncomplete, match="finish_reason=length"):
+        consolidate.consolidate_index(tmp_path)
+
+    assert len(seen) == 2
+    for name in ("understanding_index.json", "understanding_index.json.meta.json", "understanding_index.md"):
+        assert not (tmp_path / name).exists()
+
+
+def test_index_unparseable_reply_raises_without_retry(monkeypatch, tmp_path):
+    _one_scene(tmp_path)
+    seen = _scripted_api(monkeypatch, [("抱歉，我无法完成。", "stop")])
+
+    with pytest.raises(consolidate.ConsolidateIncomplete, match="不是可解析的 JSON"):
+        consolidate.consolidate_index(tmp_path)
+
+    assert len(seen) == 1
+    assert not (tmp_path / "understanding_index.json").exists()
+
+
+def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path):
+    _write_json(tmp_path, "asr_result.json", [{"start": 0.0, "end": 5.0, "text": "你给我站住"}])
+    truncated = '{"segments":[{"i":0,"text":"你给'
+    seen = _scripted_api(monkeypatch, [(truncated, "length"), (truncated, "length")])
+
+    with pytest.raises(consolidate.ConsolidateIncomplete, match="consolidate\\(asr\\)"):
+        consolidate.consolidate_transcript(tmp_path)
+
+    assert seen == [consolidate._CLEAN_MAX_TOKENS, consolidate._CLEAN_MAX_TOKENS * 2]
+    assert not (tmp_path / "asr_clean.json").exists()
