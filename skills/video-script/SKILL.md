@@ -46,6 +46,7 @@ REVISION 先明确本轮修改项与冻结项，再编辑对应层：表达、�
 - `timeline_fusion.json`：判断某段是否有对白或静音槽。
 - `vlm_analysis.json` / `asr_result.json`：核对具体画面与原声证据。
 - brief 顶部列出的 contact sheet：不要只依赖场景摘要；反应、走位、静止和台词前后的具体时刻常常更重要。
+- `production_reference.json`（仅当 `work_dir` 里有）：另一部成片拆出的可迁移方法与节奏数值，用法见 §3。
 
 full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；`edited_source.mp4` 产生后，第二阶段才按输出时间写 `narration.json`。
 
@@ -67,6 +68,8 @@ full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；
 3. **`style_card.json`（适用时）**：用户当前认可的声音、口语节奏、字幕阅读姿态和明确禁忌。收到表达或字幕反馈后更新原文件，而不是只改最终文案。
 
 只记录决定、证据锚点、被放弃的备选方案和简短理由，不写冗长思维过程。
+
+若 `work_dir` 有 `production_reference.json`，制定方案前先读它。它来自另一部成片，只含可迁移的方法和测得的节奏，不含本片事实，不能作为本片画面、剧情或台词的证据。优先级：用户指令 > 本片证据 > 参考。CREATE 可把它的 `structure` 当作一个候选假设，与素材自生的假设比较；DIRECTED / REVISION 默认不套用。`targets` 是参考值，不是配额：与本片的 `audio_owner`、完整台词或表演冲突时以素材为准。可在 `recap_story_plan.json` 写可选字段 `reference_methods: [{"id": "m1", "decision": "adopt|adapt|skip", "note": "…"}]`。没有这个文件就跳过本段。
 
 ### 3.1 导演判断
 

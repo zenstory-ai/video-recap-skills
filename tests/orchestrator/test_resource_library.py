@@ -41,7 +41,7 @@ def test_shipped_example_library_is_valid_with_only_the_intended_licence_warning
 
     assert report.errors == []
     assert _codes(report.warnings) == {(VOICE, "license_unknown")}
-    assert {k: len(v) for k, v in index.items()} == {"resources": 4, "templates": 2, "samples": 1}
+    assert {k: len(v) for k, v in index.items()} == {"resources": 4, "templates": 3, "samples": 1}
 
 
 @pytest.mark.parametrize(
@@ -86,6 +86,52 @@ def test_invalid_records_are_reported_as_errors(tmp_path, rel, change, expected)
     _, report = library.scan_library(root)
 
     assert expected in _codes(report.errors)
+
+
+REFERENCE = "templates/production_reference/demo-pacing/v1/template.json"
+REFERENCE_FILE = "templates/production_reference/demo-pacing/v1/production_reference.json"
+
+
+def _link_reference_outside_its_version(root):
+    outside = root / "templates/production_reference/demo-pacing/production_reference.json"
+    target = root / REFERENCE_FILE
+    outside.write_bytes(target.read_bytes())
+    target.unlink()
+    try:
+        target.symlink_to(outside)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlinks not permitted")
+
+
+@pytest.mark.parametrize(
+    "change, code",
+    [
+        pytest.param(lambda root: _edit(root, REFERENCE, lambda d: d["params"]["reference"].update(path="../production_reference.json")),
+                     "reference_params", id="pointer_leaves_version_dir"),
+        pytest.param(lambda root: _edit(root, REFERENCE, lambda d: d["params"].update(pace={"value": 1, "provenance": "measured"})),
+                     "reference_params", id="extra_param"),
+        pytest.param(_link_reference_outside_its_version, "file_missing", id="symlink_leaves_version_dir"),
+        pytest.param(lambda root: (root / REFERENCE_FILE).unlink(), "file_missing", id="file_missing"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d.update(schema="other.v1")), "schema", id="wrong_schema"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d.update(methods=[])), "methods", id="no_methods"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d["methods"][0].update(dimension="hook")),
+                     "methods", id="unknown_dimension"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d.update(source_facts=[])), "source_facts", id="source_facts"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d["methods"][0].update(evidence=["f1"])),
+                     "source_facts", id="nested_evidence"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d["methods"][0]["targets"]["narration_cuts_per_min"]
+                                        .update({"from": "profile.cuts_per_min"})), "source_facts", id="nested_from"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d.update(path="/videos/source.mp4")),
+                     "source_facts", id="path"),
+    ],
+)
+def test_invalid_production_reference_is_reported_on_its_template(tmp_path, change, code):
+    root = _copy_example(tmp_path)
+    change(root)
+
+    _, report = library.scan_library(root)
+
+    assert (REFERENCE, code) in _codes(report.errors)
 
 
 @pytest.mark.skipif(not hasattr(os, "symlink"), reason="needs symlinks")

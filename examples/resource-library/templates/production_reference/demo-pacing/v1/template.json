@@ -1,0 +1,19 @@
+{
+  "schema": "video-recap.template.v1",
+  "id": "demo-pacing",
+  "version": 1,
+  "kind": "production_reference",
+  "title": "旁白与原声交替的节奏参考（合成演示）",
+  "canvas": {
+    "width": 900,
+    "height": 1600
+  },
+  "params": {
+    "reference": {
+      "path": "production_reference.json"
+    }
+  },
+  "samples": [],
+  "status": "draft",
+  "notes": "production_reference.json 由制作参考技能对合成数据 export 得到，只含方法与数值；canvas 从导出物复制，仅作信息。"
+}

@@ -10,6 +10,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **新增按需技能 video-reference：把成片拆成可复用的制作参考。** `reference.py measure` 用一次 ffmpeg（`scdet` 逐帧分数 + `ebur128`）测镜头切点、镜长分布与响度，按成片 `{size, mtime_ns}` 缓存；切点只认孤立峰（固定阈值会在暗场漏掉硬切、在运动镜头里误报），被压下的候选由 `reference.py frames --review` 逐帧拼图给 Agent 复核，复核结果写进 `labels.cut_fixes`，导出物用 `cut_detection` 记录检测参数与增删数；Agent 在 `reference_breakdown.json` 标注音轨归属与叙事段落，并分开写原片事实与可迁移方法；`check` 用 R1–R8 机械分离两者（封闭 schema、事实锚点、方法证据、target 只写测量路径、实体名/台词引文/绝对时间/路径泄漏扫描、五维覆盖），`export` 零 error 时才写不含原片事实的 `production_reference.json`。写稿 Agent 只在 work_dir 有这个文件时阅读，并可在 `recap_story_plan.json` 写可选的 `reference_methods`。不调用 MiMo，不进默认生产路径，recap 不加参数，不新增 QC。
+- **制作参考可以登记进资源库并经 `--project` 绑定。** 资源库新增模板 kind `production_reference`：版本目录里放导出的 `production_reference.json`，`template.json` 的 `params` 恰好是 `{"reference": {"path": "production_reference.json"}}`；`library.py check` 核对导出物 schema、methods 与五维枚举，任何层级出现 `source_facts`/`labels`/`evidence`/`entities`/`statement`/`from`/`path` 键都报错（与导出复扫同一组键）。项目 `bindings.production_reference` 只接受 adopted 版本，recap 在第一次暂停前把带 `written_by` 与 `template {id, version}` 的副本写进 `work_dir`，暂停提示多一行说明，`resource_lock.json` 记下 `id@vN`；只绑定参考时不探测成片画布，不加门禁，没有脚本读它。`work_dir` 已有不是 `--project` 写的同名文件时，内容与导出物相同就原样保留，不同则运行停止；解除绑定后只删自己写的副本。示例库加一份合成的 `demo-pacing@v1`。
+
 ### Changed
 
 - **full 模式校验不再静默改写解说稿（破坏性变更）。** `validate.py --mode full` 不再截短超预算文本、丢弃过短段、合并相似相邻段、补句末标点或按时间重排，也不再丢掉白名单之外的字段；它和 cut_output 一样只做 lint，再用同一套声音归属算法（原声对白区间减去安静窗口）回写 `overlaps_speech`，因此 full 模式的 `overlaps_speech` 和随之的原声闪避可能与以前不同。字数超过该时间窗推荐字数 1.25 倍的段现在是 `over_budget` error（以前会被静默截短或丢弃），`narration_lint.json` 写明段号、时间窗、`budget_chars`、`limit_chars`、`actual_chars` 与 `over_chars`，Agent 改稿后重跑；cut_output 的超预算仍是 warning。未按 `start` 排序的段在所有模式下都报 `out_of_order` error。`validate.py` 删除 `--preserve-approved-text`（传入即报 unrecognized arguments），recap 不再把它传给校验；`recap.py --preserve-approved-text` 照旧传给 voiceover，voiceover 默认的句界缩稿作为最后保险保留。

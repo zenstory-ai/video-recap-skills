@@ -91,6 +91,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
   `0 <= y_top < y_bot <= canvas.height`。
 - `packaging` 需要非空 `params.layers`，每层有唯一 `name`、`image` 引用与画布内的整数 `rect {x, y, width, height}`；
   可选 `params.safe_rect`。
+- `production_reference` 见下一节。
 - `status` ∈ `draft` / `adopted` / `retired`。`adopted` 必须有 `adoption.date`（YYYY-MM-DD）、`by`、`statement`（用户原话）
   与 `scope`。可选 `adoption.resources` 记录采用时所用资源文件的身份：
 
@@ -100,6 +101,20 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
   之后文件的大小或修改时间变化，`check` 给出 `changed_since_adoption` 警告：重新采用，或出一个新版本。
   修改时间是本机事实，把库拷到另一台机器会让所有快照都显示为已变化。
+
+### 参考模板 `production_reference`
+
+把 video-reference 导出的 `production_reference.json`（只含方法与数值，不含原片事实）登记成可版本化、需采纳的模板：
+
+1. `mkdir -p templates/production_reference/<id>/v1`，把导出物原样复制进去，文件名保持 `production_reference.json`。
+2. 写 `template.json`：`params` 恰好是 `{"reference": {"path": "production_reference.json"}}`；`canvas` 从导出物复制，仅作信息，
+   绑定时不核对画布。
+3. 写 `samples/<id>/sample.json` 指向原成片，`demonstrates` / `not_reusable` 写人看的摘要；含事实的完整拆解不进库。
+4. `library.py check`：导出物的 `schema` 必须是 `video-reference.production.v1`，`methods` 非空且每条有合法 `dimension` 与 `rule`，
+   任何层级出现 `source_facts`、`labels`、`evidence`、`entities`、`statement`、`from`、`path` 键都报错（与参考技能导出时的复扫同一组键）。
+5. 用户确认后把 `status` 改为 `adopted` 并用用户原话写 `adoption`。之后要改内容就出 `v2`，不改已采纳的版本。
+
+库仍然只读，登记与采纳都是手工编辑。
 
 ## 样片 `sample.json`
 
@@ -138,10 +153,11 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 | `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，字体资源 → 再加 `SUBTITLE_FONT_FILE` |
 | `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |
 | `bgm` | `BGM_PATH` ← 该资源的第一个文件 |
+| `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`：导出物原样加 `written_by` 与 `template {id, version}`，仅写稿 Agent 阅读，没有脚本读取；不核对画布。该位置已有不是 `--project` 写的文件时：与导出物相同则原样保留（暂停提示照常），不同则停止；解除绑定后删掉自己写的副本，调用方自己放的文件不动 |
 | `packaging` | 合成前写出 `work_dir/packaging_layers.json`：每个图层的图片资源第一个文件 + `rect`，由 video-assemble 叠加到成片并写进 `timeline.json` 的 image 轨 |
 
 - 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会静默覆盖。
-- 合成前核对模板画布与实际成片画布；不一致即停止——换画幅要用另一个模板。
+- 合成前核对字幕与包装模板的画布与实际成片画布；不一致即停止——换画幅要用另一个模板。
 - 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；dub 模式与本地采用三件套不接受 `--project`。
 - 续跑命令只带 `--project`，不重复写出由绑定得到的值，改了绑定后续跑会按新绑定解析。
 

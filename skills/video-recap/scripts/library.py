@@ -39,7 +39,14 @@ RESOURCE_EXTS = {
     "font": {".ttf", ".otf", ".ttc"},
     "image": {".png", ".jpg", ".jpeg", ".webp"},
 }
-TEMPLATE_KINDS = ("subtitle_style", "packaging")
+TEMPLATE_KINDS = ("subtitle_style", "packaging", "production_reference")
+# A production_reference template points at an export of the on-demand reference skill. This is
+# a separate shape check (no import of that skill): methods only, never the source's facts.
+REFERENCE_FILE = "production_reference.json"
+REFERENCE_SCHEMA = "video-reference.production.v1"
+REFERENCE_DIMENSIONS = ("narrative_structure", "pacing", "shots_editing", "narration_subtitles", "audio_visual")
+# Same banned keys as the reference export's own re-scan: source facts plus the measurement pointers.
+REFERENCE_FACT_KEYS = {"source_facts", "labels", "evidence", "entities", "statement", "from", "path"}
 LICENSE_STATUSES = ("unknown", "owned", "licensed", "restricted")
 CONSENT_STATUSES = ("unknown", "granted", "denied")
 TEMPLATE_STATUSES = ("draft", "adopted", "retired")
@@ -90,7 +97,7 @@ class Report:
 MAX_RECORD_BYTES = 2 * 1024 * 1024
 
 
-def _load(path: Path, schema: str, keys: set, report: Report):
+def _load(path: Path, schema: str, keys: set | None, report: Report):
     try:
         st = os.stat(path)
         if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_RECORD_BYTES:
@@ -106,7 +113,7 @@ def _load(path: Path, schema: str, keys: set, report: Report):
     if data.get("schema") != schema:
         report.error(path, "schema", f"schema 必须是 {schema}")
         return None
-    unknown = sorted(set(data) - keys)
+    unknown = sorted(set(data) - keys) if keys is not None else []
     if unknown:
         report.error(path, "unknown_keys", f"未知字段: {', '.join(unknown)}")
     return data
@@ -217,6 +224,33 @@ def _param_number(params, key):
     return value if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0 else None
 
 
+def _check_production_reference(path: Path, params: dict, report: Report):
+    """Issues are filed on template.json, so a binding refuses the template when its file is bad."""
+    if params != {"reference": {"path": REFERENCE_FILE}}:
+        report.error(path, "reference_params",
+                     f'production_reference 的 params 必须恰好是 {{"reference": {{"path": "{REFERENCE_FILE}"}}}}')
+        return
+    target = resolve_inside(path.parent, path.parent, REFERENCE_FILE)
+    if target is None or not target.is_file():
+        report.error(path, "file_missing", f"版本目录内没有 {REFERENCE_FILE}")
+        return
+    loaded = Report(report.root)
+    data = _load(target, REFERENCE_SCHEMA, None, loaded)
+    for item in loaded.errors:
+        report.error(path, item["code"], f"{REFERENCE_FILE}: {item['message']}")
+    if data is None:
+        return
+    methods = data.get("methods")
+    if not (isinstance(methods, list) and methods and all(
+        isinstance(m, dict) and m.get("dimension") in REFERENCE_DIMENSIONS and _nonempty_str(m.get("rule"))
+        for m in methods
+    )):
+        report.error(path, "methods", f"{REFERENCE_FILE} 的 methods 需要非空，每条有 {REFERENCE_DIMENSIONS} 之一的 dimension 与非空 rule")
+    leaked = sorted({key for _, node in _param_values(data) for key in node if key in REFERENCE_FACT_KEYS})
+    if leaked:
+        report.error(path, "source_facts", f"{REFERENCE_FILE} 只放方法，不能带原片事实字段: {', '.join(leaked)}")
+
+
 def _check_template(path: Path, data: dict, report: Report) -> dict | None:
     vdir = path.parent
     tid, kind = vdir.parent.name, vdir.parent.parent.name
@@ -297,6 +331,8 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
                 _check_rect(path, f"params.layers[{index}].rect", layer.get("rect"), canvas, report)
         if canvas and "safe_rect" in params:
             _check_rect(path, "params.safe_rect", params["safe_rect"], canvas, report)
+    if kind == "production_reference":
+        _check_production_reference(path, params, report)
     status = data.get("status")
     if status not in TEMPLATE_STATUSES:
         report.error(path, "status", f"status 必须是 {TEMPLATE_STATUSES} 之一")

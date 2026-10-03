@@ -11,7 +11,9 @@
 video-understanding ─▶ Agent 按 video-script 写计划与旁白 ─▶ [video-cut] ─▶ video-voiceover ─▶ video-assemble
 ```
 
-- 六个技能各自可单独安装；`skills/<name>/scripts/`（含其子包）只 import 本技能的模块，阶段之间只交换 `work_dir` 里的
+- video-reference 不在这条链上：按需对成片运行，导出的 `production_reference.json` 只给写稿 Agent 阅读，没有脚本按内容使用它；
+  它可以登记成资源库模板，经 `--project` 绑定时 recap 只把副本复制进 `work_dir`。
+- 七个技能各自可单独安装；`skills/<name>/scripts/`（含其子包）只 import 本技能的模块，阶段之间只交换 `work_dir` 里的
   JSON / MP4。自包含的理由与代价见 `architecture/2026-06-14-self-contained-skills-duplicated-libs.md`。
 - 创作产物（`clip_plan.json`、`narration.json`、`dub_script.json`、两份创作计划）由 Agent 写；脚本只准备
   brief、做确定性校验、执行 TTS 与渲染（`architecture/2026-05-18-agent-owned-narration-cli-mechanical.md`）。
@@ -28,6 +30,7 @@ video-understanding ─▶ Agent 按 video-script 写计划与旁白 ─▶ [vid
 | video-voiceover | 旁白 TTS（MiMo / Fish Audio / index-tts）与英译中克隆配音 | `voiceover.py`、`dub.py` | `providers/` |
 | video-assemble | 混音、字幕、渲染、`timeline.json`、组装 QC、剪映导出、严格采用路径 | `assemble.py`、`export_jianying.py`、`source_score.py` | `subtitles/`、`adoption/`、`jianying/` |
 | video-recap | 编排、断点续跑、素材库与资源库、成片 QC、只读 dashboard | `recap.py`、`recap_inspect.py`、`library.py`、`dashboard_server.py`、`doctor.py`、`final_qc.py` | `dashboard/`、`resources/` |
+| video-reference | 按需，不在流水线上：成片的镜头/响度测量、事实与方法分离校验（R1–R8）、导出 `production_reference.json` | `reference.py` | — |
 
 功能子包的划分规则见 `architecture/2026-09-21-scripts-subpackages-jianying.md` 与
 `architecture/2026-09-21-adoption-family-stays-in-skill-as-subpackage.md`：顶层只留入口与每次都会走到的核心模块，

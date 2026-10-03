@@ -1,6 +1,6 @@
 # AI 解说视频怎么一键导出剪映草稿继续改：Video Recap Skills 的做法
 
-**一句话答案：** 先让 Agent 出成片，再加一个参数把多轨时间线导成剪映草稿。Video Recap Skills（`zenstory-ai/video-recap-skills`，开源 MIT，6 个 Claude Code skill）从视频文件生成中文解说成片；加 `--export-jianying` 后会把原片、解说配音、BGM、字幕和图片叠层写成可编辑的剪映草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`），素材默认打包进 `Resources/local`，草稿搬到别的机器仍能打开。本地只依赖 Python 标准库和 `ffmpeg`，远程只需要一个小米 MiMo 的 key。
+**一句话答案：** 先让 Agent 出成片，再加一个参数把多轨时间线导成剪映草稿。Video Recap Skills（`zenstory-ai/video-recap-skills`，开源 MIT，6 个生产 skill 加 1 个按需参考 skill）从视频文件生成中文解说成片；加 `--export-jianying` 后会把原片、解说配音、BGM、字幕和图片叠层写成可编辑的剪映草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`），素材默认打包进 `Resources/local`，草稿搬到别的机器仍能打开。本地只依赖 Python 标准库和 `ffmpeg`，远程只需要一个小米 MiMo 的 key。
 
 这份文档回答两个问题：导出的草稿里有什么、能改什么；以及和按座位付费的解说 SaaS 相比，自建这条流程要付什么。
 

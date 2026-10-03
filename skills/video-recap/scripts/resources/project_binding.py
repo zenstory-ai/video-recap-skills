@@ -2,7 +2,8 @@
 
 Only video-recap reads the library. A bound subtitle style becomes ``SUBTITLE_*`` env for
 video-assemble, a bound voice becomes the voiceover provider / voice arguments, a bound
-BGM becomes ``BGM_PATH``. Stage skills keep seeing concrete paths and values; they never
+BGM becomes ``BGM_PATH``, a bound production reference becomes a marked copy in the work_dir
+that only the writing agent reads. Stage skills keep seeing concrete paths and values; they never
 learn about templates. Anything the caller already set explicitly must agree with the
 binding — a silent override would make the delivered file disagree with the project.
 """
@@ -17,7 +18,8 @@ import library as library_lib
 PROJECT_FILE = "recap_project.json"
 PROJECT_SCHEMA = "video-recap.project.v1"
 PROJECT_KEYS = {"schema", "name", "library", "bindings", "notes"}
-BINDING_KINDS = ("subtitle_style", "packaging", "voice", "bgm")
+BINDING_KINDS = ("subtitle_style", "packaging", "voice", "bgm", "production_reference")
+GEOMETRY_ROLES = {"subtitle_style", "packaging"}
 
 
 class BindingError(SystemExit):
@@ -188,6 +190,14 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         used_templates.append({"role": "packaging", "id": packaging["id"],
                                "version": packaging["version"], "status": packaging["status"],
                                "canvas": packaging["canvas"]})
+    reference = template("production_reference")
+    if reference:
+        used_templates.append({"role": "production_reference", "id": reference["id"],
+                               "version": reference["version"], "status": reference["status"],
+                               "canvas": reference["canvas"]})
+        reference = {"template": {"id": reference["id"], "version": reference["version"]},
+                     "payload": json.loads((Path(reference["record"]).parent / library_lib.REFERENCE_FILE)
+                                           .read_text(encoding="utf-8"))}
     voice = resource("voice") if include_voice else None
     if voice:
         voice_updates, voice_env = _voice_updates(voice, args)
@@ -221,6 +231,7 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         "templates": used_templates,
         "resources": [],
         "packaging": packaging and {"record": _record(packaging), "resources": resources},
+        "production_reference": reference,
     }
 
 
@@ -244,6 +255,8 @@ def apply_project(resolved, args, environ=None) -> None:
 def check_canvas(resolved, width, height) -> None:
     """Templates only apply to the canvas they were calibrated on."""
     for template in resolved["templates"]:
+        if template["role"] not in GEOMETRY_ROLES:  # a production reference carries no geometry
+            continue
         canvas = template["canvas"]
         if (canvas["width"], canvas["height"]) != (width, height):
             raise BindingError(
@@ -253,34 +266,82 @@ def check_canvas(resolved, width, height) -> None:
 
 
 PACKAGING_LAYERS = "packaging_layers.json"
+REFERENCE_COPY = "production_reference.json"
 _WRITTEN_BY = "video-recap --project"
 
 
-def sync_packaging_layers(work_dir, resolved) -> None:
-    """Write the bound packaging template's layers for video-assemble, or retire our old copy.
+def _read_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
 
-    A caller-authored ``packaging_layers.json`` (no ``written_by`` marker) is left alone.
+
+def _ours(data) -> bool:
+    return isinstance(data, dict) and data.get("written_by") == _WRITTEN_BY
+
+
+def _sync_bound_file(work_dir, name, payload) -> None:
+    """Write ``payload`` with our marker, or retire our old copy when nothing is bound.
+
+    A caller-authored file (no ``written_by`` marker) is never deleted.
     """
-    path = Path(work_dir) / PACKAGING_LAYERS
+    path = Path(work_dir) / name
+    if payload is None:
+        if path.exists() and _ours(_read_json(path)):
+            path.unlink()
+        return
+    # The marker goes last so a payload key of the same name can never unmark our copy.
+    path.write_text(json.dumps({**payload, "written_by": _WRITTEN_BY}, ensure_ascii=False, indent=2),
+                    encoding="utf-8")
+
+
+def sync_packaging_layers(work_dir, resolved) -> None:
+    """Write the bound packaging template's layers for video-assemble, or retire our old copy."""
     packaging = (resolved or {}).get("packaging")
     if not packaging:
-        if path.exists():
-            try:
-                plan = json.loads(path.read_text(encoding="utf-8"))
-            except ValueError:
-                plan = None
-            ours = isinstance(plan, dict) and plan.get("written_by") == _WRITTEN_BY
-            if ours:
-                path.unlink()
+        _sync_bound_file(work_dir, PACKAGING_LAYERS, None)
         return
     record, resources = packaging["record"], packaging["resources"]
     layers = [{"name": layer["name"],
                "path": resources[layer["image"]["resource"]]["files"][0]["path"],
                "rect": layer["rect"]}
               for layer in record["params"]["layers"]]
-    path.write_text(json.dumps({
-        "written_by": _WRITTEN_BY,
+    _sync_bound_file(work_dir, PACKAGING_LAYERS, {
         "template": {"id": record["id"], "version": record["version"]},
         "canvas": record["canvas"],
         "layers": layers,
-    }, ensure_ascii=False, indent=2), encoding="utf-8")
+    })
+
+
+def sync_production_reference(work_dir, resolved) -> None:
+    """Hand the bound reference to the writing agent before its first pause; no script reads it.
+
+    A caller's own copy is never rewritten: identical to the binding it is left as is, different
+    from it is a conflict, like any other setting.
+    """
+    bound = (resolved or {}).get("production_reference")
+    path = Path(work_dir) / REFERENCE_COPY
+    if bound and path.exists():
+        current = _read_json(path)
+        if not _ours(current):
+            if current == bound["payload"]:
+                return
+            template = bound["template"]
+            raise BindingError(f"{path} 不是 --project 写的，与绑定的 {template['id']}@v{template['version']} "
+                               "不同；删掉其中一处")
+    _sync_bound_file(work_dir, REFERENCE_COPY,
+                     bound and {**bound["payload"], "template": bound["template"]})
+
+
+def bound_reference_note(work_dir, resolved=None) -> str | None:
+    """The pause-banner line for the bound reference in work_dir (our copy or the caller's identical one)."""
+    data = _read_json(Path(work_dir) / REFERENCE_COPY)
+    bound = (resolved or {}).get("production_reference")
+    if _ours(data):
+        template = data.get("template") or {}
+    elif bound and data == bound["payload"]:
+        template = bound["template"]
+    else:
+        return None
+    return f"本轮带制作参考 {template.get('id')}@v{template.get('version')}（可选，取舍写入 reference_methods）"

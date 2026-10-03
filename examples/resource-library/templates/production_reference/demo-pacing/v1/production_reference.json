@@ -1,0 +1,186 @@
+{
+  "schema": "video-reference.production.v1",
+  "duration_s": 60.0,
+  "canvas": {
+    "width": 900,
+    "height": 1600
+  },
+  "cut_detection": {
+    "detector": "scdet-isolated-v1",
+    "hard_score": 10.0,
+    "soft_score": 4.0,
+    "isolation_ratio": 2.0,
+    "isolation_window_s": 0.3,
+    "scaled": true,
+    "agent_added": 0,
+    "agent_removed": 0
+  },
+  "profile": {
+    "shot_median_s": {
+      "value": 5.0,
+      "provenance": "measured"
+    },
+    "cuts_per_min": {
+      "value": 8.0,
+      "provenance": "measured"
+    },
+    "integrated_lufs": {
+      "value": -14.8,
+      "provenance": "measured"
+    },
+    "narration_share": {
+      "value": 0.5,
+      "provenance": "labeled"
+    },
+    "narration_chars_per_s": {
+      "value": 2.2,
+      "provenance": "labeled",
+      "precision": "coarse_asr_windows"
+    },
+    "switch_on_cut_share": {
+      "value": 0.75,
+      "provenance": "labeled"
+    },
+    "first_original_at": {
+      "value": {
+        "fraction": 0.167
+      },
+      "provenance": "labeled"
+    }
+  },
+  "structure": [
+    {
+      "function": "hook",
+      "at": [
+        0.0,
+        0.1
+      ],
+      "lead_owner": "narration"
+    },
+    {
+      "function": "setup",
+      "at": [
+        0.1,
+        0.5
+      ],
+      "lead_owner": "narration"
+    },
+    {
+      "function": "turn",
+      "at": [
+        0.5,
+        0.833
+      ],
+      "lead_owner": "narration"
+    },
+    {
+      "function": "payoff",
+      "at": [
+        0.833,
+        1.0
+      ],
+      "lead_owner": "music"
+    }
+  ],
+  "subtitles": {
+    "burned": true,
+    "max_lines": 1,
+    "marks_original": "「」"
+  },
+  "methods": [
+    {
+      "id": "m1",
+      "dimension": "audio_visual",
+      "rule": "旁白段用短镜头推进信息，原声段放长镜头让整句台词落地",
+      "applies_when": "对白冲突强、需旁白补前情的剧集解说",
+      "avoid_when": "主要靠动作声承载的段落",
+      "applies_to": "visual_audio_board",
+      "targets": {
+        "narration_cuts_per_min": {
+          "value": 8.0,
+          "provenance": "labeled"
+        }
+      }
+    },
+    {
+      "id": "m2",
+      "dimension": "narrative_structure",
+      "rule": "先用旁白交代身份，再让第一段原声冲突接管",
+      "applies_when": "主角身份需要一句话交代的单集解说",
+      "applies_to": "story_plan",
+      "targets": {
+        "first_original": {
+          "value": {
+            "fraction": 0.167
+          },
+          "provenance": "labeled"
+        },
+        "structure": {
+          "value": [
+            {
+              "function": "hook",
+              "at": [
+                0.0,
+                0.1
+              ],
+              "lead_owner": "narration"
+            },
+            {
+              "function": "setup",
+              "at": [
+                0.1,
+                0.5
+              ],
+              "lead_owner": "narration"
+            },
+            {
+              "function": "turn",
+              "at": [
+                0.5,
+                0.833
+              ],
+              "lead_owner": "narration"
+            },
+            {
+              "function": "payoff",
+              "at": [
+                0.833,
+                1.0
+              ],
+              "lead_owner": "music"
+            }
+          ],
+          "provenance": "labeled"
+        }
+      }
+    },
+    {
+      "id": "m3",
+      "dimension": "pacing",
+      "rule": "整体保持中速切换，不靠快切制造紧张",
+      "applies_when": "对白驱动的剧情",
+      "applies_to": "clip_plan",
+      "targets": {
+        "shot_median_s": {
+          "value": 5.0,
+          "provenance": "measured"
+        }
+      }
+    },
+    {
+      "id": "m4",
+      "dimension": "shots_editing",
+      "rule": "声音归属切换尽量落在画面切点上",
+      "applies_when": "旁白与原声交替的段落",
+      "applies_to": "clip_plan"
+    },
+    {
+      "id": "m5",
+      "dimension": "narration_subtitles",
+      "rule": "单行字幕，原声台词加直角引号区分旁白",
+      "applies_when": "旁白与原声台词都上字幕时",
+      "applies_to": "style_card"
+    }
+  ],
+  "skipped_dimensions": {}
+}
