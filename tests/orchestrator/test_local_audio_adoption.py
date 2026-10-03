@@ -97,7 +97,7 @@ def test_local_bundle_is_all_or_none_before_any_stage(monkeypatch, tmp_path, pre
         ("--tts-provider", "auto"), ("--mimo-tts-voice", "chosen"),
         ("--voice-ref", "voice.wav"), ("--allow-partial-tts",),
         ("--review-narration",), ("--require-narration-review",),
-        ("--mimo-qc", "pre-assemble"), ("--export-jianying",),
+        ("--export-jianying",),
     ],
 )
 def test_local_bundle_rejects_unsupported_modes_and_authoring_flags(

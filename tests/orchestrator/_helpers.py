@@ -38,8 +38,6 @@ def manifest_args(**overrides):
         "review_narration": None,
         "require_narration_review": False,
         "allow_duration_drift": False,
-        "mimo_qc": "off",
-        "mimo_qc_refresh": False,
         "mimo_tts_voice": None,
         "tts_provider": "auto",
         "voice_ref": None,

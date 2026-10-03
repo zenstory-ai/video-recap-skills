@@ -39,13 +39,13 @@ def test_required_fields_and_value_domains():
         code="weak_hook",
         message="hook may be weak",
         deterministic=False,
-        source={"artifact": "mimo_qc.json"},
+        source={"artifact": "preflight_qc.json"},
         location={"timecode": 1.0, "source_span": [0.0, 2.0]},
         evidence={"note": "model critique"},
     )
     assert set(qc._REQUIRED_FINDING_FIELDS) <= set(finding)
     report = qc.build_report(
-        artifact="mimo_qc.json", stage="post_tts", findings=[finding]
+        artifact="preflight_qc.json", stage="post_tts", findings=[finding]
     )
     assert report["schema_version"] == 1
     assert report["artifact"] in qc.ARTIFACTS
@@ -66,22 +66,22 @@ def test_deterministic_blocking_passes():
     assert qc.validate_report(report) is True
 
 
-def test_mimo_semantic_default_advisory_non_blocking():
+def test_semantic_default_advisory_non_blocking():
     finding = qc.build_finding(
         id="m1",
         stage="post_tts",
         severity="advisory",
         confidence="low",
         sample_policy="semantic",
-        category="mimo_semantic",
+        category="semantic",
         code="pacing_flat",
         message="semantic pacing concern",
         deterministic=False,
-        source={"artifact": "mimo_qc.json"},
+        source={"artifact": "preflight_qc.json"},
         evidence={"summary": "subjective review"},
     )
     report = qc.build_report(
-        artifact="mimo_qc.json", stage="post_tts", findings=[finding]
+        artifact="preflight_qc.json", stage="post_tts", findings=[finding]
     )
 
     assert finding["blocking"] is False
@@ -119,7 +119,7 @@ def test_non_deterministic_blocking_cannot_be_enabled(corroboration):
             message="subjective issue tries to block",
             deterministic=False,
             blocking=True,
-            source={"artifact": "mimo_qc.json"},
+            source={"artifact": "preflight_qc.json"},
             evidence={"summary": "subjective"},
             **corroboration,
         )
@@ -200,8 +200,10 @@ def test_unknown_schema_version_and_missing_required_fields_validation_errors():
 
 def test_stage_names_match_approved_gate_matrix_exactly():
     assert qc.ARTIFACTS == frozenset(
-        {"final_qc.json", "golden_eval.json", "mimo_qc.json", "preflight_qc.json"}
+        {"final_qc.json", "golden_eval.json", "preflight_qc.json"}
     )
+    with pytest.raises(qc.QCContractError, match="unsupported artifact"):
+        qc.build_report(artifact="mimo_qc.json", stage="post_render", findings=[])
     assert qc.STAGES == frozenset(
         {
             "pre_cut",
@@ -272,35 +274,6 @@ def test_canonical_required_fields_include_runtime_decision_fields():
                     "ok": False,
                 }
             )
-
-
-def test_mimo_qc_artifact_attaches_to_actual_stage_not_stage_value():
-    finding = qc.build_finding(
-        finding_id="mimo-pre-assemble",
-        stage="pre_assemble",
-        severity="advisory",
-        confidence="medium",
-        sample_policy={"type": "semantic"},
-        category="mimo_semantic",
-        code="weak_transition",
-        message="model noted a weak transition",
-        deterministic=False,
-        source={"artifact": "mimo_qc.json"},
-        evidence={"summary": "subjective model review"},
-        model_used="mimo-qc-offline-fixture",
-        next_action="human_review",
-    )
-
-    assert (
-        qc.validate_report(
-            qc.build_report(
-                artifact="mimo_qc.json", stage="pre_assemble", findings=[finding]
-            )
-        )
-        is True
-    )
-    with pytest.raises(qc.QCContractError, match="unsupported stage"):
-        qc.build_report(artifact="mimo_qc.json", stage="mimo_qc", findings=[finding])
 
 
 def test_shift_left_helper_rolls_up_latest_report_per_stage(tmp_path):

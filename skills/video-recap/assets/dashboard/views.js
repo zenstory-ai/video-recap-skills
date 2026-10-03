@@ -248,7 +248,7 @@ function runFilm(R) {
 }
 
 function runQc(R) {
-  if (!R.qc.length) return empty("还没有 QC 报告", "合成后会写 final_qc.json、golden_eval.json、assembly_qc.json；MiMo 复核需要 --mimo-qc。");
+  if (!R.qc.length) return empty("还没有 QC 报告", "合成后会写 final_qc.json、golden_eval.json、assembly_qc.json。");
   const ask = R.blockers ? `请查看 ${R.work_dir} 的 QC 阻断项，修复后重新合成。` : "";
   return `${ask ? notice(`共 ${R.blockers} 个阻断项。`, "danger", askButton(ask, true)) : ""}<div class="qc-grid">${R.qc.map((card) => `<div class="card qc" data-file="${esc(card.file)}" data-level="${esc(card.level)}"><div class="hd"><b>${esc(card.label)}</b>${statusChip(QC_LEVEL[card.level] || ["warn", card.level])}</div>
     <div class="muted small mono">${esc(card.file)}</div><p>${esc(card.text)}</p>

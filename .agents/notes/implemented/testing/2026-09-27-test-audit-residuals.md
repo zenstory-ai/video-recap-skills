@@ -47,7 +47,7 @@ test-slim 1/6–6/6 瘦身之后，又有三批生产改动落地：去掉全部
 - **收益**：两处真实覆盖漏洞补上；生产代码净减约 100 行只为测试存在的接口；测试净减约 570 行；
   每个被删用例都能指出接替它的更强测试。
 - **代价**：`mimo_qc` / `cut` / `assemble` / `brief` 不再从入口模块再导出内部函数，进程内 import 这些名字的外部脚本需要改为从所属模块导入
-  （仓库文档从未把它们列为公开 API）；`recap_inspect --json` 不再输出恒为空的 `forward_state_files`。
+  （仓库文档从未把它们列为公开 API；`mimo_qc.py` 已于 2026-10-02 删除，见 [[2026-10-02-delete-mimo-qc]]）；`recap_inspect --json` 不再输出恒为空的 `forward_state_files`。
 
 ## Verification
 

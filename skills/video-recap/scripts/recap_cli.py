@@ -3,7 +3,6 @@
 import argparse
 import os
 
-from lib import env_bool
 from recap_source import AUDIO_MODES
 
 TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
@@ -142,18 +141,6 @@ def parse_args(argv=None):
         "--require-narration-review",
         action="store_true",
         help="make narration review a strict pre-TTS gate (also REQUIRE_NARRATION_REVIEW=1)",
-    )
-    review.add_argument(
-        "--mimo-qc",
-        default=os.environ.get("MIMO_QC", "off"),
-        choices=["off", "pre-assemble", "post-render", "both"],
-        help="optional advisory MiMo QC stage(s); never blocks the pipeline",
-    )
-    review.add_argument(
-        "--mimo-qc-refresh",
-        action="store_true",
-        default=env_bool("MIMO_QC_REFRESH", False),
-        help="ignore a matching MiMo QC stage cache",
     )
     review.add_argument(
         "--require-final-qc",

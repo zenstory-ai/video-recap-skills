@@ -26,7 +26,6 @@ _COLLECT_ARTIFACTS = (
     "assembly_qc.json",
     "visual_qc.json",
     "preflight_qc.json",
-    "mimo_qc.json",
 )
 # video-assemble QC artifacts: {"verdict", "blocking", "blocking_codes": [...]}.
 _UPSTREAM_QC_ARTIFACTS = ("assembly_qc.json", "visual_qc.json")
@@ -312,7 +311,6 @@ def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = 
         "artifacts": {name: _artifact_summary(root, name) for name in _COLLECT_ARTIFACTS},
         "probe": probe,
         "probe_error": probe_error,
-        # mimo_qc.json is advisory metadata only and is not rolled into final blockers.
         "auto_repair": False,
     }
 

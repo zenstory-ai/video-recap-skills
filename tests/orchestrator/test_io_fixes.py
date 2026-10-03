@@ -628,13 +628,6 @@ def test_recap_completion_prints_manifest_final_output(monkeypatch, tmp_path, ca
             id="plus-effect-flags",
         ),
         pytest.param(
-            {"mimo_qc": "both", "mimo_qc_refresh": True},
-            "video.mp4",
-            ["--mimo-qc both", "--mimo-qc-refresh"],
-            [],
-            id="mimo-qc",
-        ),
-        pytest.param(
             {
                 "edit_mode": "cut",
                 "audio_mode": "source-mix",

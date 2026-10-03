@@ -10,7 +10,6 @@ MAX_SCRIPT_MODULE_LINES = 800
 PUBLIC_ENTRYPOINTS = (
     "skills/video-assemble/scripts/assemble.py",
     "skills/video-cut/scripts/cut.py",
-    "skills/video-recap/scripts/mimo_qc.py",
     "skills/video-recap/scripts/recap.py",
     "skills/video-script/scripts/review.py",
     "skills/video-understanding/scripts/brief.py",

@@ -29,3 +29,11 @@ def test_parse_args_rejects_option_abbreviations(abbreviated, capsys):
     with pytest.raises(SystemExit):
         recap_cli.parse_args(["video.mp4", abbreviated, "x"])
     assert "unrecognized arguments" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("removed", [["--mimo-qc", "both"], ["--mimo-qc-refresh"]])
+def test_removed_mimo_qc_flags_are_rejected(removed, capsys):
+    """MiMo multimodal QC was deleted; its flags must fail loudly instead of being ignored."""
+    with pytest.raises(SystemExit):
+        recap_cli.parse_args(["video.mp4", *removed])
+    assert "unrecognized arguments" in capsys.readouterr().err

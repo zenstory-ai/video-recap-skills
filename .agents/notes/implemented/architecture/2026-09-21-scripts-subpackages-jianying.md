@@ -38,6 +38,7 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
   "顶层模块清单"里，依赖顶层入口把它们带进隔离导入测试。
 - 同日第二批（同一决定的延伸）：video-recap 的 7 个 `mimo_qc_*.py` 改为 `scripts/qc/mimo_{client,contract,evidence,observations,payload,report,runner}.py`，
   入口 `mimo_qc.py` 与被 references 点名的 `qc_contract.py`、`final_qc.py` 留在顶层（包不能叫 `mimo_qc`，会与入口模块同名）；
+  （2026-10-02 起 `qc/` 子包与 `mimo_qc.py` 随 MiMo QC 一起删除，见 [[2026-10-02-delete-mimo-qc]]。）
   video-assemble 的 4 个 `subtitle_*.py` 改为 `scripts/subtitles/{core,render,track,track_binding}.py`，
   `references/subtitle-track.md` 的脚本路径同步改为 `scripts/subtitles/track.py`。
   合同测试对 markdown 里带 `scripts/` 前缀的脚本路径也做本地解析。

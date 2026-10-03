@@ -46,7 +46,7 @@ python3 scripts/recap.py picture.mp4 --edit-mode full --work-dir NEW_WORK \
 ```
 
 三个 JSON 参数必须同时出现。该入口只接受单视频、full、narration、音轨 0、新工作目录和未存在的
-交付文件；不运行理解、写稿、解说评审、TTS、cut、MiMo QC 或剪映导出。语义与媒体形状仍由
+交付文件；不运行理解、写稿、解说评审、TTS、cut 或剪映导出。语义与媒体形状仍由
 video-assemble 严格验证，recap 只核对子技能绑定记录引用的是同一批采用文件与母版路径，不把调用方
 采用的声音或混音声明成自动创作或发布批准。详见 `references/audio-routing.md`。
 
@@ -85,9 +85,8 @@ TTS 供应商由 `--tts-provider mimo-tts|fish-audio|index-tts`（或 `TTS_PROVI
 可选能力：
 
 - `--mimo-video-overview`：按场景块补充 MiMo 视频理解。
-- `--mimo-qc pre-assemble|post-render|both`：在合成前、成片后或两个阶段给出建议型复核。
 
-MiMo QC 默认关闭；每个选定阶段最多请求一次，写入 `mimo_qc.json`。任何凭证缺失、限流、超时、格式错误或采样失败都只记录状态，不阻断流程。可覆盖配置见 `references/config-playbook.md`，QC 报告的最小契约见 `references/shift-left-qc-schema.md`。
+可覆盖配置见 `references/config-playbook.md`，QC 报告的最小契约见 `references/shift-left-qc-schema.md`。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本启动后会自行定位兄弟技能和资源。
 
@@ -148,14 +147,6 @@ python3 scripts/recap.py <video> --work-dir <work_dir>  # 可追加 --edit-mode 
 ```
 
 流程会校验当前阶段的硬输入（`clip_plan.json` / `narration.json`）；两份创作计划仍是 Agent 与建议型评审使用的工作记录，不是渲染门禁。cut 模式随后生成 `edited_source.mp4`，再合成旁白并输出 `recap_<name>.mp4`。
-
-若需要建议型 MiMo 复核：
-
-```bash
-python3 scripts/recap.py <video> --work-dir <work_dir> --mimo-qc both
-```
-
-合成前复核会读取脚本、计划和 TTS 元数据；成片后还会读取最多六张临时 JPEG。输入文件的大小/修改时间、模型与提示都未变时直接复用上次报告，`--mimo-qc-refresh` 可强制刷新。帧的 base64 与凭证不会写入磁盘。
 
 已有批准解说稿时加 `--preserve-approved-text`：校验与 TTS 原样保留批准稿（只更新 `overlaps_speech`），装不下时间窗即失败，不缩稿、不降级为部分成功。
 
@@ -249,12 +240,10 @@ python3 scripts/dashboard_server.py --root <目录> [--port 0] [--open]
 - `subtitles.srt` / `subtitles.ass`：字幕。
 - `work_dir/`：全部中间产物，契约见 `references/data-schema.md`。
 - `work_dir/recap_story_plan.json` / `visual_audio_board.json`：Agent 创作意图与剪辑决定。
-- `work_dir/mimo_qc.json`：可选的建议型复核，不作为发布门禁。
 
 完整参数列表以 `python3 scripts/recap.py --help` 为准。`--style` 是原样传给 Agent 的自由文本指导，不是 preset、枚举、开关或有限风格分类。
 
 ## 8. 能力边界
 
 - 语义评审默认建议型、失败开放；只有调用方显式启用严格解说评审时，事实矛盾、残句或评审不可用才会在 TTS 前阻断。确定性校验阶段始终负责硬校验。
-- MiMo QC 不能阻断、自动修复或改变退出状态，只提供定位建议。
 - 宣发标题、花字或外部文案回填见 `video-script` 的 references/promotional-copy.md。

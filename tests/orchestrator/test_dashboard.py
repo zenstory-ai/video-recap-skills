@@ -15,6 +15,7 @@ import pytest
 
 import dashboard_data
 import dashboard_io
+import dashboard_runs
 import dashboard_server
 import dashboard_templates
 
@@ -75,7 +76,8 @@ def _build_root(root: Path) -> dict:
     _write(ep1 / "final_qc.json", {"ok": True, "blocker_count": 0, "findings": []})
     _write(ep1 / "golden_eval.json", {"ok": False, "blocker_count": 1, "findings": [
         {"code": "golden-duration", "message": "时长不符", "blocking": True}]})
-    _write(ep1 / "assembly_qc.json", {"verdict": "PASS", "blocking_codes": []})
+    _write(ep1 / "assembly_qc.json", "{not json")
+    # Leftover from a release that still had MiMo QC: the dashboard no longer lists it.
     _write(ep1 / "mimo_qc.json", "{not json")
     bgm = root / "library" / "resources" / "bgm" / "pulse-demo" / "pulse-demo.wav"
     _write(ep1 / "resource_lock.json", {
@@ -259,7 +261,7 @@ def test_run_detail_parses_each_stage_on_the_server(site):
     assert {k: len(v) for k, v in views["film"]["timeline"]["lanes"].items()} == {
         "video": 2, "narration": 1, "bgm": 1, "subtitles": 1}
     assert {c["file"]: c["level"] for c in run["qc"]} == {
-        "final_qc.json": "ok", "golden_eval.json": "error", "assembly_qc.json": "ok", "mimo_qc.json": "unparseable"}
+        "final_qc.json": "ok", "golden_eval.json": "error", "assembly_qc.json": "unparseable"}
     lock = views["resources"]
     assert lock["attention"][0]["code"] == "unregistered"
     assert [(r["role"], r["registry"], r["name"]) for r in lock["resources"]] == [
@@ -272,7 +274,7 @@ def test_run_detail_parses_each_stage_on_the_server(site):
 @pytest.mark.parametrize(
     "rel, check",
     [
-        pytest.param("show/ep1", lambda r: r["qc"][3]["text"].startswith("无法解析")
+        pytest.param("show/ep1", lambda r: r["qc"][2]["text"].startswith("无法解析")
                      and r["views"]["narration"]["status"] == "ok", id="malformed_qc_card"),
         pytest.param("broken", lambda r: r["state_error"].startswith("无法解析运行状态")
                      and r["qc"][0]["level"] == "ok", id="malformed_run_manifest"),
@@ -283,6 +285,20 @@ def test_run_detail_parses_each_stage_on_the_server(site):
 )
 def test_an_unparseable_artifact_degrades_only_its_own_view(site, rel, check):
     assert check(_api(site, "run", rel))
+
+
+@pytest.mark.parametrize("payload, level, blockers, text", [
+    ({"verdict": "PASS", "blocking_codes": []}, "ok", 0, "通过"),
+    ({"verdict": "FAIL", "blocking_codes": ["av_desync"]}, "error", 1, "未通过：av_desync"),
+    ({"verdict": "FAIL", "blocking_codes": []}, "error", 1, "未通过"),
+    ({"verdict": "MAYBE"}, "warn", 0, "结论未知（MAYBE）"),
+])
+def test_assembly_qc_card_reads_the_verdict(tmp_path, payload, level, blockers, text):
+    _write(tmp_path / "assembly_qc.json", payload)
+
+    card = dashboard_runs._qc_card(tmp_path, "assembly_qc.json", "合成 QC")
+
+    assert (card["level"], card["blockers"], card["text"]) == (level, blockers, text)
 
 
 @pytest.mark.parametrize("query, group, target", [

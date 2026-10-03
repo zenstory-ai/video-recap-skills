@@ -24,8 +24,6 @@ _LOCAL_ADOPTION_OPTIONS = (
 )
 
 _LOCAL_ADOPTION_CONFLICTS = _TTS_OPTIONS | frozenset({
-    "--mimo-qc",
-    "--mimo-qc-refresh",
     "--export-jianying",
     "--jianying-bundle-media",
     "--jianying-no-bundle-media",
@@ -106,7 +104,6 @@ def validate_local_adoption(parser, args):
     args.tts_provider = "auto"
     args.mimo_tts_voice = None
     args.voice_ref = None
-    args.mimo_qc = "off"
 
 
 def load_local_assembly_evidence(work_dir):
@@ -215,8 +212,6 @@ def validate_audio_routing(parser, args):
     if conflicts:
         detail = ", ".join(conflicts)
         parser.error(f"--audio-mode {mode} cannot use TTS/strict narration options: {detail}")
-    if args.mimo_qc != "off":
-        parser.error(f"--audio-mode {mode} currently requires --mimo-qc off")
     if args.edit_mode == "cut" and stream != 0:
         parser.error("cut audio modes currently require --audio-stream-index 0")
     if args.export_jianying and stream != 0:

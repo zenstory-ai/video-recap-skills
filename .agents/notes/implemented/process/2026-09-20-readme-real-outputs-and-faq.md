@@ -21,7 +21,7 @@ Status: implemented
    节选惯例：JSON 与 Markdown 两份 README 都原样引用；英文 README 在每段后加 "Translated:" 段落，不改动引用体；省略处标「…」；表格与数组节选注明原有行数。
 5. **安装后的第一条请求**三条：完整解说、多集剪成一条（合并原「长视频剪短」与「多视频合成」）、只做文本交接（原 GEO 段的引用块，删去末尾「这份规划不代表已有成片」）。
 6. **流程与六个技能**：mermaid 图原样保留；架构表改为技能名链接到 `skills/<name>/`，`video-recap` 提到首行并注明日常用它、`video-script` 注明可单独调用。原「输出」清单压缩为表后一句，指向 data-schema。
-7. **进阶请求**保留原六条请求原文（素材库、MiMo QC + 剪映、字幕带、克隆音色、dub、自带字幕），删除「改用当前免费的 Fish Audio 配音」一条（安装段已覆盖，且「免费」已过期），每条解释压到一两句。
+7. **进阶请求**保留原六条请求原文（素材库、MiMo QC + 剪映、字幕带、克隆音色、dub、自带字幕；2026-10-02 起第二条只剩导出剪映，见 [[2026-10-02-delete-mimo-qc]]），删除「改用当前免费的 Fish Audio 配音」一条（安装段已覆盖，且「免费」已过期），每条解释压到一两句。
 8. **新增常见问题**三条，只收正文其他章节没有回答过的读者问题：#79 → `--skip-asr`；429 / 中断续跑（CHANGELOG 0.3.0 断点续传、`recap_phase.json`）；VLM 认不出人 → `background_research.json`。第一稿有十条，审稿后删掉七条：Fish Audio 是否免费（供应商定价）、旧地址安装失败（安装段引用块已有）、微信 / 竖屏两个已修 bug（属于 CHANGELOG）、非 Claude Code 能否用（安装段已答）、留白字幕对不上（进阶请求已写）、剪映能改什么（上文小节已写）、GPU 与费用（要点与安装段已写）。同一轮还删了实现细节：音量关键帧的秒数与增益、assembly QC 的具体条目数、「互不共享代码」、ops120 正文出处（留在致谢）、VLM prompt 模板链接；`MIMO_TOKEN_PLAN_CLUSTER` 收进 bash 注释。
 9. **延伸阅读**：三篇站点指南（原表格的三行压成一行一条）、仓库内剪映文档、案例 runbook 与决策链、各 skill 契约与 references。致谢补上字幕带检测来源 ops120。
 10. README.en.md 逐段同步，顶部加 `<!-- Last synced with README.md: 2026-09-20 -->`；导航「中文」指回 README.md，锚点 `#install` / `#see-what-it-produces`。

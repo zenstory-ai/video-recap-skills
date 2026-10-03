@@ -46,7 +46,7 @@ Six skills install into Claude Code, Codex CLI, OpenCode, or OpenClaw. You give 
 - **The editorial decision comes before the sound allocation.** The agent compares edit hypotheses first, writes the viewer promise, POV, dramatic question, and change-based beats into `recap_story_plan.json`, then assigns each beat a picture job and an audio owner: narration is voiced as a block only when it has a defined job, and strong dialogue, action sound, or silence may own an entire beat.
 - **Cut first, narrate second, so the timeline is aligned by construction.** Cut mode renders the shortened video first and writes narration against that output timeline; feed several videos at once and pick ranges by `source_id` to cut one story spine; each video's analysis is saved to a filesystem material library for reuse.
 - **Keep editing after the render.** The multi-track `timeline.json` exports to a JianYing draft with editable source clips, narration, BGM, subtitles, and image overlays; drop in an accurate subtitle file and it becomes the preferred source for original-dialogue captions.
-- **Every step leaves a record you can check.** Narration lint, assembly QC, delivery QC, and the revision log are machine-readable files; the optional MiMo adviser only suggests, and a missing key, rate limit, or timeout never blocks the render.
+- **Every step leaves a record you can check.** Narration lint, assembly QC, delivery QC, and the revision log are machine-readable files.
 
 ## Install
 
@@ -365,13 +365,11 @@ Analyze /path/to/ep1.mp4 and save reusable understanding artifacts under /path/t
 
 The library holds JSON, Markdown, and an index only; it copies no media, builds no database, and uses no embeddings. The agent simply `grep`s the filesystem.
 
-**Run an advisory MiMo review before and after assembly, and export a JianYing draft:**
+**Export a JianYing draft:**
 
 ```text
-Make a recap of /path/to/video.mp4, run MiMo quality review before assembly and after rendering, and export an editable JianYing draft.
+Make a recap of /path/to/video.mp4 and export an editable JianYing draft.
 ```
-
-MiMo review makes at most one request per stage, only suggests, and never blocks the render if it fails.
 
 **Align recap subtitles with the source's burned-in subtitle band:**
 

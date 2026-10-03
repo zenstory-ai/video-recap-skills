@@ -250,10 +250,6 @@ def _continuation_command(video, work_dir, args):
         parts.append("--skip-asr")
     if args.mimo_video_overview:
         parts.append("--mimo-video-overview")
-    if args.mimo_qc != "off":
-        parts += ["--mimo-qc", args.mimo_qc]
-    if args.mimo_qc_refresh:
-        parts.append("--mimo-qc-refresh")
     if not args.consolidate:  # default is ON; only the opt-out needs to round-trip
         parts.append("--no-consolidate")
     if args.consolidate_asr:

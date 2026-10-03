@@ -74,5 +74,5 @@ Status: proposed
 - **待 owner 拍板：**
   - `golden_eval.json` 是否并入 final_qc（建议并入）。
   - recap 的 data-schema.md 是否改成索引（建议改）。
-  - MiMo 多模态 QC 去留：一个版本周期内没人用就整体删除，约 2,170 行。
+  - MiMo 多模态 QC 去留：一个版本周期内没人用就整体删除，约 2,170 行。（owner 已选择删除，落地见 [[2026-10-02-delete-mimo-qc]]。）
   - full 模式的旧版文本改写：建议本轮不动，另做 A/B 实验。

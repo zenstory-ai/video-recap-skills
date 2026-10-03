@@ -23,7 +23,7 @@ compose_foreground、字幕轨、shot_review 计划绑定、recap manifest 交�
   且形状正确，不重哈希；`assert_current` 式逐步重验整体删除；`strict_publish` 变为写 binding → QC → 发布 → 第二次 QC。
 - 调用方 JSON 里旧的 `sha256` / `*_sha256` 键被忽略，不拒绝（`strict_inputs.without_digests`）。
 - `recap_run_manifest.json` / `assembly_manifest.json` 用 `source_video_identity {path,size,mtime_ns}`；
-  素材库 `source_id = src_<stem>_<size>`；MiMo QC 缓存比较存储的 `cache_input` 字典。
+  素材库 `source_id = src_<stem>_<size>`；MiMo QC 缓存比较存储的 `cache_input` 字典（MiMo QC 已于 2026-10-02 删除，见 [[2026-10-02-delete-mimo-qc]]）。
 - 删除 `INDEX_TTS_CACHE_REVISION`、`TTS_CACHE_VERSION`、`DUB_TTS_CACHE_VERSION`、
   `EDITED_SOURCE_RENDER_ALGORITHM_VERSION`、`GEOMETRY_RENDER_ALGORITHM_VERSION`、`SUBTITLE_RENDER_VERSION`、
   `SUBTITLE_TEXT_NORMALIZE_VERSION`、`GLOSSARY_POLICY_VERSION`、`RECEIPT_SCHEMA/VERSION`、`CONVERSION_POLICY`；
