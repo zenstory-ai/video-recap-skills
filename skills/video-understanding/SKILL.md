@@ -36,7 +36,7 @@ description: >
 export MIMO_API_KEY=***
 ```
 
-ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。`--mimo-video-overview` 可开启按场景块的视频概览。
+ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。`--mimo-video-overview` 可开启按场景块的视频概览。未设置 key 时重跑会复用已缓存的转写、画面分析、概览与故事索引（key 决定的默认 endpoint 不参与比对）；需要请求模型的 consolidation 记为 `skipped_no_key`，不发请求。缓存对不上（例如复制 work_dir 时没保留文件时间）而已有转写时，运行停下并保留转写：用 `cp -p` / `cp -Rp` / `rsync -t` 保留时间重新复制，或设置 key 后重跑（会重新转写）。不要用 `--skip-asr` 绕过，它会把现有转写替换成 `[]`。
 
 若 `work_dir/background_research.json` 存在，本技能会把剧情梗概和角色名折入 VLM 上下文；`--context` 可补充一条简短提示。
 
@@ -57,7 +57,7 @@ python3 scripts/understand.py <video> --work-dir <work_dir> [选项]
 | `--style` | `纪录片` | 写进创作简报的解说风格 |
 | `--edit-mode full\|cut` | 不设 | 写进简报的 recap 模式；`cut` 时按剪后时长估算旁白预算，已有 `edited_source.mp4` 时句末锚点改用剪后时间 |
 | `--target-duration` | 不设 | 写进简报的 cut 目标时长；尚无 `clip_plan_validated.json` 时用它估算旁白预算 |
-| `--skip-asr` | 关 | 不转写对白，写空 `asr_result.json`，ASR 证据标为显式跳过 |
+| `--skip-asr` | 关 | 不转写对白，把 `asr_result.json` 写成 `[]`（已有转写会被覆盖），ASR 证据标为显式跳过 |
 | `--mimo-video-overview` | 关 | 按场景块运行 MiMo 视频概览，并作为逐场景主描述 |
 | `--force` | 关 | 忽略缓存，全部重算 |
 | `--brief-only` | 关 | 只用现有产物重建 `agent_narration_brief.md`，不抽帧、不调 API |

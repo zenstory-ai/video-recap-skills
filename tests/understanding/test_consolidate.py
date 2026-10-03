@@ -10,6 +10,12 @@ import consolidate  # noqa: E402
 from lib import file_identity  # noqa: E402
 
 
+@pytest.fixture(autouse=True)
+def _api_key(monkeypatch):
+    """Passes that call the model need a key; the offline tests below clear it."""
+    monkeypatch.setitem(consolidate.CONFIG, "api_key", "test-key")
+
+
 def _fake(content):
     return {"choices": [{"message": {"content": content}}]}
 
@@ -242,6 +248,7 @@ def test_consolidate_runs_asr_cleanup_before_index_when_both_requested(monkeypat
     assert result == {
         "asr_clean": {"segments": [{"text": "clean"}]},
         "index": {"characters": []},
+        "skipped_no_key": [],
     }
 
 
@@ -340,3 +347,193 @@ def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path
 
     assert seen == [consolidate._CLEAN_MAX_TOKENS, consolidate._CLEAN_MAX_TOKENS * 2]
     assert not (tmp_path / "asr_clean.json").exists()
+
+
+# ── deterministic index repairs (index_normalize) ─────────────────────────────
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        ("00:95", "01:35"),  # scene seconds poured into the ss field
+        ("1:75", "02:15"),
+        ("02:05", "02:05"),
+        ("0:5", "00:05"),
+        ("1:02:03", "1:02:03"),
+        (125, "02:05"),
+        ("12.5s", "00:12"),
+        ("12.5秒", "00:12"),
+        ("约01:20", "01:20"),
+        ("大约 1:20", "01:20"),
+        ("01:20-01:45", "01:20"),
+        ("01:20 ~ 01:45", "01:20"),
+        ("80秒-95秒", "01:20"),
+        ("01:20至01:45", "01:20"),
+        ("00：95", "01:35"),  # full-width colon
+        ("3分20秒", "03:20"),
+        ("3分20", "03:20"),
+        ("3分钟", "03:00"),
+        ("约3分20.5秒", "03:20"),
+        ("1小时2分3秒", "1:02:03"),
+        ("3分20秒-3分45秒", "03:20"),
+    ],
+)
+def test_plot_time_is_canonical_mm_ss(raw, expected):
+    from index_normalize import normalize_plot_times
+
+    points, dropped = normalize_plot_times([{"time": raw, "text": "x"}], duration=4000)
+    assert points == [{"time": expected, "text": "x"}] and dropped == 0
+
+
+@pytest.mark.parametrize("raw", ["开头", "", None, "-0:05", "05:00"])
+def test_unreadable_or_out_of_range_plot_time_is_dropped(raw):
+    from index_normalize import normalize_plot_times
+
+    points, dropped = normalize_plot_times(
+        [{"time": raw, "text": "x"}, "bare string"], duration=120.0
+    )
+    assert points == [{"text": "x"}, "bare string"] and dropped == 1
+
+
+def test_characters_sharing_a_name_or_alias_merge_deterministically():
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "范闲", "description": "", "aliases": ["小范大人"], "evidence_ids": ["visual:0"],
+             "confidence": "medium"},
+            {"name": "王启年", "aliases": [], "evidence_ids": ["visual:1"]},
+            {"name": "小范大人", "description": "监察院提司", "aliases": ["范提司"],
+             "evidence_ids": ["asr:2", "visual:0"], "confidence": "high"},
+        ],
+        "relationships": [
+            {"a": "小范大人", "b": "王启年", "relation": "上下级", "evidence_ids": ["asr:2"]},
+            {"a": "范闲", "b": "王启年", "relation": "上下级", "evidence_ids": ["visual:1"]},
+            {"a": "范闲", "b": "小范大人", "relation": "同一人", "evidence_ids": []},
+        ],
+        "plot_points": [],
+    }
+
+    out, report = normalize_index(index)
+
+    assert [c["name"] for c in out["characters"]] == ["范闲", "王启年"]
+    fan = out["characters"][0]
+    assert fan["aliases"] == ["小范大人", "范提司"]
+    assert fan["evidence_ids"] == ["visual:0", "asr:2"]
+    assert fan["description"] == "监察院提司" and fan["confidence"] == "high"
+    assert out["relationships"] == [
+        {"a": "范闲", "b": "王启年", "relation": "上下级", "evidence_ids": ["asr:2", "visual:1"]}
+    ]
+    assert report == {"merged_characters": 1, "dropped_plot_times": 0}
+    assert normalize_index(out)[0] == out  # idempotent
+
+
+def test_a_later_entry_linking_two_groups_is_kept_on_its_own():
+    """An entry whose aliases name two different characters is ambiguous: no bridge merge."""
+    from index_normalize import merge_characters
+
+    chars, renames = merge_characters([
+        {"name": "甲", "aliases": ["阿甲"]},
+        {"name": "乙", "aliases": ["阿乙"]},
+        {"name": "丙", "aliases": ["甲", "乙"]},
+    ])
+    assert [c["name"] for c in chars] == ["甲", "乙", "丙"]
+    assert renames == {}
+
+
+def test_an_exact_name_match_wins_over_alias_links():
+    from index_normalize import merge_characters
+
+    chars, renames = merge_characters([
+        {"name": "甲", "aliases": ["阿甲"]},
+        {"name": "乙", "aliases": ["阿乙"]},
+        {"name": "乙", "aliases": ["甲"], "description": "乙的第二条"},
+    ])
+    assert [c["name"] for c in chars] == ["甲", "乙"]
+    assert chars[1]["aliases"] == ["阿乙", "甲"]
+    assert renames == {"乙": "乙"}
+
+
+def test_a_shared_alias_alone_does_not_merge_two_characters():
+    """A generic alias the model gives two people must not fold them into one."""
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "王大锤", "aliases": ["男子", "老板"]},
+            {"name": "李警官", "aliases": ["男子"]},
+        ],
+        "relationships": [{"a": "王大锤", "b": "李警官", "relation": "对峙"}],
+        "plot_points": [],
+    }
+    out, report = normalize_index(index)
+    assert [c["name"] for c in out["characters"]] == ["王大锤", "李警官"]
+    assert out["relationships"] == index["relationships"]
+    assert report["merged_characters"] == 0
+
+
+def test_an_extra_named_by_a_shared_alias_does_not_bridge_two_characters():
+    """A later "男子" entry links to both people carrying the alias 男子: keep all three."""
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "王大锤", "aliases": ["男子", "老板"], "description": "老板"},
+            {"name": "李警官", "aliases": ["男子"], "description": "警察"},
+            {"name": "男子", "description": "路人"},
+        ],
+        "relationships": [{"a": "王大锤", "b": "李警官", "relation": "对峙"}],
+        "plot_points": [],
+    }
+    out, report = normalize_index(index)
+    assert out["characters"] == index["characters"]
+    assert out["relationships"] == index["relationships"]
+    assert report["merged_characters"] == 0
+    assert normalize_index(out)[0] == out
+
+
+def test_a_string_alias_is_one_alias_not_its_characters():
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "大", "aliases": []},
+            {"name": "王二", "aliases": "王大锤"},
+            {"name": "王大锤", "aliases": "老王"},
+        ],
+        "relationships": [],
+        "plot_points": [],
+    }
+    out, report = normalize_index(index)
+    # "大" is not split out of "王大锤"; the second and third entries are one person.
+    assert [c["name"] for c in out["characters"]] == ["大", "王二"]
+    assert out["characters"][1]["aliases"] == ["王大锤", "老王"]
+    assert report["merged_characters"] == 1
+
+
+def test_parse_index_response_reads_a_string_alias_as_a_list():
+    out = consolidate.parse_index_response(
+        '{"characters":[{"name":"王大锤","aliases":"老王"}],"relationships":[],'
+        '"plot_points":[],"entities":[]}'
+    )
+    assert out["characters"][0]["aliases"] == ["老王"]
+
+
+def test_consolidate_index_repairs_a_cached_index_without_a_model_call(monkeypatch, tmp_path):
+    _write_json(tmp_path, "vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 120, "description": "对峙"}])
+    calls = _counting_api(monkeypatch, lambda n: (
+        '{"characters":[{"name":"范闲"},{"name":"范提司","aliases":["范闲"]}],'
+        '"relationships":[],"plot_points":[{"time":"00:95","text":"转折"}],"entities":[]}'
+    ))
+    first = consolidate.consolidate_index(tmp_path)
+    assert [c["name"] for c in first["characters"]] == ["范闲"]
+    assert first["plot_points"] == [{"time": "01:35", "text": "转折"}]
+
+    # An index cached by an older build (split entry, raw time) is repaired on the cache hit.
+    stale = dict(first, plot_points=[{"time": "00:95", "text": "转折"}])
+    (tmp_path / "understanding_index.json").write_text(json.dumps(stale), encoding="utf-8")
+    again = consolidate.consolidate_index(tmp_path)
+
+    assert calls["n"] == 1
+    assert again["plot_points"] == [{"time": "01:35", "text": "转折"}]
+    on_disk = json.loads((tmp_path / "understanding_index.json").read_text(encoding="utf-8"))
+    assert on_disk["plot_points"] == [{"time": "01:35", "text": "转折"}]

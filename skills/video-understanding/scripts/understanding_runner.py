@@ -7,7 +7,7 @@ import json
 
 from pathlib import Path
 
-from lib import CONFIG, log, get_video_duration, api_call
+from lib import CONFIG, log, get_video_duration, api_call, offline_ignored_settings
 
 from extract import extract_frames
 
@@ -44,6 +44,28 @@ from understanding_cache import (
     _write_mimo_overview_status,
     _write_stage_meta,
 )
+
+
+def _refuse_keyless_overwrite(asr_json):
+    """Stop before a key-less ASR miss replaces a real transcript with the [] placeholder.
+
+    The cache can miss for reasons that say nothing about the transcript, e.g. a work_dir
+    copied without keeping mtimes changes the recorded artifact identity."""
+    if CONFIG["mimo_asr_api_key"] or not asr_json.exists():
+        return
+    try:
+        existing = json.loads(asr_json.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return
+    if isinstance(existing, list) and existing:
+        raise SystemExit(
+            "ASR 缓存与当前视频、设置或文件时间不匹配（常见原因：复制 work_dir 或视频时没保留"
+            "修改时间），且未设置 MIMO_ASR_API_KEY / MIMO_API_KEY，无法重新转写；"
+            f"已保留现有 asr_result.json（{len(existing)} 段），未覆盖。"
+            "请用保留时间的方式重新复制（cp -p / cp -Rp / rsync -t），"
+            "或设置 MIMO_ASR_API_KEY 或 MIMO_API_KEY 后重跑（会重新转写）。"
+            "不要用 --skip-asr 绕过：它会把现有转写替换成 []。"
+        )
 
 
 def main():
@@ -145,6 +167,17 @@ def main():
         scenes = detect_scenes(video, work_dir, CONFIG["scene_threshold"])
         _write_stage_meta(scenes_json, scenes_meta)
 
+    # The VLM cache does not depend on ASR, so an offline run that would stop at Step 4 stops
+    # here instead, before Step 3 can rewrite the transcript or the silence windows.
+    vlm_meta = _vlm_cache_payload(video, work_dir, scenes_json, frames)
+    vlm_offline = offline_ignored_settings(CONFIG["api_key"], "api_url")
+    vlm_cached = not args.force and _stage_cache_valid(
+        vlm_json, vlm_meta, ignore_settings=vlm_offline
+    )
+    if not vlm_cached and not CONFIG["api_key"]:
+        key_name = CONFIG["api_env_var"]
+        raise SystemExit(f"请设置 {key_name} 环境变量（VLM 画面分析需要）")
+
     # Step 3: ASR
     asr_meta = _asr_cache_payload(video, skip_asr=args.skip_asr)
     cache_state = None
@@ -164,6 +197,7 @@ def main():
         asr_result = _load_json(asr_json)
         log(f"跳过 ASR（证据匹配，已存在 {len(asr_result)} 段）")
     else:
+        _refuse_keyless_overwrite(asr_json)
         try:
             asr_result = transcribe_audio(video, work_dir)
         except Exception as e:
@@ -185,14 +219,10 @@ def main():
         _write_stage_meta(silence_json, silence_meta)
 
     # Step 4: VLM analysis (the only stage that requires the chat API key)
-    vlm_meta = _vlm_cache_payload(video, work_dir, scenes_json, frames)
-    if not args.force and _stage_cache_valid(vlm_json, vlm_meta):
+    if vlm_cached:
         vlm_analysis = _load_json(vlm_json)
         log(f"跳过 VLM 分析（已存在 {len(vlm_analysis)} 个场景）")
     else:
-        if not CONFIG["api_key"]:
-            key_name = CONFIG["api_env_var"]
-            raise SystemExit(f"请设置 {key_name} 环境变量（VLM 画面分析需要）")
         log("VLM API 连通性预检...")
         api_call(
             {
@@ -207,7 +237,14 @@ def main():
     # Step 4.1: optional MiMo scene-chunk video understanding
     overview_path = work_dir / "mimo_video_overview.json"
     if CONFIG["mimo_video_overview"]:
-        if not CONFIG["mimo_video_api_key"]:
+        if not CONFIG["mimo_video_api_key"] and mimo_video_overview_cache_fresh(
+            overview_path, video, scenes
+        ):
+            log("未设置 MIMO_API_KEY，复用已缓存的 MiMo 分片视频概览")
+            _write_mimo_overview_status(
+                work_dir, "cached", "未设置 MIMO_API_KEY，复用缓存", overview_path.name
+            )
+        elif not CONFIG["mimo_video_api_key"]:
             log("跳过 MiMo 分片视频概览：未设置 MIMO_API_KEY")
             overview_path.unlink(missing_ok=True)
             _write_mimo_overview_status(
@@ -254,25 +291,27 @@ def main():
         from consolidate import consolidate
 
         failure = None
+        result = {}
         try:
-            consolidate(
+            result = consolidate(
                 work_dir, do_asr=args.consolidate_asr, do_index=args.consolidate
             )
         except Exception as e:
             log(f"consolidate 跳过（忽略）: {e}")
             failure = e
         artifacts = _present_consolidation_artifacts(work_dir)
+        no_key = result.get("skipped_no_key") or []
         if failure is not None:
             status, message = "failed", failure
         else:
             expected = []
             skipped = []
-            if args.consolidate:
+            if args.consolidate and "index" not in no_key:
                 if vlm_analysis:
                     expected.append("understanding_index.json")
                 else:
                     skipped.append("无 vlm_analysis，跳过 index")
-            if args.consolidate_asr:
+            if args.consolidate_asr and "asr" not in no_key:
                 if asr_result:
                     expected.append("asr_clean.json")
                 else:
@@ -280,6 +319,11 @@ def main():
             missing = [name for name in expected if name not in artifacts]
             if missing:
                 status, message = "failed", f"未产出预期 artifact: {', '.join(missing)}"
+            elif no_key:
+                status, message = (
+                    "skipped_no_key",
+                    f"未设置 {CONFIG['api_env_var']}，consolidation（{', '.join(no_key)}）未发送请求",
+                )
             elif expected:
                 status, message = "ok", "consolidation 完成"
             else:

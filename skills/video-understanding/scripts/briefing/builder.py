@@ -9,6 +9,7 @@ from briefing.context import (
     _format_asr_chunks_for_brief,
     _format_background_research,
     _format_consolidation,
+    _format_moderation_refusals,
     _format_substrate_warning,
     _format_timeline_fusion_for_brief,
     _load_background_research,
@@ -192,6 +193,7 @@ def build_agent_brief(
         )
     )
     lines.extend(_format_substrate_warning(substrate))
+    lines.extend(_format_moderation_refusals(scenes_analysis))
     lines.extend(_format_research_directive(work_dir, substrate))
     lines.extend(_format_background_research(_load_background_research(work_dir)))
     lines.extend(_format_consolidation(consolidation_index))
@@ -379,7 +381,13 @@ def build_agent_brief(
                 f"### Scene {scene['scene_id'] + 1}: {scene['start']:.1f}-{scene['end']:.1f}s",
                 f"- Duration: {duration:.1f}s; max budget if fully narrated: {max_chars} chars",
                 f"- Quiet windows: {quiet_text}",
-                f"- Description: {scene.get('description', '')}",
+                f"- Description: {scene.get('description', '')}"
+                + (
+                    " [moderation_refused]"
+                    if scene.get("analysis_status") == "moderation_refused"
+                    and scene.get("description_source") != "mimo_video_overview"
+                    else ""
+                ),
             ]
         )
         if scene.get("depth_analysis"):

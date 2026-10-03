@@ -15,6 +15,7 @@ from extract import (
 from lib import CONFIG
 from lib import (
     log, api_call, load_prompt, mimo_video_api_call, run_cmd, file_identity, is_moderation_refusal,
+    is_usable_overview_chunk, offline_ignored_settings, settings_match,
 )
 
 # ── Step 4: VLM 视觉分析 ─────────────────────────────────────────────
@@ -527,11 +528,12 @@ def mimo_video_overview_cache_fresh(overview_path, video_path, scenes):
         return False
     if not isinstance(overview, dict) or overview.get("input") != "scene_chunks":
         return False
-    if overview.get("settings") != mimo_video_settings():
+    ignored = offline_ignored_settings(CONFIG.get("mimo_video_api_key"), "mimo_video_api_url")
+    if not settings_match(overview.get("settings"), mimo_video_settings(), ignored):
         return False
     chunks = overview.get("chunks")
     if not isinstance(chunks, list) or not all(
-        isinstance(chunk, dict) and _is_mimo_chunk_usable(chunk.get("content"))
+        isinstance(chunk, dict) and is_usable_overview_chunk(chunk.get("content"))
         for chunk in chunks
     ):
         return False  # a moderation-rejected chunk is retried, never served from cache
@@ -582,21 +584,6 @@ def _analyze_mimo_video_chunk(chunk_path, chunk):
     }
 
 
-_MIMO_REJECTION_MARKERS = (
-    "request was rejected", "considered high risk", "high risk",
-    "content policy", "cannot process", "无法处理", "内容审核", "违规",
-)
-
-
-def _is_mimo_chunk_usable(content):
-    """A chunk is usable only if MiMo returned real analysis (not empty / a moderation refusal)."""
-    text = str(content or "").strip()
-    if not text:
-        return False
-    low = text.lower()
-    return not any(marker in low for marker in _MIMO_REJECTION_MARKERS)
-
-
 def analyze_video_overview(video_path, work_dir, scenes=None):
     """Use MiMo video understanding over local ffmpeg scene chunks."""
     if not CONFIG["mimo_video_overview"]:
@@ -636,7 +623,7 @@ def analyze_video_overview(video_path, work_dir, scenes=None):
             f"{chunk['start']:.1f}-{chunk['end']:.1f}s"
         )
         chunk_result = _analyze_mimo_video_chunk(chunk_path, chunk)
-        if _is_mimo_chunk_usable(chunk_result["content"]):
+        if is_usable_overview_chunk(chunk_result["content"]):
             chunk_results.append(chunk_result)
             done[cache_key] = chunk_result
             _save_mimo_partial(partial_path, done, video_path, scenes)

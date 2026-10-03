@@ -19,6 +19,7 @@ when no font is available (or drawtext errors) the sheet is still produced UNLAB
 """
 import json
 import math
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -225,6 +226,18 @@ def _tile_pages(frame_paths, columns, out_dir, out_stem, scratch_dir):
     return pages
 
 
+_PATH_SEPARATORS = re.compile(r"[\\/]")
+
+
+def work_dir_relative_pages(pages):
+    """Page images as work_dir-relative POSIX paths ("storyboard/<name>").
+
+    Pages always live in <work_dir>/storyboard/, so only the file name is kept: an absolute
+    path would keep naming the original work_dir after the directory is copied or moved."""
+    # Split on both separators: a sidecar written on Windows may be read on POSIX and back.
+    return ["storyboard/" + _PATH_SEPARATORS.split(str(page))[-1] for page in pages or []]
+
+
 def _render_storyboard(work_dir, tiles, out_stem):
     """Shared render path: optionally burn labels, tile to pages, return (page_paths, labels_burned).
 
@@ -320,7 +333,7 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
             "video_path": str(video_path),
             "fps": float(fps) if fps else None,
             "labels_burned": labels_burned,
-            "page_images": [str(p) for p in pages],
+            "page_images": work_dir_relative_pages(pages),
             "sample_policy": {
                 "max_tiles": max_tiles,
                 "columns": columns,
@@ -426,9 +439,9 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
             "schema_version": 1,
             "timeline": "output",
             "source_video_path": str(source_video_path),
-            "edited_video_path": str(edited_source) if edited_source.exists() else None,
+            "edited_video_path": edited_source.name if edited_source.exists() else None,
             "labels_burned": labels_burned,
-            "page_images": [str(p) for p in pages],
+            "page_images": work_dir_relative_pages(pages),
             "sample_policy": {
                 "max_tiles": max_tiles,
                 "columns": columns,
