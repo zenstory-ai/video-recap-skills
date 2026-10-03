@@ -79,13 +79,7 @@ def test_brief_without_consolidation_uses_raw_asr_and_writes_sidecars(monkeypatc
     monkeypatch.setitem(CONFIG, "asr_chunk_min_chars", 5)
     monkeypatch.setitem(CONFIG, "asr_chunk_max_chars", 12)  # == len(ASR text): max flush
     text = _brief_text(tmp_path, style="纪实复盘")
-    requirements = json.loads(
-        (tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8")
-    )
-    assert requirements == {
-        "schema_version": 1,
-        "style_card_required": False,
-    }
+    assert not (tmp_path / "deslop_qc_requirements.json").exists()
     assert INDEX_HEADING not in text
     for leaked in ["范闲", "监察院", "五竹", "京都"]:  # no hardcoded example entities
         assert leaked not in text

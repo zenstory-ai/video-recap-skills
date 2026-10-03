@@ -77,46 +77,27 @@ def _load_original_subtitles(work_dir: Path | None) -> list[dict[str, Any]]:
     return _normalise_segments(json.loads(path.read_text(encoding="utf-8")), source="original_subtitles")
 
 
-def _style_card_requirement(work_dir: Path | None) -> tuple[bool, str]:
-    """Read the explicit requirements contract; workspaces without one are advisory-only."""
-    if work_dir is None:
-        return False, "legacy_default"
-    path = work_dir / "deslop_qc_requirements.json"
-    if not path.exists():
-        return False, "legacy_default"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return data["style_card_required"], "deslop_qc_requirements.json"
-
-
-def _style_card_issue(work_dir: Path | None, required: bool) -> dict[str, Any] | None:
+def _style_card_issue(work_dir: Path | None) -> dict[str, Any] | None:
+    """A missing or empty style_card.json is always advisory, never a render blocker."""
     if work_dir is None:
         return None
-    severity = "blocker" if required else "advisory"
     path = work_dir / "style_card.json"
     if not path.exists():
         return {
-            "severity": severity,
+            "severity": "advisory",
             "code": "missing_style_card",
             "source": "style_card",
             "index": None,
-            "message": (
-                "style_card.json is required by this expression/packaging run but is missing"
-                if required else
-                "style_card.json is absent; legacy/migration workspaces may continue, but new expression-special runs should author it"
-            ),
+            "message": "style_card.json is absent; legacy/migration workspaces may continue, but new expression-special runs should author it",
         }
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or not data:
         return {
-            "severity": severity,
+            "severity": "advisory",
             "code": "malformed_style_card",
             "source": "style_card",
             "index": None,
-            "message": (
-                "style_card.json is required but empty or not a JSON object"
-                if required else
-                "style_card.json is present but empty or not a JSON object; treat as migration warning unless the run requires it"
-            ),
+            "message": "style_card.json is present but empty or not a JSON object; treat as migration warning",
         }
     return None
 
@@ -139,10 +120,9 @@ def analyze_deslop_qc(narration: list[dict[str, Any]], *, work_dir: str | Path |
     blockers: list[dict[str, Any]] = []
     advisories: list[dict[str, Any]] = []
 
-    required, requirement_source = _style_card_requirement(work_path)
-    style_issue = _style_card_issue(work_path, required)
+    style_issue = _style_card_issue(work_path)
     if style_issue:
-        (blockers if style_issue["severity"] == "blocker" else advisories).append(style_issue)
+        advisories.append(style_issue)
 
     all_text = "\n".join(seg["text"] for seg in segments)
     total_units = max(1, _text_units(all_text))
@@ -189,8 +169,6 @@ def analyze_deslop_qc(narration: list[dict[str, Any]], *, work_dir: str | Path |
         "ok": not blockers,
         "contract": CONTRACT,
         "scanner": "deslop_qc.py",
-        "style_card_required": required,
-        "style_card_requirement_source": requirement_source,
         "blocker_count": len(blockers),
         "advisory_count": len(advisories),
         "blockers": blockers,

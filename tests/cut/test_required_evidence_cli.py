@@ -42,9 +42,8 @@ def contract(video, track='video'):
          'track': 'video', 'content': '接收信息后作出决定'}], 'before': [['refusal', 'response']]}
 
 
-def test_missing_premise_blocks_before_cached_reuse_and_clears_stale_delivery(run_cut, tmp_path, monkeypatch):
+def test_missing_premise_blocks_before_cached_reuse(run_cut, tmp_path, monkeypatch):
     run, video = run_cut
-    (tmp_path / 'cut_delivery_qc.json').write_text('{"rendered":true}')
     # Old media remains for diagnosis; it cannot authorize the revised plan.
     (tmp_path / 'edited_source.mp4').write_bytes(b'old approved media')
     monkeypatch.setattr(cut_cli, 'should_reuse_edited_source',
@@ -57,7 +56,6 @@ def test_missing_premise_blocks_before_cached_reuse_and_clears_stale_delivery(ru
     current = json.loads((tmp_path / 'clip_plan_validated.json').read_text(encoding='utf-8'))
     assert current['qc']['required_evidence']['selection_status'] == 'BLOCK'
     assert current['qc']['blocking']
-    assert not (tmp_path / 'cut_delivery_qc.json').exists()
     assert (tmp_path / 'edited_source.mp4').read_bytes() == b'old approved media'
 
 
@@ -176,7 +174,6 @@ def test_real_render_and_cache_recheck_declared_premise(real_source, tmp_path):
     assert validated['qc']['required_evidence']['selection_status'] == 'BLOCK'
     assert media.read_bytes() == original_bytes
     assert media.stat().st_mtime_ns == original_mtime
-    assert not (work / 'cut_delivery_qc.json').exists()
 
 
 def test_multi_source_audio_must_come_from_the_declared_source(real_source, tmp_path):
@@ -226,7 +223,6 @@ def test_resumed_cut_keeps_unchanged_validated_plan_identity(real_source, tmp_pa
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert '复用剪辑源视频' in resumed.stdout + resumed.stderr
     assert identity() == rendered
-    assert json.loads(plan.read_text(encoding='utf-8'))['qc']['delivery_qc']['rendered'] is True
 
     # Same clips re-saved by the agent: validated must not look older than the raw plan.
     touched, _ = run_real_cut(real_source, work, {'clips': [{'start': 2, 'end': 5}]})

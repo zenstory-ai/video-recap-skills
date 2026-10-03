@@ -28,7 +28,6 @@ from briefing.timeline import (
     _load_cut_output_spans_for_brief,
     _parse_target_seconds,
     _remap_brief_evidence_to_output_timeline,
-    _write_deslop_qc_requirements,
 )
 from timeline_fusion import (
     _build_timeline_fusion,
@@ -397,6 +396,5 @@ def build_agent_brief(
 
     brief_path = Path(work_dir) / "agent_narration_brief.md"
     brief_path.write_text("\n".join(lines), encoding="utf-8")
-    _write_deslop_qc_requirements(work_dir)
     log(f"已写入 Agent 解说写作 brief: {brief_path}")
     return brief_path

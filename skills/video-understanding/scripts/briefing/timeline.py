@@ -308,19 +308,3 @@ def _format_output_clip_list(work_dir):
         )
     out.append("")
     return out if len(out) > 2 else []
-
-
-def _write_deslop_qc_requirements(work_dir):
-    """Write the stable deslop QC contract consumed by deslop_qc.py.
-
-    style_card_required defaults to False (advisory): a missing style_card.json is a
-    warning, not a render-blocking error. A future opt-in run can set it True to make
-    style_card.json a hard requirement — deslop_qc.py reads that field.
-    """
-    payload = {
-        "schema_version": 1,
-        "style_card_required": False,
-    }
-    path = Path(work_dir) / "deslop_qc_requirements.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
