@@ -129,11 +129,6 @@ def test_no_skill_declares_config_it_never_reads(libs):
     clip_padding_source, and read by none of them — including the one skill that
     implements padding.
     """
-    allowed_unread = {
-        # Derived report of a knob this skill implements: FOREIGN_SOURCE_AUDIO selects the
-        # ducking volumes below it, and this exposes which policy ended up in effect.
-        "assemble": {"foreign_source_audio"},
-    }
     offenders = {}
     for name, path in LIBS.items():
         readable = _readable_source(path)
@@ -142,7 +137,6 @@ def test_no_skill_declares_config_it_never_reads(libs):
             for key in libs[name].CONFIG
             if f'"{key}"' not in readable and f"'{key}'" not in readable
         }
-        unread -= allowed_unread.get(name, set())
         if unread:
             offenders[name] = sorted(unread)
     assert not offenders, (

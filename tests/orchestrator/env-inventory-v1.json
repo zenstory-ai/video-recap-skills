@@ -43,9 +43,6 @@
     "CLIP_START_SNAP_MAX_TRIM": {
       "classification": "value"
     },
-    "DUCKING_ORIG_VOLUME": {
-      "classification": "value"
-    },
     "DUCK_BRIDGE_SECONDS": {
       "classification": "value"
     },
@@ -56,12 +53,6 @@
       "classification": "value"
     },
     "EXPORT_JIANYING": {
-      "classification": "value"
-    },
-    "FADE_MS": {
-      "classification": "value"
-    },
-    "FINAL_LIMITER_PEAK": {
       "classification": "value"
     },
     "FINAL_LOUDNORM": {
@@ -133,9 +124,6 @@
     "MIMO_TTS_MODEL": {
       "classification": "value"
     },
-    "MIMO_TTS_STYLE": {
-      "classification": "value"
-    },
     "MIMO_TTS_VOICE": {
       "classification": "value"
     },
@@ -166,28 +154,7 @@
     "MIMO_VIDEO_PROMPT": {
       "classification": "value"
     },
-    "NARRATION_CUMULATIVE_TEMPO_HARD_MAX": {
-      "classification": "value"
-    },
-    "NARRATION_CUMULATIVE_TEMPO_MAX": {
-      "classification": "value"
-    },
-    "NARRATION_DELAY_SECONDS": {
-      "classification": "value"
-    },
-    "NARRATION_MAX_PULL_SECONDS": {
-      "classification": "value"
-    },
-    "NARRATION_RUN_GAP_SECONDS": {
-      "classification": "value"
-    },
     "NARRATION_SPEED": {
-      "classification": "value"
-    },
-    "NARRATION_TIGHTEN": {
-      "classification": "value"
-    },
-    "NARRATION_TIGHT_PAUSE_SECONDS": {
       "classification": "value"
     },
     "OUTPUT_CRF": {
@@ -289,12 +256,6 @@
     "SUBTITLE_FONT_SIZE": {
       "classification": "value"
     },
-    "SUBTITLE_MARGIN_L": {
-      "classification": "value"
-    },
-    "SUBTITLE_MARGIN_R": {
-      "classification": "value"
-    },
     "SUBTITLE_MARGIN_V": {
       "classification": "value"
     },
@@ -340,31 +301,13 @@
     "TARGET_DURATION": {
       "classification": "value"
     },
-    "TARGET_LRA": {
-      "classification": "value"
-    },
     "TARGET_LUFS": {
-      "classification": "value"
-    },
-    "TARGET_TRUE_PEAK": {
       "classification": "value"
     },
     "TTS_PROVIDER": {
       "classification": "value"
     },
     "TTS_RETRIES": {
-      "classification": "value"
-    },
-    "TTS_SEGMENT_NORMALIZE": {
-      "classification": "value"
-    },
-    "TTS_SEGMENT_PEAK_LIMIT": {
-      "classification": "value"
-    },
-    "TTS_SEGMENT_TARGET_RMS_DBFS": {
-      "classification": "value"
-    },
-    "TTS_SEGMENT_TEMPO_MAX": {
       "classification": "value"
     },
     "TTS_TIMEOUT": {

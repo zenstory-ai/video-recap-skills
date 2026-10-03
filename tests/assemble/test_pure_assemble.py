@@ -273,7 +273,7 @@ def test_build_video_clips_prefers_newer_validated_cut_plan(
     ]
 
 
-def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_path):
+def test_build_video_clips_rejects_stale_validated_cut_plan(monkeypatch, tmp_path):
     import os
 
     original = tmp_path / "original.mp4"
@@ -292,18 +292,28 @@ def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_pat
     os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
     monkeypatch.setitem(CONFIG, "source_video", str(original))
 
-    clips = _build_video_clips(edited, tmp_path, duration_s=5.0)
+    # edited_source.mp4 was rendered from the validated plan, so the newer raw plan does not
+    # describe the picture; provenance must fail rather than guess from either file.
+    with pytest.raises(ValueError, match="clip_plan_validated.json 已过期"):
+        _build_video_clips(edited, tmp_path, duration_s=5.0)
 
-    assert clips == [
-        {
-            "source_id": None,
-            "source_path": str(original),
-            "source_start": 40.0,
-            "source_end": 45.0,
-            "timeline_start": 0.0,
-            "timeline_end": 5.0,
-        },
-    ]
+
+def test_assemble_video_rejects_stale_cut_plan_before_render(monkeypatch, tmp_path):
+    import os
+
+    (tmp_path / "clip_plan.json").write_text('{"clips":[]}', encoding="utf-8")
+    (tmp_path / "clip_plan_validated.json").write_text('{"clips":[]}', encoding="utf-8")
+    os.utime(tmp_path / "clip_plan_validated.json", (1_000, 1_000))
+    os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
+    monkeypatch.setitem(CONFIG, "bgm_path", "")
+
+    def no_probe(*_args, **_kwargs):
+        raise AssertionError("render started despite a stale cut plan")
+
+    monkeypatch.setattr(assemble.media, "_probe_canvas", no_probe)
+    with pytest.raises(ValueError, match="clip_plan_validated.json 已过期"):
+        assemble_video(tmp_path / "edited_source.mp4", [], tmp_path, tmp_path / "output.mp4",
+                       audio_mode="source-mix")
 
 
 def test_assemble_main_creates_missing_output_dir(monkeypatch, tmp_path):
@@ -799,25 +809,6 @@ def test_generate_ass_escapes_text_and_writes_style(tmp_path):
     assert _escape_ass_text("{x}\\y") == r"\{x\}\\y"
 
 
-def test_build_timed_narration_clamps_delay_to_slot(monkeypatch, tmp_path):
-    wav = _write_silent_wav(tmp_path / "narr.wav", 0.8)
-    segment = tts_segment(
-        index=0,
-        start=0.0,
-        end=1.0,
-        narration="短槽位解说。",
-        audio_path=str(wav),
-        audio_duration=0.8,
-    )
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 1.5)
-    monkeypatch.setitem(CONFIG, "narration_tail_pad_seconds", 0.1)
-
-    narration_audio._build_timed_narration([segment], tmp_path / "out.wav", 2.0, tmp_path)
-
-    assert segment["actual_place_start"] == pytest.approx(0.1, abs=0.02)
-    assert segment["actual_place_end"] == pytest.approx(0.9, abs=0.02)
-
-
 def test_narration_start_has_no_hidden_default_delay(monkeypatch, tmp_path):
     wav = _write_silent_wav(tmp_path / "narr.wav", 0.5)
     segment = tts_segment(
@@ -828,8 +819,6 @@ def test_narration_start_has_no_hidden_default_delay(monkeypatch, tmp_path):
         audio_path=str(wav),
         audio_duration=0.5,
     )
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
-    monkeypatch.setitem(CONFIG, "narration_tail_pad_seconds", 0.1)
 
     narration_audio._build_timed_narration([segment], tmp_path / "out.wav", 8.0, tmp_path)
 
@@ -1675,7 +1664,6 @@ def test_foreign_source_audio_near_mutes_original_under_narration(monkeypatch):
     probed = _load_lib_with_env(
         monkeypatch, FOREIGN_SOURCE_AUDIO="1", SPEECH_DUCKING_VOLUME=None, ZONE_DUCKING_VOLUME=None
     )
-    assert probed.CONFIG["foreign_source_audio"] is True
     assert probed.CONFIG["speech_ducking_volume"] == 0.05  # under-narration original near-silent
     assert probed.CONFIG["zone_ducking_volume"] == 0.05
     assert probed.CONFIG["idle_orig_volume"] == 1.0  # gap/original blocks stay full volume
@@ -1778,9 +1766,6 @@ def test_p0_build_timed_narration_propagates_no_safe_fit_metadata(
             },
         )
 
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
-    monkeypatch.setitem(CONFIG, "narration_tail_pad_seconds", 0.0)
-    monkeypatch.setitem(CONFIG, "narration_tighten", False)
     monkeypatch.setattr(narration_audio, "_adjust_tts_speed", fake_adjust)
     seg = tts_segment(
         index=0,
@@ -1901,9 +1886,6 @@ def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
             },
         )
 
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
-    monkeypatch.setitem(CONFIG, "narration_tail_pad_seconds", 0.0)
-    monkeypatch.setitem(CONFIG, "narration_tighten", False)
     monkeypatch.setattr(narration_audio, "_adjust_tts_speed", fake_adjust)
     seg = tts_segment(
         index=0,

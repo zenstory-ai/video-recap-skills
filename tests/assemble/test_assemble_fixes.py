@@ -144,10 +144,8 @@ def test_partial_skip_does_not_log_all_skipped_warning(monkeypatch, tmp_path):
 
 def test_run_tightening_packs_within_run_and_respects_boundary(monkeypatch, tmp_path):
     """Within a narration run, beats pack to a fixed tight gap after the previous beat's ACTUAL
-    audio end (no slot-centering delay) so the spoken gap stays ≤ tight_pause; a deliberate
+    audio end (not the slot slack) so the spoken gap stays ≤ tight_pause; a deliberate
     authored gap > run_gap starts a new run anchored at its authored time. Anti-stutter ≤1s."""
-    monkeypatch.setitem(CONFIG, "narration_tighten", True)
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
     monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
     monkeypatch.setitem(CONFIG, "narration_run_gap_seconds", 1.6)
     monkeypatch.setitem(CONFIG, "narration_max_pull_seconds", 100.0)  # isolate tight-packing from the drift cap
@@ -172,26 +170,9 @@ def test_run_tightening_packs_within_run_and_respects_boundary(monkeypatch, tmp_
     assert segments[3]["actual_place_start"] >= 14.9        # run boundary respects the deliberate pause
 
 
-def test_run_tightening_off_keeps_slot_placement(monkeypatch, tmp_path):
-    """With narration_tighten off, beats keep the slot-anchored placement (regression guard)."""
-    monkeypatch.setitem(CONFIG, "narration_tighten", False)
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
-    monkeypatch.setitem(CONFIG, "fade_ms", 0)
-    w = _write_wav(tmp_path / "a.wav", duration=0.8)
-    segments = [
-        tts_segment(index=0, start=0.0, end=4.0, narration="句0。", audio_path=str(w), audio_duration=0.8),
-        tts_segment(index=1, start=4.0, end=8.0, narration="句1。", audio_path=str(w), audio_duration=0.8),
-    ]
-    narration_audio._build_timed_narration(segments, tmp_path / "out.wav", 30.0, tmp_path)
-    # beat 1 stays anchored near its authored 4.0s slot, not packed right after beat 0
-    assert segments[1]["actual_place_start"] >= 3.9
-
-
 def test_run_tightening_drift_cap_keeps_narration_near_picture(monkeypatch, tmp_path):
     """The drift cap stops a long contiguous run from packing entirely to the front: no beat plays
     more than narration_max_pull_seconds before its authored time, so narration stays near picture."""
-    monkeypatch.setitem(CONFIG, "narration_tighten", True)
-    monkeypatch.setitem(CONFIG, "narration_delay_seconds", 0.0)
     monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
     monkeypatch.setitem(CONFIG, "narration_run_gap_seconds", 1.6)
     monkeypatch.setitem(CONFIG, "narration_max_pull_seconds", 2.0)

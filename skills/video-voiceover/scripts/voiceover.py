@@ -7,7 +7,6 @@ import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from threading import Lock
 
 from approved_text_policy import (
     PRESERVE_APPROVED_TEXT_POLICY,
@@ -36,14 +35,6 @@ from tts_audio import _maybe_normalize_tts_wav
 SUPPORTED_TTS_ENGINES = {"mimo-tts", "fish-audio", "index-tts"}
 SEGMENT_AUDIO_SCHEMA_VERSION = 1
 VOICE_REFERENCE_PREP_VERSION = 1
-_VOICE_REFERENCE_LOCK = Lock()
-# Process-wide voice-reference state; prepared bytes are invocation-scoped.
-_VOICE_REFERENCE_STATE_KEYS = (
-    "voice_ref_b64",
-    "voice_ref_snapshot_path",
-    "voice_ref_snapshot_signature",
-    "voice_ref_snapshot_locked",
-)
 
 
 def authored_text_policy():
@@ -120,11 +111,12 @@ def _clean_narration_text(text):
     return re.sub(r'\s+', ' ', text).strip()
 
 
-def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None):
+def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice_ref_b64=None):
     """合成单个 TTS 段（线程安全），支持 resume 跳过已有文件。
 
     `prepared` is the `_prepare_tts_segment` tuple of a segment synthesize_tts already probed
-    as a cache miss; passing it skips a second sidecar read + settings resolution."""
+    as a cache miss; passing it skips a second sidecar read + settings resolution.
+    `voice_ref_b64` is the reference audio synthesize_tts transcoded once for this run."""
     if prepared is None:
         prepared = _prepare_tts_segment(i, seg, narration, tts_dir, engine)
         if prepared is None:
@@ -135,7 +127,8 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None):
     text, output_wav, rate, pitch, cache_inputs = prepared
 
     provider_receipt = _run_tts_engine(
-        engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion")
+        engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"),
+        voice_ref_b64=voice_ref_b64,
     )
 
     dur = get_video_duration(output_wav)
@@ -162,7 +155,8 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None):
             truncated = True
             truncate_reason = "sentence_boundary"
             provider_receipt = _run_tts_engine(
-                engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion")
+                engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"),
+                voice_ref_b64=voice_ref_b64,
             )
             dur = get_video_duration(output_wav)
 
@@ -259,15 +253,8 @@ def _build_tts_meta(segments, engine, narration_name, failures):
     }
 
 
-def _reset_voice_reference_state():
-    """Drop prepared reference bytes so a reused process re-hashes the live source."""
-    for key in _VOICE_REFERENCE_STATE_KEYS:
-        CONFIG.pop(key, None)
-
-
 def synthesize_tts(narration, work_dir):
     """合成解说音频（并行）。Returns (segments, engine, failures)."""
-    _reset_voice_reference_state()
     voice_ref = CONFIG["voice_ref"]
     tts_dir = work_dir / "tts_segments"
     tts_dir.mkdir(exist_ok=True)
@@ -305,34 +292,40 @@ def synthesize_tts(narration, work_dir):
 
     engine = resolve_tts_engine()
 
-    if voice_ref:
-        _cache_prepared_voice_reference(voice_ref)
-        CONFIG["voice_ref_snapshot_locked"] = True
+    # Transcode the reference once per run, and only now: a fully cached rerun never runs
+    # ffmpeg. The misses' cache keys hold the identity probed above, so a reference edited
+    # meanwhile would label new audio with the old identity; fail instead.
+    voice_ref_b64 = None
+    if voice_ref and engine == "mimo-tts":
+        probed_identity = misses[0][2][4]["settings"]["voice_ref_identity"]  # [4] = cache inputs
+        voice_ref_b64 = _prepare_voice_reference(voice_ref)
+        if _voice_reference_signature(voice_ref) != probed_identity:
+            raise RuntimeError(f"参考音频在配音期间被修改: {voice_ref}；请重新运行")
 
     log(f"TTS 引擎: {engine}")
 
     failures = []
     max_workers = min(len(misses), CONFIG["tts_workers"])
 
-    try:
-        with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {
-                executor.submit(_synthesize_segment, i, seg, narration, tts_dir, engine, prepared): i
-                for i, seg, prepared in misses
-            }
-            for future in as_completed(futures):
-                try:
-                    result = future.result()
-                except Exception as e:
-                    i = futures[future]
-                    failures.append(_tts_failure_record(i, narration[i], e))
-                    log(f"  TTS 段 {i+1} 失败: {e}")
-                    continue
-                if result:
-                    segments.append(result)
-                    log(f"  段 {result['index']+1}: {result['audio_duration']:.1f}s - {result['narration'][:25]}...")
-    finally:
-        CONFIG.pop("voice_ref_snapshot_locked", None)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(
+                _synthesize_segment, i, seg, narration, tts_dir, engine, prepared,
+                voice_ref_b64=voice_ref_b64,
+            ): i
+            for i, seg, prepared in misses
+        }
+        for future in as_completed(futures):
+            try:
+                result = future.result()
+            except Exception as e:
+                i = futures[future]
+                failures.append(_tts_failure_record(i, narration[i], e))
+                log(f"  TTS 段 {i+1} 失败: {e}")
+                continue
+            if result:
+                segments.append(result)
+                log(f"  段 {result['index']+1}: {result['audio_duration']:.1f}s - {result['narration'][:25]}...")
 
     segments.sort(key=lambda x: x["index"])
     approved_text_failures = [
@@ -372,7 +365,8 @@ def synthesize_tts(narration, work_dir):
     return segments, engine, failures
 
 
-def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=None):
+def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=None,
+                    voice_ref_b64=None):
     """Run one TTS engine with retry and remove partial files after failures.
 
     `engine` comes from resolve_tts_engine; index-tts controls were already forced to the
@@ -385,7 +379,8 @@ def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=
             _cleanup_partial_tts_outputs(output_wav)
             receipt = None
             if engine == "mimo-tts":
-                _tts_mimo(text, output_wav, rate=rate, pitch=pitch, emotion=emotion)
+                _tts_mimo(text, output_wav, rate=rate, pitch=pitch, emotion=emotion,
+                          voice_ref_b64=voice_ref_b64)
             elif engine == "fish-audio":
                 synthesize_fish_audio(text, output_wav, rate=rate)
             else:
@@ -582,7 +577,7 @@ def tts_settings_payload(engine):
     if voice_ref and engine == "mimo-tts":
         ref_path = Path(voice_ref).expanduser()
         settings.pop("mimo_tts_voice", None)  # ignored by the voiceclone API
-        settings["voice_ref_identity"] = _voice_reference_identity(ref_path)
+        settings["voice_ref_identity"] = _voice_reference_signature(ref_path)
         settings["voice_ref_preparation"] = (
             f"pcm_s16le:24000hz:mono:30s:v{VOICE_REFERENCE_PREP_VERSION}"
         )
@@ -629,52 +624,15 @@ def _voice_reference_signature(ref_path):
     return {"path": str(ref), **file_identity(ref)}
 
 
-def _voice_reference_identity(ref_path):
-    """Identity for cache settings: the locked snapshot's while a run is in flight, else live."""
-    resolved = str(Path(ref_path).expanduser().resolve())
-    if (
-        CONFIG.get("voice_ref_snapshot_locked")
-        and CONFIG.get("voice_ref_b64")
-        and CONFIG.get("voice_ref_snapshot_path") == resolved
-        and CONFIG.get("voice_ref_snapshot_signature")
-    ):
-        return CONFIG["voice_ref_snapshot_signature"]
-    return _voice_reference_signature(ref_path)
-
-
-def _cache_prepared_voice_reference(ref_path):
-    with _VOICE_REFERENCE_LOCK:
-        ref = Path(ref_path).expanduser().resolve()
-        resolved = str(ref)
-        if (
-            CONFIG.get("voice_ref_snapshot_locked")
-            and CONFIG.get("voice_ref_b64")
-            and CONFIG.get("voice_ref_snapshot_path") == resolved
-        ):
-            return CONFIG["voice_ref_b64"]
-        if not ref.is_file():
-            raise FileNotFoundError(f"参考音频不存在或不是文件: {ref}")
-        signature = _voice_reference_signature(ref)
-        if (
-            CONFIG.get("voice_ref_b64")
-            and CONFIG.get("voice_ref_snapshot_path") == resolved
-            and CONFIG.get("voice_ref_snapshot_signature") == signature
-        ):
-            return CONFIG["voice_ref_b64"]
-        encoded = _prepare_voice_reference(ref)
-        CONFIG["voice_ref_b64"] = encoded
-        CONFIG["voice_ref_snapshot_path"] = resolved
-        CONFIG["voice_ref_snapshot_signature"] = signature
-        return encoded
-
-
-def _tts_mimo(text, output_path, rate="+0%", pitch="+0Hz", emotion=None):
+def _tts_mimo(text, output_path, rate="+0%", pitch="+0Hz", emotion=None, voice_ref_b64=None):
     """使用 Xiaomi MiMo-V2.5-TTS 合成，按需用参考音频克隆音色。
 
     MiMo-v2.5-tts 是 instruct-TTS：user 消息里的自然语言指令控制整句的情绪/语气/语速。
-    每段 narration 的 `emotion` 标签即写进该指令，让解说有起伏、不机械。"""
+    每段 narration 的 `emotion` 标签即写进该指令，让解说有起伏、不机械。
+    `voice_ref_b64` is the run's prepared reference; a direct call transcodes the live source."""
     voice_ref = CONFIG["voice_ref"]
-    voice_ref_b64 = _cache_prepared_voice_reference(voice_ref) if voice_ref else None
+    if voice_ref and voice_ref_b64 is None:
+        voice_ref_b64 = _prepare_voice_reference(voice_ref)
     payload = {
         "model": "mimo-v2.5-tts-voiceclone" if voice_ref else CONFIG["mimo_tts_model"],
         "messages": [
@@ -736,10 +694,8 @@ def main():
         ap.error("--mimo-voice and --voice-ref are mutually exclusive")
     if args.mimo_voice and args.tts_provider in {"fish-audio", "index-tts"}:
         ap.error("--mimo-voice is only supported by the MiMo TTS provider")
-    # A local --voice-ref with fish-audio/index-tts is rejected by synthesize_tts.
-    # Voice-reference normalization is intentionally lazy: a fully cached rerun should not
-    # invoke ffmpeg. _tts_mimo uses a process-wide lock so a fresh parallel run still converts
-    # the reference exactly once.
+    # A local --voice-ref with fish-audio/index-tts is rejected by synthesize_tts, which also
+    # transcodes the reference lazily: once per run, and never for a fully cached rerun.
     if args.allow_partial_tts:
         CONFIG["allow_partial_tts"] = True
     if args.narration:

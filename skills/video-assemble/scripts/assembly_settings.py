@@ -82,8 +82,6 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
             narration_binding.get("tempo_policy") if narration_binding else None
         )
         settings["narration_timing"] = {
-            "delay_seconds": 0.0 if explicit_mix else CONFIG["narration_delay_seconds"],
-            "tail_pad_seconds": 0.0 if explicit_mix else CONFIG["narration_tail_pad_seconds"],
             "fade_ms": 0 if explicit_mix else CONFIG["fade_ms"],
             "narration_speed": (
                 1.0 if explicit_mix else

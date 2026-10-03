@@ -48,7 +48,14 @@ def test_plan_clip_spans_from_validated_plan(tmp_path):
     assert spans[1]["source_start"] == 50.0 and spans[1]["output_end"] == 16.0
 
 
-def test_plan_clip_spans_ignore_stale_validated_plan(tmp_path):
+def test_plan_clip_spans_none_in_full_mode_even_with_raw_plan(tmp_path):
+    # Without a validated plan there is no cut render; a stray raw plan must not remap.
+    (tmp_path / "clip_plan.json").write_text(
+        json.dumps({"clips": [{"start": 40.0, "end": 45.0}]}), encoding="utf-8")
+    assert source_subtitles._plan_clip_spans(tmp_path) is None
+
+
+def test_plan_clip_spans_reject_stale_validated_plan(tmp_path):
     import os
 
     raw = {"clips": [{"start": 40.0, "end": 45.0}]}
@@ -60,15 +67,8 @@ def test_plan_clip_spans_ignore_stale_validated_plan(tmp_path):
     os.utime(tmp_path / "clip_plan_validated.json", (1_000, 1_000))
     os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
 
-    spans = source_subtitles._plan_clip_spans(tmp_path)
-
-    assert spans == [{
-        "source_start": 40.0,
-        "source_end": 45.0,
-        "output_start": 0.0,
-        "output_end": 5.0,
-        "entry": {"start": 40.0, "end": 45.0},
-    }]
+    with pytest.raises(ValueError, match="clip_plan_validated.json 已过期"):
+        source_subtitles._plan_clip_spans(tmp_path)
 
 
 def test_map_asr_identity_in_full_mode():

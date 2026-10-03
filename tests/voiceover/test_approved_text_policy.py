@@ -162,7 +162,7 @@ def test_strict_provider_failure_cannot_be_downgraded_to_partial(monkeypatch, tm
         {"start": 3.0, "end": 6.0, "narration": "供应商失败段。"},
     ]
 
-    def fake_segment(index, seg, *_args):
+    def fake_segment(index, seg, *_args, **_kwargs):
         if index == 1:
             raise RuntimeError("offline provider failed")
         return {"index": index, "narration": seg["narration"], "audio_duration": 0.5}

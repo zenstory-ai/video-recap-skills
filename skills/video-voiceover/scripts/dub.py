@@ -381,7 +381,7 @@ def _ref_window(duration, ref_start, ref_dur):
     return start, max(2.0, min(ref_dur, duration - start))
 
 
-def stage_prepare(video, work, asr_window, ref_start, ref_dur):
+def stage_prepare(video, work, asr_window=6.0, ref_start=2.0, ref_dur=10.0):
     work.mkdir(parents=True, exist_ok=True)
     segs_dir = work / "dub_asr"
     segs_dir.mkdir(exist_ok=True)
@@ -436,7 +436,7 @@ def _brief_md(windows, duration):
     return "\n".join(lines) + "\n"
 
 
-def stage_render(video, work, ref_start, ref_dur):
+def stage_render(video, work, ref_start=2.0, ref_dur=10.0):
     transcript = json.loads((work / "dub_transcript.json").read_text(encoding="utf-8"))
     duration = transcript["duration"]
     script = json.loads((work / "dub_script.json").read_text(encoding="utf-8"))
@@ -501,15 +501,12 @@ def main():
                     help="prepare writes the ASR brief; render lints dub_script.json before voiceclone")
     ap.add_argument("--video", required=True, help="source video")
     ap.add_argument("--work-dir", required=True, help="work directory containing dub artifacts")
-    ap.add_argument("--asr-window", type=float, default=6.0)
-    ap.add_argument("--ref-start", type=float, default=2.0)
-    ap.add_argument("--ref-dur", type=float, default=10.0)
     args = ap.parse_args()
     video, work = Path(args.video), Path(args.work_dir)
     if args.stage == "prepare":
-        stage_prepare(video, work, args.asr_window, args.ref_start, args.ref_dur)
+        stage_prepare(video, work)
     else:
-        stage_render(video, work, args.ref_start, args.ref_dur)
+        stage_render(video, work)
 
 
 if __name__ == "__main__":

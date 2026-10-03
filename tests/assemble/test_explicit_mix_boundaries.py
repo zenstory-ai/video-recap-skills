@@ -58,8 +58,7 @@ def adopted_case(tmp_path, monkeypatch):
         'subtitle_original_in_gaps': False, 'export_jianying': False,
         'output_max_height': 0, 'force_video_reencode': False,
         # Hostile defaults must not become audio instructions in the explicit branch.
-        'narration_speed': 1.15, 'narration_tighten': True,
-        'narration_delay_seconds': .4, 'narration_tail_pad_seconds': .3,
+        'narration_speed': 1.15,
         'fade_ms': 50, 'final_loudnorm': True,
         'idle_orig_volume': 1, 'speech_ducking_volume': .8,
         'ducking_narr_weight': .1, 'bgm_path': '/missing/not-adopted-score.wav',

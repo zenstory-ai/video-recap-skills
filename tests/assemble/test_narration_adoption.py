@@ -268,9 +268,6 @@ def render_media(tmp_path, monkeypatch):
         pytest.skip("ffmpeg/ffprobe required for full-chain narration adoption")
     for key, value in {
         "narration_speed": 1.15,
-        "narration_tighten": False,
-        "narration_delay_seconds": 0.0,
-        "narration_tail_pad_seconds": 0.0,
         "tts_segment_tempo_max": 1.2,
         "narration_cumulative_tempo_max": 1.3,
         "narration_cumulative_tempo_hard_max": 1.4,
