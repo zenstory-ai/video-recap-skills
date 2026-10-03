@@ -383,7 +383,7 @@ Make a recap of /path/to/video.mp4 and export an editable JianYing draft.
 Detect the source subtitle band in /path/to/video.mp4 and let me confirm the preview before rendering recap subtitles in the same region.
 ```
 
-The preview is stored under `.subtitle_measure/`; it currently requires square-pixel video and bottom-aligned source subtitles.
+The preview is stored under `.subtitle_measure/`; it currently requires square or near-square pixels (SAR within 2% of 1:1) and bottom-aligned source subtitles.
 
 **Voice with an authorised reference voice:**
 

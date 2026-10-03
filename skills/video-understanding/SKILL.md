@@ -61,6 +61,7 @@ python3 scripts/understand.py <video> --work-dir <work_dir> [选项]
 | `--mimo-video-overview` | 关 | 按场景块运行 MiMo 视频概览，并作为逐场景主描述 |
 | `--force` | 关 | 忽略缓存，全部重算 |
 | `--brief-only` | 关 | 只用现有产物重建 `agent_narration_brief.md`，不抽帧、不调 API |
+| `--edited-storyboard-only` | 关 | 只按 `clip_plan_validated.json` 写剪后时间线 `storyboard/edited_storyboard.*`，并在已有的 `agent_narration_brief.md` 顶部加 storyboard 指引；多源计划（带 `sources`）从各来源 `source_work_dir` 的 `frames/` 按其 `frames_manifest.json` 的 fps 取帧，tile 标 `S1`/`S2`…；不抽帧、不调 API，故事板生成失败只记日志。与 `--brief-only` 互斥 |
 | `--consolidate` / `--no-consolidate` | 开 | 生成全局故事索引 `understanding_index.*` |
 | `--consolidate-asr` | 关 | 另外清洗 ASR 文本，写 `asr_clean.json` |
 

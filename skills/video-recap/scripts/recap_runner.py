@@ -253,6 +253,20 @@ def _rebuild_understanding_brief(source_record, source_work_dir, args):
     )
 
 
+def _write_multi_source_edited_storyboard(work_dir, video):
+    """Cut pass 2 for several sources: the same OUTPUT-timeline storyboard a single-source
+    --brief-only rebuild produces, drawn from each source's frames, with its pointer added to
+    the multi-source brief. Advisory like every storyboard: a failure warns and the pause
+    still happens."""
+    try:
+        _run(
+            "video-understanding", "understand.py", str(video),
+            "--work-dir", str(work_dir), "--edited-storyboard-only",
+        )
+    except SystemExit as exc:
+        print(f"[video-recap] ⚠ 剪后故事板未生成（建议性，继续）: {exc}", flush=True)
+
+
 def _reject_stale(mismatches, label):
     if mismatches:
         details = "\n  - ".join(mismatches)
@@ -391,6 +405,7 @@ def _run_multi_cut(videos, work_dir, args):
             _write_multi_source_output_brief(
                 work_dir, source_records, work_dir / "clip_plan_validated.json"
             )
+            _write_multi_source_edited_storyboard(work_dir, videos[0])
             _write_phase_ledger(work_dir, cp_identity)
             _pause_for_agent(
                 work_dir,
@@ -501,7 +516,7 @@ def main():
         ap.error("多视频 cut 暂不支持全局 subtitle Y 坐标；各源字幕带可能不同")
     if args.subtitle_y_top is not None:
         canvas_height = _probe_display_height_or_raise(
-            videos[0], require_square_pixels=True
+            videos[0], require_near_square_pixels=True
         )
         if args.subtitle_y_bot > canvas_height:
             ap.error(

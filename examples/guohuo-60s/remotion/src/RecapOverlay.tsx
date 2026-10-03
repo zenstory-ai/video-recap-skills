@@ -7,10 +7,10 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from 'remotion';
-import captions from './captions.json';
 
-type Caption = {start: number; end: number; text: string};
-type FlowerCue = {
+export type Caption = {start: number; end: number; text: string};
+export type TimeWindow = {start: number; end: number};
+export type FlowerCue = {
   start: number;
   end: number;
   text: string;
@@ -18,17 +18,23 @@ type FlowerCue = {
   top: number;
   align?: 'left' | 'right';
 };
+// Everything that depends on the locked master's timing lives in overlay.json /
+// captions.json (passed in as props), so a re-timed run changes data, not code.
+export type OverlayConfig = {
+  fps: number;
+  width: number;
+  height: number;
+  durationInFrames: number;
+  title: {text: string; windows: TimeWindow[]};
+  flowerCues: FlowerCue[];
+};
+export type RecapOverlayProps = {
+  captions: Caption[];
+  overlay: OverlayConfig;
+};
 
-const cues = captions as Caption[];
 const captionJoinGap = 0.12;
 const captionExitSeconds = 0.22;
-
-const flowerCues: FlowerCue[] = [
-  {start: 2.82, end: 4.08, text: '旧情难藏', left: 1420, top: 48},
-  {start: 23.35, end: 25.7, text: '克制失守', left: 160, top: 690},
-  {start: 38.2, end: 40.32, text: '本能不会说谎', left: 1510, top: 610},
-  {start: 42.78, end: 45.2, text: '重逢已迟', left: 120, top: 680},
-];
 
 const clamp = {
   extrapolateLeft: 'clamp' as const,
@@ -42,10 +48,14 @@ const windowOpacity = (time: number, start: number, end: number) => {
   );
 };
 
-const TitleMark: React.FC<{time: number}> = ({time}) => {
-  const first = windowOpacity(time, 0.18, 9.75);
-  const reprise = windowOpacity(time, 42.2, 50.3);
-  const opacity = Math.max(first, reprise);
+const TitleMark: React.FC<{time: number; title: OverlayConfig['title']}> = ({
+  time,
+  title,
+}) => {
+  const opacity = Math.max(
+    0,
+    ...title.windows.map((window) => windowOpacity(time, window.start, window.end)),
+  );
   if (opacity <= 0) return null;
 
   const rise = interpolate(opacity, [0, 1], [10, 0], clamp);
@@ -76,7 +86,7 @@ const TitleMark: React.FC<{time: number}> = ({time}) => {
           whiteSpace: 'nowrap',
         }}
       >
-        这一秒过火
+        {title.text}
       </div>
     </div>
   );
@@ -262,7 +272,7 @@ const SubtitleStrip: React.FC<{
   );
 };
 
-export const RecapOverlay: React.FC = () => {
+export const RecapOverlay: React.FC<RecapOverlayProps> = ({captions: cues, overlay}) => {
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const time = frame / fps;
@@ -306,11 +316,11 @@ export const RecapOverlay: React.FC = () => {
     }
     chainEnd = cues[index].end;
   }
-  const flower = flowerCues.find((item) => time >= item.start && time < item.end);
+  const flower = overlay.flowerCues.find((item) => time >= item.start && time < item.end);
 
   return (
     <AbsoluteFill style={{backgroundColor: 'transparent', pointerEvents: 'none'}}>
-      <TitleMark time={time} />
+      <TitleMark time={time} title={overlay.title} />
       {flower ? <FlowerText cue={flower} frame={frame} fps={fps} /> : null}
       {cue ? (
         <SubtitleStrip

@@ -1,0 +1,49 @@
+{
+  "fps": 25,
+  "width": 1920,
+  "height": 1080,
+  "durationInFrames": 1474,
+  "title": {
+    "text": "这一秒过火",
+    "windows": [
+      {
+        "start": 0.18,
+        "end": 9.75
+      },
+      {
+        "start": 42.2,
+        "end": 50.3
+      }
+    ]
+  },
+  "flowerCues": [
+    {
+      "start": 2.82,
+      "end": 4.08,
+      "text": "旧情难藏",
+      "left": 1420,
+      "top": 48
+    },
+    {
+      "start": 23.35,
+      "end": 25.7,
+      "text": "克制失守",
+      "left": 160,
+      "top": 690
+    },
+    {
+      "start": 38.2,
+      "end": 40.32,
+      "text": "本能不会说谎",
+      "left": 1510,
+      "top": 610
+    },
+    {
+      "start": 42.78,
+      "end": 45.2,
+      "text": "重逢已迟",
+      "left": 120,
+      "top": 680
+    }
+  ]
+}

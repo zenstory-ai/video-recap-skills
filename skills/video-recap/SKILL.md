@@ -132,6 +132,8 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --target-duration 10m --work-dir work_dir_multi_ep
 ```
 
+第二阶段与单视频一样生成剪后故事板 `storyboard/edited_storyboard.*`，取自各来源 `sources/<source_id>/frames/`，brief 顶部列出 `S1`/`S2`… 对应的 `source_id`；素材库恢复的来源没有抽帧，这些片段不出现在故事板里，用 `inspect clip-map` 核对。
+
 可选文件系统素材库：
 
 ```bash

@@ -518,6 +518,45 @@ def test_source_subtitle_mask_can_follow_custom_band_and_narration_windows(monke
     assert "between(t,5.000,6.000)" in filt
 
 
+@pytest.mark.parametrize(
+    ("stream", "geometry"),
+    [
+        # Near-square and upright: display rows ARE frame rows; only the canvas width moves.
+        ({"width": 1280, "height": 720, "sample_aspect_ratio": "64:63"}, "y=606:w=iw:h=58"),
+        # Unspecified SAR reads as square, exactly like the canvas probe.
+        ({"width": 1280, "height": 720, "sample_aspect_ratio": "0:1"}, "y=606:w=iw:h=58"),
+        # Rotated near-square: the canvas stretches the stored width (now the rows) by the SAR,
+        # so the measured display rows map back onto the decoded 1280-row frame.
+        (
+            {"width": 1280, "height": 720, "sample_aspect_ratio": "64:63",
+             "side_data_list": [{"rotation": 90}]},
+            "y=597:w=iw:h=57",
+        ),
+    ],
+    ids=("near-square", "unspecified", "rotated-near-square"),
+)
+def test_measured_band_accepts_near_square_pixels_and_masks_frame_rows(
+    monkeypatch, stream, geometry
+):
+    monkeypatch.setitem(CONFIG, "burn_subtitles", True)
+    monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
+    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
+    monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
+    monkeypatch.setitem(CONFIG, "subtitle_y_bot", 660)
+    monkeypatch.setitem(CONFIG, "subtitle_mask_padding", 4)
+    monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 0.6)
+    monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "all")
+    canvas = media._canvas_from_stream({"r_frame_rate": "25/1", **stream})
+
+    filt = _source_subtitle_mask_filter(canvas, Path.cwd(), [], 4.0)
+    style = visual_render._style_for_measured_subtitle_band(
+        visual_render._subtitle_style_config(canvas), canvas
+    )
+
+    assert geometry in filt
+    assert style["margin_v"] == canvas["height"] - 660
+
+
 @pytest.mark.parametrize("configured_opacity", [0.0, 0.6])
 def test_source_subtitle_mask_opaquely_covers_byo_gap_subtitles(
     monkeypatch, tmp_path, configured_opacity
@@ -611,7 +650,7 @@ def test_generate_ass_places_subtitle_bottom_on_measured_y(monkeypatch, tmp_path
         (
             {"subtitle_y_top": 300, "subtitle_y_bot": 340},
             {"width": 720, "height": 1280, "sample_aspect_ratio": "2:1"},
-            "SAR 1:1",
+            "近方形像素",
         ),
     ],
     ids=("band-outside-canvas", "non-bottom-alignment", "non-square-pixels"),

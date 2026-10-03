@@ -83,7 +83,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 导出只接受 `schema_version: 2` 的 `timeline.json`，只映射视频、音频、字幕和图片叠层（`scale` / `position`）；变速、转场、蒙版、富文本、特效轨等手写扩展字段会被明确拒绝。
 - 剪映草稿引用未烧录的源视频，因此原片硬字幕仍会保留，必要时在剪映内另行遮罩。
 - 字幕外观可用 `SUBTITLE_FONT_SIZE`、`SUBTITLE_MARGIN_V`、`SUBTITLE_MAX_CHARS` 等控制。
-- `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为半开 `[top, bot)`；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。
+- `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为显示画布上的半开 `[top, bot)`，只接受方形或近方形像素（SAR 与 1:1 相差不超过 2%，未标注的 `0:1` 按方形）；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。
 - 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `DUCK_BRIDGE_SECONDS`、`ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM` 与 `TARGET_LUFS`。
 - 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
 - 烧录字幕需要带 `subtitles` / libass 的 ffmpeg，合成阶段在渲染前预检。显式要求烧录（`--burn-subtitles` 或环境变量 `BURN_SUBTITLES`）时缺 libass 直接失败；只是默认开启时降级：不烧录，交付外挂 `.srt`（留白里的 `「」` 原声对白仅在有 `user_subtitles.*` 时照常写进去；原本由遮罩触发的对白随遮罩一起关闭，原片硬字幕可见），`visual_qc.json` 的 `warnings` 与 `assembly_manifest.json` 的 `warnings` 记一条 `subtitle_burn_degraded`，`subtitles.burn_degraded_reason` 写原因。降级后遮罩照旧关闭（`mask.trigger` 为 `burn_subtitles_degraded`）。
