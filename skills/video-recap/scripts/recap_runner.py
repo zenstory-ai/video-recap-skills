@@ -434,6 +434,8 @@ def main():
     if (args.doctor or needs_voiceover(args)) and args.tts_provider not in TTS_PROVIDERS:
         ap.error("TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS))
 
+    if args.edit_mode != "dub" and args.confirm_voice_rights:
+        ap.error("--confirm-voice-rights only applies to --edit-mode dub")
     if args.doctor:
         if any(
             getattr(args, field) is not None
@@ -507,8 +509,6 @@ def main():
             "MiMo ASR and clones the original speaker's voice with MiMo voiceclone; confirm only "
             "when the user has the rights to this video and the speaker's consent to clone the voice"
         )
-    if args.edit_mode != "dub" and args.confirm_voice_rights:
-        ap.error("--confirm-voice-rights only applies to --edit-mode dub")
     if (args.subtitle_y_top is None) != (args.subtitle_y_bot is None):
         ap.error("--subtitle-y-top and --subtitle-y-bot must be provided together")
     if args.subtitle_y_top is not None:

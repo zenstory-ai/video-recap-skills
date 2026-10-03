@@ -6,7 +6,8 @@ description: >
  vlm_analysis.json；文案返修输入当前成片的工程与内容证据。策划输出 recap_story_plan.json、visual_audio_board.json、
  可选 style_card.json、cut 模式需要的 clip_plan.json，以及通过校验的 narration.json；仅宣发文案任务交付提案或回填既有包装计划。
  外发说明：只有建议型评审 review.py 联网，它把旁白稿全文与理解证据、策划文件的文字摘录发到 MiMo chat 接口
- （MIMO_API_KEY / MIMO_API_URL，不发视频、图片或音频）；只在被显式执行时运行，可关闭；validate.py 与 lint 仅在本地运行。
+ （MIMO_API_KEY / MIMO_API_URL，不发视频、图片或音频）；单独使用时只在显式执行时运行，端到端编排默认在 TTS 前运行一次，
+ 可用 --no-review-narration / REVIEW_NARRATION=0 关闭（严格评审开启时除外）；validate.py 与 lint 仅在本地运行。
  触发词：解说词、写解说、视频旁白、宣发标题、花字修订、文案回填、
  narration script、写稿、解说文案、剪辑思路、导演思路。
 ---
@@ -239,7 +240,7 @@ REVISION 还要逐项确认：用户点名的问题已经改变，未点名的�
 ### 7.1 建议型语义评审
 
 ```bash
-python3 scripts/review.py --work-dir <work_dir>
+python3 scripts/review.py --work-dir <work_dir>   # 会联网：外发内容与关闭方式见 §2
 ```
 
 评审会自动识别 cut 模式，并在存在已校验剪辑计划时按输出时间线核对；`--timeline source` 可强制使用原片时间。打开 `narration_review.md`，逐项处理 `error`，尤其是 `category=hallucination`。

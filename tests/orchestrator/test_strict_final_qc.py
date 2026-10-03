@@ -356,3 +356,17 @@ os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
     assert "✅ 完成" in advisory.stdout
     assert "仅报告，不阻断" in advisory.stdout
     assert json.loads((default_work / "final_qc.json").read_text(encoding="utf-8"))["ok"] is False
+
+
+def test_doctor_rejects_the_dub_only_voice_rights_flag(monkeypatch, capsys):
+    """The flag is dub-only everywhere, including the --doctor early return."""
+    monkeypatch.delenv("EDIT_MODE", raising=False)
+    monkeypatch.setattr(
+        recap_runner, "_run",
+        lambda *_: (_ for _ in ()).throw(AssertionError("doctor must not run")),
+    )
+    monkeypatch.setattr(sys, "argv", ["recap.py", "--doctor", "--confirm-voice-rights"])
+    with pytest.raises(SystemExit) as exc:
+        recap_runner.main()
+    assert exc.value.code == 2
+    assert "--confirm-voice-rights only applies to --edit-mode dub" in capsys.readouterr().err

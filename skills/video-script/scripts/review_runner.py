@@ -1,4 +1,8 @@
-"""Run narration review and write narration_review.json / .md."""
+"""Run narration review and write narration_review.json / .md.
+
+Network: sends the narration text plus text excerpts of VLM/ASR evidence, research and planning
+files to the MiMo chat endpoint (MIMO_API_KEY / MIMO_API_URL); no video, frames or audio.
+"""
 
 import argparse
 
@@ -142,7 +146,8 @@ def _auto_timeline(work_dir):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Review an agent-written narration.json for quality (LLM-as-judge)."
+        description=("Review an agent-written narration.json for quality (LLM-as-judge). Sends the narration "
+                     "text and text excerpts of the evidence to the MiMo chat endpoint (MIMO_API_KEY); no media.")
     )
     ap.add_argument("--work-dir", required=True)
     ap.add_argument(

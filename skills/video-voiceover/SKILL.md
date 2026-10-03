@@ -23,8 +23,8 @@ description: >
 
 | 路径 | 服务与凭据 | 发送内容 |
 |------|------------|----------|
-| 默认解说 TTS（`--tts-provider auto\|mimo-tts`） | MiMo chat 接口 `<MIMO_TTS_API_URL 或 MIMO_API_URL>/chat/completions`，`MIMO_TTS_API_KEY` 或 `MIMO_API_KEY`，模型 `mimo-v2.5-tts` | 每段实读文本、一句自然语言语气/语速指令（由段的 `emotion` 与时间窗算出）、内置音色名（默认 `冰糖`） |
-| 解说声音克隆（`--voice-ref <audio>`） | 同上，模型 `mimo-v2.5-tts-voiceclone` | 上述内容，外加参考音频（转成 24 kHz 单声道 WAV，最长 30 秒）的 base64，每段请求都带 |
+| 默认解说 TTS（`--tts-provider auto\|mimo-tts`） | MiMo chat 接口 `<MIMO_TTS_API_URL 或 MIMO_API_URL>/chat/completions`，`MIMO_TTS_API_KEY` 或 `MIMO_API_KEY`，模型 `mimo-v2.5-tts` | 每段实读文本、一句自然语言语气/语速指令（由段的 `emotion` 与时间窗算出）、内置音色名（默认 `冰糖`）；`auto` 下 MiMo key 缺失且设置了 `FISH_API_KEY` 时改走 Fish Audio 行 |
+| 解说声音克隆（`--voice-ref <audio>` / `VOICE_REF`） | 同上，模型 `mimo-v2.5-tts-voiceclone` | 上述内容，外加参考音频（转成 24 kHz 单声道 WAV，最长 30 秒）的 base64，每段请求都带 |
 | Fish Audio（`--tts-provider fish-audio`） | `FISH_TTS_API_URL`（默认 `https://api.fish.audio/v1/tts`），`FISH_API_KEY` | 每段实读文本、数值语速、音色 ID `FISH_TTS_REFERENCE_ID`；不发送本地音频 |
 | 自托管 IndexTTS（`--tts-provider index-tts`） | 用户自己部署、由 `INDEX_TTS_ENDPOINT` 指定的 HTTP(S) 服务 | `{"voice": INDEX_TTS_VOICE, "text": 实读文本}`；不发送本地音频 |
 | 实验性 dub（见 §8） | MiMo ASR（`MIMO_API_URL`，`MIMO_API_KEY`，`mimo-v2.5-asr`）与 MiMo voiceclone（TTS 接口与凭据，`mimo-v2.5-tts-voiceclone`） | 源视频整条音轨按 6 秒分窗送 ASR；每句中文译文连同从源音频截取的约 10 秒原说话人声音（克隆参考）送 voiceclone |
