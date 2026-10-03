@@ -6,11 +6,12 @@ from pathlib import Path
 
 from asr_timing_evidence import EVIDENCE_FILENAME, validate_asr_timing_evidence
 from extract import FRAME_TIME_CONVENTION_VERSION
-from lib import CONFIG, log, file_identity, load_prompt
+from lib import CONFIG, log, file_identity
 
 
 from vlm import (
     _is_mimo_chunk_usable,
+    vlm_prompt_payload,
 )
 
 
@@ -222,12 +223,8 @@ def _asr_cache_state(artifact_path, expected_meta, video_path):
     if not _stage_cache_valid(artifact_path, expected_meta):
         return "MISS"
     evidence_path = artifact_path.parent / EVIDENCE_FILENAME
-    if not evidence_path.exists():
-        return "LEGACY_UNVERIFIED"
     if validate_asr_timing_evidence(evidence_path, video_path, artifact_path):
         evidence = _load_json(evidence_path)
-        if evidence.get("status") == "LEGACY_UNVERIFIED":
-            return "LEGACY_UNVERIFIED"
         # An all-empty transcription is an unexplained outcome, not proven silence; treating it
         # as fresh would make one bad run a permanent cache hit.
         if evidence.get("status") in {"UNAVAILABLE_NO_DURATION", "EMPTY_UNKNOWN"}:
@@ -263,21 +260,6 @@ def _silence_cache_payload(video_path, asr_json):
     }
 
 
-def _vlm_prompt_payload():
-    """The exact prompt/context text the VLM stage sends; compared by equality."""
-    prompt = load_prompt("VLM_DEPTH_PROMPT")
-    if not prompt:
-        prompt = (
-            "仔细观察这些视频帧。分两部分输出：\n"
-            "【描述】不超过80字，描述画面中正在发生什么。\n"
-            "【深层分析】不超过120字，分析角色情绪、关系动态、潜台词。"
-        )
-    context = CONFIG.get("context_info", "")
-    if context:
-        prompt = f"已知信息：{context}\n\n{prompt}"
-    return {"prompt_text": prompt, "context_info": context}
-
-
 def _vlm_cache_payload(video_path, work_dir, scenes_json, frames):
     return {
         "schema_version": 1,
@@ -290,7 +272,7 @@ def _vlm_cache_payload(video_path, work_dir, scenes_json, frames):
             ),
         },
         "frames": _frame_cache_payload(video_path, CONFIG.get("fps"), frames),
-        "prompt": _vlm_prompt_payload(),
+        "prompt": vlm_prompt_payload(),
         "settings": {
             "fps": CONFIG.get("fps"),
             "vlm_model": CONFIG.get("vlm_model"),

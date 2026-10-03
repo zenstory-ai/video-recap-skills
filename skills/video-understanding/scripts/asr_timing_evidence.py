@@ -19,7 +19,6 @@ VALID_STATUSES = {
     "FAILED_AUDIO_EXTRACTION",
     "FAILED_PROVIDER",
     "EMPTY_UNKNOWN",
-    "LEGACY_UNVERIFIED",
 }
 _TOP_KEYS = {
     "schema_version", "status", "source_video", "audio", "asr_result",
@@ -63,10 +62,8 @@ def load_glossary_names(work_dir):
     )
 
 
-def _glossary_binding(work_dir, *, legacy=False):
-    """The glossary names that could have corrected this transcription (legacy: unknown)."""
-    if legacy:
-        return {"names": None, "name_count": None}
+def _glossary_binding(work_dir):
+    """The glossary names that could have corrected this transcription."""
     names = load_glossary_names(work_dir)
     return {"names": names, "name_count": len(names)}
 
@@ -87,12 +84,12 @@ def _atomic_json_write(path, payload):
             pass
 
 
-def _window_evidence(observed_segments, final_segments, legacy):
+def _window_evidence(observed_segments, final_segments):
     observed_segments = observed_segments or []
     windows = []
     for index, final in enumerate(final_segments or []):
         observed = observed_segments[index] if index < len(observed_segments) else None
-        observed_text = None if legacy or observed is None else str(observed.get("text") or "")
+        observed_text = None if observed is None else str(observed.get("text") or "")
         final_text = str(final.get("text") or "")
         windows.append({
             "index": index,
@@ -111,20 +108,19 @@ def write_asr_timing_evidence(
     audio_path=None,
 ):
     """Write a sidecar recording which source/audio/result files it describes, without
-    changing the legacy result."""
+    changing the result itself."""
     if status not in VALID_STATUSES:
         raise ValueError(f"unknown ASR timing evidence status: {status}")
     work_dir = Path(work_dir)
-    legacy = status == "LEGACY_UNVERIFIED"
     payload = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
         "source_video": _identity(video_path),
         "audio": _identity(audio_path) if audio_path else None,
         "asr_result": _identity(work_dir / "asr_result.json"),
-        "glossary": _glossary_binding(work_dir, legacy=legacy),
+        "glossary": _glossary_binding(work_dir),
         "precision": dict(_PRECISION),
-        "windows": _window_evidence(observed_segments, final_segments, legacy),
+        "windows": _window_evidence(observed_segments, final_segments),
     }
     path = work_dir / EVIDENCE_FILENAME
     _atomic_json_write(path, payload)
@@ -146,11 +142,9 @@ def _is_identity(value):
     )
 
 
-def _valid_glossary(payload, work_dir, legacy):
+def _valid_glossary(payload, work_dir):
     if not isinstance(payload, dict) or set(payload) != _GLOSSARY_KEYS:
         return False
-    if legacy:
-        return payload == _glossary_binding(work_dir, legacy=True)
     return payload == _glossary_binding(work_dir) and _is_int(payload.get("name_count"))
 
 
@@ -162,8 +156,8 @@ def _valid_status_relationships(status, result, audio):
         return bool(result) and not any(texts) and _is_identity(audio)
     if status == "UNAVAILABLE_NO_DURATION":
         return result == [] and _is_identity(audio)
-    if status in {"EXPLICITLY_SKIPPED", "UNAVAILABLE_NO_KEY", "LEGACY_UNVERIFIED"}:
-        return audio is None and (status == "LEGACY_UNVERIFIED" or result == [])
+    if status in {"EXPLICITLY_SKIPPED", "UNAVAILABLE_NO_KEY"}:
+        return audio is None and result == []
     return False
 
 
@@ -199,8 +193,7 @@ def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
         return False
     if not _valid_status_relationships(status, result, audio):
         return False
-    legacy = status == "LEGACY_UNVERIFIED"
-    if not _valid_glossary(evidence.get("glossary"), evidence_path.parent, legacy):
+    if not _valid_glossary(evidence.get("glossary"), evidence_path.parent):
         return False
 
     if audio is not None:
@@ -240,10 +233,7 @@ def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
             or window.get("text_availability") != ("AVAILABLE" if text else "UNAVAILABLE_UNKNOWN")
         ):
             return False
-        if legacy:
-            if observed is not None or modified is not None:
-                return False
-        elif (
+        if (
             not isinstance(observed, str) or not isinstance(modified, bool)
             or modified != (observed != text)
         ):
@@ -265,6 +255,7 @@ def asr_evidence_summary_for_brief(work_dir, video_path):
     if valid:
         payload = json.loads(evidence_path.read_text(encoding="utf-8"))
         return {"status": payload["status"],
-                "glossary_modifications": None if payload["status"] == "LEGACY_UNVERIFIED"
-                else sum(w["glossary_modified"] is True for w in payload["windows"])}
+                "glossary_modifications": sum(
+                    w["glossary_modified"] is True for w in payload["windows"]
+                )}
     return {"status": "MISSING_OR_STALE", "glossary_modifications": None}

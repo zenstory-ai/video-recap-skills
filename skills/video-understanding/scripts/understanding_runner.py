@@ -14,7 +14,7 @@ from extract import extract_frames
 from detect import detect_scenes, detect_silence_periods, detect_speech_boundary_anchors
 
 from asr import transcribe_audio
-from asr_timing_evidence import write_asr_timing_evidence, asr_evidence_summary_for_brief
+from asr_timing_evidence import write_asr_timing_evidence
 
 from vlm import (
     analyze_scenes,
@@ -22,11 +22,11 @@ from vlm import (
     mimo_video_overview_cache_fresh,
 )
 
-from briefing.builder import build_agent_brief
-from briefing.context import assess_understanding_substrate
-
-
-from understanding_brief import _research_context, _write_brief_from_existing_artifacts
+from understanding_brief import (
+    _finish_brief,
+    _research_context,
+    _write_brief_from_existing_artifacts,
+)
 from understanding_cache import (
     _asr_cache_payload,
     _asr_cache_state,
@@ -43,11 +43,6 @@ from understanding_cache import (
     _write_frames_manifest,
     _write_mimo_overview_status,
     _write_stage_meta,
-)
-from understanding_storyboard import (
-    _generate_edited_storyboard,
-    _generate_source_storyboard,
-    _prepend_storyboard_brief_header,
 )
 
 
@@ -165,21 +160,9 @@ def main():
             work_dir, video, "EXPLICITLY_SKIPPED", final_segments=asr_result
         )
         log("跳过 ASR（--skip-asr）")
-    elif cache_state in {
-        "FRESH",
-        "LEGACY_UNVERIFIED",
-    }:
+    elif cache_state == "FRESH":
         asr_result = _load_json(asr_json)
-        if cache_state == "LEGACY_UNVERIFIED":
-            write_asr_timing_evidence(
-                work_dir,
-                video,
-                "LEGACY_UNVERIFIED",
-                final_segments=asr_result,
-            )
-            log(f"复用旧 ASR（{len(asr_result)} 段；时间/声学证据未经验证）")
-        else:
-            log(f"跳过 ASR（证据匹配，已存在 {len(asr_result)} 段）")
+        log(f"跳过 ASR（证据匹配，已存在 {len(asr_result)} 段）")
     else:
         try:
             asr_result = transcribe_audio(video, work_dir)
@@ -266,23 +249,22 @@ def main():
     vlm_analysis = _merge_overview_into_scenes(vlm_analysis, overview_path)
 
     # optional consolidation (整理): build the understanding index before the brief folds it in
-    if args.consolidate or args.consolidate_asr:
+    enabled = bool(args.consolidate or args.consolidate_asr)
+    status, message, artifacts = "disabled", "consolidation 未启用", []
+    if enabled:
         from consolidate import consolidate
 
+        failure = None
         try:
             consolidate(
                 work_dir, do_asr=args.consolidate_asr, do_index=args.consolidate
             )
         except Exception as e:
             log(f"consolidate 跳过（忽略）: {e}")
-            _write_consolidation_status(
-                work_dir,
-                "failed",
-                e,
-                _present_consolidation_artifacts(work_dir),
-                do_asr=args.consolidate_asr,
-                do_index=args.consolidate,
-            )
+            failure = e
+        artifacts = _present_consolidation_artifacts(work_dir)
+        if failure is not None:
+            status, message = "failed", failure
         else:
             expected = []
             skipped = []
@@ -296,92 +278,26 @@ def main():
                     expected.append("asr_clean.json")
                 else:
                     skipped.append("无 ASR 文本，跳过 ASR 清洗")
-            artifacts = _present_consolidation_artifacts(work_dir)
             missing = [name for name in expected if name not in artifacts]
             if missing:
-                _write_consolidation_status(
-                    work_dir,
-                    "failed",
-                    f"未产出预期 artifact: {', '.join(missing)}",
-                    artifacts,
-                    do_asr=args.consolidate_asr,
-                    do_index=args.consolidate,
-                )
+                status, message = "failed", f"未产出预期 artifact: {', '.join(missing)}"
             elif expected:
-                _write_consolidation_status(
-                    work_dir,
-                    "ok",
-                    "consolidation 完成",
-                    artifacts,
-                    do_asr=args.consolidate_asr,
-                    do_index=args.consolidate,
-                )
+                status, message = "ok", "consolidation 完成"
             else:
-                _write_consolidation_status(
-                    work_dir,
-                    "skipped",
-                    "；".join(skipped) or "无可整理输入",
-                    artifacts,
-                    do_asr=args.consolidate_asr,
-                    do_index=args.consolidate,
-                )
-    else:
-        _write_consolidation_status(
-            work_dir,
-            "disabled",
-            "consolidation 未启用",
-            [],
-            enabled=False,
-            do_asr=False,
-            do_index=False,
-        )
-
-    # Storyboard contact sheets (advisory, never blocking). Source uses scene anchors over the
-    # source timeline; edited is gated on clip_plan_validated.json file-presence (NOT edit_mode —
-    # recap.py forwards --edit-mode cut in BOTH passes, so the validated plan is the only reliable
-    # pass2 signal). Both cache via _write_stage_meta/_stage_cache_valid with fps + frame-set in the key.
-    source_storyboard = _generate_source_storyboard(
-        work_dir, Path(video), scenes, scenes_json, force=args.force
-    )
-    edited_storyboard = _generate_edited_storyboard(work_dir, video, force=args.force)
-    cut_mode = (work_dir / "clip_plan_validated.json").exists()
-
-    # understanding substrate warning + writing brief
-    substrate = assess_understanding_substrate(vlm_analysis, asr_result)
-    if substrate["level"] != "rich":
-        banner = "理解素材为空" if substrate["level"] == "empty" else "理解素材偏薄"
-        log(
-            f"⚠️  {banner}：ASR {substrate['asr_chars']} 字 | 场景 {substrate['scene_count']} | "
-            f"带 frame_facts 的场景 {substrate['scenes_with_frame_facts']} | 平均画面描述 {substrate['avg_description_len']} 字"
-        )
-    brief_path = build_agent_brief(
-        vlm_analysis,
-        asr_result,
-        silence_periods,
-        video_duration,
+                status, message = "skipped", "；".join(skipped) or "无可整理输入"
+    _write_consolidation_status(
         work_dir,
-        args.style,
-        mimo_overview_enabled=CONFIG["mimo_video_overview"],
-        mimo_overview_video_path=video,
-        asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
-    )
-    # C1: prepend a storyboard header to the returned brief file, pointing the agent at the sheet(s).
-    _prepend_storyboard_brief_header(
-        brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode
+        status,
+        message,
+        artifacts,
+        enabled=enabled,
+        do_asr=args.consolidate_asr,
+        do_index=args.consolidate,
     )
 
-    log("=" * 50)
-    log(f"理解完成。写作 brief: {brief_path}")
-    print(
-        json.dumps(
-            {
-                "status": "analyzed",
-                "work_dir": str(work_dir),
-                "brief": str(brief_path),
-                "substrate": substrate["level"],
-                "scenes": len(scenes),
-                "asr_segments": len(asr_result),
-            },
-            ensure_ascii=False,
-        )
+    _finish_brief(
+        video, work_dir, args, video_duration,
+        storyboard_scenes=scenes, brief_scenes=vlm_analysis,
+        asr_result=asr_result, silence_periods=silence_periods,
+        status="analyzed", done_label="理解完成", force=args.force,
     )

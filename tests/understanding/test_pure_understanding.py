@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -155,6 +157,33 @@ def test_mimo_api_headers_and_payload_mapping(monkeypatch):
     assert "thinking" not in tts_payload
     asr_payload = _prepare_api_payload({"model": "mimo-v2.5-asr"})
     assert "thinking" not in asr_payload
+
+
+def test_mimo_video_401_names_the_env_var_that_supplied_the_key(tmp_path):
+    """A MIMO_VIDEO_API_KEY rejected with 401 is reported under its own name, not MIMO_API_KEY."""
+    script = """
+import io, sys, urllib.error, urllib.request
+sys.path.insert(0, sys.argv[1])
+import lib
+
+def reject(*_a, **_k):
+    raise urllib.error.HTTPError("u", 401, "unauthorized", {}, io.BytesIO(b"{}"))
+
+urllib.request.urlopen = reject
+try:
+    lib.mimo_video_api_call({"model": "m"}, max_retries=1)
+except RuntimeError as exc:
+    print(exc)
+"""
+    scripts_dir = Path(__file__).resolve().parents[2] / "skills" / "video-understanding" / "scripts"
+    env = {k: v for k, v in os.environ.items() if not k.startswith("MIMO_")}
+    env["MIMO_VIDEO_API_KEY"] = "video-only-key"
+    env["PYTHONIOENCODING"] = "utf-8"  # the message is Chinese; Windows pipes default to cp1252
+    out = subprocess.run(
+        [sys.executable, "-c", script, str(scripts_dir)],
+        env=env, capture_output=True, text=True, encoding="utf-8", check=True, cwd=tmp_path,
+    ).stdout
+    assert "401" in out and "MIMO_VIDEO_API_KEY" in out
 
 
 def test_mimo_video_overview_uses_scene_chunks(monkeypatch, tmp_path):

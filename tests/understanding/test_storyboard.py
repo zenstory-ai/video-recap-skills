@@ -22,7 +22,7 @@ sys.path.insert(
 )
 
 import storyboard  # noqa: E402
-import understanding_runner as understand  # noqa: E402
+import understanding_storyboard  # noqa: E402
 from lib import CONFIG  # noqa: E402
 
 
@@ -229,7 +229,7 @@ def test_edited_short_clip_frame_identity_dedupe(monkeypatch, tmp_path):
 
 
 def _cached_source_storyboard(monkeypatch, tmp_path):
-    """Stage a work_dir for understand._generate_source_storyboard with a build counter."""
+    """Stage a work_dir for understanding_storyboard._generate_source_storyboard with a build counter."""
     _stage_frames(tmp_path, [0, 2, 4, 6], fps=2.0)
     monkeypatch.setitem(CONFIG, "storyboard", True)
     monkeypatch.setitem(CONFIG, "fps", 2.0)
@@ -253,7 +253,7 @@ def _cached_source_storyboard(monkeypatch, tmp_path):
     )
 
     def generate():
-        return understand._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
+        return understanding_storyboard._generate_source_storyboard(tmp_path, video, scenes, scenes_json)
 
     return generate, builds
 
@@ -339,7 +339,7 @@ def test_brief_still_builds_when_storyboard_fails(monkeypatch, tmp_path):
     # storyboard returns None → header is skipped, brief content untouched
     brief = tmp_path / "agent_narration_brief.md"
     brief.write_text("# Brief body\n", encoding="utf-8")
-    understand._prepend_storyboard_brief_header(brief, None, None, cut_mode=False)
+    understanding_storyboard._prepend_storyboard_brief_header(brief, None, None, cut_mode=False)
     assert brief.read_text(encoding="utf-8") == "# Brief body\n"  # unchanged
 
 
@@ -371,7 +371,7 @@ def test_font_absent_sheet_still_produced_unlabelled(monkeypatch, tmp_path):
 def test_edited_storyboard_skipped_without_validated_plan(tmp_path):
     _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
     # no clip_plan_validated.json → pass1 → None (gated on file presence, not edit_mode)
-    assert understand._generate_edited_storyboard(tmp_path, "video.mp4") is None
+    assert understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4") is None
 
 
 def test_brief_header_branches_on_labels_burned(tmp_path):
@@ -381,7 +381,7 @@ def test_brief_header_branches_on_labels_burned(tmp_path):
         "page_images": ["storyboard/source_storyboard.jpg"],
         "labels_burned": False,
     }
-    understand._prepend_storyboard_brief_header(brief, source, None, cut_mode=False)
+    understanding_storyboard._prepend_storyboard_brief_header(brief, source, None, cut_mode=False)
     text = brief.read_text(encoding="utf-8")
     assert "Storyboard" in text
     assert "先看 storyboard 再写" in text
@@ -400,7 +400,7 @@ def test_brief_header_cut_mode_lists_both_timelines(tmp_path):
         "page_images": ["storyboard/edited_storyboard.jpg"],
         "labels_burned": True,
     }
-    understand._prepend_storyboard_brief_header(brief, source, edited, cut_mode=True)
+    understanding_storyboard._prepend_storyboard_brief_header(brief, source, edited, cut_mode=True)
     text = brief.read_text(encoding="utf-8")
     assert "源时间线" in text and "output" in text
     assert "inspect clip-map" not in text  # labels burned → no fallback note

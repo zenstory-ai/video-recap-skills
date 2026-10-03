@@ -94,8 +94,8 @@ def env_float(name, default, *, minimum=None):
     return _env_number(name, default, float, minimum)
 
 
-# Single MiMo credential powers ASR + VLM + TTS. Per-capability overrides
-# (MIMO_VIDEO_API_KEY / MIMO_TTS_API_KEY / MIMO_ASR_API_KEY and their *_API_URL forms)
+# Single MiMo credential powers ASR + VLM. Per-capability overrides
+# (MIMO_VIDEO_API_KEY / MIMO_ASR_API_KEY and their *_API_URL forms)
 # are optional and fall back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-
 # route to the Token-Plan cluster base URL; pay-as-you-go keys use api.xiaomimimo.com.
 _mimo_api_key = os.environ.get("MIMO_API_KEY", "")
@@ -121,6 +121,7 @@ CONFIG = {
     "mimo_api_key": _mimo_api_key,
     "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
     "mimo_video_api_key": _mimo_video_api_key,
+    "mimo_video_env_var": "MIMO_VIDEO_API_KEY" if os.environ.get("MIMO_VIDEO_API_KEY") else "MIMO_API_KEY",
     "mimo_asr_api_url": normalize_api_url(_raw_mimo_asr_api_url),
     "mimo_asr_api_key": _mimo_asr_api_key,
     "mimo_asr_env_var": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
@@ -279,9 +280,8 @@ def _sanitize_api_error(value, limit=500):
     text = _ERROR_KEY_RE.sub("<redacted-key>", text)
     return text[:limit]
 
-def _api_headers(api_provider=None, api_url=None, api_key=None):
+def _api_headers(api_key=None):
     """Build MiMo auth headers (OpenAI-compatible chat/completions with an api-key header)."""
-    del api_provider, api_url  # MiMo is the only provider; signature kept for call sites
     key = CONFIG["api_key"] if api_key is None else api_key
     return {
         "Content-Type": "application/json",
@@ -289,9 +289,8 @@ def _api_headers(api_provider=None, api_url=None, api_key=None):
         "api-key": key,
     }
 
-def _prepare_api_payload(payload, api_provider=None, api_url=None):
+def _prepare_api_payload(payload):
     """Normalize payload fields for MiMo's OpenAI-compatible chat/completions API."""
-    del api_provider, api_url
     normalized = dict(payload)
     if "max_tokens" in normalized and "max_completion_tokens" not in normalized:
         normalized["max_completion_tokens"] = normalized.pop("max_tokens")
@@ -307,10 +306,9 @@ def _prepare_api_payload(payload, api_provider=None, api_url=None):
     return normalized
 
 def _mimo_endpoint(kind):
-    """Return per-capability MiMo endpoint settings (video understanding / TTS / ASR)."""
+    """Return per-capability MiMo endpoint settings (video understanding / ASR)."""
     by_kind = {
         "video": ("mimo_video_api_url", "mimo_video_api_key", "mimo_video_env_var"),
-        "tts": ("mimo_tts_api_url", "mimo_tts_api_key", "mimo_tts_env_var"),
         "asr": ("mimo_asr_api_url", "mimo_asr_api_key", "mimo_asr_env_var"),
     }
     if kind not in by_kind:
@@ -319,7 +317,7 @@ def _mimo_endpoint(kind):
     return {
         "api_url": CONFIG.get(url_key) or CONFIG.get("mimo_api_url"),
         "api_key": CONFIG.get(key_key) or CONFIG.get("mimo_api_key"),
-        "api_env_var": CONFIG.get(src_key, "MIMO_API_KEY"),
+        "api_env_var": CONFIG[src_key],
     }
 
 def _call_mimo_endpoint(kind, payload, max_retries=10):
@@ -327,7 +325,6 @@ def _call_mimo_endpoint(kind, payload, max_retries=10):
     return api_call(
         payload,
         max_retries=max_retries,
-        api_provider="mimo",
         api_url=settings["api_url"],
         api_key=settings["api_key"],
         api_env_var=settings["api_env_var"],
@@ -341,7 +338,7 @@ def mimo_asr_api_call(payload, max_retries=10):
     """Call the MiMo speech-recognition (ASR) endpoint."""
     return _call_mimo_endpoint("asr", payload, max_retries=max_retries)
 
-def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key=None, api_env_var=None):
+def api_call(payload, max_retries=8, *, api_url=None, api_key=None, api_env_var=None):
     """调用 OpenAI-compatible API，带重试。
 
     长视频理解会发出数百次 VLM/ASR 调用，集群的 429 限流是常态而非错误，所以重试更耐心
@@ -349,8 +346,8 @@ def api_call(payload, max_retries=8, *, api_provider=None, api_url=None, api_key
     集群的配额窗口常以分钟计，所以 429 在没有 Retry-After 时也至少等 10s，给窗口时间复位。
     """
     endpoint = normalize_api_url(api_url if api_url is not None else CONFIG["api_url"])
-    headers = _api_headers(api_provider=api_provider, api_url=endpoint, api_key=api_key)
-    data = json.dumps(_prepare_api_payload(payload, api_provider=api_provider, api_url=endpoint)).encode("utf-8")
+    headers = _api_headers(api_key=api_key)
+    data = json.dumps(_prepare_api_payload(payload)).encode("utf-8")
 
     for attempt in range(max_retries):
         try:

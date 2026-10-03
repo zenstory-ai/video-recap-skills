@@ -172,7 +172,7 @@ def _patch_runner(monkeypatch, tmp_path, *, overview=False, mimo_key="", real_br
     monkeypatch.setattr("understanding_runner.analyze_scenes", _fresh_analysis)
     if not real_brief:
         monkeypatch.setattr(
-            "understanding_runner.build_agent_brief",
+            "understanding_brief.build_agent_brief",
             lambda *a, **k: tmp_path / "agent_narration_brief.md",
         )
     return frame

@@ -79,11 +79,9 @@ ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构�
 ```
 
 `status` 可为 `AVAILABLE_COARSE`、`EXPLICITLY_SKIPPED`、`UNAVAILABLE_NO_KEY`、
-`UNAVAILABLE_NO_DURATION`、`FAILED_AUDIO_EXTRACTION`、`FAILED_PROVIDER`、`EMPTY_UNKNOWN`
-或 `LEGACY_UNVERIFIED`。`LEGACY_UNVERIFIED` 标记没有旧 sidecar 的兼容缓存，可离线复用但
-`observed_text`/`glossary_modified` 为 `null`，且始终保持 legacy 身份；非 legacy sidecar 记录
-当时参与修正的人名/别名列表（`glossary.names`），人名表变化或所描述的文件被重写（size/mtime 不再
-一致）都会使 ASR 缓存失效。
+`UNAVAILABLE_NO_DURATION`、`FAILED_AUDIO_EXTRACTION`、`FAILED_PROVIDER` 或 `EMPTY_UNKNOWN`。
+sidecar 记录当时参与修正的人名/别名列表（`glossary.names`），人名表变化、所描述的文件被重写
+（size/mtime 不再一致）或 sidecar 缺失，都会使 ASR 缓存失效并重跑 ASR。
 `UNAVAILABLE_NO_DURATION` 与 `EMPTY_UNKNOWN` 是可重试的不可用结果，不作为缓存命中；写作
 brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一致时显示 `MISSING_OR_STALE`。
 
