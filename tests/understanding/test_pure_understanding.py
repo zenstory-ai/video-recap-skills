@@ -178,9 +178,10 @@ except RuntimeError as exc:
     scripts_dir = Path(__file__).resolve().parents[2] / "skills" / "video-understanding" / "scripts"
     env = {k: v for k, v in os.environ.items() if not k.startswith("MIMO_")}
     env["MIMO_VIDEO_API_KEY"] = "video-only-key"
+    env["PYTHONIOENCODING"] = "utf-8"  # the message is Chinese; Windows pipes default to cp1252
     out = subprocess.run(
         [sys.executable, "-c", script, str(scripts_dir)],
-        env=env, capture_output=True, text=True, check=True, cwd=tmp_path,
+        env=env, capture_output=True, text=True, encoding="utf-8", check=True, cwd=tmp_path,
     ).stdout
     assert "401" in out and "MIMO_VIDEO_API_KEY" in out
 
