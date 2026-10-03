@@ -8,6 +8,7 @@ from pathlib import Path
 
 from lib import load_json
 from lib import file_identity
+import resources.project_binding as project_binding
 from library import LIBRARY_ENV
 from recap_runtime import (
     _entry,
@@ -526,5 +527,8 @@ def _pause_for_agent(work_dir, need_text, cont, inspect_hint=None):
     print(f"[video-recap] ⏸  阅读 {brief}（按 video-script 规则）后写入 {need_text}")
     if inspect_hint:
         print(f"[video-recap]    先核对状态/时间轴（建议性）: {inspect_hint}")
+    reference_note = project_binding.bound_reference_note(work_dir)
+    if reference_note:
+        print(f"[video-recap]    {reference_note}")
     print(f"[video-recap]    写完后重跑继续: {cont}")
     print("=" * 50)

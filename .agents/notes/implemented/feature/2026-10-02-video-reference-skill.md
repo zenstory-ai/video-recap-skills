@@ -2,7 +2,7 @@
 
 Status: implemented
 
-后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-production-reference-binding]]，尚未落地。
+后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-production-reference-binding]]，已落地。
 
 ## Problem
 
@@ -46,8 +46,10 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
   增删数另记在 `cut_detection.agent_added/agent_removed`。
 - **消费方只有写稿 Agent**：video-script `SKILL.md` §2 读取清单加一条、§3 加一段：只在 `work_dir` 有 `production_reference.json` 时阅读，
   优先级"用户指令 > 本片证据 > 参考"，可在 `recap_story_plan.json` 写可选的 `reference_methods`。没有脚本对 story plan 做封闭键检查，
-  所以不改 playbook 的 schema 示例。video-recap `SKILL.md` §1 加一段路由说明；`recap.py`、runner、doctor、final_qc 不变。
-- 新守卫 `test_only_the_reference_skill_names_production_reference_in_scripts`：除本 skill 外，任何 `skills/*/scripts/**/*.py` 都不得出现
+  所以不改 playbook 的 schema 示例。video-recap `SKILL.md` §1 加一段路由说明；`recap.py`、doctor、final_qc 不变，runner 只在
+  `--project` 绑定了参考模板时把副本写进 `work_dir`（[[2026-10-02-production-reference-binding]]）。
+- 新守卫 `test_only_the_reference_skill_and_its_binding_name_production_reference_in_scripts`：除本 skill 与 recap 的
+  `library.py`（登记时的形状检查）、`resources/project_binding.py`（绑定时写副本）外，任何 `skills/*/scripts/**/*.py` 都不得出现
   `production_reference.json`。plugin manifest 不变量从"只有 router 和写稿可调用"变为三个可调用 skill。
 
 ## Alternatives considered

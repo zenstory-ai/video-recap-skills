@@ -9,4 +9,7 @@ python3 skills/video-recap/scripts/library.py --library-dir examples/resource-li
 python3 skills/video-recap/scripts/library.py --library-dir examples/resource-library show clean-white@v1
 ```
 
+`templates/production_reference/demo-pacing/v1/` 是一份参考模板：`production_reference.json` 由 video-reference
+对合成数据导出，只含方法与数值，状态 `draft`。
+
 `check` 会报一条警告：演示音色的授权状态是 `unknown`，这是有意留下的示例。

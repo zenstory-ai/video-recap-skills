@@ -17,7 +17,7 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 
 把成片拆成制作参考不是生产路径。用户要求时：对成片跑 video-understanding（建议 `ASR_SEGMENT_SECONDS=5`），
 再用 video-reference 做 measure、标注、check、export，把导出的 `production_reference.json` 复制进下一次运行的
-`work_dir`。recap 不会自动运行它，也不拿新成片与参考做比对。
+`work_dir`，或登记成资源库的 `production_reference` 模板、采纳后经 `--project` 绑定。recap 不会自动运行它，也不拿新成片与参考做比对。
 
 流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会比对
 `recap_run_manifest.json` 记录的源视频路径、文件大小/修改时间与运行参数，拒绝复用来自其他源视频或其他参数的旧工作目录；视频理解产物也只在来源一致时复用。
@@ -139,8 +139,8 @@ python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --material-library-dir 
 
 素材检索只是对 JSON / MD / JSONL 做 grep，例如 `grep -R "keyword" .video-materials`。当前版本不复制原始媒体，也不提供数据库、向量或语义搜索。
 
-同一根目录还可以登记可复用的资源（BGM、音效、音色、字体、图片）、带版本与采用记录的模板（字幕样式、包装图层）和样片。
-格式与 `scripts/library.py check|list|show` 只读工具见 `references/resource-library.md`。用 `--project recap_project.json` 把已采用的字幕样式、音色与 BGM 绑定到这次运行；
+同一根目录还可以登记可复用的资源（BGM、音效、音色、字体、图片）、带版本与采用记录的模板（字幕样式、包装图层、制作参考）和样片。
+格式与 `scripts/library.py check|list|show` 只读工具见 `references/resource-library.md`。用 `--project recap_project.json` 把已采用的字幕样式、包装、制作参考、音色与 BGM 绑定到这次运行；
 每次 full / cut 合成后 `work_dir/resource_lock.json` 记下实际用到的资源与授权状态。
 
 ### 4.4 继续生成成片

@@ -13,6 +13,7 @@ All notable changes to this project are documented here.
 ### Added
 
 - **新增按需技能 video-reference：把成片拆成可复用的制作参考。** `reference.py measure` 用一次 ffmpeg（`scdet` 逐帧分数 + `ebur128`）测镜头切点、镜长分布与响度，按成片 `{size, mtime_ns}` 缓存；切点只认孤立峰（固定阈值会在暗场漏掉硬切、在运动镜头里误报），被压下的候选由 `reference.py frames --review` 逐帧拼图给 Agent 复核，复核结果写进 `labels.cut_fixes`，导出物用 `cut_detection` 记录检测参数与增删数；Agent 在 `reference_breakdown.json` 标注音轨归属与叙事段落，并分开写原片事实与可迁移方法；`check` 用 R1–R8 机械分离两者（封闭 schema、事实锚点、方法证据、target 只写测量路径、实体名/台词引文/绝对时间/路径泄漏扫描、五维覆盖），`export` 零 error 时才写不含原片事实的 `production_reference.json`。写稿 Agent 只在 work_dir 有这个文件时阅读，并可在 `recap_story_plan.json` 写可选的 `reference_methods`。不调用 MiMo，不进默认生产路径，recap 不加参数，不新增 QC。
+- **制作参考可以登记进资源库并经 `--project` 绑定。** 资源库新增模板 kind `production_reference`：版本目录里放导出的 `production_reference.json`，`template.json` 的 `params` 恰好是 `{"reference": {"path": "production_reference.json"}}`；`library.py check` 核对导出物 schema、methods 与五维枚举，任何层级出现 `source_facts`/`labels`/`evidence`/`entities`/`statement` 键都报错。项目 `bindings.production_reference` 只接受 adopted 版本，recap 在第一次暂停前把带 `written_by` 与 `template {id, version}` 的副本写进 `work_dir`，暂停提示多一行说明，`resource_lock.json` 记下 `id@vN`；不核对画布，不加门禁，没有脚本读它。`work_dir` 已有内容不同、且不是 `--project` 写的同名文件时运行停止；解除绑定后只删自己写的副本。示例库加一份合成的 `demo-pacing@v1`。
 
 ### Changed
 

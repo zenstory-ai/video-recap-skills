@@ -10,7 +10,7 @@ import pytest
 import resources.project_binding as project_binding
 import recap_runner
 import recap_timeline
-from _helpers import seed_full_work, stub_child_run
+from _helpers import DEFAULT_NARRATION, seed_full_work, stub_child_run
 from recap_cli import parse_args
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -89,6 +89,7 @@ def test_font_resource_supplies_family_and_file(tmp_path, clean_env):
     "bindings, args, env, match",
     [
         pytest.param({"packaging": "bottom-bar@v1"}, {}, {}, "draft", id="draft_template"),
+        pytest.param({"production_reference": "demo-pacing@v1"}, {}, {}, "draft", id="draft_reference"),
         pytest.param({"subtitle_style": "clean-white@v9"}, {}, {}, "不存在", id="missing_template"),
         pytest.param({"voice": "pulse-demo"}, {}, {}, "voice 资源", id="wrong_resource_kind"),
         pytest.param({"subtitle_style": "clean-white@v1"}, {}, {"SUBTITLE_FONT_SIZE": "40"}, "SUBTITLE_FONT_SIZE", id="env_conflict"),
@@ -245,3 +246,94 @@ def test_equivalent_ambient_settings_are_not_conflicts(tmp_path, clean_env, monk
     monkeypatch.setenv("SUBTITLE_FONT_SIZE", "52.0")
 
     project_binding.resolve_project(path, _args())
+
+
+REFERENCE_DIR = "templates/production_reference/demo-pacing/v1"
+FACT_KEYS = {"source_facts", "labels", "evidence", "entities", "statement"}
+
+
+def _reference_project(tmp_path, *, canvas=None):
+    lib = tmp_path / "lib"
+    shutil.copytree(EXAMPLE, lib)
+    template = lib / REFERENCE_DIR / "template.json"
+    data = json.loads(template.read_text(encoding="utf-8"))
+    data.update(status="adopted", adoption={"date": "2026-10-02", "by": "user", "statement": "按这份节奏来",
+                                            "scope": "演示"})
+    if canvas:
+        data["canvas"] = canvas
+    template.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    path, _ = _project(tmp_path, {"production_reference": "demo-pacing@v1", "subtitle_style": "clean-white@v1"},
+                       library=lib)
+    export = json.loads((lib / REFERENCE_DIR / "production_reference.json").read_text(encoding="utf-8"))
+    return path, export
+
+
+def test_bound_reference_is_a_marked_copy_with_no_canvas_check_and_retires_when_unbound(tmp_path, clean_env):
+    path, export = _reference_project(tmp_path, canvas={"width": 1280, "height": 720})
+    resolved = project_binding.resolve_project(path, _args())
+    work = tmp_path / "work"
+    work.mkdir()
+
+    project_binding.check_canvas(resolved, 900, 1600)  # the reference's own canvas is information only
+    with pytest.raises(SystemExit, match="subtitle_style"):
+        project_binding.check_canvas(resolved, 1280, 720)
+    project_binding.sync_production_reference(work, resolved)
+
+    copy = json.loads((work / "production_reference.json").read_text(encoding="utf-8"))
+    assert copy == {"written_by": "video-recap --project", **export,
+                    "template": {"id": "demo-pacing", "version": 1}}
+    assert not FACT_KEYS & {k for node in (copy, *copy["methods"]) for k in node}
+    assert project_binding.bound_reference_note(work).startswith("本轮带制作参考 demo-pacing@v1")
+
+    project_binding.sync_production_reference(work, None)
+    assert not (work / "production_reference.json").exists()
+    assert project_binding.bound_reference_note(work) is None
+
+
+def test_caller_reference_is_kept_unless_it_disagrees_with_the_binding(tmp_path, clean_env):
+    path, export = _reference_project(tmp_path)
+    resolved = project_binding.resolve_project(path, _args())
+    work = tmp_path / "work"
+    work.mkdir()
+    own = work / "production_reference.json"
+
+    own.write_text(json.dumps({**export, "methods": export["methods"][:1]}), encoding="utf-8")
+    with pytest.raises(SystemExit, match="demo-pacing@v1"):
+        project_binding.sync_production_reference(work, resolved)
+    project_binding.sync_production_reference(work, None)
+    assert own.exists()  # a caller's own copy is not ours to delete
+    assert project_binding.bound_reference_note(work) is None
+
+    own.write_text(json.dumps(export), encoding="utf-8")  # the same export copied by hand is no conflict
+    project_binding.sync_production_reference(work, resolved)
+    assert json.loads(own.read_text(encoding="utf-8"))["written_by"] == "video-recap --project"
+
+
+def test_reference_reaches_work_dir_before_the_first_pause_and_lands_in_the_lock(monkeypatch, tmp_path, clean_env,
+                                                                                capsys):
+    path, _ = _reference_project(tmp_path)
+    video, work = seed_full_work(tmp_path, narration=None)
+
+    def understand(cli):
+        (work / "agent_narration_brief.md").write_text("# brief", encoding="utf-8")
+
+    def assemble(cli):
+        (work / "assembly_manifest.json").write_text(json.dumps({"final_output": "x.mp4"}), encoding="utf-8")
+
+    monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, understand=understand, assemble=assemble))
+    monkeypatch.setattr(recap_runner, "_probe_display_size_or_raise", lambda *a, **k: (900, 1600))
+    monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work),
+                                      "--project", str(path)])
+
+    recap_runner.main()
+
+    assert "本轮带制作参考 demo-pacing@v1" in capsys.readouterr().out
+    assert json.loads((work / "production_reference.json").read_text(encoding="utf-8"))["template"] == {
+        "id": "demo-pacing", "version": 1}
+
+    (work / "narration.json").write_text(json.dumps(DEFAULT_NARRATION, ensure_ascii=False), encoding="utf-8")
+    recap_runner.main()
+
+    lock = json.loads((work / "resource_lock.json").read_text(encoding="utf-8"))
+    assert [(t["role"], t["id"], t["version"]) for t in lock["templates"]] == [
+        ("subtitle_style", "clean-white", 1), ("production_reference", "demo-pacing", 1)]

@@ -326,6 +326,7 @@ def _run_multi_cut(videos, work_dir, args):
     work_dir.mkdir(parents=True, exist_ok=True)
     reject_unbound_narration_workdir(work_dir, args)
     reject_unsupported_subtitle_track(work_dir, args)
+    project_binding.sync_production_reference(work_dir, getattr(args, "resolved_project", None))
     source_records = _build_multi_source_records(videos, args)
     narration_json = work_dir / "narration.json"
     clip_plan_json = work_dir / "clip_plan.json"
@@ -547,6 +548,7 @@ def _run_dub(video, work_dir, args):
 
 def _run_single(video, work_dir, args):
     """Single-video full or cut run; returns early at each agent pause."""
+    project_binding.sync_production_reference(work_dir, getattr(args, "resolved_project", None))
     cut = args.edit_mode == "cut"
     narration_json = work_dir / "narration.json"
     clip_plan_json = work_dir / "clip_plan.json"

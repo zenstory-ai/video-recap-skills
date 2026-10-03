@@ -142,7 +142,7 @@ def test_overview_nests_runs_and_ranks_what_needs_attention(site):
     overview = _get_json(site, "/api/overview")
 
     assert overview["counts"] == {"libraries": 1, "projects": 2, "runs": 4,
-                                  "resources": 4, "templates": 2, "samples": 1}
+                                  "resources": 4, "templates": 3, "samples": 1}
     runs = {run["path"]: run for run in overview["runs"]}
     assert runs["show/ep1/sources/src_a"]["parent"] == "show/ep1"
     assert runs["show/ep1"]["project"] == "show"
