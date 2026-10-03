@@ -79,3 +79,55 @@ def test_deslop_qc_is_report_only_with_blocker_advisory_split(tmp_path):
     assert not ({item["code"] for item in report["blockers"]} & advisory_codes)
     assert "rewrite" not in report
     assert "rewrites" not in report
+
+
+def test_original_subtitle_blocker_is_not_labelled_as_a_narration_block(tmp_path):
+    """The em dash is in the 3rd original subtitle; narration.json has only 2 blocks, so the
+    summary must point at original_subtitles.json, not at a 段 3 that does not exist."""
+    from lint_summary import format_lint_failure
+
+    (tmp_path / "original_subtitles.json").write_text(
+        json.dumps(
+            [
+                {"start": 0, "end": 1, "text": "第一句"},
+                {"start": 1, "end": 2, "text": "第二句"},
+                {"start": 2, "end": 3, "text": "等等——别走"},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    report = lint_narration(
+        [
+            {"start": 0.0, "end": 4.0, "narration": "他推门进来。"},
+            {"start": 6.0, "end": 10.0, "narration": "屋里没有人。"},
+        ],
+        work_dir=tmp_path,
+    )
+
+    [blocker] = [e for e in report["errors"] if e["code"] == "em_dash"]
+    assert (blocker["source"], blocker["index"]) == ("original_subtitles", 2)
+    [line] = [x for x in format_lint_failure(report).splitlines() if "em_dash" in x]
+    assert line.startswith("- 原声字幕第 3 条 em_dash：")
+    assert "段 " not in line
+    assert "original_subtitles.json" in line and "不是改 narration.json" in line
+
+
+def test_narration_blocker_index_counts_non_object_entries(tmp_path):
+    """deslop numbers blocks by their narration.json position, non-objects included."""
+    from lint_summary import format_lint_failure
+
+    report = lint_narration(
+        [
+            "not an object",
+            {"start": 0.0, "end": 4.0, "narration": "他推门进来。"},
+            {"start": 6.0, "end": 10.0, "narration": "屋里——没有人。"},
+        ],
+        work_dir=tmp_path,
+    )
+
+    [blocker] = [e for e in report["errors"] if e["code"] == "em_dash"]
+    assert (blocker["source"], blocker["index"]) == ("narration", 2)
+    [line] = [x for x in format_lint_failure(report).splitlines() if "em_dash" in x]
+    assert line.startswith("- 段 3 em_dash：")
+    assert line.endswith("改法：删掉破折号，改用逗号、句号或把句子拆开")

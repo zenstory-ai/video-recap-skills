@@ -61,7 +61,11 @@ def _text_units(text: str) -> int:
 def _normalise_segments(payload: list[dict[str, Any]], *, source: str) -> list[dict[str, Any]]:
     key = "narration" if source == "narration" else "text"
     segments: list[dict[str, Any]] = []
+    # `index` is the item's position in the file as written (non-objects included), so a
+    # blocker points at the same entry the author sees there.
     for idx, item in enumerate(payload):
+        if not isinstance(item, dict):
+            continue
         text = str(item.get(key, "")).strip()
         if text:
             segments.append({"source": source, "index": idx, "text": text})

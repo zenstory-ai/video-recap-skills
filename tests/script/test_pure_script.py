@@ -331,7 +331,7 @@ def test_validate_cut_output_rejects_false_speech_override(monkeypatch, tmp_path
         ],
     )
 
-    with pytest.raises(ValueError, match="interrupts_source_sentence"):
+    with pytest.raises(SystemExit, match="段 1 interrupts_source_sentence"):
         _run_validate_cut_output(monkeypatch, tmp_path)
 
 
@@ -350,7 +350,7 @@ def test_validate_cut_output_fails_closed_without_mapped_speech_evidence(
         ],
     )
 
-    with pytest.raises(ValueError, match="source_sentence_anchors_unavailable"):
+    with pytest.raises(SystemExit, match="段 1 source_sentence_anchors_unavailable"):
         _run_validate_cut_output(monkeypatch, tmp_path)
 
 
@@ -374,7 +374,7 @@ def test_validate_cut_output_checks_entry_before_later_quiet(monkeypatch, tmp_pa
         ],
     )
 
-    with pytest.raises(ValueError, match="interrupts_source_sentence"):
+    with pytest.raises(SystemExit, match="段 1 interrupts_source_sentence"):
         _run_validate_cut_output(monkeypatch, tmp_path)
 
 
@@ -724,7 +724,7 @@ def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
         validate_bounds(bad, 10.0)
     msg = str(exc.value)
     assert "output_duration=10.000" in msg
-    assert "segment 0" in msg and "segment 1" in msg and "segment 2" in msg
+    assert "段 1 start=" in msg and "段 2 end=" in msg and "段 3 [" in msg
 
     with pytest.raises(SystemExit, match="finite and positive"):
         validate_bounds([{"start": 0.0, "end": 1.0}], float("nan"))

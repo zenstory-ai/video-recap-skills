@@ -13,7 +13,7 @@ import math
 from pathlib import Path
 
 from lib import log
-from narration_lint import validate_narration_or_raise
+from narration_lint import NarrationLintError, validate_narration_or_raise
 from speech_ownership import measure_narration_speech_ownership
 
 
@@ -53,16 +53,16 @@ def _validate_output_timeline_bounds(narration, duration, tolerance=0.05):
         start, end = seg["start"], seg["end"]
         if end <= -tolerance or start >= duration + tolerance:
             problems.append(
-                f"segment {idx} [{start:.3f},{end:.3f}] fully outside output_duration={duration:.3f}"
+                f"段 {idx + 1} [{start:.3f},{end:.3f}] fully outside output_duration={duration:.3f}"
             )
             continue
         if start < -tolerance:
             problems.append(
-                f"segment {idx} start={start:.3f} before output timeline (output_duration={duration:.3f})"
+                f"段 {idx + 1} start={start:.3f} before output timeline (output_duration={duration:.3f})"
             )
         if end > duration + tolerance:
             problems.append(
-                f"segment {idx} end={end:.3f} exceeds output_duration={duration:.3f}"
+                f"段 {idx + 1} end={end:.3f} exceeds output_duration={duration:.3f}"
             )
     if problems:
         raise SystemExit(
@@ -72,6 +72,15 @@ def _validate_output_timeline_bounds(narration, duration, tolerance=0.05):
 
 
 def main():
+    try:
+        _validate(_parse_args())
+    except NarrationLintError as exc:
+        # A lint failure is an ordinary result the author fixes from the summary,
+        # not a crash: exit non-zero with the summary only, no traceback.
+        raise SystemExit(str(exc)) from None
+
+
+def _parse_args():
     ap = argparse.ArgumentParser(
         description="Validate agent-written narration.json and measure speech ownership."
     )
@@ -83,8 +92,10 @@ def main():
         default=None,
         help="cut_output: rendered edited_source.mp4 duration in seconds",
     )
-    args = ap.parse_args()
+    return ap.parse_args()
 
+
+def _validate(args):
     work_dir = Path(args.work_dir)
     narration_path = work_dir / "narration.json"
     narration = _load(narration_path)

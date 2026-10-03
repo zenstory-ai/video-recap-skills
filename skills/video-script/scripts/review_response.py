@@ -489,6 +489,20 @@ def _normalise_review(data):
     }
 
 
+def _segment_label(segment):
+    """The draft lists blocks from 0 (`segment` keeps that index); readers see 段 N from 1."""
+    if segment is None:
+        return "整体"
+    if isinstance(segment, str) and segment.strip().isdigit():
+        segment = int(segment)
+    elif isinstance(segment, float) and segment.is_integer():
+        segment = int(segment)
+    if isinstance(segment, int) and not isinstance(segment, bool) and segment >= 0:
+        return f"段 {segment + 1}"
+    # Any other shape is not a block index; show the raw value, never as a 段 number.
+    return f"段 ?（模型返回 {json.dumps(segment, ensure_ascii=False, default=str)}）"
+
+
 def format_review_md(review):
     """Render a parse_review_response() review as markdown."""
     order = {"error": 0, "warning": 1, "suggestion": 2}
@@ -510,7 +524,7 @@ def format_review_md(review):
     if not findings:
         out.append("- (none)")
     for f in findings:
-        seg = "整体" if f["segment"] is None else f"段 {f['segment']}"
+        seg = _segment_label(f["segment"])
         out.append(f"- **[{f['severity']}/{f['category']}] {seg}** — {f['issue']}")
         if f["fix"]:
             out.append(f"  - 改法: {f['fix']}")
