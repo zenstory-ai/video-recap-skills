@@ -85,6 +85,15 @@ def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def read_json_object(path):
+    """A JSON object file as a dict, or None when it is unreadable, malformed or not an object."""
+    try:
+        data = load_json(path)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 # ── 文件身份与 id ─────────────────────────────────────────────────────
 
 def file_identity(path):

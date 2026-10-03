@@ -26,7 +26,6 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | Fish Audio endpoint | `FISH_TTS_API_URL` | `https://api.fish.audio/v1/tts` | returns WAV directly to the existing voiceover pipeline |
 | Self-hosted TTS | `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` | — | explicit `--tts-provider index-tts` only; the endpoint is never written to disk, and segment `emotion`/style is rejected |
 | TTS transport | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | request timeout, parallel segments, and per-segment retries for all providers |
-| Narration block coverage | `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` | `0.7` / `9.0` | current block-recap density controls |
 | Narration speed | `NARRATION_SPEED` | `1.15` | global atempo on the voiceover; set `1.0` for long-form/documentary |
 | Narration authored start | `NARRATION_DELAY_SECONDS` | `0` | the renderer uses the Agent-authored `start` exactly. Set a non-zero value only for legacy drafts; hidden delay can move a validated sentence-boundary entry back into source speech |
 | Source sentence boundary detector | `SOURCE_BOUNDARY_NOISE_THRESHOLD` / `SOURCE_BOUNDARY_MIN_PAUSE` / `SOURCE_BOUNDARY_MAX_ALIGNMENT_ERROR` | `-18dB` / `0.12` / `2.1` | aligns ASR terminal punctuation to short acoustic pauses and writes `speech_boundary_anchors.json`; unsafe narration entries and cut in/out points are blocked. There is no intentional-interrupt override |

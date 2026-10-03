@@ -1,20 +1,11 @@
-import importlib.util
 import json
 import sys
 from pathlib import Path
 
 import pytest
 
-# inspect.py shares its name with the stdlib `inspect` module, so it cannot be imported with a
-# bare `import inspect` (that would resolve the stdlib). Load it by explicit file path under a
-# private module name instead — this is the read-only advisory CLI under test.
-_INSPECT_PATH = (
-    Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts" / "recap_inspect.py"
-)
-_spec = importlib.util.spec_from_file_location("recap_inspect", _INSPECT_PATH)
-recap_inspect = importlib.util.module_from_spec(_spec)
-sys.modules["recap_inspect"] = recap_inspect
-_spec.loader.exec_module(recap_inspect)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
+import recap_inspect  # noqa: E402
 
 
 # ---------------------------------------------------------------------------

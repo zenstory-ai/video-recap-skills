@@ -156,7 +156,7 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
 
 ## narration_lint.json
 
-`--step script` 或续跑验证 `narration.json` 时生成的预检结果。它检查写稿、时间安全和解说覆盖。`metrics` 为 full 模式下的诊断指标（cut 模式为空对象），不是要求命中某个旁白比例的创作配额；低覆盖 warning 应回到 `visual_audio_board.json` 检查是否为有意的原声/沉默选择。
+续跑校验 `narration.json` 时生成的预检结果。它检查写稿、时间安全和解说覆盖。`metrics` 为 full 模式下的诊断指标（cut 模式为空对象），不是要求命中某个旁白比例的创作配额；低覆盖 warning 应回到 `visual_audio_board.json` 检查是否为有意的原声/沉默选择。
 
 ```json
 {

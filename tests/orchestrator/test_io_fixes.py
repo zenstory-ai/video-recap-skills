@@ -744,30 +744,40 @@ def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
     assert all("--normalize-only" not in c[2] for c in cut_calls)
     assert "--allow-duration-drift" in cut_calls[0][2]
     assert not any(c[1] in ("voiceover.py", "assemble.py") for c in calls)
-    assert recap_timeline._read_phase_ledger(work).get("edited_source_rendered") is True
+    assert recap_timeline._read_phase_ledger(work) == {
+        "clip_plan_identity": file_identity(work / "clip_plan.json")
+    }
 
 
-def test_recap_cut_rejects_stale_narration_after_clip_plan_change(
-    monkeypatch, tmp_path
-):
-    """A narration written for a previous clip_plan may re-render but never reaches TTS."""
+def _refuse_every_child(skill, script, *cli_args):
+    raise AssertionError(f"{script} ran despite stale narration")
+
+
+def test_recap_cut_rejects_stale_narration_before_recutting(monkeypatch, tmp_path):
+    """A narration written for a previous clip_plan aborts the final run before cut.py
+    re-renders anything, so it never reaches TTS and no re-cut is wasted on it."""
     video, work = seed_cut_work(
         tmp_path,
         narration=[{"start": 1, "end": 3, "narration": "解说。"}],
         rendered=False,
     )
-    recap_timeline._write_phase_ledger(
-        work, clip_plan_identity={"size": 0, "mtime_ns": 0}, edited_source_rendered=True
-    )
-
-    def fake_run(skill, script, *cli_args):
-        if script == "cut.py":
-            write_cut_output(work)  # render allowed
-        if script in ("validate.py", "voiceover.py", "assemble.py"):
-            raise AssertionError(f"{script} ran despite stale narration")
-
-    monkeypatch.setattr("recap_runner._run", fake_run)
+    recap_timeline._write_phase_ledger(work, {"size": 0, "mtime_ns": 0})
+    monkeypatch.setattr("recap_runner._run", _refuse_every_child)
     _argv(monkeypatch, video, "--work-dir", work, "--edit-mode", "cut")
+
+    with pytest.raises(SystemExit, match="clip_plan.json 已改变"):
+        recap.main()
+
+
+def test_recap_multi_cut_rejects_stale_narration_before_recutting(monkeypatch, tmp_path):
+    videos, work, _ = seed_multi_work(
+        tmp_path,
+        manifest_args(edit_mode="cut"),
+        narration=[{"start": 0, "end": 1, "narration": "解说。"}],
+    )
+    recap_timeline._write_phase_ledger(work, {"size": 0, "mtime_ns": 0})
+    monkeypatch.setattr("recap_runner._run", _refuse_every_child)
+    _argv(monkeypatch, *videos, "--work-dir", work, "--edit-mode", "cut")
 
     with pytest.raises(SystemExit, match="clip_plan.json 已改变"):
         recap.main()
@@ -1092,7 +1102,9 @@ def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
         work / "multi_source_manifest.json"
     )
     assert not any(c[1] in ("voiceover.py", "assemble.py") for c in calls)
-    assert recap_timeline._read_phase_ledger(work)["multi_source"] is True
+    assert recap_timeline._read_phase_ledger(work) == {
+        "clip_plan_identity": file_identity(work / "clip_plan.json")
+    }
 
 
 def test_recap_single_video_phase_a_can_save_materials(monkeypatch, tmp_path):
