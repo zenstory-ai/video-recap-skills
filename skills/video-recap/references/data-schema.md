@@ -575,6 +575,7 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
     "probe": {"streams": [{"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "avg_frame_rate": "30/1"}],
               "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "61.2"}},
     "probe_error": null,
+    "warnings": [],
     "auto_repair": false
   }
 }
@@ -583,3 +584,12 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
 阻断码：`missing_final_output`、`empty_final_output`、`probe_failed`（ffprobe 不可用或失败）、`missing_video_stream`、`missing_duration` / `invalid_duration`、`missing_codec`、`missing_fps` / `invalid_fps`，以及尾部 2 秒解码失败的 `undecodable_stream`。`next_action` 是可直接执行的修复提示。`ok` 为 `true` 当且仅当 `blocker_count` 为 0；`--require-final-qc` 只读这两个字段，dashboard 另外读 finding 的 `code` / `message` / `blocking`。
 
 `metadata.artifacts` 汇总 `assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json` 的 `schema_version` / `verdict` / `blocking` / `blocking_codes`（不可解析时为 `{"invalid": true}`），只作记录、不转成 final_qc 的阻断项：assembly/visual QC 阻断时 video-assemble 已经非零退出，流程到不了 final_qc。`metadata.probe` 只保留检查用到的流与容器字段（codec、宽高、帧率、时长、采样率等），不保存 `tags` / `disposition` / 文件名，因此从原片带过来的容器标签（如 comment、purl 里的 URL）不会写进报告。
+
+`metadata.warnings` 照抄 `visual_qc.json` 的 `warnings`：不阻断、不计入 `blocker_count`，但 Agent 交付时必须转告用户。目前只有一种：默认烧录字幕而 ffmpeg 缺 libass 时降级为外挂字幕，
+
+```json
+{"code": "subtitle_burn_degraded", "reason": "ffmpeg_missing_libass", "delivered": "sidecar_srt",
+ "mask_dropped": false, "message": "…", "next_action": "…"}
+```
+
+这时成片里没有字幕，字幕在成片旁的同名 `.srt`（路径见 `assembly_manifest.json` 的 `subtitle_sidecar`）；`mask_dropped` 为 `true` 表示原本会画的原字幕遮罩也一并关掉了。`final_qc.py` 打印的摘要 `final_qc.warnings` 列出这些 code，`recap.py` 完成时打印一行警告和外挂字幕路径。

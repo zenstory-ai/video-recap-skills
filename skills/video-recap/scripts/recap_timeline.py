@@ -3,11 +3,12 @@
 import json
 import os
 import shlex
+import shutil
 import sys
 from pathlib import Path
 
 from lib import load_json
-from lib import file_identity
+from lib import file_identity, ffmpeg_filters, read_json_object
 import resources.project_binding as project_binding
 from library import LIBRARY_ENV
 from recap_runtime import (
@@ -69,6 +70,41 @@ def _canonical_visual_overlay(overlay, segment):
     return item
 
 
+def _canonical_visual_overlays(narration_path):
+    return [
+        item
+        for segment in load_json(narration_path)
+        for overlay in segment.get("visual_overlays", [])
+        if (item := _canonical_visual_overlay(overlay, segment)) is not None
+    ]
+
+
+def _preflight_visual_overlays(work_dir, *, narration):
+    """Fail before TTS and render when the run will draw text overlays but this ffmpeg has
+    no drawtext (libfreetype; stock Homebrew ffmpeg lacks it). Overlays are authored content,
+    never a default, so they are not dropped silently the way a default subtitle burn
+    degrades: the message says how to remove them. Narration runs read narration.json (the
+    overlays are only written after TTS); source modes read an existing visual_overlays.json."""
+    work_dir = Path(work_dir)
+    if shutil.which("ffmpeg") is None:
+        return
+    if narration:
+        narration_path = work_dir / "narration.json"
+        overlays = _canonical_visual_overlays(narration_path) if narration_path.exists() else []
+        remedy = "删掉 narration.json 各段的 visual_overlays"
+    else:
+        data = read_json_object(work_dir / _VISUAL_OVERLAYS) or {}
+        overlays = data.get("overlays") if isinstance(data.get("overlays"), list) else []
+        remedy = f"删掉 {_VISUAL_OVERLAYS} 里的 overlays"
+    if not overlays or "drawtext" in ffmpeg_filters():
+        return
+    raise SystemExit(
+        f"本次运行有 {len(overlays)} 个画面文字叠加（visual_overlays），但当前 ffmpeg 不支持 drawtext"
+        " 滤镜（需要 libfreetype），会在最后渲染时失败。\n"
+        f"  解决其一：(1) 安装带 drawtext/libfreetype 的 ffmpeg；(2) {remedy} 后续跑。"
+    )
+
+
 def _write_canonical_visual_overlays(work_dir, narration_path):
     """Write assemble's canonical work_dir/visual_overlays.json recap handoff.
 
@@ -79,12 +115,7 @@ def _write_canonical_visual_overlays(work_dir, narration_path):
     empty overlay list.
     """
     path = Path(work_dir) / _VISUAL_OVERLAYS
-    overlays = [
-        item
-        for segment in load_json(narration_path)
-        for overlay in segment.get("visual_overlays", [])
-        if (item := _canonical_visual_overlay(overlay, segment)) is not None
-    ]
+    overlays = _canonical_visual_overlays(narration_path)
     payload = {"schema_version": 1, "overlays": overlays}
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"[video-recap] 🧩 visual overlays: {len(overlays)} → {path}", flush=True)

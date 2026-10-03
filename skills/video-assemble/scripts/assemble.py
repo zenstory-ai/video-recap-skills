@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import artifacts
@@ -314,12 +315,21 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     # needs EVEN width AND height, so normalize odd dims (4:2:2/4:4:4 permit them) before the
     # encode — otherwise libx264 aborts to a 0-byte file. The downscale helper already evens out.
     even = "scale=trunc(iw/2)*2:trunc(ih/2)*2"
-    reencode = bool(vf_chain or packaging_layers) or lib.CONFIG["force_video_reencode"]
+    # A stream copy only stays when the source already is what a re-encode would deliver
+    # (H.264 8-bit 4:2:0, even size); otherwise a filter-free render re-encodes too, so the
+    # yuv420p guarantee holds on every path, including no-burn and degraded-burn runs.
+    source_format = media._probe_video_format(input_video)
+    color_tags = media._output_color_tags(source_format)
+    copy_unsafe = not media._video_copy_safe(source_format)
+    reencode = (
+        bool(vf_chain or packaging_layers) or lib.CONFIG["force_video_reencode"] or copy_unsafe
+    )
     notes = []
     video_filter_script = None
     if vf_chain or packaging_layers:
         if max_h <= 0:  # no downscale in the chain to force even dims
             vf_chain.append(even)
+        vf_chain.append(media._color_tag_filter(color_tags))
         video_filter = packaging.compose_video_filter(
             vf_chain, packaging_layers, mask_first=bool(mask_filter)
         )
@@ -341,10 +351,21 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                  + ([f"缩放≤{max_h}p"] if max_h > 0 else []))
         lib.log(f"视频重编码: {' + '.join(notes)} (crf={crf}, preset={preset})")
     elif reencode:
-        notes = ["force_video_reencode"]
-        cmd += ["-vf", even, "-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]
+        notes = (
+            ["force_video_reencode"] if lib.CONFIG["force_video_reencode"]
+            else ["normalize_source_format"]
+        )
+        cmd += ["-vf", f"{even},{media._color_tag_filter(color_tags)}",
+                "-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]
+        if not lib.CONFIG["force_video_reencode"]:
+            lib.log(
+                "视频重编码: 源画面不是 H.264 yuv420p "
+                f"(codec={source_format.get('codec_name')}, pix_fmt={source_format.get('pix_fmt')})"
+            )
     else:
         cmd += ["-c:v", "copy"]
+    # Container (and, on a re-encode, bitstream) colour tags; see media._output_color_tags.
+    cmd += media._color_tag_args(color_tags)
 
     # +faststart relocates the moov atom to the front so web/social players can start
     # before the full file downloads; valid (and beneficial) on the copy path too.
@@ -404,6 +425,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         "audio_sample_rate": (
             adopted_audio["output"]["sample_rate"] if adopted_audio else 48000
         ),
+        "color_tags": color_tags,
         "final_compat_notes": (
             (["yuv420p"] if reencode else ["video_copy"])
             + (["aac_packet_copy", "faststart"] if adopted_audio else ["aac_48000", "faststart"])
@@ -476,7 +498,6 @@ def _block_before_render(tts_segments, video_duration, work_dir, output_path, au
 
 def main():
     import argparse
-    import shutil
     ap = argparse.ArgumentParser(
         description="video-assemble: mux narration audio over the video, duck the original, render subtitles.")
     ap.add_argument("video", help="source video (edited_source.mp4 in cut mode, else the original)")
@@ -497,7 +518,9 @@ def main():
     ap.add_argument("--recap-stem", default=None, help="final recap filename stem (default: video stem)")
     ap.add_argument("--output-dir", default=None)
     ap.add_argument("--burn-subtitles", action=argparse.BooleanOptionalAction, default=None,
-                    help="burn narration subtitles into the video (default on; --no-burn-subtitles to disable)")
+                    help="burn narration subtitles into the video (default on; without libass the default "
+                         "delivers a .srt sidecar instead, while an explicit --burn-subtitles fails; "
+                         "--no-burn-subtitles to disable)")
     ap.add_argument("--subtitle-y-top", type=int, default=None,
                     help="inclusive top of a measured subtitle band in display-frame pixels")
     ap.add_argument("--subtitle-y-bot", type=int, default=None,
@@ -517,6 +540,7 @@ def main():
     work_dir = Path(args.work_dir)
     if args.burn_subtitles is not None:
         lib.CONFIG["burn_subtitles"] = args.burn_subtitles
+        lib.CONFIG["burn_subtitles_explicit"] = True
     if (args.subtitle_y_top is None) != (args.subtitle_y_bot is None):
         ap.error("--subtitle-y-top and --subtitle-y-bot must be provided together")
     if args.subtitle_y_top is not None:
@@ -540,7 +564,10 @@ def main():
         lib.CONFIG["export_jianying"] = True
     if args.jianying_bundle_media is not None:
         lib.CONFIG["jianying_bundle_media"] = args.jianying_bundle_media
-    render_preflight._preflight_burn_subtitles()  # fail before the render if burn-in is on but ffmpeg lacks libass
+    # Before the render: an explicit burn without libass fails, the default degrades to the
+    # .srt sidecar; drawtext overlays without drawtext fail.
+    render_preflight._preflight_burn_subtitles()
+    render_preflight._preflight_visual_overlays(work_dir)
     # Argument combinations are validated once, by assemble_video.
     tts_meta = Path(args.tts_meta) if args.tts_meta else None
     tts_segments = []
@@ -554,6 +581,7 @@ def main():
         ap.error("explicit audio mix requires a new final delivery path")
     delivery_stage = None
     owned_alias = None
+    sidecar = None
     output_path = work_dir / "output.mp4"
     try:
         try:
@@ -593,6 +621,7 @@ def main():
             delivery_stage = None
         else:
             shutil.copy2(str(output_path), str(final_output))
+        sidecar = _publish_subtitle_sidecar(work_dir, final_output)
         manifest = assembly_contract._assembly_manifest_payload(
             args.video, tts_segments, work_dir, output_path,
             tts_meta_path=tts_meta,
@@ -603,8 +632,14 @@ def main():
             audio_mode=args.audio_mode,
             audio_stream_index=args.audio_stream_index,
         )
+        visual_qc = artifacts._load_work_json(work_dir, constants.VISUAL_QC) or {}
+        warnings = visual_qc.get("warnings", [])
+        manifest["subtitle_sidecar"] = str(sidecar) if sidecar else None
+        manifest["warnings"] = warnings
         assembly_contract._write_assembly_manifest(work_dir, manifest)
     except BaseException:
+        if sidecar is not None:
+            sidecar.unlink(missing_ok=True)
         if delivery_stage is not None:
             delivery_stage.unlink(missing_ok=True)
         if owned_alias is not None and final_output.exists():
@@ -620,8 +655,26 @@ def main():
         from jianying.optional import maybe_export_jianying
         maybe_export_jianying(work_dir, args.jianying_out, stem)
 
-    print(json.dumps({"status": "assembled", "output": str(final_output), "work_dir": str(work_dir)},
+    for warning in warnings:
+        lib.log(f"⚠️ {warning['code']}: {warning['message']}（外挂字幕: {sidecar}）")
+    print(json.dumps({"status": "assembled", "output": str(final_output), "work_dir": str(work_dir),
+                      "subtitle_sidecar": str(sidecar) if sidecar else None,
+                      "warnings": [warning["code"] for warning in warnings]},
                      ensure_ascii=False))
+
+
+def _publish_subtitle_sidecar(work_dir, final_output):
+    """Ship subtitles.srt next to the recap when the subtitles are not burned in.
+
+    The pair shares the stable recap_<stem> alias, so a burned run removes a sidecar left by
+    an earlier unburned run instead of letting players stack it over the burned text.
+    """
+    sidecar = final_output.with_suffix(".srt")
+    if lib.CONFIG["burn_subtitles"]:
+        sidecar.unlink(missing_ok=True)
+        return None
+    shutil.copy2(work_dir / "subtitles.srt", sidecar)
+    return sidecar
 
 
 if __name__ == "__main__":

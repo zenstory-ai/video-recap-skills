@@ -31,6 +31,7 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
     settings = {
         "user_subtitles": _has_user_subtitles(work_dir),
         "burn_subtitles": burn_subtitles,
+        "subtitle_burn_degraded": CONFIG["burn_subtitles_degraded"],
         "force_video_reencode": CONFIG["force_video_reencode"],
         "encode": {
             "output_crf": CONFIG["output_crf"],

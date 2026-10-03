@@ -187,6 +187,11 @@ full/cut 交付如需让确定性的最终检查影响命令退出状态，显�
 会保留报告和已渲染诊断媒体，但命令非零退出且不打印完成。默认仍是仅报告、不阻断。
 该参数不支持 `--edit-mode dub`；dub 未传该参数时的准备和渲染行为不变。
 
+交付时读 `final_qc.json` 的 `metadata.warnings`，有内容就原样告诉用户，不能只报“完成”。`subtitle_burn_degraded`
+表示 ffmpeg 缺 libass、默认烧录被降级：成片里没有字幕，字幕在成片旁的同名 `.srt`。用户要烧录字幕，就请他装带 libass 的
+ffmpeg 后重跑；显式传 `--burn-subtitles` 时缺 libass 会在开跑前报错。旁白里写了 `visual_overlays` 而 ffmpeg 缺
+drawtext 时，流程在配音前停下，按报错删掉叠加或换 ffmpeg 后续跑。
+
 ### 4.7 不需要解说的片子
 
 ```bash

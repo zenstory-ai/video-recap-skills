@@ -13,7 +13,7 @@ description: >
 
 1. 把各段旁白音频放到视频时间线上。
 2. 在旁白窗口内用固定包络压低原声（盖住原声对白时与落在安静段时各用一档音量），间隙恢复原声。
-3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。
+3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。不烧录时（关闭或降级），`subtitles.srt` 复制到成片旁，名为 `recap_<stem>.srt`；烧录时删掉旧的同名外挂字幕。
 4. 可选把最终响度标准化到目标 LUFS。
 
 ## 2. 声音收尾契约
@@ -86,7 +86,9 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为半开 `[top, bot)`；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。
 - 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `DUCK_BRIDGE_SECONDS`、`ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM` 与 `TARGET_LUFS`。
 - 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
-- 烧录字幕需要带 `subtitles` / libass 的 ffmpeg；合成阶段会预检并在缺失时明确失败。
+- 烧录字幕需要带 `subtitles` / libass 的 ffmpeg，合成阶段在渲染前预检。显式要求烧录（`--burn-subtitles` 或环境变量 `BURN_SUBTITLES`）时缺 libass 直接失败；只是默认开启时降级：不烧录，交付外挂 `.srt`（留白里的 `「」` 原声对白照常写进去），`visual_qc.json` 的 `warnings` 与 `assembly_manifest.json` 的 `warnings` 记一条 `subtitle_burn_degraded`，`subtitles.burn_degraded_reason` 写原因。降级后遮罩照旧关闭（`mask.trigger` 为 `burn_subtitles_degraded`）。
+- `visual_overlays.json` 的文字叠加用 ffmpeg `drawtext`（libfreetype）。缺 drawtext 时合成在渲染前失败；叠加是写稿时明确加的内容，不会被静默丢掉。
+- 成片画面一律是 H.264 `yuv420p` 并带 `+faststart`：不需要滤镜、且源画面已是 H.264 8-bit 4:2:0、宽高为偶数时才流复制，否则重编码。色彩标记：源未标记或已是 BT.709 时标为 BT.709（`-colorspace/-color_primaries/-color_trc bt709`），其它已声明的色彩空间原样保留；全范围（`pc`）源保留 `pc`，其余标 `tv`。只改标记，不转换像素；结果记在 `assembly_qc.json` 的 `delivery_qc.color_tags`。
 - 原声留白中的对白字幕优先读取 Agent 校对的 `original_subtitles.json`；否则保守映射 ASR。只有遮罩覆盖留白或用户字幕明确要求替换时才烧录原声对白，并用 `「」` 与旁白区分。
 
 ### 按原片区间准备声音，而不是整体压低旧成片

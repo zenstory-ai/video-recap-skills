@@ -104,6 +104,10 @@ def _mock_assemble_media(monkeypatch, *, duration=4.0, has_audio=True):
     canvas = _canvas()
     monkeypatch.setattr(assemble.lib, "get_video_duration", lambda _path: duration)
     monkeypatch.setattr(media, "_probe_canvas", lambda _path: canvas)
+    monkeypatch.setattr(
+        media, "_probe_video_format",
+        lambda _path: {"codec_name": "h264", "pix_fmt": "yuv420p", "width": 1280, "height": 720},
+    )
     monkeypatch.setattr(media, "_has_audio_stream", lambda _path: has_audio)
     monkeypatch.setattr(
         narration_audio, "_apply_narration_speed", lambda *_args, **_kwargs: None
@@ -2410,6 +2414,7 @@ _VISUAL_QC_ALLOWED_TOP_LEVEL = {
     "verdict",
     "blocking",
     "blocking_codes",
+    "warnings",
     "geometry",
     "subtitles",
     "overlays",

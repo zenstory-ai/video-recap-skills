@@ -7,7 +7,13 @@ from frame_grid import frame_count, parse_frame_rate
 from lib import CONFIG, filter_file_args, get_video_duration, log, run_cmd
 
 from cut_contract import _write_edited_source_meta
-from media_geometry import _has_audio_stream
+from media_geometry import (
+    _color_tag_args,
+    _color_tag_filter,
+    _has_audio_stream,
+    _output_color_tags,
+    _probe_video_format,
+)
 from sentence_gate import _continuous_source_join
 
 
@@ -79,6 +85,19 @@ def _warn_on_frame_count_mismatch(path, expected):
         log(f"警告: {path.name} 渲染出 {rendered} 帧，"
             f"qc.frame_grid.frame_count 记录的是 {expected} 帧；"
             "当前 ffmpeg 的 fps/tpad/trim 行为可能不同，请检查帧率是否恒定")
+
+
+def _edited_source_color_tags(source_paths):
+    """One set of colour tags for the concatenated picture (nothing is converted).
+
+    Sources that agree keep their shared tags; sources that disagree cannot be described by
+    one label, so the picture is labelled BT.709, the same default an untagged source gets.
+    """
+    tags = [_output_color_tags(_probe_video_format(path)) for path in source_paths]
+    if all(item == tags[0] for item in tags):
+        return tags[0]
+    log("剪辑源视频: 各来源色彩标记不一致，成片按 BT.709 标记")
+    return _output_color_tags({})
 
 
 def build_edited_source_video(input_video, validated_plan, work_dir, output_path=None):
@@ -189,6 +208,9 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
             "anullsrc=channel_layout=stereo:sample_rate=48000",
         ]
 
+    color_tags = _edited_source_color_tags(source_paths)
+    parts.append(f"[v]{_color_tag_filter(color_tags)}[vtagged]")
+    maps[maps.index("[v]")] = "[vtagged]"
     filter_complex = ";".join(parts)
     if len(filter_complex.encode("utf-8")) > 7000:
         filter_script = work_dir / "edit_filter_complex.txt"
@@ -223,6 +245,7 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
         "48000",
         "-movflags",
         "+faststart",
+        *_color_tag_args(color_tags),
         str(output_path),
     ]
     result = run_cmd(cmd)

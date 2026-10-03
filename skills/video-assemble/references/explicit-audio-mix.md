@@ -64,7 +64,9 @@ narration binding path, the final decoded PCM facts, the final AAC decoder/packe
 count/payload bytes, and the actual output picture decoder/frame clock. The output
 picture must preserve fps, frame count, zero start, and duration. A video-copy path
 reports `packet_identity: EXACT` when decoder parameters and packet sizes/timestamps
-are unchanged; an allowed visual re-encode reports `REENCODED_CLOCK_MATCH`. Timeline,
+are unchanged; an allowed visual re-encode reports `REENCODED_CLOCK_MATCH`. The colour
+labels (`color_range` / `color_space` / `color_transfer` / `color_primaries`) are left out of
+that comparison, because the final render deliberately labels an untagged picture BT.709. Timeline,
 settings, QC, and manifest identify the explicit path rather than reporting ambient
 ducking/BGM/loudnorm operations.
 

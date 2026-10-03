@@ -172,3 +172,100 @@ def _build_video_clips(input_video, work_dir, duration_s):
                       "timeline_start": timeline_start,
                       "timeline_end": timeline_end})
     return clips
+
+
+# Delivered-picture format. `_probe_video_format`, `_output_color_tags`,
+# `_color_tag_filter` and `_color_tag_args` are intentional function-level copies shared
+# with the cut render (tests/orchestrator/test_render_format_parity.py keeps them identical).
+_COLOR_FIELDS = (
+    ("color_space", "colorspace"),
+    ("color_primaries", "color_primaries"),
+    ("color_transfer", "color_trc"),
+)
+_UNTAGGED_COLOR = {None, "", "unknown", "unspecified", "reserved", "N/A"}
+# Names ffprobe prints that ffmpeg's -colorspace/-color_primaries/-color_trc and setparams
+# also accept; anything else is left for ffmpeg to carry over on its own.
+_KNOWN_COLOR_VALUES = {
+    "colorspace": {
+        "bt709", "fcc", "bt470bg", "smpte170m", "smpte240m", "ycgco", "bt2020nc", "bt2020c",
+        "smpte2085", "chroma-derived-nc", "chroma-derived-c", "ictcp", "gbr",
+    },
+    "color_primaries": {
+        "bt709", "bt470m", "bt470bg", "smpte170m", "smpte240m", "film", "bt2020",
+        "smpte428", "smpte431", "smpte432", "jedec-p22",
+    },
+    "color_trc": {
+        "bt709", "gamma22", "gamma28", "smpte170m", "smpte240m", "linear", "log100",
+        "log316", "iec61966-2-4", "bt1361e", "iec61966-2-1", "bt2020-10", "bt2020-12",
+        "smpte2084", "smpte428", "arib-std-b67",
+    },
+}
+
+
+def _probe_video_format(video_path):
+    """Codec, pixel format, size and colour tags of the first video stream ({} if unreadable)."""
+    result = run_cmd([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries",
+        "stream=codec_name,pix_fmt,width,height,color_space,color_primaries,color_transfer,color_range",
+        "-of", "json", str(video_path),
+    ])
+    if result.returncode != 0:
+        return {}
+    try:
+        streams = json.loads(result.stdout).get("streams") or []
+    except (ValueError, AttributeError):
+        return {}
+    return streams[0] if streams and isinstance(streams[0], dict) else {}
+
+
+def _output_color_tags(stream):
+    """Colour tags to write on the delivered picture, as {ffmpeg option: value}.
+
+    An untagged or BT.709 source is labelled BT.709, which is how players already decode
+    untagged web video. Any other declared colour space passes through as declared. The
+    range follows the source: full range stays `pc`, everything else is limited `tv`.
+    Nothing here converts pixels; it only fixes the labels.
+    """
+    declared = {option: stream.get(key) for key, option in _COLOR_FIELDS}
+    if all(value in _UNTAGGED_COLOR or value == "bt709" for value in declared.values()):
+        tags = {option: "bt709" for _, option in _COLOR_FIELDS}
+    else:
+        tags = {
+            option: value for option, value in declared.items()
+            if value in _KNOWN_COLOR_VALUES[option]
+        }
+    tags["color_range"] = "pc" if stream.get("color_range") == "pc" else "tv"
+    return tags
+
+
+def _color_tag_filter(tags):
+    """setparams filter that stamps the tags on every frame before the encoder.
+
+    Output options alone are not enough when re-encoding: ffmpeg 8/9 let the (untagged)
+    frame properties win for primaries and transfer, so the bitstream would stay untagged.
+    """
+    parts = [f"{option}={tags[option]}" for _, option in _COLOR_FIELDS if option in tags]
+    parts.append(f"range={tags['color_range']}")
+    return "setparams=" + ":".join(parts)
+
+
+def _color_tag_args(tags):
+    """Output options that write the tags into the container (and encoder) metadata."""
+    args = []
+    for _, option in _COLOR_FIELDS:
+        if option in tags:
+            args += [f"-{option}", tags[option]]
+    return args + ["-color_range", tags["color_range"]]
+
+
+def _video_copy_safe(stream):
+    """True when the source picture can be stream-copied and still match a re-encoded
+    delivery: H.264, 8-bit 4:2:0 (yuvj420p is the same layout in full range), even size."""
+    width, height = stream.get("width"), stream.get("height")
+    return (
+        stream.get("codec_name") == "h264"
+        and stream.get("pix_fmt") in {"yuv420p", "yuvj420p"}
+        and isinstance(width, int) and isinstance(height, int)
+        and width % 2 == 0 and height % 2 == 0
+    )

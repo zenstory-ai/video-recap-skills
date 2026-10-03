@@ -107,6 +107,7 @@ def _subtitle_layout_qc(entries, style, safe_area=None):
     return {
         "enabled": CONFIG["burn_subtitles"],
         "renderer": "ass" if CONFIG["burn_subtitles"] else "sidecar_srt",
+        "burn_degraded_reason": CONFIG["burn_subtitles_degraded"],
         "style": {
             "font_size": int(font_size),
             "max_chars": int(style["max_chars"]),
@@ -267,6 +268,24 @@ def _visual_overlay_filters(work_dir, canvas, video_duration):
     return filters, qc
 
 
+def _subtitle_delivery_warnings(mask):
+    """Non-blocking, machine-readable record of a default burn that degraded to the sidecar."""
+    reason = CONFIG["burn_subtitles_degraded"]
+    if not reason:
+        return []
+    return [{
+        "code": "subtitle_burn_degraded",
+        "reason": reason,
+        "delivered": "sidecar_srt",
+        "mask_dropped": mask["trigger"] == "burn_subtitles_degraded",
+        "message": (
+            "ffmpeg lacks the libass subtitles filter: subtitles are not burned into the "
+            "video and ship as a .srt sidecar next to it"
+        ),
+        "next_action": "install an ffmpeg build with libass and rerun to burn, or deliver the .srt sidecar",
+    }]
+
+
 def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_qc=None, mask_filter=None):
     entries = _combined_subtitle_entries(tts_segments, work_dir, video_duration)
     style = _style_for_measured_subtitle_band(_subtitle_style_config(canvas), canvas)
@@ -284,6 +303,7 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
     })
     if overlay_qc is None:
         overlay_qc = _visual_overlay_filters(work_dir, canvas, video_duration)[1]
+    warnings = _subtitle_delivery_warnings(mask)
     blocking_codes = []
     if mask["blocking"]:
         blocking_codes.append("mask_policy_not_explicit")
@@ -299,6 +319,7 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
         "verdict": "FAIL" if blocking_codes else "PASS",
         "blocking": bool(blocking_codes),
         "blocking_codes": blocking_codes,
+        "warnings": warnings,
         "geometry": {
             "canvas": {
                 "width": canvas["width"],

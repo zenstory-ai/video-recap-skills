@@ -1,8 +1,9 @@
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
-"""Fail-fast preflight: when subtitle burn-in is on but ffmpeg lacks the libass
-`subtitles` filter, assemble must raise BEFORE the render — not die at the final -vf."""
+"""Burn preflight: when ffmpeg lacks the libass `subtitles` filter, an explicit burn request
+must raise BEFORE the render (not die at the final -vf) and the default burn must degrade to
+the .srt sidecar with the reason recorded."""
 import shutil  # noqa: E402
 import subprocess  # noqa: E402
 
@@ -11,12 +12,27 @@ import pytest  # noqa: E402
 import render_preflight as preflight  # noqa: E402
 
 
-def test_preflight_raises_when_present_but_filter_missing(monkeypatch):
+def test_preflight_raises_when_explicit_burn_and_filter_missing(monkeypatch):
     monkeypatch.setitem(preflight.CONFIG, "burn_subtitles", True)
+    monkeypatch.setitem(preflight.CONFIG, "burn_subtitles_explicit", True)
+    monkeypatch.setitem(preflight.CONFIG, "burn_subtitles_degraded", None)
     monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ffmpeg")
     monkeypatch.setattr(preflight, "_ffmpeg_filters", lambda: {"scale", "atempo"})
     with pytest.raises(SystemExit, match="subtitles/libass"):
         preflight._preflight_burn_subtitles()
+    assert preflight.CONFIG["burn_subtitles_degraded"] is None
+
+
+def test_preflight_default_burn_degrades_to_sidecar(monkeypatch, capsys):
+    monkeypatch.setitem(preflight.CONFIG, "burn_subtitles", True)
+    monkeypatch.setitem(preflight.CONFIG, "burn_subtitles_explicit", False)
+    monkeypatch.setitem(preflight.CONFIG, "burn_subtitles_degraded", None)
+    monkeypatch.setattr(shutil, "which", lambda _n: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(preflight, "_ffmpeg_filters", lambda: {"scale", "atempo"})
+    preflight._preflight_burn_subtitles()  # must not raise
+    assert preflight.CONFIG["burn_subtitles"] is False
+    assert preflight.CONFIG["burn_subtitles_degraded"] == "ffmpeg_missing_libass"
+    assert ".srt" in capsys.readouterr().out
 
 
 def test_preflight_ok_when_filter_present(monkeypatch):

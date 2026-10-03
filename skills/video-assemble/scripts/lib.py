@@ -91,6 +91,9 @@ CONFIG = {
     "speech_ducking_volume": env_float("SPEECH_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.2, minimum=0.0),    # 解说与对白重叠时原声音量
     "burn_subtitles": env_bool("BURN_SUBTITLES", True),  # 烧录解说字幕（默认开；遮挡原字幕后需自带字幕，否则字幕区空白）
+    # 显式要求烧录（设了 BURN_SUBTITLES 或传了 --burn-subtitles）时缺 libass 直接失败；只是默认开时降级为外挂 .srt
+    "burn_subtitles_explicit": "BURN_SUBTITLES" in os.environ,
+    "burn_subtitles_degraded": None,  # 降级原因（如 ffmpeg_missing_libass），由 render_preflight 写入
     "subtitle_original_in_gaps": env_bool("SUBTITLE_ORIGINAL_IN_GAPS", True),  # 原声留白处补烧原声台词字幕（来自 ASR）
     "force_video_reencode": env_bool("FORCE_VIDEO_REENCODE", False),  # 组装时重编码视频，修复部分容器时间戳问题
     # 成片压制（仅在重编码时生效：烧字幕/遮罩/缩放/FORCE_VIDEO_REENCODE 任一触发重编码）。
