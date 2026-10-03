@@ -62,12 +62,18 @@ def _read_video_duration_or_raise(path):
     return duration
 
 
-def _probe_display_height_or_raise(path, *, require_square_pixels=False):
+# Subtitle Y coordinates are display-canvas rows; a near-square SAR only changes the canvas
+# width (or, rotated, the row scale the renderer converts exactly). Same value as the
+# renderer's and the measuring tool's copies (parity-tested).
+SUBTITLE_BAND_SAR_TOLERANCE = 0.02
+
+
+def _probe_display_height_or_raise(path, *, require_near_square_pixels=False):
     """Return ffmpeg's display-coordinate height, accounting for rotation and SAR."""
-    return _probe_display_size_or_raise(path, require_square_pixels=require_square_pixels)[1]
+    return _probe_display_size_or_raise(path, require_near_square_pixels=require_near_square_pixels)[1]
 
 
-def _probe_display_size_or_raise(path, *, require_square_pixels=False):
+def _probe_display_size_or_raise(path, *, require_near_square_pixels=False):
     """Return ffmpeg's display-coordinate (width, height), accounting for rotation and SAR."""
     cmd = [
         "ffprobe",
@@ -94,11 +100,14 @@ def _probe_display_size_or_raise(path, *, require_square_pixels=False):
         sar_ratio = float(num) / float(den)
     except (ValueError, ZeroDivisionError):
         sar_ratio = math.nan
-    if require_square_pixels and (
-        not math.isfinite(sar_ratio) or abs(sar_ratio - 1.0) >= 1e-9
+    if sar in {"0:1", "N/A"}:
+        sar_ratio = 1.0  # unspecified SAR: ffmpeg (and the renderer's canvas) treat it as square
+    if require_near_square_pixels and (
+        not math.isfinite(sar_ratio) or abs(sar_ratio - 1.0) > SUBTITLE_BAND_SAR_TOLERANCE + 1e-9
     ):
         raise SystemExit(
-            f"subtitle Y coordinates currently require square-pixel video (SAR 1:1); got {sar}"
+            "subtitle Y coordinates require square or near-square pixels "
+            f"(SAR within {SUBTITLE_BAND_SAR_TOLERANCE:.0%} of 1:1); got {sar}"
         )
     display_width = max(1, round(width * sar_ratio)) if math.isfinite(sar_ratio) else width
     rotation_values = [

@@ -13,6 +13,13 @@ from assemble_constants import (
 )
 from media import _ratio_to_float
 
+# Measured subtitle bands accept near-square pixels: Y rows are converted between the display
+# canvas and the decoded frame exactly (_frame_row), so the only SAR effect left is a burned
+# ASS line stretched horizontally by the same factor — invisible within 2%. Kept equal to the
+# orchestrator's preflight copy and the measuring tool's (parity-tested).
+SUBTITLE_BAND_SAR_TOLERANCE = 0.02
+
+
 def _seconds_to_srt_time(seconds):
     """Floor times to SRT milliseconds without float remainder artifacts.
 
@@ -102,9 +109,11 @@ def _measured_subtitle_band(canvas):
     if y_top < 0 and y_bot < 0:
         return None
     sar_text = canvas["sample_aspect_ratio"]
-    if abs(_ratio_to_float(sar_text, 0.0) - 1.0) >= 1e-9:
+    # Unspecified SAR ("0:1"/"N/A") is square, exactly as the canvas probe reads it.
+    if abs(_ratio_to_float(sar_text, 1.0) - 1.0) > SUBTITLE_BAND_SAR_TOLERANCE + 1e-9:
         raise ValueError(
-            f"字幕带坐标仅支持方形像素画布 (SAR 1:1)；当前 SAR={sar_text}"
+            "字幕带坐标仅支持方形或近方形像素画布 "
+            f"(SAR 与 1:1 相差不超过 {SUBTITLE_BAND_SAR_TOLERANCE:.0%})；当前 SAR={sar_text}"
         )
     canvas_h = canvas["height"]
     if not 0 <= y_top < y_bot <= canvas_h:
@@ -113,6 +122,19 @@ def _measured_subtitle_band(canvas):
             "必须满足 0 <= top < bot <= height"
         )
     return y_top, y_bot
+
+
+def _frame_row(canvas, display_y):
+    """Display-canvas row → row of the decoded, auto-rotated frame that drawbox paints on.
+
+    The canvas keeps the frame's pixel width and stretches the height by the SAR only for a
+    90°/270° stream (its stored width becomes the height); otherwise both share rows exactly.
+    """
+    rotated = canvas["rotation"] in {90, 270}
+    frame_h = canvas["storage_width"] if rotated else canvas["storage_height"]
+    if frame_h == canvas["height"]:
+        return display_y
+    return round(display_y * frame_h / canvas["height"])
 
 
 def _style_for_measured_subtitle_band(style, canvas):

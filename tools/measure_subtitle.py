@@ -26,10 +26,18 @@ def _run(command):
     return subprocess.run(command, capture_output=True, text=True)
 
 
+# Same value as the renderer's and the orchestrator's copies (parity-tested): within it the
+# measured rows convert exactly to the display canvas and a burned line is stretched invisibly.
+SUBTITLE_BAND_SAR_TOLERANCE = 0.02
+
+
 def _probe_video(path):
+    """Storage (width, height), duration, SAR text and rotation of the first video stream."""
     result = _run([
         "ffprobe", "-v", "error", "-select_streams", "v:0",
-        "-show_entries", "stream=width,height,sample_aspect_ratio:format=duration",
+        "-show_entries",
+        "stream=width,height,sample_aspect_ratio:stream_tags=rotate:"
+        "stream_side_data=rotation:format=duration",
         "-of", "json", str(path),
     ])
     if result.returncode != 0:
@@ -41,15 +49,35 @@ def _probe_video(path):
     sar = str(stream.get("sample_aspect_ratio") or "1:1")
     if width <= 0 or height <= 0 or duration <= 0:
         raise RuntimeError(f"无法读取视频尺寸/时长: {path}")
-    return width, height, duration, sar
+    rotation_values = [
+        (stream.get("tags") or {}).get("rotate"),
+        *(item.get("rotation") for item in stream.get("side_data_list") or []),
+    ]
+    rotation = next(
+        (int(round(float(value))) % 360 for value in rotation_values if value not in (None, "")),
+        0,
+    )
+    return width, height, duration, sar, rotation
 
 
-def _is_square_sample_aspect_ratio(value):
+def _sample_aspect_ratio(value):
+    """SAR as a float; "0:1"/"N/A" (unspecified) count as square, garbage as None."""
+    if str(value) in {"0:1", "N/A"}:
+        return 1.0
     try:
         num, den = str(value).split(":", 1)
-        return abs(float(num) / float(den) - 1.0) < 1e-9
+        return float(num) / float(den)
     except (TypeError, ValueError, ZeroDivisionError):
-        return False
+        return None
+
+
+def _display_canvas(frame_width, frame_height, sar, rotation):
+    """Display canvas (width, height) the recap and renderer use for subtitle Y rows, from the
+    decoded (already auto-rotated) frame: the stored width is scaled by the SAR, so a
+    90°/270° stream — whose stored width is now the frame height — scales its rows."""
+    if rotation in {90, 270}:
+        return frame_width, max(1, round(frame_height * sar))
+    return max(1, round(frame_width * sar)), frame_height
 
 
 def _sample_times(duration, count, start_sec=10.0):
@@ -318,27 +346,27 @@ def main(argv=None):
         parser.error(f"视频不存在: {video}")
     if args.frames <= 0:
         parser.error("--frames must be positive")
-    _storage_width, _storage_height, duration, sar = _probe_video(video)
-    if not _is_square_sample_aspect_ratio(sar):
+    _storage_width, _storage_height, duration, sar, rotation = _probe_video(video)
+    sar_ratio = _sample_aspect_ratio(sar)
+    if sar_ratio is None or abs(sar_ratio - 1.0) > SUBTITLE_BAND_SAR_TOLERANCE + 1e-9:
         parser.error(
-            f"当前坐标测量仅支持方形像素视频 (SAR 1:1)；当前 SAR={sar}"
+            "当前坐标测量仅支持方形或近方形像素视频 "
+            f"(SAR 与 1:1 相差不超过 {SUBTITLE_BAND_SAR_TOLERANCE:.0%})；当前 SAR={sar}"
         )
     out_dir = Path(args.out_dir).expanduser().resolve() if args.out_dir else _default_output_dir(video)
     staging, frames_dir, preview_dir = _prepare_staged_output(out_dir)
 
     try:
         detections = []
-        canvas_width = canvas_height = None
+        frame_size = None
         for index, timestamp in enumerate(_sample_times(duration, args.frames, args.start_sec)):
             pgm = frames_dir / f"frame_{index:03d}_{timestamp:.2f}s.pgm"
             _extract_gray_frame(video, timestamp, pgm)
             frame_w, frame_h, pixels = _read_pgm(pgm)
-            if canvas_width is None:
-                canvas_width, canvas_height = frame_w, frame_h
-            elif (frame_w, frame_h) != (canvas_width, canvas_height):
-                raise RuntimeError(
-                    f"抽帧尺寸不一致: {(frame_w, frame_h)} != {(canvas_width, canvas_height)}"
-                )
+            if frame_size is None:
+                frame_size = (frame_w, frame_h)
+            elif (frame_w, frame_h) != frame_size:
+                raise RuntimeError(f"抽帧尺寸不一致: {(frame_w, frame_h)} != {frame_size}")
             band = _detect_subtitle_band(frame_w, frame_h, pixels)
             pgm.unlink(missing_ok=True)
             if band:
@@ -348,11 +376,18 @@ def main(argv=None):
 
         if not detections:
             raise SystemExit("未检测到可靠字幕带；可增加 --frames 或降低 --start-sec 后重试")
-        width, height = int(canvas_width), int(canvas_height)
-        suggested_top = round(median(top for top, _ in detections))
+        # Decoded (auto-rotated) frames keep the pixel rows; the display canvas stretches them
+        # only for a rotated non-square stream. Convert so the coordinates match the renderer.
+        width, height = _display_canvas(*frame_size, sar_ratio, rotation)
+        row_scale = height / frame_size[1]
         # Detection/preview bands use inclusive pixel rows; the recap CLI uses [top, bot).
-        suggested_bot = min(height, round(median(bottom for _, bottom in detections)) + 1)
+        frame_top = round(median(top for top, _ in detections))
+        frame_bot = round(median(bottom for _, bottom in detections)) + 1
+        suggested_top = round(frame_top * row_scale)
+        suggested_bot = min(height, round(frame_bot * row_scale))
         print(f"检测到字幕帧 {len(detections)}/{args.frames}，预览: {preview_dir}")
+        if row_scale != 1:
+            print(f"预览红框按解码帧像素行绘制；坐标已换算到显示画布（行 ×{row_scale:.4f}）")
         print(f"建议字幕带（半开区间）: y=[{suggested_top}, {suggested_bot})")
         if args.accept_detected:
             y_top, y_bot = suggested_top, suggested_bot

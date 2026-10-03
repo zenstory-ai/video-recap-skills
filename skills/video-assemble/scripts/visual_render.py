@@ -19,6 +19,7 @@ from source_subtitles import (
     _source_subtitle_mask_policy,
 )
 from subtitles.core import (
+    _frame_row,
     _measured_subtitle_band,
     _measured_subtitle_safe_area,
     _normalize_subtitle_text,
@@ -425,8 +426,8 @@ def _source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
     if band is not None:
         y_top, y_bot = band
         padding = CONFIG["subtitle_mask_padding"]
-        mask_top = max(0, y_top - padding)
-        mask_bot = min(canvas["height"], y_bot + padding)
+        mask_top = _frame_row(canvas, max(0, y_top - padding))
+        mask_bot = _frame_row(canvas, min(canvas["height"], y_bot + padding))
         geometry = f"x=0:y={mask_top}:w=iw:h={mask_bot - mask_top}"
     else:
         # Our subtitle cues are one line. Keep the mask large enough for that line and its

@@ -168,7 +168,7 @@ def test_main_uses_auto_rotated_frame_dimensions_for_canvas(monkeypatch, tmp_pat
         for x in range(25, 155):
             pixels[y * width + x] = 20 if y in {250, 261} else 235
 
-    monkeypatch.setattr(measure, "_probe_video", lambda path: (320, 180, 5.0, "1:1"))
+    monkeypatch.setattr(measure, "_probe_video", lambda path: (320, 180, 5.0, "1:1", 0))
     monkeypatch.setattr(measure, "_sample_times", lambda *args: [1.0])
 
     def fake_extract(video_path, timestamp, output):
@@ -207,7 +207,7 @@ def test_interactive_prompt_points_to_current_staging_preview_then_final_path(
         for x in range(18, 82):
             pixels[y * width + x] = 20 if y in {70, 79} else 235
 
-    monkeypatch.setattr(measure, "_probe_video", lambda path: (width, height, 5.0, "1:1"))
+    monkeypatch.setattr(measure, "_probe_video", lambda path: (width, height, 5.0, "1:1", 0))
     monkeypatch.setattr(measure, "_sample_times", lambda *args: [1.0])
     monkeypatch.setattr(
         measure,
@@ -247,7 +247,7 @@ def test_main_rejects_non_square_pixel_coordinate_domain(monkeypatch, tmp_path, 
     video = tmp_path / "anamorphic.mp4"
     video.write_bytes(b"video")
     out = tmp_path / "measure"
-    monkeypatch.setattr(measure, "_probe_video", lambda path: (320, 180, 5.0, "2:1"))
+    monkeypatch.setattr(measure, "_probe_video", lambda path: (320, 180, 5.0, "2:1", 0))
 
     try:
         measure.main([str(video), "--out-dir", str(out), "--accept-detected"])
@@ -256,8 +256,73 @@ def test_main_rejects_non_square_pixel_coordinate_domain(monkeypatch, tmp_path, 
     else:
         raise AssertionError("non-square pixels must be rejected before measurement")
 
-    assert "SAR 1:1" in capsys.readouterr().err
+    assert "近方形像素" in capsys.readouterr().err
     assert not out.exists()
+
+
+@pytest.mark.parametrize(
+    ("sar", "rotation", "canvas", "band"),
+    [
+        # Near-square, upright: rows are shared exactly; only the canvas width follows the SAR.
+        ("101:100", 0, {"width": 182, "height": 320}, (250, 262)),
+        # Near-square, rotated: the decoded frame's rows are the stored width, scaled by SAR.
+        ("101:100", 90, {"width": 180, "height": 323}, (252, 264)),
+        # Unspecified SAR reads as square.
+        ("0:1", 0, {"width": 180, "height": 320}, (250, 262)),
+    ],
+)
+def test_main_measures_near_square_video_in_display_rows(
+    monkeypatch, tmp_path, sar, rotation, canvas, band
+):
+    video = tmp_path / "near-square.mp4"
+    video.write_bytes(b"video")
+    out = tmp_path / "measure"
+    width, height = 180, 320
+    pixels = bytearray([120] * (width * height))
+    for y in range(250, 262):
+        for x in range(25, 155):
+            pixels[y * width + x] = 20 if y in {250, 261} else 235
+    monkeypatch.setattr(
+        measure, "_probe_video", lambda path: (width, height, 5.0, sar, rotation)
+    )
+    monkeypatch.setattr(measure, "_sample_times", lambda *args: [1.0])
+    monkeypatch.setattr(
+        measure,
+        "_extract_gray_frame",
+        lambda _video, _timestamp, output: output.write_bytes(
+            f"P5\n{width} {height}\n255\n".encode() + pixels
+        ),
+    )
+    monkeypatch.setattr(measure, "_write_preview", lambda *args: args[2].write_bytes(b"png"))
+
+    assert measure.main([str(video), "--out-dir", str(out), "--frames", "1", "--accept-detected"]) == 0
+
+    positions = json.loads((out / "subtitle_positions.json").read_text(encoding="utf-8"))
+    assert positions["canvas"] == canvas
+    assert (positions["subtitle_y_top"], positions["subtitle_y_bot"]) == band
+
+
+def test_subtitle_band_sar_tolerance_matches_across_measuring_preflight_and_render():
+    """The tool, the recap preflight and the renderer must accept exactly the same SARs, or a
+    measured band passes one gate and fails the next after a long run."""
+    import ast
+
+    def literal(path):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        return next(
+            node.value.value
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and getattr(node.targets[0], "id", None) == "SUBTITLE_BAND_SAR_TOLERANCE"
+        )
+
+    paths = [
+        ROOT / "tools" / "measure_subtitle.py",
+        ROOT / "skills" / "video-recap" / "scripts" / "recap_runtime.py",
+        ROOT / "skills" / "video-assemble" / "scripts" / "subtitles" / "core.py",
+    ]
+    values = {str(path.relative_to(ROOT)): literal(path) for path in paths}
+    assert set(values.values()) == {0.02}, values
 
 
 def test_failed_measurement_preserves_previous_owned_results(monkeypatch, tmp_path):
@@ -272,7 +337,7 @@ def test_failed_measurement_preserves_previous_owned_results(monkeypatch, tmp_pa
     old_positions = out / "subtitle_positions.json"
     old_positions.write_text('{"old": true}\n', encoding="utf-8")
 
-    monkeypatch.setattr(measure, "_probe_video", lambda path: (100, 100, 5.0, "1:1"))
+    monkeypatch.setattr(measure, "_probe_video", lambda path: (100, 100, 5.0, "1:1", 0))
     monkeypatch.setattr(measure, "_sample_times", lambda *args: [1.0])
 
     def fake_extract(_video, _timestamp, output):

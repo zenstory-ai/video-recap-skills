@@ -516,7 +516,7 @@ def main():
         ap.error("多视频 cut 暂不支持全局 subtitle Y 坐标；各源字幕带可能不同")
     if args.subtitle_y_top is not None:
         canvas_height = _probe_display_height_or_raise(
-            videos[0], require_square_pixels=True
+            videos[0], require_near_square_pixels=True
         )
         if args.subtitle_y_bot > canvas_height:
             ap.error(

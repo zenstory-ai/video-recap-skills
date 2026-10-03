@@ -945,10 +945,39 @@ def test_probe_display_height_accounts_for_rotation_and_sar(monkeypatch):
     )
 
     assert recap_runtime._probe_display_height_or_raise("rotated.mp4") == 640
-    with pytest.raises(SystemExit, match="require square-pixel video"):
+    with pytest.raises(SystemExit, match="near-square pixels"):
         recap_runtime._probe_display_height_or_raise(
-            "rotated.mp4", require_square_pixels=True
+            "rotated.mp4", require_near_square_pixels=True
         )
+
+
+@pytest.mark.parametrize(
+    ("sar", "rotation", "size"),
+    [
+        ("64:63", 0, (1950, 1080)),  # near-square: accepted, width follows the SAR
+        ("63:64", 90, (1080, 1890)),  # rotated near-square: the stored width becomes rows
+        ("0:1", 0, (1920, 1080)),  # unspecified SAR is square, not a 1px-wide canvas
+        ("N/A", 0, (1920, 1080)),
+    ],
+)
+def test_probe_display_size_accepts_near_square_and_unspecified_sar(
+    monkeypatch, sar, rotation, size
+):
+    stream = {"width": 1920, "height": 1080, "sample_aspect_ratio": sar}
+    if rotation:
+        stream["side_data_list"] = [{"rotation": rotation}]
+    monkeypatch.setattr(
+        recap_runtime.subprocess,
+        "run",
+        lambda *args, **kwargs: type(
+            "Result", (), {"returncode": 0, "stdout": json.dumps({"streams": [stream]}),
+                           "stderr": ""}
+        )(),
+    )
+
+    assert recap_runtime._probe_display_size_or_raise(
+        "near.mp4", require_near_square_pixels=True
+    ) == size
 
 
 @pytest.mark.parametrize("via", ["cli", "env"])
