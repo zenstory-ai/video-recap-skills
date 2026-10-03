@@ -87,6 +87,17 @@ def test_run_asr_api_failure_raises_instead_of_silent_empty(monkeypatch, tmp_pat
         asr._run_asr(wav)
 
 
+def test_run_asr_missing_audio_raises_instead_of_empty_transcript(monkeypatch, tmp_path):
+    """A missing wav is an upstream bug, not silence: it must not become an empty transcript."""
+
+    def boom(payload):
+        raise AssertionError("missing audio must not hit the API")
+
+    monkeypatch.setattr("asr.mimo_asr_api_call", boom)
+    with pytest.raises(RuntimeError, match="无法读取音频"):
+        asr._run_asr(tmp_path / "absent.wav")
+
+
 def test_run_asr_skips_oversize_segment(monkeypatch, tmp_path):
     """A segment whose base64 exceeds the MiMo cap is skipped, not sent (10MB API limit)."""
     wav = tmp_path / "big.wav"
@@ -283,6 +294,36 @@ def test_understand_writes_failed_consolidation_status(monkeypatch, tmp_path):
     assert status["status"] == "failed"
     assert "understanding_index.json" in status["message"]
     assert status["artifacts"] == []
+
+
+def test_understand_reports_failed_not_ok_when_index_reply_is_cut_off(monkeypatch, tmp_path):
+    """A cut-off index reply (finish_reason=length, even after the retry) must surface as a
+    failed consolidation status, not "ok" over an empty understanding_index.json."""
+    video = _video(tmp_path)
+    _patch_runner(monkeypatch, tmp_path)
+
+    def analyze_and_write(scenes, frames, work_dir, **kwargs):
+        analysis = _fresh_analysis(scenes, frames, work_dir)
+        (Path(work_dir) / "vlm_analysis.json").write_text(json.dumps(analysis), encoding="utf-8")
+        return analysis
+
+    monkeypatch.setattr("understanding_runner.analyze_scenes", analyze_and_write)
+    monkeypatch.setattr(
+        "consolidate.api_call",
+        lambda payload: {
+            "choices": [{"message": {"content": '{"characters":[{"name":"范'}, "finish_reason": "length"}]
+        },
+    )
+
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
+
+    status = json.loads(
+        (tmp_path / "consolidation.status.json").read_text(encoding="utf-8")
+    )
+    assert status["status"] == "failed"
+    assert "finish_reason=length" in status["message"]
+    assert status["artifacts"] == []
+    assert not (tmp_path / "understanding_index.json").exists()
 
 
 def test_understand_omits_stale_mimo_overview_when_overview_disabled(

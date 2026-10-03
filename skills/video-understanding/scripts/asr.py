@@ -202,13 +202,13 @@ def _run_asr(wav_path):
 
     音频以 base64 data-URI 放进 OpenAI 风格的 chat/completions 消息里，转写文本回到
     choices[0].message.content。API/响应结构失败会抛错，避免把瞬时失败缓存成空转写；
-    只有无音频、超体积等确定不可发送的片段返回空串。
+    音频文件缺失/不可读同样抛错（那是上游 bug，不是静音）；只有空音频、超体积等
+    确定不可发送的片段返回空串。
     """
     try:
         raw = Path(wav_path).read_bytes()
     except OSError as e:
-        log(f"ASR 警告: 无法读取音频 {wav_path}: {e}")
-        return ""
+        raise RuntimeError(f"ASR: 无法读取音频 {wav_path}: {e}") from e
     if not raw:
         return ""
 

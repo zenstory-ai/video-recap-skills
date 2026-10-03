@@ -52,6 +52,8 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- **故事索引被截断时不再报 ok。** consolidate 的索引调用此前上限 3000 token，5 分钟的解说素材就会被截断（`finish_reason=length`），解析出空列表后照样写出空的 `understanding_index.json`，`consolidation.status.json` 仍是 `ok`，brief 拿到 0 个角色。现在索引与 ASR 清洗两次调用的上限都是 8000 token，被截断时加倍预算重试一次；仍被截断或返回的不是 JSON 时不写产物，`consolidation.status.json` 记为 `failed` 并写明原因，brief 照常提示。索引 prompt 要求更紧凑的输出（每条描述不超过 40 字、剧情节点最多 20 条等），已有索引会按新 prompt 重建一次。
+- **ASR 读不到音频文件时报错，** 不再当作空转写继续。
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。
 - **多视频 cut 的旁白校验不再以 `KeyError` 崩溃。** recap 写的多源 `speech_boundary_anchors_output.json` 现在带 `clip_plan_identity`；源锚点缺 `pause_start` 时与单源一样按 `time − 0.12` 处理。
 - **Windows 上经管道运行 recap 时，阶段脚本不再因中文日志崩溃。** recap 调用各阶段脚本时设置 `PYTHONIOENCODING=utf-8`；此前 stdout 被管道捕获（Agent 宿主、CI）时子进程默认 cp1252，第一行中文日志就抛 `UnicodeEncodeError`。
