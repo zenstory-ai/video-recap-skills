@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 from pathlib import Path
 
 import materials as material_lib
@@ -147,8 +148,27 @@ def _run_local_adoption(video, work_dir, args):
     _finish_recap(work_dir, final_output, args)
 
 
-def _run_or_restore_understanding(source_record, source_work_dir, args):
-    """Run video-understanding for one source, or restore it from the material library."""
+def _share_project_background_research(project_work_dir, source_work_dir):
+    """Give one source of a multi-video run the project-level background_research.json.
+
+    video-understanding only reads background_research.json from its own work_dir
+    (sources/<source_id>/), while the Agent writes the research once at the project level.
+    The project file is copied in when the source has none or an older one; a per-source
+    file newer than the project file is kept. copy2 keeps the mtime, so an unchanged
+    project file leaves the understanding cache identity unchanged."""
+    shared = Path(project_work_dir) / "background_research.json"
+    if not shared.is_file():
+        return
+    target = Path(source_work_dir) / "background_research.json"
+    if target.is_file() and target.stat().st_mtime_ns >= shared.stat().st_mtime_ns:
+        return
+    shutil.copy2(shared, target)
+
+
+def _run_or_restore_understanding(source_record, source_work_dir, args, project_work_dir=None):
+    """Run video-understanding for one source, or restore it from the material library.
+
+    `project_work_dir` is set for multi-video runs, whose sources share its research file."""
     source_work_dir = Path(source_work_dir)
     source_work_dir.mkdir(parents=True, exist_ok=True)
     source_path = source_record["source_path"]
@@ -177,6 +197,8 @@ def _run_or_restore_understanding(source_record, source_work_dir, args):
                 flush=True,
             )
     if not restored:
+        if project_work_dir is not None:
+            _share_project_background_research(project_work_dir, source_work_dir)
         _run(
             "video-understanding",
             "understand.py",
@@ -339,7 +361,7 @@ def _run_multi_cut(videos, work_dir, args):
     if not clip_plan_json.exists():
         for record in source_records:
             _run_or_restore_understanding(
-                record, _source_work_dir(work_dir, record), args
+                record, _source_work_dir(work_dir, record), args, project_work_dir=work_dir
             )
         # Rewrite: _run_or_restore_understanding fills in material_id per record.
         manifest_path = _write_multi_source_manifest(work_dir, source_records)

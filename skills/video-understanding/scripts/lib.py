@@ -244,6 +244,18 @@ def load_background_research(work_dir):
         raise ValueError("background_research.json 顶层必须是 JSON 对象（{...}）")
     return data
 
+# MiMo answers a moderated ASR / per-scene VLM request with this English sentence as the reply
+# content ("The request was rejected because it was considered high risk"). Only the provider's
+# own wording is matched: a broader list (e.g. "违规") would also match real dialogue.
+_MODERATION_REFUSAL_MARKERS = ("request was rejected", "considered high risk")
+
+
+def is_moderation_refusal(text):
+    """True when a MiMo reply is a moderation refusal, not a transcript or description."""
+    low = str(text or "").lower()
+    return any(marker in low for marker in _MODERATION_REFUSAL_MARKERS)
+
+
 def file_identity(path):
     """{"size", "mtime_ns"} of a file: the cache identity recorded instead of content hashes."""
     st = os.stat(os.fspath(path))

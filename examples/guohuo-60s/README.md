@@ -45,7 +45,7 @@ video-understanding
 | video-cut | 无运行时产物入库 | Skill 根据 `clip_plan.json` 生成新的 `clip_plan_validated.json` 与 `edited_source.mp4`；本案例后续做过项目级画面 conform，因此不把扩展过的项目文件冒充 Skill 原生输出 |
 | video-script pass 2 | [`narration.json`](narration.json)、[`original_subtitles.json`](original_subtitles.json) | 对剪后成片写 7 个连续 TTS 块并保留采用的原声窗口；复现时由 Skill 根据新的 validated plan 重新生成句末锚点与校验报告 |
 | video-voiceover | 无媒体产物入库 | 本例旁白来自 Fish Audio；复现时重新生成分段音频 |
-| video-assemble | [`timeline.json`](timeline.json)、[`assembly_manifest.json`](assembly_manifest.json)、[`assembly_qc.json`](assembly_qc.json) | 展示多轨、ducking、逐段完整性、响度与发布门禁；路径已替换为逻辑占位 |
+| video-assemble | [`timeline.json`](timeline.json)、[`assembly_manifest.json`](assembly_manifest.json)、[`assembly_qc.json`](assembly_qc.json) | 展示多轨、ducking、逐段完整性、响度与 `assembly_qc.json` 的 `verdict` / `blocking_codes`；路径已替换为逻辑占位，并已删掉当前 video-assemble 不再写的字段（记录的数值未改） |
 | 可选声音/包装 | [`sfx_mix_plan.json`](sfx_mix_plan.json)、[`captions.json`](captions.json)、[`remotion/`](remotion/) | 音画锁定后探索低频音效、片名、花字和字幕透明层 |
 | REVISION / delivery | [`revision-log.json`](revision-log.json)、[`edit-map.json`](edit-map.json)、[`picture-conform.json`](picture-conform.json)、[`delivery-qc.json`](delivery-qc.json)、[`content-qc.md`](content-qc.md) | 把看片建议拆为修改项/冻结项，项目级 conform 后重新看片并做内容、压缩和交付复核 |
 
@@ -53,7 +53,7 @@ video-understanding
 
 ## Remotion 包装
 
-包装画布为 1920×1080、25fps、1474 帧，透明背景包含三层：
+包装画布为 1920×1080、25fps、1474 帧（时长、花字时间和片名窗口写死在 `remotion/src` 里，复现时按新母版重定时，见 runbook），透明背景包含三层：
 
 1. **片名标识**：横排在顶部黑边，不侵入正片画面。
 2. **花字**：低频出现，使用“旧情难藏 / 克制失守 / 本能不会说谎 / 重逢已迟”补充情绪，不复述字幕。

@@ -69,6 +69,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 音频模式的处理与冻结语义见 `references/audio-modes.md`。默认仍为 `narration`；另外两种模式必须显式选择。
 - `--audio-mix-adoption` 只与显式 `--tts-meta`、`--narration-adoption` 同时使用；它保留 `narration` 模式名，但跳过旧速度/适配、原声 handoff、环境 BGM、duck、loudnorm 和 limiter。
 - 音频按轨道混合：原声、可选 BGM 与旁白各自独立。
+- 段落首块（与上一块作者留白超过 1.6 秒）严格从写的 `start` 放置；段落内后续块紧接上一块的实际结尾（间隔 0.35 秒），最多比写的 `start` 提前 1.2 秒。这一提前发生在旁白校验之后，`source_entry_status` 不会为它另记一次判定。
 - 旁白不做任何容差裁尾；温和加速后仍放不下即 `no_safe_fit`。每段 `_placed_*.wav`
   必须与序列化后的时间线区间等长或更短，否则 `timeline_audio_mismatch` 阻断。
 - 已采用配音的 v1 合同只支持原速、禁止段内适速；不能让环境默认 1.15 倍速或旧缓存覆盖它。放不下就修订安排，不裁尾。严格运行使用新工作目录与新输出路径；输入/实际混音来源变动或 QC 失败时，不发布候选成片。没有采用文件的旧入口仍是兼容模式，不自动获得同等证据。
