@@ -71,15 +71,54 @@ def test_only_inserted_and_edited_blocks_reach_the_engine(engine_calls, tmp_path
     assert _audio_by_index(segments) == [f"audio:{text}" for text in edited]
 
 
-def test_a_block_whose_position_changes_its_prosody_is_resynthesized(engine_calls, tmp_path):
-    """Rate/pitch depend on position (first, second-to-last, last) and stay in the key."""
+def test_mimo_resynthesizes_only_a_block_whose_instruction_changes(engine_calls, tmp_path):
+    """Position sets the nominal rate (+5% inside, -2% second-to-last, -5% last), but MiMo
+    only hears it through the instruction wording, which +5% and -2% share."""
     voiceover.synthesize_tts(_narration(BLOCKS), tmp_path)
     engine_calls.clear()
 
-    # Deleting the second-to-last block makes the third block second-to-last (-2% rate).
-    voiceover.synthesize_tts(_narration(BLOCKS[:3] + BLOCKS[4:]), tmp_path)
+    # Deleting the last block: block 3 goes +5% -> -2% (same wording), block 4 goes
+    # -2% -> -5% ("语速略慢").
+    segments, _engine, _failures = voiceover.synthesize_tts(_narration(BLOCKS[:4]), tmp_path)
 
-    assert engine_calls == [BLOCKS[2]]
+    assert engine_calls == [BLOCKS[3]]
+    # The reused take reports its new position's rate, exactly as a fresh synthesis would.
+    assert [s["tts_rate_offset"] for s in segments] == [0.05, 0.05, -0.02, -0.05]
+    assert _audio_by_index(segments) == [f"audio:{text}" for text in BLOCKS[:4]]
+
+
+def test_fish_resynthesizes_every_block_whose_numeric_speed_changes(
+    engine_calls, monkeypatch, tmp_path
+):
+    """Fish Audio receives the rate as a number, so every rate change is a new request."""
+    monkeypatch.setitem(CONFIG, "tts_provider", "fish-audio")
+    monkeypatch.setitem(CONFIG, "fish_api_key", "fish-test")
+    voiceover.synthesize_tts(_narration(BLOCKS), tmp_path)
+    engine_calls.clear()
+
+    voiceover.synthesize_tts(_narration(BLOCKS[:4]), tmp_path)
+
+    assert sorted(engine_calls) == sorted(BLOCKS[2:4])
+
+
+def test_cache_key_is_the_request_the_provider_receives(monkeypatch):
+    monkeypatch.setitem(CONFIG, "voice_ref", "")
+    monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
+    seg = {"start": 0.0, "end": 3.0, "narration": "同一句。"}
+
+    def key(engine, rate, pitch="+0Hz", emotion=None):
+        block = {**seg, "emotion": emotion} if emotion else seg
+        return voiceover._tts_segment_cache_inputs(engine, block, "同一句。", rate, pitch)
+
+    # MiMo: +5% and -2% both read "语速中等"; +6% and -3% change the wording.
+    assert key("mimo-tts", "+5%") == key("mimo-tts", "-2%") == key("mimo-tts", "+0%")
+    assert key("mimo-tts", "+6%") != key("mimo-tts", "+5%")
+    assert key("mimo-tts", "-3%") != key("mimo-tts", "-2%")
+    assert key("mimo-tts", "+0%", emotion="紧张") != key("mimo-tts", "+0%")
+    # Fish Audio: the numeric speed is sent, pitch and emotion are not.
+    assert key("fish-audio", "+5%") != key("fish-audio", "-2%")
+    assert key("fish-audio", "+5%", pitch="+3Hz", emotion="紧张") == key("fish-audio", "+5%")
+    assert key("fish-audio", "+5%")["provider_request"] == {"speed": 1.05}
 
 
 def test_moving_a_window_reuses_the_audio(engine_calls, tmp_path):

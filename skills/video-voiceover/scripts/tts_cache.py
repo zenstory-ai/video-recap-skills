@@ -19,8 +19,7 @@ from approved_text_policy import write_json_atomically
 from lib import file_identity
 
 CACHE_DIR_NAME = "cache"
-_RECORD_KEYS = ("spoken_text", "audio_duration", "tts_rate_offset", "normalization",
-                "provider_receipt")
+_RECORD_KEYS = ("spoken_text", "audio_duration", "normalization", "provider_receipt")
 
 
 def cache_entry(tts_dir, cache_inputs):

@@ -101,9 +101,9 @@ def test_rerun_resynthesizes_a_hallucinated_wav_cached_by_an_earlier_version(mon
     tts_dir.mkdir()
     calls = _fake_provider(monkeypatch, [8.2])
     # What the earlier version left behind: the bad wav plus a matching sidecar.
-    text, wav, rate, _pitch, cache_inputs = voiceover._prepare_tts_segment(0, SEGMENT, [SEGMENT], tts_dir, "mimo-tts")
+    text, wav, _rate, _pitch, cache_inputs = voiceover._prepare_tts_segment(0, SEGMENT, [SEGMENT], tts_dir, "mimo-tts")
     wav.write_bytes(b"hallucinated")
-    voiceover._write_tts_segment_cache(wav, cache_inputs, text, 18.08, voiceover._parse_rate_offset(rate))
+    voiceover._write_tts_segment_cache(wav, cache_inputs, text, 18.08)
 
     segments, _engine, failures = voiceover.synthesize_tts([SEGMENT], tmp_path)
 

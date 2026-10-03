@@ -45,11 +45,11 @@ def _seed_segment_cache(i, seg, narration, tts_dir, wav_bytes, duration):
     """Write a wav plus a sidecar that _synthesize_segment will accept as a cache hit."""
     wav = tts_dir / f"narr_{i:03d}.wav"
     wav.write_bytes(wav_bytes)
-    text, output_wav, rate, _pitch, cache_inputs = voiceover._prepare_tts_segment(
+    text, output_wav, _rate, _pitch, cache_inputs = voiceover._prepare_tts_segment(
         i, seg, narration, tts_dir, "mimo-tts"
     )
     assert output_wav == wav
-    voiceover._write_tts_segment_cache(wav, cache_inputs, text, duration, _parse_rate_offset(rate))
+    voiceover._write_tts_segment_cache(wav, cache_inputs, text, duration)
     return wav
 
 

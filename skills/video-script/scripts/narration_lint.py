@@ -17,7 +17,7 @@ from agent_text import (
     _text_char_count,
 )
 from deslop_qc import analyze_deslop_qc
-from lint_summary import format_lint_failure
+from lint_summary import format_lint_failure, format_lint_warnings
 from speech_ownership import (
     entry_overlaps_source_speech,
     load_source_sentence_evidence,
@@ -132,11 +132,48 @@ def _clip_matches_for_segment(seg, clip_plan, requested_clip_id):
     ]
 
 
-def _source_sentence_entry_issue(index, start, anchors, speech_owned):
+# A narration block that starts within this gap after another block's end is a
+# back-to-back handoff: the source track is never exposed between the two.
+CONNECTED_HANDOFF_SECONDS = 0.15
+# A suggested entry farther than this from the authored one moves the block off the
+# pictures it was written for; past it the author must rethink the block instead.
+SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS = 10.0
+
+
+def _shift_is_clear(new_start, duration, other_spans):
+    """The block moved whole to new_start neither overlaps nor abuts another block."""
+    new_end = new_start + duration
+    gap = CONNECTED_HANDOFF_SECONDS
+    return all(
+        new_end < other_start - gap or new_start > other_end + gap
+        for other_start, other_end in other_spans
+    )
+
+
+def _nearest_safe_anchor(start, end, anchors, other_spans):
+    """The anchor closest to `start` the whole block can move to (duration kept) without
+    overlapping or abutting another block, within SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS;
+    a later anchor wins a tie. None when no anchor qualifies."""
+    duration = end - start
+    candidates = [
+        anchor
+        for anchor in anchors
+        if abs(anchor["time"] - start) <= SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS
+        and anchor["time"] >= 0
+        and _shift_is_clear(anchor["time"], duration, other_spans)
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda anchor: (abs(anchor["time"] - start), -anchor["time"]))
+
+
+def _source_sentence_entry_issue(index, start, end, anchors, speech_owned, other_spans=()):
     """Return a blocking issue when narration enters midway through source speech.
 
     The validator reports a correction instead of silently moving audio. Source
     sentence integrity is invariant; an editorial policy string cannot bypass it.
+    `other_spans` are the other blocks' (start, end): the suggested entry never moves
+    this block onto, or flush against, one of them.
     """
     if not speech_owned:
         return None
@@ -163,18 +200,19 @@ def _source_sentence_entry_issue(index, start, anchors, speech_owned):
         if pause_start - 0.05 <= start <= when + 0.08:
             return None
 
-    suggested = next(
-        (anchor for anchor in anchors if anchor["time"] > start + 0.08), None
-    )
+    suggested = _nearest_safe_anchor(start, end, anchors, other_spans)
     return _lint_issue(
         "error",
         index,
         "interrupts_source_sentence",
-        "Narration enters before the source sentence finishes. Move this block to the suggested "
-        "sentence-end anchor, or shorten/move/remove it when there is no later verified anchor, "
+        "Narration enters before the source sentence finishes. Move the whole block (same "
+        "duration) to the suggested sentence-end anchor, or shorten/move/remove it when no "
+        f"anchor within {SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS:g}s keeps clear of the other blocks, "
         "then rerun lint before TTS. Source sentence interruption has no override.",
         entry_time=round(start, 3),
         suggested_start=round(suggested["time"], 3) if suggested else None,
+        suggested_end=round(suggested["time"] + end - start, 3) if suggested else None,
+        max_shift_seconds=SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS,
         source_text_tail=str(suggested.get("text_tail", "")).strip() if suggested else "",
         anchor_confidence=suggested["confidence"] if suggested else None,
         anchor_boundary_use=(
@@ -186,6 +224,18 @@ def _source_sentence_entry_issue(index, start, anchors, speech_owned):
     )
 
 
+def _other_block_spans(narration, idx):
+    """(start, end) of every other block with a usable numeric window."""
+    spans = []
+    for other_idx, other in enumerate(narration):
+        if other_idx == idx or not isinstance(other, dict):
+            continue
+        other_start, other_end = other.get("start"), other.get("end")
+        if _is_number(other_start) and _is_number(other_end) and other_end > other_start:
+            spans.append((other_start, other_end))
+    return spans
+
+
 def _has_connected_predecessor(narration, idx, start):
     """A back-to-back narration handoff (<=150ms gap) does not expose the source track,
     so the next TTS block is not a new source-speech entry."""
@@ -195,7 +245,7 @@ def _has_connected_predecessor(narration, idx, start):
         other_start, other_end = other.get("start"), other.get("end")
         if not _is_number(other_start) or not _is_number(other_end):
             continue
-        if other_start < start and -0.001 <= start - other_end <= 0.15:
+        if other_start < start and -0.001 <= start - other_end <= CONNECTED_HANDOFF_SECONDS:
             return True
     return False
 
@@ -356,7 +406,9 @@ def lint_narration(
                         budget_chars=budget,
                     )
                 )
-            elif not over_limit and estimated_tts_seconds > slot_seconds:
+            # Independent of slot_too_short: a short slot can also be overfilled, and the
+            # author needs both numbers.
+            if not over_limit and estimated_tts_seconds > slot_seconds:
                 warnings.append(
                     _lint_issue(
                         "warning",
@@ -386,12 +438,14 @@ def lint_narration(
                 entry_issue = _source_sentence_entry_issue(
                     idx,
                     start,
+                    end,
                     source_sentence_anchors,
                     entry_overlaps_source_speech(
                         start,
                         source_evidence,
                         authored_overlap=seg.get("overlaps_speech", True),
                     ),
+                    _other_block_spans(narration, idx),
                 )
                 if entry_issue:
                     errors.append(entry_issue)
@@ -438,6 +492,7 @@ def lint_narration(
                         end=end,
                         duration=round(end - start, 2),
                         frame_fact_times=[round(ts, 2) for ts in frame_fact_times[:8]],
+                        frame_fact_count=len(frame_fact_times),
                     )
                 )
 
@@ -691,9 +746,9 @@ def validate_narration_or_raise(
             report, None if work_dir is None else Path(work_dir, "narration_lint.json")
         )
     if report["warnings"]:
-        log(
-            f"narration lint: {len(report['warnings'])} warnings (see narration_lint.json)"
-        )
+        log(format_lint_warnings(
+            report, None if work_dir is None else Path(work_dir, "narration_lint.json")
+        ))
     else:
         log("narration lint: ok")
     return report

@@ -11,6 +11,7 @@ import pytest
 from lib import CONFIG, env_float, file_identity
 from agent_text import _text_char_count
 from narration_lint import lint_narration
+from lint_summary import format_lint_failure
 
 
 def _write_json(path, payload):
@@ -157,17 +158,25 @@ def test_lint_narration_rejects_malformed_visual_overlays(tmp_path):
             ],
             6.10,
             12.0,
-            14.34,
-            "第二句说完",
-            id="shortly_after_pause_ended_suggests_next_anchor",
+            5.81,
+            "第一句说完",
+            id="shortly_after_pause_ended_suggests_the_nearer_earlier_anchor",
         ),
         pytest.param(
             [{"time": 5.81, "pause_start": 5.22, "text_tail": "已完成句子。", "confidence": "high"}],
             8.0,
             12.0,
+            5.81,
+            "已完成句子",
+            id="after_last_known_anchor_suggests_it",
+        ),
+        pytest.param(
+            [{"time": 75.0, "pause_start": 74.6, "text_tail": "一分钟后。", "confidence": "high"}],
+            15.0,
+            19.0,
             None,
             "",
-            id="after_last_known_anchor_has_no_fake_suggestion",
+            id="anchor_a_minute_away_is_no_suggestion",
         ),
     ],
 )
@@ -196,6 +205,68 @@ def test_lint_blocks_narration_entry_that_interrupts_source_sentence(
     assert issue["entry_time"] == start
     assert issue["suggested_start"] == suggested_start
     assert text_tail in issue["source_text_tail"]
+
+
+def _interrupt_issue(tmp_path, anchors, narration, index):
+    _write_source_anchors(tmp_path, anchors)
+    report = lint_narration(narration, work_dir=tmp_path)
+    return next(
+        item for item in report["errors"]
+        if item["code"] == "interrupts_source_sentence" and item["index"] == index
+    )
+
+
+def _anchor(time, tail):
+    return {"time": time, "pause_start": time - 0.4, "text_tail": tail, "confidence": "high"}
+
+
+def _block(start, end, overlaps_speech=False):
+    return {"start": start, "end": end, "narration": "一块完整的旁白。", "overlaps_speech": overlaps_speech}
+
+
+def test_interrupt_suggestion_skips_an_anchor_on_another_blocks_start(tmp_path):
+    """The next anchor (14 s) is where block 2 starts: moving there would overlap it."""
+    issue = _interrupt_issue(
+        tmp_path,
+        [_anchor(14.0, "第二块入点。"), _anchor(17.5, "安全入点。")],
+        [_block(10.0, 13.0, overlaps_speech=True), _block(14.0, 16.0)],
+        0,
+    )
+
+    assert issue["suggested_start"] == 17.5
+    assert issue["suggested_end"] == 20.5
+    assert "安全入点" in issue["source_text_tail"]
+
+
+def test_interrupt_suggestion_never_abuts_a_neighbouring_block(tmp_path):
+    """9.0 would leave 0.1 s after block 1 (a back-to-back handoff); 6.0 overlaps it."""
+    issue = _interrupt_issue(
+        tmp_path,
+        [_anchor(6.0, "前一句。"), _anchor(9.0, "紧贴前块。"), _anchor(12.5, "空出来的入点。")],
+        [_block(5.0, 8.9), _block(10.0, 12.0, overlaps_speech=True)],
+        1,
+    )
+
+    assert issue["suggested_start"] == 12.5
+
+
+def test_interrupt_without_a_clear_anchor_in_range_suggests_nothing(tmp_path):
+    issue = _interrupt_issue(
+        tmp_path,
+        [_anchor(14.0, "被占用。"), _anchor(40.0, "太远。")],
+        [_block(10.0, 13.0, overlaps_speech=True), _block(13.5, 20.0)],
+        0,
+    )
+
+    assert issue["suggested_start"] is None
+    assert issue["max_shift_seconds"] == 10.0
+    summary = format_lint_failure(lint_narration(
+        [_block(10.0, 13.0, overlaps_speech=True), _block(13.5, 20.0)], work_dir=tmp_path,
+    ))
+    assert (
+        "- 段 1 interrupts_source_sentence：入点 10.00s 落在原声句子中间，前后 10 秒内没有"
+        "能整块挪过去、又不与其他块重叠或相接的句尾锚点"
+    ) in summary
 
 
 def test_lint_never_allows_intentional_source_interrupt_override(tmp_path):

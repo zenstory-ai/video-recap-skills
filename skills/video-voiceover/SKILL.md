@@ -65,9 +65,9 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 
 ## 6. 运行规则
 
-- 分段音频按内容缓存在 `tts_segments/cache/`：键是实读文本、语速/音高、情绪与 TTS 设置，不含段序号和时间窗；
+- 分段音频按内容缓存在 `tts_segments/cache/`：键是实读文本、实际发给供应商的语气请求（MiMo 是那句自然语言指令，语速只在 ≥+6% 或 ≤-3% 时改变措辞；Fish Audio 是数值 speed；index-tts 没有段级控制）与 TTS 设置，不含段序号和时间窗；因此段位变化让名义语速从 +5% 变成 -2% 时，MiMo 不重新合成；
   缓存 WAV 的 `size`/`mtime_ns` 变了即失效。`narr_NNN.wav` 是指向缓存的硬链接（不支持时为副本），`tts_meta.json`
-  照旧引用它。删掉、插入或挪动某段后，只重生成文本或语速/音高变了的段（语速随首段、末两段的位置变化）；
+  照旧引用它。删掉、插入或挪动某段后，只重生成文本或发给供应商的请求变了的段（名义语速随首段、末两段的位置变化）；
   旧版的 `narr_NNN.wav.cache.json` 不再读取。
 - 批准稿保护策略属于缓存设置：严格模式与默认策略（`report-over-budget-v2`）互不命中，旧的自动缩稿缓存也不再复用；只有同一严格策略下、
   `spoken_text` 完整匹配且 WAV 存在非空的缓存才可离线复用；复用时仍按当前时间窗检查，放不下照样失败。
@@ -76,7 +76,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 - `auto` 优先使用已配置的 MiMo，MiMo key 缺失且设置了 `FISH_API_KEY` 时使用 Fish Audio；需要可复现的 provider 选择时显式传 `--tts-provider`。
 - 自托管 index-tts 端点只能由 `--tts-provider index-tts` 或 `TTS_PROVIDER=index-tts` 显式选择，`auto`
   永不兜底选择它。协议、请求体、receipt 语义与缓存失效规则见 `references/index-tts.md`。
-- Fish Audio 直接请求 WAV；默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），`FISH_TTS_REFERENCE_ID` 可覆盖。模型、音色 ID、API URL、归一化设置或按内容计算出的语速/音高变化时会重新生成缓存。当前免费模型无 SLA，受 Fair Use 和官方免费期限约束。
+- Fish Audio 直接请求 WAV；默认使用“娱乐扒妹”音色（`5653cea4ac83480aaf2bf45406556185`），`FISH_TTS_REFERENCE_ID` 可覆盖。模型、音色 ID、API URL、归一化设置或按内容计算出的语速变化时会重新生成缓存（Fish 不接收音高和情绪，它们变了不重新生成）。当前免费模型无 SLA，受 Fair Use 和官方免费期限约束。
 - `--voice-ref` 仅用于 full/cut 解说克隆，切换到 `mimo-v2.5-tts-voiceclone`。仅在确需新合成时惰性规范化一次；
   参考音频的路径、`size`/`mtime_ns` 或预处理版本变化会使旧缓存失效。仅在获得授权后使用，参考音频会发送到 MiMo。
 - dub voiceclone 原始 WAV 也会按模型、提示、台词和参考音频的 `size`/`mtime_ns` 缓存；匹配重跑不再重复请求或计费，
