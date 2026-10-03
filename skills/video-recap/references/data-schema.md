@@ -517,7 +517,7 @@ full / cut 流程（含本地采用路径）合成完成后，video-recap 在 `w
 
 组装后，`assembly_manifest.json.audio_segments[]` 另外记录 `fit_status`、`truncated`、
 `truncate_reason`、`placed_audio_duration`、`placed_audio_path`、`source_duck_end`、
-`source_restore_at` 与 `source_handoff_status`。组装阶段从不按时间裁旁白尾音：放不下时用
+`source_restore_at`、`source_handoff_status`、`source_entry_status` 与 `written_start`。组装阶段从不按时间裁旁白尾音：放不下时用
 `no_safe_fit` 阻断。`placed_audio_path` 是实际写入 canonical `narration.wav` 的完整逐段 PCM；
 `timeline.json`/剪映必须引用它而不是更长的加速前文件。素材时长与序列化后的时间线段长不一致时，
 `assembly_qc.json` 用 `timeline_audio_mismatch` 阻断。旁白结束后原声最多再压低 3 秒，等这段时间内的
@@ -526,7 +526,13 @@ full / cut 流程（含本地采用路径）合成完成后，video-recap 在 `w
 `sentence_boundary_unverified`（锚点为 `unverified`，含 schema 1 旧锚点）、`held_to_timeline_end`（3 秒内无锚点且离片尾
 不足 3 秒，压到片尾）、`bounded_release`（3 秒内无锚点，在旁白结束处以 `duck_fade_seconds` 渐强回满，不阻断）、
 `anchors_unavailable`（原声有讲话但没有可用锚点，阻断）、`no_source_speech`；入口状态在 `source_entry_status`
-（`sentence_boundary` / `sentence_boundary_unverified` / `quiet_source` / `unverified` / `unsafe_entry` / `anchors_unavailable`）。
+（`sentence_boundary` / `sentence_boundary_unverified` / `quiet_source` / `non_dialogue_source` / `unverified` /
+`unsafe_entry` / `anchors_unavailable` / `paragraph_tightened`）。每个压低段只给首块记入口状态：`quiet_source` 是入口落在
+实测安静或没有讲话的地方，`non_dialogue_source` 是入口落在只有语气词（尖叫、"Hi."）的讲话窗口里，两者都不阻断。
+段落内与上一块作者留白不超过 1.6 秒的后续块会紧接上一块实际结尾 0.35 秒后播放，最多比写的 `start` 提前 1.2 秒；
+旁白校验只检查过写的 `start`，所以提前的这一段不进入原声对白（ASR 对白区间减去实测安静窗口），有对白时最多提前到
+最后一段对白结束处。真的提前了的块记 `paragraph_tightened`，`written_start` 是写的 `start`（未提前的块为 `null`）；
+这样的块若因间隔超过 `duck_bridge_seconds` 成为新压低段的首块，入口状态改记该段在实际起点上的入口判定，`written_start` 保留。
 每次压低延续 = `source_restore_at - actual_place_end`，最大值写在 `assembly_qc.json` 的 `summary.max_source_duck_hold_seconds`，只作信息、不阻断。
 
 ## dub_lint.json

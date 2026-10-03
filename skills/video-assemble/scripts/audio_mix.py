@@ -250,11 +250,16 @@ def _dialogue_speech_spans(rows):
 
 def _handoff_speech_evidence(work_dir, payload):
     """(speech, quiet, dialogue) rows; `dialogue` drops interjection-only windows and
-    decides only whether a narration entry interrupts source speech."""
+    decides only whether a narration entry interrupts source speech.
+
+    ASR fallback rows with empty text are windows where nothing was recognized, not
+    speech (video-cut and video-script drop them the same way). Output-clock
+    `speech_spans` carry no `text` and stay timing-only dialogue evidence.
+    """
     rows = payload.get("speech_spans", [])
     quiet = _timed_rows(payload.get("quiet_windows", []))
     if not payload.get("require_measured"):
-        rows = rows or _asr_segments(work_dir)
+        rows = rows or [row for row in _asr_segments(work_dir) if row["text"].strip()]
         if not quiet:
             silence = _load_work_json(work_dir, "silence_periods.json") or []
             quiet = _timed_rows(row for row in silence if not row["has_speech"])
@@ -315,6 +320,54 @@ def _entry_speech_owned(
     if speech:
         return False
     return True if anchors or require_measured else bool(authored)
+
+
+def _unowned_entry_status(start, speech, quiet, tolerance=0.05):
+    """Entry status when a narration entry does not interrupt source dialogue.
+
+    `non_dialogue_source` when the entry lands inside measured speech that holds only
+    interjections (a scream, "Hi."); `quiet_source` for measured quiet or no speech.
+    """
+    if any(row["start"] - tolerance <= start <= row["end"] + tolerance for row in quiet):
+        return "quiet_source"
+    if any(row["start"] <= start < row["end"] for row in speech):
+        return "non_dialogue_source"
+    return "quiet_source"
+
+
+def _dialogue_free_pull_start(candidate, written_start, dialogue, quiet, tolerance=0.05):
+    """Earliest start in [candidate, written_start] whose pulled stretch holds no dialogue.
+
+    Paragraph tightening plays a block up to `narration_max_pull_seconds` before its
+    written `start`, after narration lint checked only that written entry. Measured quiet
+    inside a dialogue span is not dialogue. When dialogue remains in the stretch, the
+    block starts no earlier than the end of the last such piece.
+    """
+    safe = candidate
+    quiet_intervals = _merged_handoff_intervals(candidate, written_start, quiet)
+    for left, right in _merged_handoff_intervals(candidate, written_start, dialogue):
+        pieces = [(left, right)]
+        for quiet_left, quiet_right in quiet_intervals:
+            pieces = [
+                part
+                for piece_left, piece_right in pieces
+                for part in (
+                    (piece_left, min(piece_right, quiet_left)),
+                    (max(piece_left, quiet_right), piece_right),
+                )
+                if part[1] - part[0] > 0
+            ]
+        for piece_left, piece_right in pieces:
+            if piece_right - piece_left > tolerance:
+                safe = max(safe, piece_right)
+    return safe
+
+
+def _paragraph_pull_evidence(work_dir):
+    """(dialogue, quiet) rows on the narration clock for `_dialogue_free_pull_start`."""
+    _anchors, _artifact, payload = _load_sentence_handoff_anchors(work_dir)
+    _speech, quiet, dialogue = _handoff_speech_evidence(work_dir, payload)
+    return dialogue, quiet
 
 
 def _work_has_source_speech(work_dir, speech_spans, require_measured):
@@ -384,6 +437,10 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             require_measured=require_measured,
         )
         speech_owned = entry_owned or any(ownership)
+        if not entry_owned:
+            first["source_entry_status"] = _unowned_entry_status(
+                run["start"], speech_spans, quiet_windows
+            )
         if not speech_owned:
             report.append({"start": run["start"], "end": run["end"], "status": "quiet_source"})
             continue
@@ -397,13 +454,11 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
         if entry_owned and anchors and not start_safe:
             first["source_handoff_blocking"] = True
             first["source_entry_status"] = "unsafe_entry"
-        elif not entry_owned:
-            first["source_entry_status"] = "quiet_source"
-        elif not anchors:
+        elif entry_owned and not anchors:
             first["source_entry_status"] = "unverified"
-        elif entry_anchor is not None and not entry_anchor["verified"]:
+        elif entry_owned and entry_anchor is not None and not entry_anchor["verified"]:
             first["source_entry_status"] = "sentence_boundary_unverified"
-        else:
+        elif entry_owned:
             first["source_entry_status"] = "sentence_boundary"
 
         max_hold = SOURCE_HANDOFF_MAX_HOLD_SECONDS
