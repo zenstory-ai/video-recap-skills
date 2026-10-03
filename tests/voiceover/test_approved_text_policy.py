@@ -191,12 +191,10 @@ def test_matching_strict_complete_text_cache_can_be_reused_offline(monkeypatch, 
     tts_dir.mkdir()
     wav = tts_dir / "narr_000.wav"
     wav.write_bytes(b"complete-approved-audio")
-    text, _output, rate, _pitch, key = voiceover._prepare_tts_segment(
+    text, _output, _rate, _pitch, key = voiceover._prepare_tts_segment(
         0, narration[0], narration, tts_dir, "mimo-tts"
     )
-    voiceover._write_tts_segment_cache(
-        wav, key, text, 1.0, voiceover._parse_rate_offset(rate)
-    )
+    voiceover._write_tts_segment_cache(wav, key, text, 1.0)
     monkeypatch.setattr(
         voiceover,
         "_run_tts_engine",

@@ -13,13 +13,18 @@ from pathlib import Path
 from lib import CONFIG, _sanitize_api_error
 
 
+def fish_speed(rate):
+    """The numeric prosody speed Fish Audio receives for a '+5%'-style rate."""
+    return 1.0 + float(rate.rstrip("%")) / 100.0
+
+
 def _fish_payload(text, rate):
     payload = {
         "text": text,
         "format": "wav",
         "normalize": True,
         "prosody": {
-            "speed": 1.0 + float(rate.rstrip("%")) / 100.0,
+            "speed": fish_speed(rate),
             "volume": 0,
             "normalize_loudness": True,
         },

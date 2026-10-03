@@ -12,6 +12,9 @@ sys.path.insert(
 import validate as narration_validate
 from lib import CONFIG, file_identity
 
+# More warnings than the error summary would ever list.
+MAX_WARNINGS_PROBE = 14
+
 
 def _run_validate(monkeypatch, work_dir, mode="full", *extra):
     argv = ["validate.py", "--work-dir", str(work_dir), "--mode", mode, *extra]
@@ -211,6 +214,66 @@ def test_cut_output_over_budget_text_stays_a_warning(monkeypatch, tmp_path):
     assert _approved_fields(_read_json(path)[0]) == approved[0]
     lint = _read_json(tmp_path / "narration_lint.json")
     assert any(item["code"] == "over_budget" for item in lint["warnings"])
+
+
+def test_cut_output_short_overfilled_slot_prints_both_warnings(monkeypatch, tmp_path, capsys):
+    """A 1.2 s slot is too short for five characters and is also overfilled: both
+    warnings are reported and printed, and cut_output still passes."""
+    from agent_text import _lint_char_budget
+
+    assert _lint_char_budget(0, 1.2) < 5
+    _write_output_evidence(tmp_path)
+    _write_narration(tmp_path, [{"start": 0, "end": 1.2, "narration": "等待同伴归来。" * 2}])
+
+    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "10")
+
+    lint = _read_json(tmp_path / "narration_lint.json")
+    assert lint["errors"] == []
+    assert [w["code"] for w in lint["warnings"]] == ["slot_too_short", "over_budget"]
+    [over] = [w for w in lint["warnings"] if w["code"] == "over_budget"]
+    out = capsys.readouterr().out
+    assert "narration lint：通过，2 个 warning（不阻塞）" in out
+    assert (
+        f"- 段 1 slot_too_short：0.00s-1.20s 只容得下约 {lint['warnings'][0]['budget_chars']} 字"
+    ) in out
+    assert (
+        f"- 段 1 over_budget：0.00s-1.20s 写了 {over['actual_chars']} 字，窗口约 {over['budget_chars']} 字，"
+        f"估计读完 {over['estimated_tts_seconds']:.2f}s，可用 {over['slot_seconds']:.2f}s。"
+        "改法：缩短文字，或放宽/挪动时间窗"
+    ) in out
+    assert str(tmp_path / "narration_lint.json") in out
+
+
+def test_every_warning_is_listed_on_the_console(monkeypatch, tmp_path, capsys):
+    _write_output_evidence(tmp_path)
+    segments = [
+        {"start": i * 0.7, "end": i * 0.7 + 0.5, "narration": "没有句号的一块"}
+        for i in range(MAX_WARNINGS_PROBE)
+    ]
+    _write_narration(tmp_path, segments)
+
+    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "10")
+
+    out = capsys.readouterr().out
+    for n in range(1, MAX_WARNINGS_PROBE + 1):
+        assert f"- 段 {n} incomplete_sentence：结尾「没有句号的一块」没有句末标点" in out
+
+
+def test_lint_failure_summary_also_lists_the_warnings():
+    from lint_summary import format_lint_failure
+
+    report = {
+        "errors": [{"level": "error", "index": 1, "code": "empty_narration", "message": "m"}],
+        "warnings": [{"level": "warning", "index": 0, "code": "incomplete_sentence",
+                      "message": "x", "text_tail": "半句话"}],
+    }
+    lines = format_lint_failure(report, "narration_lint.json").splitlines()
+
+    assert lines[1] == "- 段 2 empty_narration：m"
+    assert lines[2] == "另有 1 个 warning（不阻塞）："
+    assert lines[3] == (
+        "- 段 1 incomplete_sentence：结尾「半句话」没有句末标点。改法：用句号、问号或感叹号收尾"
+    )
 
 
 def test_cut_mode_validates_without_writing(monkeypatch, tmp_path):

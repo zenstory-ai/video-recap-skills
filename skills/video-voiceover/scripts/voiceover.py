@@ -17,7 +17,7 @@ from approved_text_policy import (
     validate_required_texts,
     write_json_atomically as _write_tts_meta_atomically,
 )
-from providers.fish_audio import synthesize_fish_audio
+from providers.fish_audio import fish_speed, synthesize_fish_audio
 import providers.index_tts as index_provider
 from lib import (
     CONFIG,
@@ -125,7 +125,8 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice
         prepared = _prepare_tts_segment(i, seg, narration, tts_dir, engine)
         if prepared is None:
             return None
-        cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], engine)
+        cached = _reuse_tts_segment_cache(
+            i, seg, prepared[1], prepared[4], engine, _parse_rate_offset(prepared[2]))
         if cached:
             return cached
     text, output_wav, rate, pitch, cache_inputs = prepared
@@ -149,8 +150,7 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice
     norm_meta = _maybe_normalize_tts_wav(output_wav)
     if norm_meta:
         dur = get_video_duration(output_wav)
-    _write_tts_segment_cache(output_wav, cache_inputs, text, dur, rate_offset,
-                             norm_meta, provider_receipt)
+    _write_tts_segment_cache(output_wav, cache_inputs, text, dur, norm_meta, provider_receipt)
     return _build_tts_segment_result(
         i, seg, text, output_wav, dur, rate_offset, norm_meta, provider_receipt)
 
@@ -283,7 +283,8 @@ def synthesize_tts(narration, work_dir):
         if prepared is None:
             continue
         try:
-            cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], cache_engine)
+            cached = _reuse_tts_segment_cache(
+                i, seg, prepared[1], prepared[4], cache_engine, _parse_rate_offset(prepared[2]))
         except ApprovedTextDurationError as e:
             failures.append(_tts_failure_record(i, seg, e))
             continue
@@ -455,8 +456,12 @@ def _prepare_tts_segment(index, seg, narration, tts_dir, engine):
     return text, output_wav, rate, pitch, cache_inputs
 
 
-def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
-    """A result from the content-addressed cache, with `output_wav` pointing at its audio."""
+def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine, rate_offset):
+    """A result from the content-addressed cache, with `output_wav` pointing at its audio.
+
+    `rate_offset` is this block's own nominal rate. The key holds only what the provider
+    receives, so a take synthesized at another nominal rate that produced the same request
+    is reused, and reports this block's rate exactly as a fresh synthesis would."""
     cached = tts_cache.load(output_wav.parent, cache_inputs)
     if cached is None:
         return None
@@ -470,7 +475,7 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
     # The window is not part of the key (it never changes the audio), so an approved-text
     # block moved into a shorter window is re-checked here instead of re-synthesized.
     _check_segment_window(index, seg, cached["spoken_text"], cached["audio_duration"],
-                          cached["tts_rate_offset"])
+                          rate_offset)
     tts_cache.materialize(output_wav.parent, cache_inputs, output_wav)
     # The sidecar's audio identity (size, mtime_ns) still matches the WAV that produced
     # `audio_duration`; re-probing would be one ffprobe process per segment on every rerun.
@@ -481,24 +486,36 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
         cached["spoken_text"],
         output_wav,
         cached["audio_duration"],
-        cached["tts_rate_offset"],
+        rate_offset,
         cached["normalization"],
         cached.get("provider_receipt"),
     )
 
 
+def _provider_prosody_request(engine, rate, pitch, emotion):
+    """The prosody part of the request the provider actually receives for one block.
+
+    MiMo gets a natural-language instruction in which rate offsets only change the wording
+    at >= +6% or <= -3% (pitch only as zero/non-zero); Fish Audio gets a numeric speed and
+    ignores pitch and emotion; index-tts takes no per-block controls."""
+    if engine == "mimo-tts":
+        return {"instruction": _mimo_tts_style_instruction(rate, pitch, emotion)}
+    if engine == "fish-audio":
+        return {"speed": fish_speed(rate)}
+    return {}
+
+
 def _tts_segment_cache_inputs(engine, seg, source_text, rate, pitch):
     """The exact inputs that make cached audio safe to reuse (compared by equality).
 
-    Only what changes the audio: text, prosody and provider/voice settings. The block's
-    position and window are left out, so deleting or inserting a block reuses every other
-    block's audio (rate/pitch still differ where position changes them)."""
+    Only what changes the audio: text, the prosody request the provider receives, and
+    provider/voice settings. The block's position and window are left out, so deleting or
+    inserting a block reuses every other block's audio; a block whose position changes its
+    nominal rate is re-synthesized only if the provider would receive a different request."""
     payload = {
         "engine": engine,
         "source_text": source_text,
-        "rate": rate,
-        "pitch": pitch,
-        "emotion": seg.get("emotion", ""),
+        "provider_request": _provider_prosody_request(engine, rate, pitch, seg.get("emotion")),
         "settings": tts_settings_payload(engine),
     }
     if authored_text_policy() == PRESERVE_APPROVED_TEXT_POLICY:
@@ -510,13 +527,12 @@ def _tts_segment_cache_inputs(engine, seg, source_text, rate, pitch):
     return payload
 
 
-def _write_tts_segment_cache(output_wav, cache_inputs, spoken_text, duration, rate_offset,
+def _write_tts_segment_cache(output_wav, cache_inputs, spoken_text, duration,
                              norm_meta=None, provider_receipt=None):
     """Store the finished block WAV under its non-secret synthesis inputs for reuse."""
     tts_cache.store(output_wav, cache_inputs, {
         "spoken_text": spoken_text,
         "audio_duration": duration,
-        "tts_rate_offset": rate_offset,
         "normalization": norm_meta or None,
         "provider_receipt": provider_receipt,
     })

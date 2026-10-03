@@ -1713,7 +1713,8 @@ def test_multi_source_cut_output_validate_reads_recap_written_evidence(
     assert evidence["sentence_anchors"][0]["pause_start"] == 1.88
     (work / "narration.json").write_text(
         json.dumps(
-            [{"start": start, "end": 5.8, "narration": "他终于明白，弟弟一直在门口等他回家。",
+            # Ends 1.2 s before the 6 s output, so the moved block (2.0-5.8) still fits it.
+            [{"start": start, "end": 4.8, "narration": "他终于明白，弟弟一直在门口等他回家。",
               "overlaps_speech": False}],
             ensure_ascii=False,
         ),
@@ -1734,6 +1735,7 @@ def test_multi_source_cut_output_validate_reads_recap_written_evidence(
     else:
         assert codes == [error_code]
         assert lint["errors"][0]["suggested_start"] == 2.0
+        assert lint["errors"][0]["suggested_end"] == 5.8
 
 
 @pytest.mark.parametrize("storyboard_fails", [False, True])
