@@ -282,6 +282,20 @@ def _word_grams(text, size):
     return {tuple(words[i:i + size]) for i in range(len(words) - size + 1)}
 
 
+def _mention_names(value):
+    """Names one aliases/asr_mentions entry contributes.
+
+    The model writes plain strings; video-understanding's deterministic ASR/research fallback writes
+    {text, evidence_id, matched_aliases} dicts, whose names are the matched aliases (the text is the
+    ASR window, already in the source-text corpus). Anything else contributes nothing."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        matched = value.get("matched_aliases")
+        return [m for m in matched if isinstance(m, str)] if isinstance(matched, list) else []
+    return []
+
+
 def _index_names(index):
     """name / aliases / asr_mentions of characters, entities and research_glossary in understanding_index.json."""
     names = set()
@@ -289,10 +303,12 @@ def _index_names(index):
         items = index.get(key) if isinstance(index, dict) else None
         for item in items if isinstance(items, list) else []:
             if isinstance(item, dict):
-                names.add(item.get("name"))
+                if isinstance(item.get("name"), str):
+                    names.add(item["name"])
                 for alias_key in ("aliases", "asr_mentions"):
                     values = item.get(alias_key)
-                    names.update(values if isinstance(values, list) else [])
+                    for value in values if isinstance(values, list) else []:
+                        names.update(_mention_names(value))
     return names
 
 
