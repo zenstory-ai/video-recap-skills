@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "83363b1058ca5e23fd1c1a2392f9c3b5cd76846eacf649578bd77ad137b5a237",
+      "packageDigest": "8b119317e901724ebb22e92c27dbecb67d00a131f6ce9cd8da7b9fce9464c35b",
       "path": "skills/video-cut",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -78,7 +78,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.4"
+      "version": "1.0.5"
     },
     {
       "categories": [
@@ -104,8 +104,8 @@
         "bin:python",
         "bin:ffmpeg",
         "bin:ffprobe",
-        "skill:worldwonderer/video-understanding@1.0.4",
-        "skill:worldwonderer/video-cut@1.0.4",
+        "skill:worldwonderer/video-understanding@1.0.5",
+        "skill:worldwonderer/video-cut@1.0.5",
         "skill:worldwonderer/video-script@1.0.3",
         "skill:worldwonderer/video-voiceover@1.0.3",
         "skill:worldwonderer/video-assemble@1.0.5"
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.8"
+      "version": "1.0.9"
     },
     {
       "catalogMigration": true,
@@ -134,7 +134,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "203606a4d18aa39127d5662c93df998253c66fce411743bd5fa03bbe18db42e9",
+      "packageDigest": "cf278954ec2a5304db3f12085d7860b60875cebeb8b4a618ef86762438914251",
       "path": "skills/video-reference",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -155,7 +155,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.1"
+      "version": "1.0.2"
     },
     {
       "catalogMigration": true,
@@ -206,7 +206,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "83c7ea2812b484a98432b1bf76861bb3ed48e164e2c85b7cb11a52b8019f60b1",
+      "packageDigest": "c0ebf25e902189452fd6a98a1c423e061c392f2f9235c70da9acade1c714cf24",
       "path": "skills/video-understanding",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -227,7 +227,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.4"
+      "version": "1.0.5"
     },
     {
       "catalogMigration": true,
