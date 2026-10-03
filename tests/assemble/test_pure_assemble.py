@@ -2680,6 +2680,11 @@ def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
     monkeypatch.setattr(
         media, "_probe_canvas", lambda path: _canvas()
     )
+    # The pixel-format probe runs its own ffprobe; CI has none, so stub it too.
+    monkeypatch.setattr(
+        media, "_probe_video_format",
+        lambda _path: {"codec_name": "h264", "pix_fmt": "yuv420p", "width": 1280, "height": 720},
+    )
     monkeypatch.setattr(
         narration_audio, "_apply_narration_speed", lambda segments, work_dir: None
     )
