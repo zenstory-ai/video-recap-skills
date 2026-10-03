@@ -14,7 +14,7 @@ description: >
 1. 把各段旁白音频放到视频时间线上。
 2. 在旁白窗口内用固定包络压低原声（盖住原声对白时与落在安静段时各用一档音量），间隙恢复原声。
 3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。不烧录时（关闭或降级），`subtitles.srt` 复制到成片旁，名为 `recap_<stem>.srt`；烧录时删掉旧的同名外挂字幕。
-4. 可选把最终响度标准化到目标 LUFS：两遍 loudnorm，只用一个恒定增益；混音的真峰值放不下这么大的增益时，目标响度下调到刚好放得下（成片比 `TARGET_LUFS` 安静，不做动态压缩）。ffmpeg 实际用的模式记在 `assembly_qc.json` 的 `loudness_mode` 与 `loudnorm_final_pass`。
+4. 可选把最终响度标准化到目标 LUFS：两遍 loudnorm，只用一个恒定增益，不做动态压缩；混音的真峰值放不下这么大的增益时，先过 4 倍过采样的真峰值限幅器（最多削 `LOUDNESS_LIMITER_MAX_DB`，默认 6 dB），超出部分才下调目标响度。ffmpeg 实际用的模式与限幅量记在 `assembly_qc.json` 的 `loudness_mode` 与 `loudnorm_final_pass`。
 5. 成片不带原片的容器元数据（`title`、`comment` 等标签与章节）。
 
 ## 2. 声音收尾契约
@@ -85,7 +85,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 剪映草稿引用未烧录的源视频，因此原片硬字幕仍会保留，必要时在剪映内另行遮罩。
 - 字幕外观可用 `SUBTITLE_FONT_SIZE`、`SUBTITLE_MARGIN_V`、`SUBTITLE_MAX_CHARS` 等控制。
 - `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为显示画布上的半开 `[top, bot)`，只接受方形或近方形像素（SAR 与 1:1 相差不超过 2%，未标注的 `0:1` 按方形）；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。
-- 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `DUCK_BRIDGE_SECONDS`、`ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM` 与 `TARGET_LUFS`。
+- 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `DUCK_BRIDGE_SECONDS`、`ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM`、`TARGET_LUFS` 与 `LOUDNESS_LIMITER_MAX_DB`。
 - 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
 - 烧录字幕需要带 `subtitles` / libass 的 ffmpeg，合成阶段在渲染前预检。显式要求烧录（`--burn-subtitles` 或环境变量 `BURN_SUBTITLES`）时缺 libass 直接失败；只是默认开启时降级：不烧录，交付外挂 `.srt`（留白里的 `「」` 原声对白仅在有 `user_subtitles.*` 时照常写进去；原本由遮罩触发的对白随遮罩一起关闭，原片硬字幕可见），`visual_qc.json` 的 `warnings` 与 `assembly_manifest.json` 的 `warnings` 记一条 `subtitle_burn_degraded`，`subtitles.burn_degraded_reason` 写原因。降级后遮罩照旧关闭（`mask.trigger` 为 `burn_subtitles_degraded`）。
 - `visual_overlays.json` 的文字叠加用 ffmpeg `drawtext`（libfreetype）。缺 drawtext 时合成在渲染前失败；叠加是写稿时明确加的内容，不会被静默丢掉。

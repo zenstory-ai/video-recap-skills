@@ -13,6 +13,7 @@ import audio_mix
 import adoption.audio_mix_binding as audio_mix_binding
 import adoption.av_clock as av_clock
 import adoption.frozen_audio as frozen_audio
+import loudness
 import media
 import narration_audio
 import adoption.narration_binding as narration_binding
@@ -209,6 +210,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     source_has_audio = media._has_audio_stream(input_video)
     adopted_audio = None
     loudnorm_measurement = None
+    peak_limiter = None
     original_audio_input = []
     bgm_input = []
     filter_complex = None
@@ -229,7 +231,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             )
         else:
             filter_complex += ";[source]anull[aout]"
-        final_ln = audio_mix.final_loudnorm_filter()
+        final_ln = loudness.final_loudnorm_filter()
         filter_complex += f";[aout]{final_ln}[aoutln]"
         lib.log(f"source-mix 音频处理: source volume + {final_ln}")
     elif explicit_mix is not None:
@@ -258,7 +260,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         # duration=first + -t trim it back to the video length).
         bgm_input = ["-stream_loop", "-1", "-i", str(bgm_path)] if has_bgm else []
         # 末端整体响度归一：ducking 只管相对平衡，这一步统一成片绝对响度
-        loudnorm_measurement = audio_mix._run_loudnorm_first_pass(
+        loudnorm_measurement, peak_limiter = loudness.plan_final_loudness(
             input_video,
             narration_wav,
             original_audio_input,
@@ -266,18 +268,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             filter_complex,
             work_dir,
         )
-        final_ln = audio_mix.final_loudnorm_filter(loudnorm_measurement)
+        final_ln = loudness.final_loudnorm_filter(loudnorm_measurement, peak_limiter)
         filter_complex += f";[aout]{final_ln}[aoutln]"
         lib.log(f"成片响度归一: {final_ln}")
-        linear_targets = (
-            audio_mix._linear_loudnorm_targets(loudnorm_measurement)
-            if loudnorm_measurement else None
-        )
-        if linear_targets and linear_targets["gain_capped_db"] > 0:
-            lib.log(
-                f"  成片真峰值余量不足：目标响度从 {lib.CONFIG['target_lufs']} 降到 "
-                f"{linear_targets['integrated']} LUFS，保持线性增益（不做动态压缩）"
-            )
         audio_map = "[aoutln]"
         audio_input_args = ["-i", str(narration_wav), *original_audio_input]
 
@@ -445,14 +438,17 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     }
     loudnorm_final = None
     if audio_mode != "adopted-packet-copy" and explicit_mix is None and lib.CONFIG["final_loudnorm"]:
-        loudnorm_final = audio_mix.loudnorm_final_pass(result.stderr, loudnorm_measurement)
+        loudnorm_final = loudness.loudnorm_final_pass(
+            result.stderr, loudnorm_measurement, peak_limiter
+        )
         if loudnorm_measurement and loudnorm_final["normalization_type"] == "dynamic":
             lib.log("  ⚠️ loudnorm 第二遍退回动态模式（测得的响度范围或峰值超出线性条件）")
     loudness_mode = (
         "not_run" if audio_mode == "adopted-packet-copy" else
         "fixed_master_gain_no_loudnorm" if explicit_mix is not None else
-        audio_mix._loudness_mode(
-            loudnorm_measurement, (loudnorm_final or {}).get("normalization_type")
+        loudness._loudness_mode(
+            loudnorm_measurement, (loudnorm_final or {}).get("normalization_type"),
+            peak_limiter,
         )
     )
     source_audio_status = "prepared_bed_adopted" if explicit_mix is not None else None

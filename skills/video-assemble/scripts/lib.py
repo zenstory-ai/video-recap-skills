@@ -106,6 +106,8 @@ CONFIG = {
     "target_true_peak": -1.0,  # 目标真峰值 (dBTP)
     "target_lra": 11.0,          # 目标响度范围 (LU)
     "final_limiter_peak": 0.98,  # loudnorm 后峰值保护 limiter
+    # 峰值放不下线性增益时，先过真峰值限幅器再线性增益；限幅器最多削这么多 dB，超出部分才下调目标响度。0=不限幅
+    "loudness_limiter_max_db": env_float("LOUDNESS_LIMITER_MAX_DB", 6.0, minimum=0.0),
     "subtitle_font_name": os.environ.get("SUBTITLE_FONT_NAME", "Arial"),
     # 可选字体文件：ASS 烧录经 fontsdir 加载，画面文字经 drawtext fontfile 使用；family 名仍由 SUBTITLE_FONT_NAME 指定
     "subtitle_font_file": os.environ.get("SUBTITLE_FONT_FILE", "").strip(),

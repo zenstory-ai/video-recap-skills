@@ -4,7 +4,7 @@ from pathlib import Path
 
 from artifacts import _artifact_identity
 from assemble_constants import VISUAL_OVERLAYS
-from audio_mix import _loudness_mode, final_loudnorm_filter
+from loudness import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
 from source_subtitles import _has_user_subtitles, _source_subtitle_mask_policy
 from subtitles.core import _subtitle_style_config
@@ -115,6 +115,7 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
             "zone_ducking_volume": CONFIG["zone_ducking_volume"],
             "final_loudnorm": final_loudnorm_filter(),
             "loudness_mode": _loudness_mode(),
+            "loudness_limiter_max_db": CONFIG["loudness_limiter_max_db"],
             "bgm_path": CONFIG["bgm_path"],
             "bgm_volume": CONFIG["bgm_volume"],
             "bgm_ducking_volume": CONFIG["bgm_ducking_volume"],

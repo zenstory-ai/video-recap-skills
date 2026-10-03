@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-a
 
 import assemble  # noqa: E402
 import assembly_contract  # noqa: E402
-import audio_mix  # noqa: E402
+import loudness  # noqa: E402
 import media  # noqa: E402
 import narration_audio  # noqa: E402
 import render_preflight  # noqa: E402
@@ -179,7 +179,7 @@ def _render_cmd(monkeypatch, tmp_path, *, source_format, burn=False):
     monkeypatch.setattr(narration_audio, "_build_timed_narration",
                         lambda segments, out, duration, wd: Path(out).write_bytes(b"n"))
     monkeypatch.setattr(timeline_emit, "_emit_timeline", lambda *a, **k: None)
-    monkeypatch.setattr(audio_mix, "_run_loudnorm_first_pass", lambda *a, **k: None)
+    monkeypatch.setattr(loudness, "_measure_loudness", lambda *a, **k: None)
     monkeypatch.setattr(assembly_contract, "_build_assembly_qc",
                         lambda *a, **k: {"blocking": False, "blocking_codes": []})
     monkeypatch.setattr("assemble.lib.run_cmd", fake_run_cmd)
