@@ -203,3 +203,33 @@ def test_multi_source_audio_must_come_from_the_declared_source(real_source, tmp_
                                     '--sources-manifest', str(manifest), '--normalize-only')
     assert passed.returncode == 0, passed.stdout + passed.stderr
     assert validated['qc']['required_evidence']['selection_status'] == 'PASS'
+
+
+def test_resumed_cut_keeps_unchanged_validated_plan_identity(real_source, tmp_path):
+    """Output-clock evidence binds clip_plan_validated.json by {size, mtime_ns}; a resumed
+    run that re-validates the same plan must not invalidate it, a newer raw plan must."""
+    work = tmp_path / 'resume'
+    first, _ = run_real_cut(real_source, work, {'clips': [{'start': 2, 'end': 5}]})
+    assert first.returncode == 0, first.stdout + first.stderr
+    plan = work / 'clip_plan_validated.json'
+
+    def identity():
+        stat = plan.stat()
+        return stat.st_size, stat.st_mtime_ns
+
+    rendered = identity()
+    resumed = subprocess.run([
+        sys.executable, str(Path(cut_cli.__file__).with_name('cut.py')),
+        str(real_source), '--work-dir', str(work),
+    ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0',
+            'CLIP_PADDING': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    assert resumed.returncode == 0, resumed.stdout + resumed.stderr
+    assert '复用剪辑源视频' in resumed.stdout + resumed.stderr
+    assert identity() == rendered
+    assert json.loads(plan.read_text(encoding='utf-8'))['qc']['delivery_qc']['rendered'] is True
+
+    # Same clips re-saved by the agent: validated must not look older than the raw plan.
+    touched, _ = run_real_cut(real_source, work, {'clips': [{'start': 2, 'end': 5}]})
+    assert touched.returncode == 0, touched.stdout + touched.stderr
+    assert identity() != rendered
+    assert plan.stat().st_mtime_ns >= (work / 'clip_plan.json').stat().st_mtime_ns

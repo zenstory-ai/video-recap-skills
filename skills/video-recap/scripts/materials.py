@@ -24,6 +24,9 @@ from pathlib import Path
 
 from lib import load_json
 
+# asr_timing_evidence.json stays out on purpose: it binds asr_result.json and audio.wav by
+# {size, mtime_ns}, and a restore rewrites the former (redacted copy) and never copies the
+# latter, so a restored sidecar could only ever read as MISSING_OR_STALE.
 ALLOWED_ARTIFACTS = {
     "scenes.json",
     "asr_result.json",
@@ -35,6 +38,7 @@ ALLOWED_ARTIFACTS = {
     "timeline_fusion.json",
     "understanding_index.json",
     "understanding_index.md",
+    "consolidation.status.json",
     "agent_narration_brief.md",
     "background_research.json",
     "reference_profile.json",
