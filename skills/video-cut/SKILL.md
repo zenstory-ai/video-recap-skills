@@ -77,8 +77,20 @@ beat_id | function | change | POV | preferred moment | 入点 reason | 出点 re
 
 ```bash
 python3 scripts/cut.py <video> --work-dir <work_dir> \
-  [--sources-manifest <sources.json>] [--target-duration 10m] [--allow-overlap]
+  [--sources-manifest <sources.json>] [--target-duration 10m] [--allow-overlap] \
+  [--allow-duration-drift] [--normalize-only]
 ```
+
+- `--sources-manifest`：多源剪辑的来源清单 `{"sources": [{"source_id", "source_path"[, "duration", "source_work_dir"]}]}`；片段用 `source_id` 指明来源，并按自己的来源吸附句界与画面切点。
+- `--target-duration`：目标时长。实际时长与目标之比在 0.85–1.15 之外记 warning，在 0.60–1.40 之外阻断。
+- `--allow-duration-drift`：只放行时长偏差阻断（记为 `allowed: true` 的 warning），不放行句界或必保证据阻断。
+- `--normalize-only`：只标准化、吸附并检查计划，写出 `clip_plan_validated.json` 后退出，不渲染。
+
+cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.json` 的 `qc.blocking`，每项带 `code`：
+
+- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。
+- `target_duration_drift`：时长偏差超出阻断阈值；明细见 `qc.target_duration`。
+- `REQUIRED_EVIDENCE_INVALID` / `REQUIRED_EVIDENCE_MISSING` / `REQUIRED_EVIDENCE_ORDER` / `REQUIRED_EVIDENCE_AUDIO_UNAVAILABLE`：必保证据声明无效、缺段、错序或源无音轨；明细见 `qc.required_evidence`。
 
 ## 5. 输出契约
 

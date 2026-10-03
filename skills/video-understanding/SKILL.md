@@ -45,19 +45,43 @@ ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对�
 ## 4. 运行命令
 
 ```bash
-python3 scripts/understand.py <video> --work-dir <work_dir> \
-  [--context "节目名/角色名"] [--scene-threshold 0.1] [--skip-asr] [--mimo-video-overview] [--force]
+python3 scripts/understand.py <video> --work-dir <work_dir> [选项]
 ```
+
+| 选项 | 默认 | 作用 |
+|------|------|------|
+| `<video>` | 必填 | 源视频 |
+| `--work-dir` | 必填 | 产物目录；不存在时创建 |
+| `--context "..."` | 空 | 补充给 VLM 的简短上下文（节目名、角色名），与 `background_research.json` 合并 |
+| `--scene-threshold` | `0.1` | 场景检测阈值 |
+| `--style` | `纪录片` | 写进创作简报的解说风格 |
+| `--edit-mode full\|cut` | 不设 | 写进简报的 recap 模式；`cut` 时按剪后时长估算旁白预算，已有 `edited_source.mp4` 时句末锚点改用剪后时间 |
+| `--target-duration` | 不设 | 写进简报的 cut 目标时长；尚无 `clip_plan_validated.json` 时用它估算旁白预算 |
+| `--skip-asr` | 关 | 不转写对白，写空 `asr_result.json`，ASR 证据标为显式跳过 |
+| `--mimo-video-overview` | 关 | 按场景块运行 MiMo 视频概览，并作为逐场景主描述 |
+| `--force` | 关 | 忽略缓存，全部重算 |
+| `--brief-only` | 关 | 只用现有产物重建 `agent_narration_brief.md`，不抽帧、不调 API |
+| `--consolidate` / `--no-consolidate` | 开 | 生成全局故事索引 `understanding_index.*` |
+| `--consolidate-asr` | 关 | 另外清洗 ASR 文本，写 `asr_clean.json` |
 
 ## 5. 输出契约
 
+默认运行写出下表产物；各阶段产物旁的 `*.meta.json` 是缓存 provenance sidecar。
+
 | 文件 | 内容 |
 |------|------|
+| `frames/frame_*.jpg`、`frames_manifest.json` | 按 fps 抽出的帧及其清单 |
 | `scenes.json` | 场景切点、起止时间与时长 |
+| `audio.wav` | 16 kHz 单声道音频，供 ASR、静音检测与句末锚点使用 |
 | `asr_result.json` | `[{start, end, text}]` 时间戳对白 |
 | `asr_timing_evidence.json` | ASR 可用性状态、粗窗口精度、glossary 前后文本，以及它所描述的源视频/音频/结果文件（路径存在性 + size/mtime） |
-| `vlm_analysis.json` | 逐场景描述、深层分析与 `frame_facts` |
 | `silence_periods.json` | `[{start, end, duration, has_speech}]` 安静窗口 |
+| `speech_boundary_anchors.json` | ASR 句末标点对齐到短停顿的句末锚点；缺音频或 ASR 时 `status: unavailable` |
+| `vlm_analysis.json` | 逐场景描述、深层分析与 `frame_facts` |
+| `mimo_video_overview.status.json` | 视频概览状态（未启用时为 `disabled`）；启用成功另写 `mimo_video_overview.json` |
+| `understanding_index.json`、`understanding_index.md` | 全局故事索引（`--no-consolidate` 时不写） |
+| `consolidation.status.json` | 故事索引与 ASR 清洗的运行状态 |
+| `storyboard/source_storyboard.{json,jpg}` | 原片时间线联系表（超页时续写 `_001.jpg` 等）；已有 `clip_plan_validated.json` 时另写 `edited_storyboard.*`；`STORYBOARD=0` 关闭 |
 | `timeline_fusion.json` | VLM、ASR 与静音信息的统一时间线 |
 | `asr_writing_chunks.json` | 按句界和场景切分的 ASR 写作块 |
 | `agent_narration_brief.md` | Agent 首先阅读的创作简报 |

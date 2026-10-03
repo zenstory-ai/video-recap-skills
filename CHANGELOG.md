@@ -59,6 +59,7 @@ All notable changes to this project are documented here.
 - **`MIMO_VIDEO_API_KEY` 被拒（401）时报错点名它本身**，不再让用户去检查 `MIMO_API_KEY`。
 - **素材库保存并恢复 `consolidation.status.json`。** 从素材库恢复的 work_dir 重建 brief 时，仍会提示 consolidate 失败或缺索引。
 - **cut 终轮先判断解说是否过期，再重剪。** `clip_plan.json` 在写稿后改过时，单视频与多视频 cut 现在在调用 `cut.py` 之前就以"clip_plan.json 已改变"退出，不再先重新归一化、吸附、甚至重编码 `edited_source.mp4` 之后才报错。
+- **各技能 SKILL.md 补齐漏写的选项并改正错误说明。** video-cut §4 补上 `--allow-duration-drift`、`--normalize-only` 的用法和多源清单格式，并列出 cut 阻断时 `qc.blocking` 里的错误码（`unsafe_clip_sentence_boundary`、`target_duration_drift`、`REQUIRED_EVIDENCE_*`）及各自的明细位置；`cut.py --normalize-only` 的帮助不再声称会“剪枝”计划。video-understanding §4/§5 改成两张表，列全 `understand.py` 的 13 个参数（含此前未写的 `--style`、`--edit-mode`、`--target-duration`、`--brief-only`、`--no-consolidate`、`--consolidate-asr`）和默认运行写出的产物（含此前未列的 `speech_boundary_anchors.json`、`understanding_index.*`、`consolidation.status.json`、`storyboard/*`）。video-voiceover 的命令示例补上 `--allow-partial-tts`，并把粘在一起的 `--voice-ref` 与 dub 缓存两条说明拆开。
 - **参考文档去掉不存在的选项与环境变量。** `data-schema.md` 不再提 `--step script`，`config-playbook.md` 删除把写死常量 `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` 当成环境变量的一行。
 
 ## [0.6.0] - 2026-09-27
