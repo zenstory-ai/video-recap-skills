@@ -3,8 +3,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
 """Integration characterization tests for the ffmpeg render path.
 
-These run real ffmpeg/ffprobe to lock the behavior of assemble_video (ducking
-branches + final-mix loudness normalization). Skipped when ffmpeg is absent.
+These run real ffmpeg/ffprobe to lock the behavior of assemble_video (ducked
+narration over source speech, final-mix loudness normalization on and off, and
+the encode edge cases below). Skipped when ffmpeg is absent.
 """
 import shutil
 import subprocess
@@ -64,28 +65,13 @@ def test_assemble_video_runs_with_final_loudnorm(tmp_path, monkeypatch):
     work.mkdir()
     src = tmp_path / "src.mp4"
     _make_source_video(src, seconds=4)
-    # overlaps_speech=True drives the "fixed" ducking branch
+    # overlaps_speech=True ducks the original under the narration
     segs = _segment(work, 0.5, 3.5, overlaps=True)
     out = work / "output.mp4"
     assemble_video(src, segs, work, out)
     assert out.exists() and out.stat().st_size > 0
     types = _stream_types(out)
     assert "video" in types and "audio" in types
-
-
-def test_assemble_video_runs_with_loudnorm_disabled_and_quiet_branch(tmp_path, monkeypatch):
-    monkeypatch.setitem(CONFIG, "final_loudnorm", False)
-    work = tmp_path / "work2"
-    work.mkdir()
-    src = tmp_path / "src2.mp4"
-    _make_source_video(src, seconds=3)
-    # overlaps_speech=False drives the zone/quiet ducking branch
-    segs = _segment(work, 0.5, 2.5, overlaps=False, dur=1.0)
-    out = work / "out.mp4"
-    assemble_video(src, segs, work, out)
-    assert out.exists()
-    assert "audio" in _stream_types(out)
-
 
 
 def _make_silent_source_video(path, seconds=3):

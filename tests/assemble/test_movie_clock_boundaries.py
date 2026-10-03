@@ -1,11 +1,14 @@
 """A fractional-second AAC interval must survive producing and packaging."""
 
+import array
 from fractions import Fraction
 import json
+import math
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import wave
 
 import pytest
 
@@ -17,7 +20,7 @@ import lib  # noqa: E402
 from adoption.av_clock import probe_picture, validate_pair_timing  # noqa: E402
 from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
 from lib import CONFIG  # noqa: E402
-from test_explicit_audio_mix import explicit_case, _quiet  # noqa: E402, F401
+from tts_fixtures import tts_segment  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     not (shutil.which('ffmpeg') and shutil.which('ffprobe')),
@@ -25,8 +28,94 @@ pytestmark = pytest.mark.skipif(
 )
 
 
+STRICT_TEMPO = {
+    'global_atempo': 1.0, 'bounded_segment_fit': False,
+    'segment_tempo_max': 1.0, 'cumulative_tempo_max': 1.0,
+    'cumulative_tempo_hard_max': 1.0,
+}
+
+
 def run(*args):
     subprocess.run(list(map(str, args)), check=True, capture_output=True)
+
+
+def _wav(path, frequency, seconds=0.4):
+    rate = 48_000
+    data = array.array('h', (
+        int(8000 * math.sin(2 * math.pi * frequency * index / rate))
+        for index in range(round(rate * seconds))
+    ))
+    if sys.byteorder != 'little':
+        data.byteswap()
+    with wave.open(str(path), 'wb') as output:
+        output.setparams((1, 2, rate, len(data), 'NONE', 'not compressed'))
+        output.writeframes(data.tobytes())
+    return path
+
+
+def _quiet(monkeypatch):
+    monkeypatch.setitem(CONFIG, 'burn_subtitles', False)
+    monkeypatch.setitem(CONFIG, 'mask_source_subtitles', False)
+    monkeypatch.setitem(CONFIG, 'subtitle_original_in_gaps', False)
+    monkeypatch.setitem(CONFIG, 'output_max_height', 0)
+    monkeypatch.setitem(CONFIG, 'bgm_path', 'hostile-unused-bgm.wav')
+    monkeypatch.setitem(CONFIG, 'final_loudnorm', True)
+    monkeypatch.setitem(CONFIG, 'narration_speed', 1.15)
+
+
+@pytest.fixture
+def explicit_case(tmp_path):
+    """One bound voice over a prepared source+score bed; the caller renders picture.mp4."""
+    picture = tmp_path / 'picture.mp4'
+    work = tmp_path / 'work'
+    work.mkdir()
+    beds = tmp_path / 'beds'
+    beds.mkdir()
+    for name, frequency in (('source_bed.wav', 220), ('score_bed.wav', 330)):
+        run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
+            f'sine=frequency={frequency}:sample_rate=48000:duration=2', '-ac', '2',
+            '-c:a', 'pcm_f32le', beds / name)
+    run('ffmpeg', '-v', 'error', '-y', '-i', beds / 'source_bed.wav', '-i',
+        beds / 'score_bed.wav', '-filter_complex',
+        '[0:a][1:a]amix=inputs=2:normalize=0[out]', '-map', '[out]',
+        '-c:a', 'pcm_f32le', beds / 'prepared_bed.wav')
+    identities = {
+        name: source_score._output_facts(beds / name)
+        for name in ('source_bed.wav', 'score_bed.wav', 'prepared_bed.wav')
+    }
+    receipt = beds / 'prepared_bed_receipt.json'
+    receipt.write_text(json.dumps({
+        'artifact': 'prepared_bed_receipt', 'schema_version': 1, 'status': 'PREPARED',
+        'format': {'sample_rate': 48000, 'channels': 2, 'total_samples': 96000,
+                   'codec': 'pcm_f32le'},
+        'outputs': identities,
+    }))
+    voice = _wav(tmp_path / 'voice.wav', 997)
+    segment = tts_segment(
+        index=0, start=0.25, end=1.0, narration='bound voice',
+        spoken_text='bound voice', audio_path=str(voice),
+        audio_duration=0.4, pause_after_ms=0, overlaps_speech=False,
+        tts_rate_offset=0.0,
+    )
+    meta = tmp_path / 'tts_meta.json'
+    meta.write_text(json.dumps({'segments': [segment]}))
+    narration = tmp_path / 'narration_adoption.json'
+    narration.write_text(json.dumps({
+        'artifact': 'narration_adoption', 'schema_version': 1,
+        'segments': [{
+            'index': 0, 'spoken_text': 'bound voice',
+            'requested_provider': 'offline', 'requested_voice': 'voice-a',
+        }], 'tempo_policy': STRICT_TEMPO,
+    }))
+    adoption = tmp_path / 'audio_mix_adoption.json'
+    adoption.write_text(json.dumps({
+        'artifact': 'audio_mix_adoption', 'schema_version': 1,
+        'prepared_receipt': {'path': str(receipt)},
+        'format': {'sample_rate': 48000, 'channels': 2, 'total_samples': 96000},
+        'segments': [{'index': 0, 'output_start_sample': 12000, 'gain': 0.5}],
+        'master_gain_db': 0.75,
+    }))
+    return picture, work, [segment], meta, narration, adoption
 
 
 def assert_sample_clock(video):
@@ -115,7 +204,7 @@ def test_adopted_assemble_rejects_quantized_new_output_without_publishing(
 
 @pytest.mark.parametrize('drop_timescale', [False, True])
 def test_explicit_mix_produces_sample_accurate_fractional_movie_clock(
-    explicit_case, monkeypatch, drop_timescale,  # noqa: F811 - imported pytest fixture
+    explicit_case, monkeypatch, drop_timescale,
 ):
     picture, work, segments, meta, narration, adoption = explicit_case
     _quiet(monkeypatch)

@@ -1437,54 +1437,6 @@ def test_assembly_settings_payload_records_legacy_implicit_mask_policy(monkeypat
     assert assembly_settings_payload() == legacy_implicit
 
 
-def test_assemble_video_uses_silent_original_track_when_source_has_no_audio(
-    monkeypatch, tmp_path
-):
-    video = tmp_path / "silent.mp4"
-    video.write_bytes(b"video")
-    output = tmp_path / "output.mp4"
-    commands = []
-
-    def fake_run_cmd(cmd):
-        commands.append(cmd)
-        output.write_bytes(b"mp4")
-        return CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    monkeypatch.setitem(CONFIG, "final_loudnorm", False)
-    _mock_assemble_media(monkeypatch, has_audio=False)
-    monkeypatch.setattr(
-        narration_audio,
-        "_build_timed_narration",
-        lambda segments, out, duration, wd: Path(out).write_bytes(b"narration"),
-    )
-    monkeypatch.setattr("assemble.lib.run_cmd", fake_run_cmd)
-
-    assemble_video(
-        video,
-        [
-            tts_segment(
-                start=0.0,
-                end=3.0,
-                actual_place_start=0.2,
-                actual_place_end=2.0,
-                narration="无原声音轨也应能混音。",
-                audio_path=str(tmp_path / "narr.wav"),
-                audio_duration=1.0,
-            )
-        ],
-        tmp_path,
-        output,
-    )
-
-    ffmpeg_cmd = commands[-1]
-    joined = " ".join(str(part) for part in ffmpeg_cmd)
-    assert "anullsrc=channel_layout=stereo:sample_rate=48000" in joined
-    assert "[2:a]volume=" in joined
-    assert output.exists()
-
-
 def test_split_subtitle_chunks_breaks_block_into_short_one_line_pieces():
     block = "这婴儿还在襁褓里，脑子里却装着一个现代人将死的记忆。他叫范闲，注定要搅动这座庙堂。"
     chunks = _split_subtitle_chunks(block, max_chars=20)
