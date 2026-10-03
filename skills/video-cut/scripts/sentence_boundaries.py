@@ -51,10 +51,30 @@ def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=No
     return sorted(windows, key=lambda row: (row["start"], row["end"]))
 
 
+# Interjections and common ASR artifacts on screams/music. A window whose text is only these
+# is not dialogue for the cut gate; real short lines such as "救我！" still are.
+_NON_DIALOGUE_TOKENS = frozenset(
+    "啊 嗯 哼 哦 呃 唉 嘿 呦 哈 呀 hi yeah ok okay oh uh ah hmm".split()
+)
+_NON_DIALOGUE_CJK = frozenset("啊嗯哼哦呃唉嘿呦哈呀")
+# Lines cross 15s ASR window edges (a line may run 13.2–15.4 while its window ends at 15.0),
+# so an interjection-only window next to real dialogue keeps this much of its shared edge.
+_INTERJECTION_GUARD_SECONDS = 1.0
+
+
+def _interjection_only(text):
+    tokens = [token for token in re.split(r"[\W_]+", text.lower()) if token]
+    return all(
+        token in _NON_DIALOGUE_TOKENS or set(token) <= _NON_DIALOGUE_CJK for token in tokens
+    )
+
+
 def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
-    """Merged ASR speech spans (asr_clean.json wins over asr_result.json).
+    """Merged ASR dialogue spans (asr_clean.json wins over asr_result.json).
 
     Only used to decide whether an unsafe edge blocks; a missing transcript means unchecked.
+    A window holding only interjections ("啊！", "Hi.") is not dialogue, except a
+    `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue window.
     """
     rows = []
     for filename in ("asr_clean.json", "asr_result.json"):
@@ -63,10 +83,32 @@ def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
             payload = json.loads(path.read_text(encoding="utf-8"))
             rows = payload["segments"] if filename == "asr_clean.json" else payload
             break
-    spans = sorted(
-        ({"start": row["start"], "end": row["end"]} for row in rows if row["text"].strip()),
+    rows = sorted(
+        (
+            {
+                "start": row["start"],
+                "end": row["end"],
+                "dialogue": not _interjection_only(row["text"]),
+            }
+            for row in rows
+            if row["text"].strip()
+        ),
         key=lambda row: (row["start"], row["end"]),
     )
+    spans = []
+    for idx, row in enumerate(rows):
+        if row["dialogue"]:
+            spans.append({"start": row["start"], "end": row["end"]})
+            continue
+        before = rows[idx - 1] if idx > 0 else None
+        after = rows[idx + 1] if idx + 1 < len(rows) else None
+        if before and before["dialogue"] and row["start"] - before["end"] <= 0.05:
+            end = min(row["end"], row["start"] + _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": row["start"], "end": end})
+        if after and after["dialogue"] and after["start"] - row["end"] <= 0.05:
+            start = max(row["start"], row["end"] - _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": start, "end": row["end"]})
+    spans.sort(key=lambda row: (row["start"], row["end"]))
     merged = []
     for span in spans:
         if merged and span["start"] <= merged[-1]["end"] + 0.05:
