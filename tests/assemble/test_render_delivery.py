@@ -64,9 +64,33 @@ _BT709 = {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709
                   "color_transfer": "unknown", "color_range": "pc"},
                  {"colorspace": "bt709", "color_primaries": "smpte170m", "color_range": "tv",
                   "from_rgb": True}, id="rgb-source-never-writes-gbr"),
+    pytest.param({"pix_fmt": "argb"}, {**_BT709, "from_rgb": True},
+                 id="rgb-pix-fmt-without-colour-space"),
+    pytest.param({"pix_fmt": "bgr0", "color_space": "unknown", "color_range": "pc"},
+                 {**_BT709, "from_rgb": True}, id="rgb-pix-fmt-unknown-colour-space"),
+    pytest.param({"pix_fmt": "pal8"}, {**_BT709, "from_rgb": True}, id="paletted-gif"),
+    pytest.param({"pix_fmt": "gbrp10le", "color_space": "bt709"},
+                 {**_BT709, "from_rgb": True}, id="planar-rgb-mislabelled-bt709"),
+    pytest.param({"pix_fmt": "gray"}, _BT709, id="gray-is-not-rgb"),
 ])
 def test_output_color_tags(stream, expected):
     assert media._output_color_tags(stream) == expected
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+def test_rgb_pix_fmt_prefixes_match_ffmpegs_rgb_family():
+    """Every format ffprobe flags RGB or paletted is RGB to us, and nothing else is."""
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_pixel_formats",
+         "-show_entries", "pixel_format=name:flags=rgb,palette", "-of", "json"],
+        check=True, capture_output=True, text=True,
+    ).stdout
+    formats = json.loads(out)["pixel_formats"]
+    assert len(formats) > 100
+    for fmt in formats:
+        flags = fmt.get("flags", {})
+        rgb = bool(flags.get("rgb") or flags.get("palette"))
+        assert fmt["name"].startswith(media._RGB_PIX_FMT_PREFIXES) == rgb, fmt["name"]
 
 
 def test_color_tag_filter_and_args_spell_every_tag():
@@ -179,6 +203,8 @@ def test_copy_safe_untagged_source_is_copied_and_labelled_bt709(monkeypatch, tmp
                         ("-color_trc", "bt709"), ("-color_range", "tv")):
         assert _value(cmd, flag) == value
     assert _value(cmd, "-movflags") == "+faststart"
+    # The narration mux never inherits the source's title/comment tags or chapters.
+    assert _value(cmd, "-map_metadata") == "-1" and _value(cmd, "-map_chapters") == "-1"
 
 
 def test_ten_bit_422_source_without_filters_is_reencoded_to_yuv420p(monkeypatch, tmp_path):
@@ -405,18 +431,24 @@ def _first_yuv_pixel(path):
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
-@pytest.mark.parametrize("codec", ["png", "libx264rgb"])
-def test_real_render_converts_rgb_source_to_bt709(monkeypatch, tmp_path, codec):
+@pytest.mark.parametrize("codec, pix_fmt, colour_space", [
+    ("png", "rgb24", "gbr"),
+    ("libx264rgb", "rgb24", "gbr"),
+    # QuickTime RLE: ffprobe reports pix_fmt argb and no colour space at all.
+    ("qtrle", "argb", None),
+])
+def test_real_render_converts_rgb_source_to_bt709(monkeypatch, tmp_path, codec, pix_fmt,
+                                                  colour_space):
     """An RGB source (ffprobe colour space `gbr`) used to fail at `-colorspace gbr`."""
     _quiet(monkeypatch)
-    source = tmp_path / ("source.mov" if codec == "png" else "source.mp4")
+    source = tmp_path / ("source.mp4" if codec == "libx264rgb" else "source.mov")
     work = tmp_path / "work"
     work.mkdir()
     _run("ffmpeg", "-y", "-loglevel", "error",
-         "-f", "lavfi", "-i", "color=c=red:s=160x120:r=12:d=2,format=rgb24",
+         "-f", "lavfi", "-i", f"color=c=red:s=160x120:r=12:d=2,format={pix_fmt}",
          "-f", "lavfi", "-i", "sine=frequency=431:sample_rate=48000:d=2",
          "-c:v", codec, "-c:a", "aac", str(source))
-    assert _probe(source)["color_space"] == "gbr"
+    assert _probe(source).get("color_space") == colour_space
 
     output = assemble_video(source, [], work, work / "output.mp4", audio_mode="source-mix")
 
@@ -447,3 +479,36 @@ def test_real_render_preserves_declared_bt601_tags(monkeypatch, tmp_path):
     assert (facts["color_space"], facts["color_primaries"], facts["color_transfer"]) == (
         "smpte170m", "smpte170m", "smpte170m"
     )
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
+@pytest.mark.parametrize("pix_fmt", ["yuv420p", "yuv422p"])
+def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, audio_mode, pix_fmt):
+    """A downloaded source's title/comment/URL tags and chapters stay out of the recap,
+    on the stream-copy path as well as the re-encode."""
+    _quiet(monkeypatch)
+    source = tmp_path / "source.mp4"
+    work = tmp_path / "work"
+    work.mkdir()
+    meta = tmp_path / "meta.txt"
+    meta.write_text(
+        ";FFMETADATA1\ntitle=Scraped Site Title\ncomment=https://example.invalid/watch\n"
+        "[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle=Site chapter\n",
+        encoding="utf-8",
+    )
+    _make_source(source, pix_fmt=pix_fmt)
+    tagged = tmp_path / "tagged.mp4"
+    _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(source), "-i", str(meta),
+         "-map", "0", "-map_metadata", "1", "-map_chapters", "1", "-c", "copy", str(tagged))
+
+    output = assemble_video(tagged, [], work, work / "output.mp4", audio_mode=audio_mode)
+
+    probe = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-show_chapters", "-show_entries", "format_tags",
+         "-of", "json", str(output)],
+        check=True, capture_output=True, text=True,
+    ).stdout)
+    tags = probe["format"].get("tags", {})
+    assert "title" not in tags and "comment" not in tags, tags
+    assert probe.get("chapters", []) == []

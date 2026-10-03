@@ -1,6 +1,7 @@
 """Loudness, source handoffs, ducking envelopes, and audio mix graphs."""
 
 import json
+import math
 import re
 from pathlib import Path
 
@@ -16,10 +17,59 @@ def _limiter_filter():
     return f"alimiter=limit={CONFIG['final_limiter_peak']:.2f}:level=false"
 
 
-def _loudness_mode(measured=None):
+# loudnorm's LRA option range is 1-20 in older ffmpeg (1-50 in current releases).
+_LOUDNORM_MAX_LRA = 20.0
+
+
+def _loudness_mode(measured=None, normalization_type=None):
+    """`limiter_only`, `equivalent` (single pass), or the two-pass mode ffmpeg really ran.
+
+    `normalization_type` is what the final render's loudnorm reported; without it the mode
+    is predicted from whether `_linear_loudnorm_targets` found linear targets.
+    """
     if not CONFIG["final_loudnorm"]:
         return "limiter_only"
-    return "two_pass_linear" if measured else "equivalent"
+    if not measured:
+        return "equivalent"
+    if normalization_type is None:
+        normalization_type = "linear" if _linear_loudnorm_targets(measured) else "dynamic"
+    return "two_pass_linear" if normalization_type == "linear" else "two_pass_dynamic"
+
+
+def _linear_loudnorm_targets(measured):
+    """Second-pass targets that keep loudnorm linear, or None when no such targets exist.
+
+    With `linear=true` ffmpeg only applies one constant gain when
+    measured_TP + (I - measured_I) <= TP and measured_LRA <= LRA; otherwise it silently
+    switches to dynamic (3-second AGC) normalisation, which reshapes the mix. So the
+    integrated target is lowered until the gained true peak fits under TP (the recap
+    comes out quieter than TARGET_LUFS instead of being compressed), and the LRA target,
+    which linear mode never applies, is raised to the measured range.
+    """
+    try:
+        values = [float(measured[key])
+                  for key in ("input_i", "input_tp", "input_lra", "input_thresh")]
+    except (KeyError, TypeError, ValueError):
+        return None
+    measured_i, measured_tp, measured_lra, measured_thresh = values
+    # ffmpeg's own "not measured" sentinels (silence measures -inf / -70 / 0).
+    if (not all(math.isfinite(v) for v in values) or measured_tp == 99
+            or measured_thresh == -70 or measured_lra == 0 or measured_i == 0):
+        return None
+    requested = float(CONFIG["target_lufs"])
+    true_peak = float(CONFIG["target_true_peak"])
+    # 0.01 LU under the exact limit: ffmpeg compares the floating-point sum.
+    peak_limited = math.floor((true_peak - measured_tp + measured_i) * 100) / 100 - 0.01
+    integrated = round(min(requested, peak_limited), 2)
+    lra = max(float(CONFIG["target_lra"]), measured_lra)
+    if integrated < -70 or lra > _LOUDNORM_MAX_LRA:
+        return None
+    return {
+        "integrated": integrated,
+        "lra": lra,
+        "true_peak": true_peak,
+        "gain_capped_db": round(max(0.0, requested - integrated), 2),
+    }
 
 
 def final_loudnorm_filter(measured=None):
@@ -28,15 +78,18 @@ def final_loudnorm_filter(measured=None):
     Ducking branches set only relative balance; this single stage owns the
     absolute output loudness so the recap is not left too quiet. When `measured`
     is supplied from a first loudnorm pass, ffmpeg runs the deterministic second
-    pass; without it we still force the same target and peak limiter as a
-    documented equivalent/fallback path.
+    pass with the targets from `_linear_loudnorm_targets`; without it we still force
+    the same target and peak limiter as a documented equivalent/fallback path.
     """
     if not CONFIG["final_loudnorm"]:
         return _limiter_filter()
+    targets = _linear_loudnorm_targets(measured) if measured else None
+    integrated = targets["integrated"] if targets else CONFIG["target_lufs"]
+    lra = targets["lra"] if targets else CONFIG["target_lra"]
     filt = (
-        f"loudnorm=I={CONFIG['target_lufs']}"
+        f"loudnorm=I={integrated}"
         f":TP={CONFIG['target_true_peak']}"
-        f":LRA={CONFIG['target_lra']}"
+        f":LRA={lra}"
         f":linear=true"
     )
     if measured:
@@ -63,6 +116,28 @@ def _parse_loudnorm_json(text):
         if {"input_i", "input_tp", "input_lra", "input_thresh", "target_offset"} <= set(data):
             return data
     return None
+
+
+def _loudnorm_summary_value(text, label):
+    """Last `<label>: <number>` in a loudnorm summary (None when absent, e.g. `-inf`)."""
+    matches = re.findall(rf"{label}:\s*([+-]?\d+(?:\.\d+)?)\b", text)
+    return float(matches[-1]) if matches else None
+
+
+def loudnorm_final_pass(stderr, measured=None):
+    """What the final render's loudnorm actually did, from its `print_format=summary`.
+
+    `normalization_type` is `linear` or `dynamic` (None when ffmpeg printed no summary);
+    `target` holds the second-pass targets when a first pass measured the mix.
+    """
+    text = stderr or ""
+    kinds = re.findall(r"Normalization Type:\s*(Linear|Dynamic)", text)
+    return {
+        "normalization_type": kinds[-1].lower() if kinds else None,
+        "target": _linear_loudnorm_targets(measured) if measured else None,
+        "output_integrated": _loudnorm_summary_value(text, "Output Integrated"),
+        "output_true_peak": _loudnorm_summary_value(text, "Output True Peak"),
+    }
 
 
 def _loudnorm_first_pass_filter():

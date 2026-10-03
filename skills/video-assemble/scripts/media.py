@@ -183,9 +183,16 @@ _COLOR_FIELDS = (
     ("color_transfer", "color_trc"),
 )
 _UNTAGGED_COLOR = {None, "", "unknown", "unspecified", "reserved", "N/A"}
-# ffprobe's colour space for an RGB picture (PNG/QuickTime RLE, libx264rgb). ffmpeg rejects
+# ffprobe's colour space for an RGB picture (PNG, libx264rgb, FFV1 RGB). ffmpeg rejects
 # `-colorspace gbr`, and the delivered picture is YUV anyway, so it is never written.
 _RGB_COLOR_SPACE = "gbr"
+# Pixel-format name prefixes of ffmpeg's RGB family (packed, planar `gbr*`, paletted, Bayer).
+# Some RGB sources report no colour space at all (QuickTime RLE `argb`, raw `bgr24`, GIF
+# `pal8`), so the pixel format decides too; tests/assemble/test_render_delivery.py checks
+# the prefixes against every format a real ffprobe lists.
+_RGB_PIX_FMT_PREFIXES = (
+    "rgb", "bgr", "gbr", "argb", "abgr", "0rgb", "0bgr", "x2rgb", "x2bgr", "pal8", "bayer_",
+)
 # Names ffprobe prints that setparams and the -colorspace/-color_primaries/-color_trc
 # output options accept and libx264 writes back (tests/assemble/test_render_delivery.py
 # runs each through a real ffmpeg); anything else is not written explicitly.
@@ -234,12 +241,16 @@ def _output_color_tags(stream):
     range follows the source: full range stays `pc`, everything else is limited `tv`.
     For a YUV source nothing here converts pixels; it only fixes the labels.
 
-    An RGB source (colour space `gbr`) has no YUV matrix to keep: it is converted to
-    BT.709 limited range, and `from_rgb` tells `_color_tag_filter` to do that conversion
-    explicitly instead of letting ffmpeg pick a matrix.
+    An RGB source (colour space `gbr`, or an RGB pixel format with or without a colour
+    space) has no YUV matrix to keep: it is converted to BT.709 limited range, and
+    `from_rgb` tells `_color_tag_filter` to do that conversion explicitly instead of
+    letting ffmpeg pick a matrix.
     """
     declared = {option: stream.get(key) for key, option in _COLOR_FIELDS}
-    from_rgb = declared["colorspace"] == _RGB_COLOR_SPACE
+    from_rgb = (
+        declared["colorspace"] == _RGB_COLOR_SPACE
+        or str(stream.get("pix_fmt") or "").startswith(_RGB_PIX_FMT_PREFIXES)
+    )
     if from_rgb:
         declared["colorspace"] = "bt709"
     if all(value in _UNTAGGED_COLOR or value == "bt709" for value in declared.values()):

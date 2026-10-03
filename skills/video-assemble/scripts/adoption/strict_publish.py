@@ -30,7 +30,8 @@ def current_audio_mix_binding(work_dir, audio_mode):
 def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_wav,
                    render_output, published_output, audio_mode, audio_operations,
                    adopted_audio, loudness_mode, loudnorm_measurement, visual_qc,
-                   source_has_audio, video_duration, render_delivery, source_audio_status):
+                   source_has_audio, video_duration, render_delivery, source_audio_status,
+                   loudnorm_final_pass=None):
     """Gate the rendered candidate on assembly QC and publish it with its bindings.
 
     Returns the final output path. Inactive-binding renders only write their
@@ -77,6 +78,7 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
             source_has_audio=source_has_audio,
             loudness_mode=loudness_mode,
             loudnorm_measurement=loudnorm_measurement,
+            loudnorm_final_pass=loudnorm_final_pass,
             visual_qc=visual_qc,
             audio_mode=audio_mode,
             audio_operations=audio_operations,
@@ -103,6 +105,7 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
                 tts_segments, video_duration, output_path=render_output,
                 source_has_audio=source_has_audio,
                 loudness_mode=loudness_mode, loudnorm_measurement=loudnorm_measurement,
+                loudnorm_final_pass=loudnorm_final_pass,
                 visual_qc=visual_qc, audio_mode=audio_mode,
                 audio_operations=audio_operations, adopted_audio=adopted_audio,
                 narration_input_binding=current_binding,

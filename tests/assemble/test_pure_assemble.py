@@ -1711,7 +1711,7 @@ def test_p0_adjust_tts_speed_respects_cumulative_tempo_cap(monkeypatch, tmp_path
         )
 
 
-def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path):
+def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path, capsys):
     """When cumulative cap cannot fit a segment, assemble records blocking metadata, not time-only cuts."""
     src = tmp_path / "narr_000.wav"
     src.write_bytes(b"wav")
@@ -1733,12 +1733,14 @@ def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path
 
     out, dur, meta = _adjust_result_parts(
         narration_audio._adjust_tts_speed(
-            src, target_duration=10.0, tts_rate_offset=0.05
+            src, target_duration=10.0, tts_rate_offset=0.05, segment_index=2
         )
     )
 
     assert Path(out) == src
     assert dur == 15.0
+    logged = capsys.readouterr()
+    assert "TTS 无安全放置: 段 3 15.0s" in logged.out + logged.err  # 1-based, as in narration.json
     assert meta["fit_status"] == "no_safe_fit"
     assert meta["truncate_reason"] in {"no_safe_boundary", "no_room"}
     assert meta.get("blocking") is True
@@ -1751,7 +1753,7 @@ def test_p0_build_timed_narration_propagates_no_safe_fit_metadata(
     """_build_timed_narration must preserve audio/text truth and expose no-safe-fit for QC."""
     wav = _write_silent_wav(tmp_path / "long.wav", 2.0, frame=b"\x00\x10")
 
-    def fake_adjust(path, target_duration, tts_rate_offset=0.0):
+    def fake_adjust(path, target_duration, tts_rate_offset=0.0, **_kwargs):
         return (
             str(path),
             2.0,
@@ -1867,7 +1869,7 @@ def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
     # longer than the 2.0s slot -> triggers fit
     wav = _write_silent_wav(tmp_path / "orig.wav", 2.1, frame=b"\x00\x10")
 
-    def fake_adjust(path, target_duration, tts_rate_offset=0.0):
+    def fake_adjust(path, target_duration, tts_rate_offset=0.0, **_kwargs):
         # simulate atempo landing ~10ms over the fit target (real ffmpeg rounding drift)
         over = _write_silent_wav(
             tmp_path / "over.wav", target_duration + 0.010, frame=b"\x00\x10"
@@ -2791,7 +2793,7 @@ def test_default_path_blocks_no_safe_fit_before_the_video_encode(monkeypatch, tm
     segs = [tts_segment(index=0, start=1.0, end=4.0, audio_duration=5.2,
                         audio_path=str(tmp_path / "narr.wav"))]
 
-    with pytest.raises(RuntimeError, match=r"渲染前阻断: no_safe_fit.*needed_tempo_factor=1\.31"):
+    with pytest.raises(RuntimeError, match=r"渲染前阻断: no_safe_fit（段 1 needed_tempo_factor=1\.31）"):
         assemble_video(video, segs, tmp_path, output)
 
     assert encodes == []

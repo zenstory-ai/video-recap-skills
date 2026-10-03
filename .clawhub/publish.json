@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "9325f1e3c2e1f2c2b998830b2515dddc4f0ba5ddb78fecbd597dde6577721ab2",
+      "packageDigest": "4996f7861df84c978b90e041d167ae26aa63484f9bc87644a8b9a5ae2eb589a6",
       "path": "skills/video-assemble",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.5"
+      "version": "1.0.6"
     },
     {
       "catalogMigration": true,
@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "8b119317e901724ebb22e92c27dbecb67d00a131f6ce9cd8da7b9fce9464c35b",
+      "packageDigest": "0fe9cc797fc8bc6c22f8d82025a1061b969c0dc412ce3275212d4dc43cb97cbd",
       "path": "skills/video-cut",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -78,7 +78,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.5"
+      "version": "1.0.6"
     },
     {
       "categories": [
@@ -105,10 +105,10 @@
         "bin:ffmpeg",
         "bin:ffprobe",
         "skill:worldwonderer/video-understanding@1.0.5",
-        "skill:worldwonderer/video-cut@1.0.5",
+        "skill:worldwonderer/video-cut@1.0.6",
         "skill:worldwonderer/video-script@1.0.4",
-        "skill:worldwonderer/video-voiceover@1.0.4",
-        "skill:worldwonderer/video-assemble@1.0.5"
+        "skill:worldwonderer/video-voiceover@1.0.5",
+        "skill:worldwonderer/video-assemble@1.0.6"
       ],
       "slug": "video-recap",
       "supportedRuntimes": [],
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.11"
+      "version": "1.0.12"
     },
     {
       "catalogMigration": true,
@@ -243,7 +243,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "dda298ceefe37461e47860a631743d5fbd60124ee1c221047defd992bb820a37",
+      "packageDigest": "5e779337ea55c8e1955aee68d4fd9a05493857f4d696598e667d3982efa2c1a4",
       "path": "skills/video-voiceover",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -264,7 +264,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.4"
+      "version": "1.0.5"
     }
   ]
 }

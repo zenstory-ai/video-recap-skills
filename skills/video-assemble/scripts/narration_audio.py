@@ -45,6 +45,7 @@ def _adjust_tts_speed(
     tts_rate_offset=0.0,
     *,
     tempo_policy=None,
+    segment_index=None,
 ):
     """Fit overlong TTS with bounded atempo; never time-trim speech in assemble.
 
@@ -99,8 +100,9 @@ def _adjust_tts_speed(
             "placed_audio_duration": 0.0,
             "needed_tempo_factor": ratio,
         })
+        label = "" if segment_index is None else f"段 {segment_index + 1} "
         log(
-            f"  TTS 无安全放置: {current_dur:.1f}s 需 x{ratio:.2f}，"
+            f"  TTS 无安全放置: {label}{current_dur:.1f}s 需 x{ratio:.2f}，"
             f"超过段内预算 x{effective_max:.2f}（assemble 不按时间硬切）"
         )
         return (str(audio_path), current_dur, meta)
@@ -263,11 +265,12 @@ def _build_timed_narration(
             if tempo_policy:
                 wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
                     wav_path, available_duration, tts_rate_offset,
-                    tempo_policy=tempo_policy,
+                    tempo_policy=tempo_policy, segment_index=seg["index"],
                 )
             else:
                 wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
-                    wav_path, available_duration, tts_rate_offset
+                    wav_path, available_duration, tts_rate_offset,
+                    segment_index=seg["index"],
                 )
             seg.update({
                 "fit_status": fit_meta["fit_status"],
@@ -337,7 +340,7 @@ def _build_timed_narration(
             # consonant/vowel release. _adjust_tts_speed must produce a complete file
             # that fits; otherwise block and ask the Agent to shorten/move the block.
             over = (audio_samples - available) / sample_rate
-            log(f"  TTS 无安全放置: 段 {seg['index']} 超出可用窗口 {over:.3f}s；禁止裁尾，交由 QC 阻断")
+            log(f"  TTS 无安全放置: 段 {seg['index'] + 1} 超出可用窗口 {over:.3f}s；禁止裁尾，交由 QC 阻断")
             _unplaced(seg, actual_start / sample_rate, "no_safe_fit", "no_safe_boundary", blocking=True)
             prev_pause_samples = pause_samples
             skipped_count += 1
@@ -348,7 +351,7 @@ def _build_timed_narration(
         if actual_start < last_written_end:
             overlap_ms = (last_written_end - actual_start) * 1000 / sample_rate
             if last_written_end >= actual_start + write_samples:
-                log(f"  跳过重叠段: {actual_start/sample_rate:.1f}s "
+                log(f"  跳过重叠段: 段 {seg['index'] + 1} {actual_start/sample_rate:.1f}s "
                        f"(与前段重叠 {overlap_ms:.0f}ms)")
                 _unplaced(seg, seg["start"], "no_safe_fit", "no_room", blocking=True)
                 prev_pause_samples = pause_samples

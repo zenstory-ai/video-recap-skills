@@ -269,6 +269,15 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         final_ln = audio_mix.final_loudnorm_filter(loudnorm_measurement)
         filter_complex += f";[aout]{final_ln}[aoutln]"
         lib.log(f"成片响度归一: {final_ln}")
+        linear_targets = (
+            audio_mix._linear_loudnorm_targets(loudnorm_measurement)
+            if loudnorm_measurement else None
+        )
+        if linear_targets and linear_targets["gain_capped_db"] > 0:
+            lib.log(
+                f"  成片真峰值余量不足：目标响度从 {lib.CONFIG['target_lufs']} 降到 "
+                f"{linear_targets['integrated']} LUFS，保持线性增益（不做动态压缩）"
+            )
         audio_map = "[aoutln]"
         audio_input_args = ["-i", str(narration_wav), *original_audio_input]
 
@@ -366,6 +375,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         cmd += ["-c:v", "copy"]
     # Container (and, on a re-encode, bitstream) colour tags; see media._output_color_tags.
     cmd += media._color_tag_args(color_tags)
+    # Never inherit the source's container/stream tags (a scraper's title, comment or URL)
+    # or its chapters, whose times no longer match an edit; every audio path muxes here.
+    cmd += ["-map_metadata", "-1", "-map_chapters", "-1"]
 
     # +faststart relocates the moov atom to the front so web/social players can start
     # before the full file downloads; valid (and beneficial) on the copy path too.
@@ -431,9 +443,17 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             + (["aac_packet_copy", "faststart"] if adopted_audio else ["aac_48000", "faststart"])
         ),
     }
+    loudnorm_final = None
+    if audio_mode != "adopted-packet-copy" and explicit_mix is None and lib.CONFIG["final_loudnorm"]:
+        loudnorm_final = audio_mix.loudnorm_final_pass(result.stderr, loudnorm_measurement)
+        if loudnorm_measurement and loudnorm_final["normalization_type"] == "dynamic":
+            lib.log("  ⚠️ loudnorm 第二遍退回动态模式（测得的响度范围或峰值超出线性条件）")
     loudness_mode = (
         "not_run" if audio_mode == "adopted-packet-copy" else
-        "fixed_master_gain_no_loudnorm" if explicit_mix is not None else None
+        "fixed_master_gain_no_loudnorm" if explicit_mix is not None else
+        audio_mix._loudness_mode(
+            loudnorm_measurement, (loudnorm_final or {}).get("normalization_type")
+        )
     )
     source_audio_status = "prepared_bed_adopted" if explicit_mix is not None else None
     render_output = strict_publish.publish_render(
@@ -442,7 +462,8 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         render_output=render_output, published_output=published_output,
         audio_mode=audio_mode, audio_operations=audio_operations,
         adopted_audio=adopted_audio, loudness_mode=loudness_mode,
-        loudnorm_measurement=loudnorm_measurement, visual_qc=visual_qc,
+        loudnorm_measurement=loudnorm_measurement, loudnorm_final_pass=loudnorm_final,
+        visual_qc=visual_qc,
         source_has_audio=source_has_audio, video_duration=video_duration,
         render_delivery=render_delivery, source_audio_status=source_audio_status,
     )
@@ -486,7 +507,8 @@ def _block_before_render(tts_segments, video_duration, work_dir, output_path, au
         for seg in tts_segments if seg.get("needed_tempo_factor") is not None
     }
     detail = ", ".join(
-        f"段{index}" + (f" needed_tempo_factor={needed[index]:.2f}" if index in needed else "")
+        f"段 {index + 1}"
+        + (f" needed_tempo_factor={needed[index]:.2f}" if index in needed else "")
         for index in blocked
     )
     raise AssemblyBlockedBeforeRender(

@@ -129,7 +129,8 @@ def _placed_audio_matches_timeline(seg):
 
 def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render_delivery,
                        output_path=None, source_has_audio=None, loudness_mode=None,
-                       loudnorm_measurement=None, visual_qc=None, audio_mode="narration",
+                       loudnorm_measurement=None, loudnorm_final_pass=None,
+                       visual_qc=None, audio_mode="narration",
                        adopted_audio=None,
                        narration_input_binding=None, audio_mix_binding=None,
                        source_audio_status=None):
@@ -231,6 +232,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         "source_audio": source_audio,
         "loudness_mode": loudness_mode or _loudness_mode(loudnorm_measurement),
         "loudnorm_measurement": loudnorm_measurement,
+        "loudnorm_final_pass": loudnorm_final_pass,
         "visual_qc": visual_verdict,
         "delivery_qc": {
             "video_encode_passes": render_delivery["video_encode_passes"],

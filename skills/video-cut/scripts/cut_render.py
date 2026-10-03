@@ -91,17 +91,52 @@ def _edited_source_color_tags(source_formats, *, rgb_converted_per_clip=False):
     """One set of colour tags for the concatenated picture, from each source's probe.
 
     Sources that agree keep their shared tags; sources that disagree cannot be described by
-    one label, so the picture is labelled BT.709, the same default an untagged source gets.
-    With `rgb_converted_per_clip` the RGB sources were already converted to BT.709 limited
-    yuv420p clip by clip, so their tags lose `from_rgb` and match a BT.709 YUV source.
+    one label, so the picture is BT.709 limited, the same default an untagged source gets,
+    and `_clip_color_filter` converts every clip into it. With `rgb_converted_per_clip` the
+    RGB sources (by colour space or pixel format) are converted to BT.709 limited yuv420p
+    clip by clip, so their tags lose `from_rgb` and match a BT.709 limited YUV source.
     """
     tags = [_output_color_tags(fmt) for fmt in source_formats]
     if rgb_converted_per_clip:
         tags = [{k: v for k, v in item.items() if k != "from_rgb"} for item in tags]
     if all(item == tags[0] for item in tags):
         return tags[0]
-    log("剪辑源视频: 各来源色彩标记不一致，成片按 BT.709 标记")
+    log("剪辑源视频: 各来源色彩标记不一致，各段统一转换为 BT.709 limited")
     return _output_color_tags({})
+
+
+# ffprobe colour-space names the scale filter can convert from/to (in/out_color_matrix).
+_SCALE_COLOR_MATRIX = {
+    "bt709": "bt709", "bt470bg": "bt470", "smpte170m": "smpte170m", "fcc": "fcc",
+    "smpte240m": "smpte240m", "bt2020nc": "bt2020",
+}
+
+
+def _clip_color_filter(source_format, target_tags):
+    """Per-clip conversion of one source's picture into the shared yuv420p picture.
+
+    The conversion is explicit for every source: the concat filter needs one pixel format,
+    and ffmpeg 8 also negotiates one colour space and range across its inputs, silently
+    converting the others with its own pick while the stamped label says something else.
+    An RGB source converts with the target's matrix; a YUV source converts from its own
+    matrix and range (untagged counts as BT.709, the label it would get alone). Only the
+    matrix and range are converted; primaries and transfer are relabelled, not remapped.
+    """
+    tags = _output_color_tags(source_format)
+    out_matrix = _SCALE_COLOR_MATRIX.get(target_tags.get("colorspace"))
+    out_range = target_tags["color_range"]
+    if tags.get("from_rgb"):
+        return f"scale=out_color_matrix={out_matrix or 'bt709'}:out_range={out_range},format=yuv420p,"
+    in_matrix = _SCALE_COLOR_MATRIX.get(tags.get("colorspace"))
+    if in_matrix and out_matrix:
+        return (
+            f"scale=in_color_matrix={in_matrix}:in_range={tags['color_range']}"
+            f":out_color_matrix={out_matrix}:out_range={out_range},format=yuv420p,"
+        )
+    if tags != target_tags:
+        log(f"剪辑源视频: 色彩空间 {tags.get('colorspace')} 无法转换为 "
+            f"{target_tags.get('colorspace')}，该来源只改标记")
+    return "format=yuv420p,"
 
 
 def build_edited_source_video(input_video, validated_plan, work_dir, output_path=None):
@@ -137,6 +172,10 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     join_fade_ms = CONFIG["clip_join_audio_fade_ms"]
     qc["join_fade_ms"] = round(join_fade_ms, 3)
 
+    color_tags = _edited_source_color_tags(
+        [format_by_input[path] for path in source_paths],
+        rgb_converted_per_clip=len(source_paths) > 1,
+    )
     parts = []
     concat_inputs = []
     extra_inputs = []
@@ -152,15 +191,11 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
             f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
             f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
         )
-        # Each clip becomes yuv420p here, before the shared colour tags are stamped. An RGB
-        # source converts with an explicit BT.709 limited matrix; left to `format=yuv420p`
-        # alone, ffmpeg would pick BT.601 while the file is labelled BT.709.
+        # Each clip becomes yuv420p in the shared colour space and range here, before the
+        # shared tags are stamped; left to `format=yuv420p` alone, ffmpeg picks the matrix
+        # (BT.601 for RGB) while the file is labelled with the shared tags.
         vnorm_by_input = {
-            path: vnorm + (
-                "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
-                if _output_color_tags(fmt).get("from_rgb")
-                else "format=yuv420p,"
-            )
+            path: vnorm + _clip_color_filter(fmt, color_tags)
             for path, fmt in format_by_input.items()
         }
     has_audio = len(source_paths) > 1 or all(audio_by_input.values())
@@ -224,10 +259,6 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
             "anullsrc=channel_layout=stereo:sample_rate=48000",
         ]
 
-    color_tags = _edited_source_color_tags(
-        [format_by_input[path] for path in source_paths],
-        rgb_converted_per_clip=len(source_paths) > 1,
-    )
     parts.append(f"[v]{_color_tag_filter(color_tags)}[vtagged]")
     maps[maps.index("[v]")] = "[vtagged]"
     filter_complex = ";".join(parts)
@@ -264,6 +295,12 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
         "48000",
         "-movflags",
         "+faststart",
+        # The source's container/stream tags (a scraper's title, comment or URL) and its
+        # chapters would otherwise be copied into edited_source.mp4 and on into the recap.
+        "-map_metadata",
+        "-1",
+        "-map_chapters",
+        "-1",
         *_color_tag_args(color_tags),
         str(output_path),
     ]
