@@ -28,7 +28,7 @@ from lib import (
     narration_tempo_budget,
     run_cmd,
 )
-from tts_audio import _maybe_normalize_tts_wav
+from tts_audio import _maybe_normalize_tts_wav, implausible_tts_duration
 
 SUPPORTED_TTS_ENGINES = {"mimo-tts", "fish-audio", "index-tts"}
 SEGMENT_AUDIO_SCHEMA_VERSION = 1
@@ -374,8 +374,14 @@ def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=
                 synthesize_fish_audio(text, output_wav, rate=rate)
             else:
                 receipt = index_provider.synthesize_configured(text, output_wav, CONFIG)
-            if get_video_duration(output_wav) <= 0:
+            duration = get_video_duration(output_wav)
+            if duration <= 0:
                 raise RuntimeError(f"{engine} 输出音频时长无效")
+            # A hallucinated reading (the text plus invented speech) is a failed attempt: it is
+            # retried, never cached, and never reaches assemble as an over-budget block.
+            implausible = implausible_tts_duration(text, duration)
+            if implausible:
+                raise RuntimeError(implausible)
             return receipt
         except Exception as exc:
             last_error = exc
@@ -422,6 +428,11 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
     if cached is None:
         return None
     if engine == "index-tts" and not index_provider.valid_cached_receipt(cached, CONFIG):
+        return None
+    implausible = implausible_tts_duration(cached["spoken_text"], cached["audio_duration"])
+    if implausible:
+        # Written before this bound existed: re-synthesize instead of blocking every rerun.
+        log(f"  段 {index+1}: 不复用缓存，重新合成：{implausible}")
         return None
     # The sidecar's audio identity (size, mtime_ns) still matches the WAV that produced
     # `audio_duration`; re-probing would be one ffprobe process per segment on every rerun.
