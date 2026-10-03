@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "repository": "zenstory-ai/video-recap-skills",
+  "versionFiles": [
+    {
+      "path": "VERSION",
+      "format": "text"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "format": "json",
+      "pointer": "/version"
+    }
+  ],
+  "changelog": "CHANGELOG.md",
+  "requiredPaths": [
+    "README.md",
+    "README.en.md",
+    "skills/video-assemble/SKILL.md",
+    "skills/video-cut/SKILL.md",
+    "skills/video-recap/SKILL.md",
+    "skills/video-reference/SKILL.md",
+    "skills/video-script/SKILL.md",
+    "skills/video-understanding/SKILL.md",
+    "skills/video-voiceover/SKILL.md",
+    "VERSION",
+    ".claude-plugin/plugin.json",
+    ".claude-plugin/marketplace.json"
+  ],
+  "excludePaths": [
+    ".agents",
+    ".clawhub",
+    ".github",
+    ".release"
+  ],
+  "ciWorkflows": [
+    {
+      "file": "skill-validate.yml",
+      "jobs": [
+        "validate (ubuntu-latest)",
+        "validate (macos-latest)",
+        "validate (windows-latest)"
+      ]
+    },
+    {
+      "file": "validate-clawhub.yml",
+      "jobs": [
+        "guard-central-ref",
+        "ClawHub inventory validation / distribute"
+      ]
+    }
+  ]
+}
