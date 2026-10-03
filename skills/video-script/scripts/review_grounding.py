@@ -62,20 +62,18 @@ def _load_review_grounding(work_dir):
                 continue
             for scene in _load(source_dir, "vlm_analysis.json") or []:
                 combined_vlm.append({**scene, "source_id": source_id})
-            clean_asr = _load(source_dir, "asr_clean.json")
-            raw_asr = (
-                clean_asr
-                if clean_asr is not None
-                else _load(source_dir, "asr_result.json")
-            )
-            for segment in _asr_segments(raw_asr):
+            for segment in _preferred_asr(source_dir):
                 combined_asr.append({**segment, "source_id": source_id})
         if combined_vlm or combined_asr:
             return combined_vlm, combined_asr
 
-    return _load(work_dir, "vlm_analysis.json") or [], _asr_segments(
-        _load(work_dir, "asr_result.json")
-    )
+    return _load(work_dir, "vlm_analysis.json") or [], _preferred_asr(work_dir)
+
+
+def _preferred_asr(work_dir):
+    """asr_clean.json wins over asr_result.json, as in lint, cut and assemble."""
+    clean = _load(work_dir, "asr_clean.json")
+    return _asr_segments(clean if clean is not None else _load(work_dir, "asr_result.json"))
 
 
 def _load_cut_clip_spans(work_dir):

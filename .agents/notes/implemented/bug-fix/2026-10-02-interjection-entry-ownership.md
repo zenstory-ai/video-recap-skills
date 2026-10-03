@@ -13,6 +13,7 @@ Status: implemented
 - 只改入口判定：script 的证据多一个 `dialogue_spans`，`entry_overlaps_source_speech` 用它判断入口是否落在讲话里；assemble 的 `_handoff_speech_evidence` 返回 `(speech, quiet, dialogue)`，`_entry_speech_owned` 用 `dialogue` 判断。"有没有实测讲话证据"仍看完整的 `speech_spans`，所以只有语气词的素材入口按安静处理，不会退回"没有证据就算讲话"。
 - 整段归属（`overlaps_speech`、压低电平）和 understanding 写出的 `speech_boundary_anchors_output.json` 都不变；两种时钟的 `speech_spans` 行本来就带 `text`，消费方自己过滤。
 - 文档：`video-recap/references/data-schema.md` 的入口规则说明同步更新。
+- 空白文本行与三处读哪份转写，后续统一见 [[2026-10-02-speech-evidence-one-transcript]]。
 
 ## Alternatives considered
 

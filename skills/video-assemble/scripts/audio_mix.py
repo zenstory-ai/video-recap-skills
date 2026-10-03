@@ -209,7 +209,9 @@ def _dialogue_speech_spans(rows):
 
     A row holding only interjections ("啊！", "Hi.") is not dialogue, except a
     `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue row. A row
-    without text is timing-only evidence and counts as dialogue.
+    whose text is empty or whitespace (ASR heard no words) is timing-only evidence: it is
+    skipped here and guards nothing. A row with no `text` field is measured timing whose
+    words are unknown and counts as dialogue.
     """
     rows = sorted(
         (
@@ -219,6 +221,7 @@ def _dialogue_speech_spans(rows):
                 "dialogue": not _interjection_only(row.get("text", "")),
             }
             for row in rows
+            if "text" not in row or row["text"].strip()
         ),
         key=lambda row: (row["start"], row["end"]),
     )

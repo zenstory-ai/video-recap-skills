@@ -44,7 +44,7 @@ REVISION 先明确本轮修改项与冻结项，再编辑对应层：表达、�
 - `work_dir/agent_narration_brief.md`：场景、时长、安静窗口与字数预算。
 - `asr_writing_chunks.json`：长对白的写作分块。
 - `timeline_fusion.json`：判断某段是否有对白或静音槽。
-- `vlm_analysis.json` / `asr_result.json`：核对具体画面与原声证据。
+- `vlm_analysis.json` / `asr_result.json`：核对具体画面与原声证据；有 `asr_clean.json` 时以它的文本为准（lint、评审、剪辑和合成都读它）。
 - brief 顶部列出的 contact sheet：不要只依赖场景摘要；反应、走位、静止和台词前后的具体时刻常常更重要。
 - `production_reference.json`（仅当 `work_dir` 里有）：另一部成片拆出的可迁移方法与节奏数值，用法见 §3。
 
