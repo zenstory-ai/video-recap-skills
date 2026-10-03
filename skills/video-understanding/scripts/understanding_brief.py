@@ -8,7 +8,7 @@ from lib import CONFIG, log, load_background_research
 from asr_timing_evidence import asr_evidence_summary_for_brief
 
 
-from detect import anchors_current, detect_speech_boundary_anchors
+from detect import ensure_speech_boundary_anchors
 
 
 from briefing.builder import build_agent_brief
@@ -137,8 +137,7 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
     scenes, asr_result, silence_periods = _load_understanding_artifacts_for_brief(
         work_dir
     )
-    if not anchors_current(work_dir):
-        detect_speech_boundary_anchors(work_dir, asr_result)
+    ensure_speech_boundary_anchors(work_dir, asr_result)
     overview_path = Path(work_dir) / "mimo_video_overview.json"
     if CONFIG["mimo_video_overview"]:
         scenes = _merge_overview_into_scenes(scenes, overview_path)

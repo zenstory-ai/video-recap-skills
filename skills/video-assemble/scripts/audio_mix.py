@@ -164,6 +164,13 @@ def _load_sentence_handoff_anchors(work_dir):
     return sorted(anchors.values(), key=lambda row: row["time"]), artifact, payload
 
 
+def _prefer_verified(matches):
+    """First verified anchor among time-ordered matches, else the first match, else None."""
+    return next((anchor for anchor in matches if anchor["verified"]), None) or (
+        matches[0] if matches else None
+    )
+
+
 def _timed_rows(rows):
     return [{"start": float(row["start"]), "end": float(row["end"])} for row in rows]
 
@@ -313,14 +320,11 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             report.append({"start": run["start"], "end": run["end"], "status": "quiet_source"})
             continue
         last = run["segments"][-1]
-        entry_anchor = next(
-            (
-                anchor
-                for anchor in anchors
-                if anchor["pause_start"] - 0.05 <= run["start"] <= anchor["time"] + 0.08
-            ),
-            None,
-        )
+        entry_anchor = _prefer_verified([
+            anchor
+            for anchor in anchors
+            if anchor["pause_start"] - 0.05 <= run["start"] <= anchor["time"] + 0.08
+        ])
         start_safe = run["start"] <= 0.25 or entry_anchor is not None
         if entry_owned and anchors and not start_safe:
             first["source_handoff_blocking"] = True
@@ -335,14 +339,11 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             first["source_entry_status"] = "sentence_boundary"
 
         max_hold = SOURCE_HANDOFF_MAX_HOLD_SECONDS
-        restore_anchor = next(
-            (
-                anchor
-                for anchor in anchors
-                if run["end"] - 0.01 <= anchor["time"] <= run["end"] + max_hold
-            ),
-            None,
-        )
+        restore_anchor = _prefer_verified([
+            anchor
+            for anchor in anchors
+            if run["end"] - 0.01 <= anchor["time"] <= run["end"] + max_hold
+        ])
         if restore_anchor is not None:
             # Hold the source low through its last spoken sample, then fit the release
             # entirely inside the measured pause. Never begin the ramp `fade` seconds

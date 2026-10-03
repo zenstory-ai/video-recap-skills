@@ -240,6 +240,12 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
                 # never mixes clocks.
                 item["source_pause_end"] = round(anchor.get("pause_end", source_time), 3)
                 item["pause_end"] = item["time"]
+                if "expected_time" in anchor:
+                    expected = float(anchor["expected_time"])
+                    item["source_expected_time"] = round(expected, 3)
+                    item["expected_time"] = round(
+                        span["output_start"] + expected - span["source_start"], 3
+                    )
                 remapped.append(item)
 
     speech_rows = [

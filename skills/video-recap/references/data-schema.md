@@ -101,7 +101,9 @@ ASR 时间只到窗口级，句末位置只能在窗口内估计。`timing_bound
 即句末真实位置的最坏误差；`confidence` 取它与 `alignment_error` 的较大值（≤0.6 high，≤1.2 medium，否则 low）。
 `boundary_use` 决定下游用不用：`verified`（high/medium）、`unverified`（窗口太粗但吸附误差 ≤1.2s，仍作门禁锚点，
 brief 里标 `unverified ±N s`）、`none`（不用）。缺 `boundary_use` 的旧文件按 high/medium 视为 `verified`；
-理解阶段发现 `schema_version` 不是 2 会重新生成本文件。
+理解阶段发现 `schema_version` 不是 2 时：有 `audio.wav` 就重新生成本文件；没有（素材库恢复）就按 `asr_result.json`
+原地重标（锚点时间不变，记 `upgraded_from_schema: 1`），重标不了就保持原样。剪后输出时钟的
+`speech_boundary_anchors_output.json` 里 `time` / `pause_start` / `pause_end` / `expected_time` 都是输出时钟，原片值在 `source_*` 字段。
 
 当 `overlaps_speech=true` 且旁白不是从 0 秒冷开场时，`narration` lint 要求 `start`
 贴近 `boundary_use` 不为 `none` 的锚点。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回

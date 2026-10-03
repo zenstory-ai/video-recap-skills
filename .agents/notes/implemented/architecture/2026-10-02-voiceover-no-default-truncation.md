@@ -16,7 +16,7 @@ Status: implemented
 
 - `voiceover.py` 删除截短并重合成的分支。超预算时记日志 `段 N: 超出预算 Xs > Ys，保留原稿，交由 assemble 有界提速或在渲染前阻断`，原稿照常交给 assemble。`--preserve-approved-text`（`enforce_approved_text_policy`）不变，超窗仍在 TTS 阶段抛 `ApprovedTextDurationError`。结果里的 `truncated` / `truncate_reason` 字段保留，默认路径上恒为 `False` / `"none"`。`lib._truncate_at_sentence` 和只有它在用的 `_text_char_count` 一并删除。
 - `approved_text_policy.LEGACY_TEXT_POLICY` 改名为 `report-over-budget-v2`。策略名是 TTS 分段缓存键的一部分，改名让按旧策略缓存的截短音频失效。
-- `assemble.py` 在 `_apply_source_sentence_handoffs` 之后、`seal_render_inputs` 之前调用 `_block_before_render`：用当前分段构建一次 `_build_assembly_qc`（`delivery_qc.video_encode_passes = 0`、`reencode_reason = ["blocked_before_render"]`），有阻断码就删掉工作目录里旧的 `output.mp4`、写 `assembly_qc.json`，并抛 `RuntimeError`，消息列出阻断码、段号和 `needed_tempo_factor`。默认路径和严格路径都走这一步，取代原来只在严格路径上的 `no_safe_fit` 报错。阻断码不变（`no_safe_fit`、`skipped_segments`、`unsafe_source_handoff` 等）。
+- `assemble.py` 在 `_apply_source_sentence_handoffs` 之后、`seal_render_inputs` 之前调用 `_block_before_render`：用当前分段构建一次 `_build_assembly_qc`（`delivery_qc.video_encode_passes = 0`、`reencode_reason = ["blocked_before_render"]`），有阻断码就删掉工作目录里旧的 `output.mp4` 和 `timeline.json`、写 `assembly_qc.json`，并抛 `AssemblyBlockedBeforeRender`（`RuntimeError` 子类），消息列出阻断码、段号和 `needed_tempo_factor`；`main` 把它转成 `SystemExit(消息)`，和编码后阻断一样只打印一行，不出 traceback。默认路径和严格路径都走这一步，取代原来只在严格路径上的 `no_safe_fit` 报错。阻断码不变（`no_safe_fit`、`skipped_segments`、`unsafe_source_handoff` 等）。
 - `narration_audio._build_timed_narration` 在 `no_safe_fit` 时把 `needed_tempo_factor` 写回分段，供上面的错误消息使用。
 - 文档：`video-voiceover/SKILL.md` 的能力边界与缓存说明同步更新。
 
@@ -28,5 +28,5 @@ Status: implemented
 ## Consequences
 
 - **收益**：默认路径不再出现 `truncated_speech`；每段只调一次 TTS；放不下的段在视频编码前失败，不再白跑完整渲染，错误里直接给出需要的提速倍数，Agent 知道该删多少字。pass4 类运行的全文要么经 assemble 有界提速放下（评审估算原始音频最多可超 4.39 秒），要么在编码前阻断。
-- **代价**：以前"截短后其实也会被阻断"的段，现在同样被阻断，但报的码从 `truncated_speech` 变成 `no_safe_fit`，依赖旧码的脚本需要更新。旧缓存的截短音频会被重新合成一次。工作目录里上一次的 `output.mp4` 在编码前阻断时会被删除，以免和 FAIL 的 QC 放在一起被误用。
+- **代价**：以前"截短后其实也会被阻断"的段，现在同样被阻断，但报的码从 `truncated_speech` 变成 `no_safe_fit`，依赖旧码的脚本需要更新。旧缓存的截短音频会被重新合成一次。工作目录里上一次的 `output.mp4` 和 `timeline.json` 在编码前阻断时会被删除，以免和 FAIL 的 QC 放在一起被误用（`assembly_manifest.json` 与编码后阻断时一样不动）。
 - 只有单测证据；真实重跑需要确认 `tts_meta.json` 里没有 `truncated: true`、每段 TTS 只调用一次、所有 assemble 失败的 `assembly_qc.delivery_qc.video_encode_passes == 0` 且没有 `output.mp4`，以及用 pass5 的稿子重放时以 `no_safe_fit ×1.31` 在编码前阻断。

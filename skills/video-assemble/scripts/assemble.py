@@ -427,6 +427,10 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     return render_output
 
 
+class AssemblyBlockedBeforeRender(RuntimeError):
+    """Narration can never pass assembly QC; raised before the video encode."""
+
+
 def _block_before_render(tts_segments, video_duration, work_dir, output_path, audio_mode):
     """Fail before the video encode when the narration track can already never pass QC.
 
@@ -443,7 +447,9 @@ def _block_before_render(tts_segments, video_duration, work_dir, output_path, au
     )
     if not qc["blocking"]:
         return
-    Path(output_path).unlink(missing_ok=True)  # never leave an earlier render beside a FAIL
+    # Never leave an earlier render or its timeline beside a FAIL for these placements.
+    Path(output_path).unlink(missing_ok=True)
+    (Path(work_dir) / "timeline.json").unlink(missing_ok=True)
     assembly_contract._write_assembly_qc(work_dir, qc)
     summary = qc["summary"]
     blocked = sorted(set(
@@ -460,7 +466,7 @@ def _block_before_render(tts_segments, video_duration, work_dir, output_path, au
         f"段{index}" + (f" needed_tempo_factor={needed[index]:.2f}" if index in needed else "")
         for index in blocked
     )
-    raise RuntimeError(
+    raise AssemblyBlockedBeforeRender(
         f"组装 QC 在渲染前阻断: {', '.join(qc['blocking_codes'])}"
         + (f"（{detail}）" if detail else "")
         + f"；详见 {Path(work_dir) / constants.ASSEMBLY_QC}"
@@ -549,12 +555,15 @@ def main():
     owned_alias = None
     output_path = work_dir / "output.mp4"
     try:
-        assemble_video(
-            args.video, tts_segments, work_dir, output_path,
-            audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
-            narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
-            audio_mix_adoption_path=args.audio_mix_adoption,
-        )
+        try:
+            assemble_video(
+                args.video, tts_segments, work_dir, output_path,
+                audio_mode=args.audio_mode, audio_stream_index=args.audio_stream_index,
+                narration_adoption_path=args.narration_adoption, tts_meta_path=tts_meta,
+                audio_mix_adoption_path=args.audio_mix_adoption,
+            )
+        except AssemblyBlockedBeforeRender as exc:
+            raise SystemExit(str(exc)) from None
         assembly_qc = artifacts._load_work_json(work_dir, constants.ASSEMBLY_QC)
         if assembly_qc["blocking"]:
             codes = ", ".join(assembly_qc["blocking_codes"])

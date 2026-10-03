@@ -912,7 +912,7 @@ def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path)
     _write_json(
         tmp_path / "speech_boundary_anchors.json",
         {"schema_version": 2, "sentence_anchors": [
-            {"time": 104.0, "pause_start": 103.8, "pause_end": 104.0,
+            {"time": 104.0, "pause_start": 103.8, "pause_end": 104.0, "expected_time": 103.5,
              "confidence": "low", "boundary_use": "unverified",
              "timing_bound_seconds": 9.24, "text_tail": "估计句末。"},
             {"time": 106.0, "pause_start": 105.8, "pause_end": 106.0,
@@ -932,6 +932,7 @@ def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path)
     mapped = output["sentence_anchors"][0]
     assert mapped["pause_end"] == mapped["time"] == 4.0
     assert mapped["source_pause_end"] == 104.0
+    assert (mapped["expected_time"], mapped["source_expected_time"]) == (3.5, 103.5)
 
 
 @pytest.mark.parametrize(

@@ -524,6 +524,13 @@ def test_short_real_dialogue_window_still_blocks_cut_edges(tmp_path):
     assert out["qc"]["blocking"][0]["reason"] == "inside_detected_speech"
 
 
+def test_punctuation_only_asr_window_stays_dialogue(tmp_path):
+    # ASR writes "……" for unintelligible mumbling, which can be real speech.
+    _write_asr_windows(tmp_path, [(10.0, 15.0, "……"), (20.0, 25.0, "♪♪")])
+    spans = sentence_boundaries._load_source_speech_spans(tmp_path)
+    assert [(row["start"], row["end"]) for row in spans] == [(10.0, 15.0), (20.0, 25.0)]
+
+
 def test_quiet_window_outranks_an_unverified_anchor_on_the_same_span():
     combined = sentence_boundaries._combine_boundary_windows(
         [{"start": 3.0, "end": 3.2, "kind": "sentence_anchor", "boundary_use": "unverified"}],

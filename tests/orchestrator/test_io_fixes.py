@@ -1266,6 +1266,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
                     {
                         "time": 2.0,
                         "pause_start": 1.8,
+                        "expected_time": 1.9,
                         "text_tail": "来源句子。",
                         "confidence": "high",
                     },
@@ -1377,6 +1378,8 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     # Output-clock pause_end; the source value is kept under its own name.
     assert output_evidence["sentence_anchors"][0]["pause_end"] == 1.0
     assert output_evidence["sentence_anchors"][0]["source_pause_end"] == 2.0
+    assert output_evidence["sentence_anchors"][0]["expected_time"] == 0.9
+    assert output_evidence["sentence_anchors"][0]["source_expected_time"] == 1.9
     assert output_evidence["sentence_anchors"][1]["time"] == 1.5
     assert output_evidence["sentence_anchors"][1]["pause_start"] == 1.5
     assert output_evidence["speech_spans"][0]["start"] == 0.0

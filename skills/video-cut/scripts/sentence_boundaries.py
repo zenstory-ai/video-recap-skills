@@ -64,7 +64,8 @@ _INTERJECTION_GUARD_SECONDS = 1.0
 
 def _interjection_only(text):
     tokens = [token for token in re.split(r"[\W_]+", text.lower()) if token]
-    return all(
+    # Punctuation-only rows ("……", "？") are often ASR for unintelligible speech: keep them.
+    return bool(tokens) and all(
         token in _NON_DIALOGUE_TOKENS or set(token) <= _NON_DIALOGUE_CJK for token in tokens
     )
 

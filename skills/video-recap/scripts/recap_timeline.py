@@ -385,6 +385,10 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
                 source_pause_end=round(float(anchor.get("pause_end", when)), 3),
             )
             item["pause_end"] = item["time"]
+            if "expected_time" in anchor:
+                expected = float(anchor["expected_time"])
+                item["source_expected_time"] = round(expected, 3)
+                item["expected_time"] = round(output_start + expected - source_start, 3)
             mapped_anchors.append(item)
         for rows, destination, require_text in (
             (speech_rows, mapped_speech, True),

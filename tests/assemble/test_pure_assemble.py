@@ -126,8 +126,8 @@ def _volume_expr_from_filter(filter_complex):
     return filter_complex[start:end]
 
 
-def _eval_duck_expr(filter_complex, t):
-    expr = _volume_expr_from_filter(filter_complex)
+def _eval_envelope(expr, t):
+    """Evaluate an ffmpeg volume envelope expression at time t (restricted eval)."""
     return eval(
         expr,
         {"__builtins__": {}},
@@ -138,6 +138,10 @@ def _eval_duck_expr(filter_complex, t):
             "between": lambda value, lo, hi: 1.0 if lo <= value <= hi else 0.0,
         },
     )
+
+
+def _eval_duck_expr(filter_complex, t):
+    return _eval_envelope(_volume_expr_from_filter(filter_complex), t)
 
 
 def _adjust_result_parts(result):
@@ -1900,15 +1904,9 @@ def test_source_handoff_restores_only_at_next_sentence_anchor(monkeypatch, tmp_p
     assert seg.get("source_handoff_blocking") is not True
 
     expr = audio_mix._duck_envelope([seg], 1.0, 0.2, 0.12, 0.3, bridge=1.5)
-    env = {"__builtins__": {}}
-    names = {
-        "min": min,
-        "max": max,
-        "between": lambda value, lo, hi: 1.0 if lo <= value <= hi else 0.0,
-    }
-    assert eval(expr, env, {**names, "t": 13.70}) == pytest.approx(0.2)
-    assert 0.2 < eval(expr, env, {**names, "t": 14.04}) < 1.0
-    assert eval(expr, env, {**names, "t": 14.34}) == pytest.approx(1.0)
+    assert _eval_envelope(expr, 13.70) == pytest.approx(0.2)
+    assert 0.2 < _eval_envelope(expr, 14.04) < 1.0
+    assert _eval_envelope(expr, 14.34) == pytest.approx(1.0)
 
     from timeline import build_timeline
 
@@ -1966,25 +1964,7 @@ def test_source_handoff_holds_to_end_when_no_later_sentence_anchor(
     monkeypatch.setitem(CONFIG, "speech_ducking_volume", 0.2)
     expr = audio_mix._duck_envelope([seg], 1.0, 0.2, 0.12, 0.3, bridge=1.5)
     # Narration ended at 27.5, but source remains ducked through the timeline end.
-    assert eval(
-        expr,
-        {"__builtins__": {}},
-        {
-            "t": 29.0,
-            "min": min,
-            "max": max,
-            "between": lambda value, lo, hi: 1.0 if lo <= value <= hi else 0.0,
-        },
-    ) == pytest.approx(0.2)
-
-
-def _eval_duck(expr, t):
-    names = {
-        "min": min,
-        "max": max,
-        "between": lambda value, lo, hi: 1.0 if lo <= value <= hi else 0.0,
-    }
-    return eval(expr, {"__builtins__": {}}, {**names, "t": t})
+    assert _eval_envelope(expr, 29.0) == pytest.approx(0.2)
 
 
 def test_source_handoff_releases_when_next_anchor_is_beyond_the_hold_bound(
@@ -2009,7 +1989,7 @@ def test_source_handoff_releases_when_next_anchor_is_beyond_the_hold_bound(
     assert report[0]["hold_seconds"] == pytest.approx(0.3)
     assert seg.get("source_handoff_blocking") is not True
     expr = audio_mix._duck_envelope([seg], 1.0, 0.2, 0.12, 0.3, bridge=1.5)
-    assert _eval_duck(expr, 13.0) == pytest.approx(1.0)
+    assert _eval_envelope(expr, 13.0) == pytest.approx(1.0)
 
 
 def test_source_handoff_marks_unverified_anchor_restores_and_entries(monkeypatch, tmp_path):
@@ -2032,6 +2012,29 @@ def test_source_handoff_marks_unverified_anchor_restores_and_entries(monkeypatch
     assert seg["source_entry_status"] == "sentence_boundary_unverified"
     assert seg["source_restore_at"] == pytest.approx(14.0)
     assert report[0]["hold_seconds"] == pytest.approx(2.0)
+
+
+def test_source_handoff_prefers_verified_anchor_evidence_over_time_order(monkeypatch, tmp_path):
+    _write_legacy_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "pause_start": 5.22, "confidence": "low",
+             "boundary_use": "unverified"},
+            {"time": 5.9, "pause_start": 5.5, "confidence": "high"},
+            {"time": 12.5, "pause_start": 12.2, "confidence": "low",
+             "boundary_use": "unverified"},
+            {"time": 13.5, "pause_start": 13.3, "confidence": "high"},
+        ],
+    )
+    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
+    seg = {"index": 0, "actual_place_start": 5.6, "actual_place_end": 12.0,
+           "overlaps_speech": True}
+
+    report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 60.0)
+
+    assert seg["source_entry_status"] == "sentence_boundary"
+    assert report[0]["status"] == "sentence_boundary"
+    assert seg["source_restore_at"] == pytest.approx(13.5)
 
 
 def test_source_handoff_blocks_unsafe_entry_and_missing_anchors_with_speech(tmp_path):
@@ -2622,6 +2625,7 @@ def test_default_path_blocks_no_safe_fit_before_the_video_encode(monkeypatch, tm
     video.write_bytes(b"video")
     output = tmp_path / "output.mp4"
     output.write_bytes(b"stale render from an earlier run")
+    (tmp_path / "timeline.json").write_text("{}", encoding="utf-8")
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     monkeypatch.setitem(CONFIG, "bgm_path", "")
     monkeypatch.setattr(assemble.lib, "get_video_duration", lambda _path: 10.0)
@@ -2653,6 +2657,7 @@ def test_default_path_blocks_no_safe_fit_before_the_video_encode(monkeypatch, tm
 
     assert encodes == []
     assert not output.exists()
+    assert not (tmp_path / "timeline.json").exists()
     qc = json.loads((tmp_path / "assembly_qc.json").read_text(encoding="utf-8"))
     assert qc["blocking_codes"] == ["no_safe_fit"]
     assert qc["delivery_qc"]["video_encode_passes"] == 0

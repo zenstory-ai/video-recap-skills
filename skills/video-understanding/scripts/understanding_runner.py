@@ -11,12 +11,7 @@ from lib import CONFIG, log, get_video_duration, api_call
 
 from extract import extract_frames
 
-from detect import (
-    anchors_current,
-    detect_scenes,
-    detect_silence_periods,
-    detect_speech_boundary_anchors,
-)
+from detect import detect_scenes, detect_silence_periods, ensure_speech_boundary_anchors
 
 from asr import transcribe_audio
 from asr_timing_evidence import write_asr_timing_evidence
@@ -184,8 +179,7 @@ def main():
     if not args.force and _stage_cache_valid(silence_json, silence_meta):
         silence_periods = _load_json(silence_json)
         log(f"跳过静音检测（已存在 {len(silence_periods)} 个窗口）")
-        if not anchors_current(work_dir):
-            detect_speech_boundary_anchors(work_dir, asr_result)
+        ensure_speech_boundary_anchors(work_dir, asr_result)
     else:
         silence_periods = detect_silence_periods(video, work_dir, asr_result)
         _write_stage_meta(silence_json, silence_meta)
