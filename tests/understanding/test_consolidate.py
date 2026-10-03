@@ -383,8 +383,13 @@ def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path
         ("01:20左右-01:45左右", "01:20"),
         ("1.5分", "01:30"),
         ("2.5分钟", "02:30"),
-        ("第3分钟", "03:00"),
-        ("第 95 秒", "01:35"),
+        ("第3分钟", "02:00"),  # the third minute starts at 02:00
+        ("第1分钟", "00:00"),
+        ("第3分钟左右", "02:00"),
+        ("第 95 秒", "01:34"),
+        ("第2小时", "1:00:00"),
+        ("第3分20秒", "03:20"),  # a time, not an ordinal unit
+        ("第01:20", "01:20"),
     ],
 )
 def test_plot_time_is_canonical_mm_ss(raw, expected):
@@ -472,6 +477,31 @@ def test_entries_with_the_same_name_are_one_character():
     assert [c["name"] for c in chars] == ["甲"]
     assert chars[0]["aliases"] == ["阿甲", "乙", "阿乙"]
     assert renames == {"乙": "甲"}
+
+
+@pytest.mark.parametrize("nameless_first", [True, False])
+def test_a_merged_character_takes_the_first_name_any_member_has(nameless_first):
+    """A nameless entry linked by alias keeps its position but not its missing name, so the
+    relationship is not re-pointed at a null side."""
+    from index_normalize import normalize_index
+
+    nameless = {"aliases": ["王大锤"], "description": "无名条目", "evidence_ids": ["A"]}
+    named = {"name": "王大锤", "evidence_ids": ["B"]}
+    pair = [nameless, named] if nameless_first else [named, nameless]
+    out, report = normalize_index({
+        "characters": [*pair, {"name": "李警官"}],
+        "relationships": [{"a": "王大锤", "b": "李警官", "relation": "同事"}],
+        "plot_points": [],
+        "entities": [],
+    })
+    assert [c.get("name") for c in out["characters"]] == ["王大锤", "李警官"]
+    merged = out["characters"][0]
+    assert merged["aliases"] == []
+    assert merged["description"] == "无名条目"
+    assert merged["evidence_ids"] == (["A", "B"] if nameless_first else ["B", "A"])
+    assert out["relationships"] == [{"a": "王大锤", "b": "李警官", "relation": "同事"}]
+    assert report["merged_characters"] == 1
+    assert normalize_index(out)[0] == out
 
 
 _LEADS_AND_EXTRA = (

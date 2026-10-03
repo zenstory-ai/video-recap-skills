@@ -14,6 +14,7 @@ from briefing.context import (
     _format_timeline_fusion_for_brief,
     _load_background_research,
     _load_consolidation,
+    _scene_number,
     _write_json_artifact,
     assess_understanding_substrate,
 )
@@ -38,20 +39,20 @@ from timeline_fusion import (
 
 
 def _duration_label(seconds):
-    """'45s' / '2min' / '1m42s': whole minutes only when the duration is one.
+    """'45s' / '2min' / '1m42s' / '2h' / '2h01m' / '2h01m05s', rounded to whole seconds;
+    a unit is dropped only when it and everything below it are zero.
 
     A minute-rounded label hid the real length: a 90 s target read '~2min'."""
     whole = int(seconds + 0.5)
     if whole < 60:
         return f"{whole}s"
     minutes, secs = divmod(whole, 60)
-    return f"{minutes}min" if secs == 0 else f"{minutes}m{secs:02d}s"
-
-
-def _scene_number(scene_id):
-    """1-based source scene number; a scene split across kept clips ("3.1") reads "4 part 2"."""
-    base, _, part = str(scene_id).partition(".")
-    return f"{int(base) + 1} part {int(part) + 1}" if part else str(int(base) + 1)
+    if minutes < 60:
+        return f"{minutes}min" if secs == 0 else f"{minutes}m{secs:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    if minutes == 0 and secs == 0:
+        return f"{hours}h"
+    return f"{hours}h{minutes:02d}m" if secs == 0 else f"{hours}h{minutes:02d}m{secs:02d}s"
 
 
 def build_agent_brief(
@@ -406,7 +407,7 @@ def build_agent_brief(
             [
                 f"### OUTPUT {span} (source scene {_scene_number(scene['scene_id'])})"
                 if cut_pass2
-                else f"### Scene {scene['scene_id'] + 1}: {span}",
+                else f"### Scene {_scene_number(scene['scene_id'])}: {span}",
                 f"- Duration: {duration:.1f}s; max budget if fully narrated: {max_chars} chars",
                 f"- Quiet windows: {quiet_text}",
                 f"- Description: {scene.get('description', '')}"

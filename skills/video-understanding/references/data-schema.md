@@ -141,6 +141,8 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 ]
 ```
 
+cut 第二轮（已有 `edited_source.mp4`）时本文件与 `asr_writing_chunks.json` 都在 OUTPUT 时间轴上：被拆到多个片段的场景 `scene_id` 写作 `"3.1"`（0 起的原场景号加片段序号）；VLM 文字里落在场景原片区间内的时间改写成输出时间，落在被剪掉部分的写 `[cut-away moment]`；只被剪进一部分的 ASR 窗口文字换成 `[partial ASR window: only part of it is in the cut, text withheld]`。`scene_id` 一律 0 起，brief 里给人看的场景号从 1 数。
+
 ## background_research.json
 
 可选的背景调研结果（由 Agent 使用任意可用搜索/浏览方式整理）：

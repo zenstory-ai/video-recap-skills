@@ -8,6 +8,13 @@ from index_normalize import normalize_index
 from lib import CONFIG, file_identity
 
 
+def _scene_number(scene_id):
+    """1-based scene number for every human-facing label in the brief (JSON keeps the
+    0-based `scene_id`); a scene split across kept clips ("3.1") reads "4 part 2"."""
+    base, _, part = str(scene_id).partition(".")
+    return f"{int(base) + 1} part {int(part) + 1}" if part else str(int(base) + 1)
+
+
 def _load_background_research(work_dir):
     """Load the agent-authored background_research.json ({} when absent)."""
     path = Path(work_dir) / "background_research.json"
@@ -168,7 +175,7 @@ def _format_moderation_refusals(scenes_analysis):
     ]
     if not refused:
         return []
-    labels = ", ".join(str(scene["scene_id"] + 1) for scene in refused[:12])
+    labels = ", ".join(_scene_number(scene["scene_id"]) for scene in refused[:12])
     more = f" …(+{len(refused) - 12})" if len(refused) > 12 else ""
     covered = sum(
         1 for scene in refused if scene.get("description_source") == "mimo_video_overview"
@@ -201,7 +208,7 @@ def _format_asr_chunks_for_brief(chunks, max_chunks=24):
         "",
     ]
     for chunk in chunks[:max_chunks]:
-        scene_ids = ",".join(str(sid) for sid in chunk["scene_ids"]) or "n/a"
+        scene_ids = ", ".join(_scene_number(sid) for sid in chunk["scene_ids"]) or "n/a"
         text = chunk["text"]
         if len(text) > 900:
             text = text[:897] + "..."
@@ -249,7 +256,7 @@ def _format_timeline_fusion_for_brief(fusion, max_items=40):
         )
         lines.extend(
             [
-                f"### Fusion scene {item['scene_id']}: {start:.1f}-{end:.1f}s ({item['recommended_mode']})",
+                f"### Fusion scene {_scene_number(item['scene_id'])}: {start:.1f}-{end:.1f}s ({item['recommended_mode']})",
                 f"- Visual: {item['visual_description']}",
                 f"- Dialogue overlap: {item['dialogue_overlap_seconds']:.1f}s | {dialogue_text}",
                 f"- Narration slots: {slot_text}",
