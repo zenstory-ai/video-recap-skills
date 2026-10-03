@@ -191,8 +191,11 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
     except (OSError, ValueError):
         log("storyboard 跳过 edited：clip_plan_validated.json 无法解析")
         return None
+    if not isinstance(clip_plan_validated, dict):
+        log("storyboard 跳过 edited：clip_plan_validated.json 不是对象")
+        return None
     plan_sources = clip_plan_validated.get("sources")
-    if plan_sources:
+    if isinstance(plan_sources, dict) and plan_sources:
         frame_sets = _multi_source_frame_sets(work_dir, plan_sources)
         if not frame_sets:
             log("storyboard 跳过 edited：所有来源的 frames/ 都缺失")
