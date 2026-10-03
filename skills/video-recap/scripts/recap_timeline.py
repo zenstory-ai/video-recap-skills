@@ -393,6 +393,7 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         return cache[source_id]
 
     mapped_anchors, mapped_speech, mapped_quiet = [], [], []
+    output_duration = max(float(clip["output_end"]) for clip in plan["clips"])
     for clip in plan["clips"]:
         source_id = clip["source_id"]
         source_start = float(clip["source_start"])
@@ -403,13 +404,18 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             when = float(anchor["time"])
             if not (source_start - 0.05 <= when <= source_end + 0.05):
                 continue
+            output_time = round(output_start + when - source_start, 3)
+            # The 0.05 s source slack can carry an anchor past the output's ends (a clip
+            # end frame-snapped 181.42 -> 181.40): narration cannot start there.
+            if not 0 <= output_time <= output_duration:
+                continue
             # Same default as the single-source remap in video-understanding's timeline brief.
             pause = max(source_start, min(float(anchor.get("pause_start", when - 0.12)), when))
             item = dict(anchor)
             item.update(
                 source_id=source_id,
                 source_time=round(when, 3),
-                time=round(output_start + when - source_start, 3),
+                time=output_time,
                 source_pause_start=round(pause, 3),
                 pause_start=round(output_start + pause - source_start, 3),
                 # `time` IS the pause end; keep the source value apart (one clock per field).

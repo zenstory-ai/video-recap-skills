@@ -1,3 +1,4 @@
+import itertools
 import json
 import sys
 from pathlib import Path
@@ -375,6 +376,15 @@ def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path
         ("约3分20.5秒", "03:20"),
         ("1小时2分3秒", "1:02:03"),
         ("3分20秒-3分45秒", "03:20"),
+        ("01:20左右", "01:20"),
+        ("约1分20秒左右", "01:20"),
+        ("3分钟前后", "03:00"),
+        ("80秒许", "01:20"),
+        ("01:20左右-01:45左右", "01:20"),
+        ("1.5分", "01:30"),
+        ("2.5分钟", "02:30"),
+        ("第3分钟", "03:00"),
+        ("第 95 秒", "01:35"),
     ],
 )
 def test_plot_time_is_canonical_mm_ss(raw, expected):
@@ -384,7 +394,7 @@ def test_plot_time_is_canonical_mm_ss(raw, expected):
     assert points == [{"time": expected, "text": "x"}] and dropped == 0
 
 
-@pytest.mark.parametrize("raw", ["开头", "", None, "-0:05", "05:00"])
+@pytest.mark.parametrize("raw", ["开头", "", None, "-0:05", "05:00", "左右", "第一分钟"])
 def test_unreadable_or_out_of_range_plot_time_is_dropped(raw):
     from index_normalize import normalize_plot_times
 
@@ -440,17 +450,67 @@ def test_a_later_entry_linking_two_groups_is_kept_on_its_own():
     assert renames == {}
 
 
-def test_an_exact_name_match_wins_over_alias_links():
+def test_entries_with_the_same_name_are_one_character():
+    """Same-named entries pool their aliases before any link is judged, so one of them
+    naming another character as an alias links the whole character, not a duplicate."""
     from index_normalize import merge_characters
 
     chars, renames = merge_characters([
         {"name": "甲", "aliases": ["阿甲"]},
         {"name": "乙", "aliases": ["阿乙"]},
-        {"name": "乙", "aliases": ["甲"], "description": "乙的第二条"},
+        {"name": "乙", "aliases": ["阿二"], "description": "乙的第二条"},
     ])
     assert [c["name"] for c in chars] == ["甲", "乙"]
-    assert chars[1]["aliases"] == ["阿乙", "甲"]
-    assert renames == {"乙": "乙"}
+    assert chars[1]["aliases"] == ["阿乙", "阿二"]
+    assert chars[1]["description"] == "乙的第二条"
+
+    chars, renames = merge_characters([
+        {"name": "甲", "aliases": ["阿甲"]},
+        {"name": "乙", "aliases": ["阿乙"]},
+        {"name": "乙", "aliases": ["甲"]},
+    ])
+    assert [c["name"] for c in chars] == ["甲"]
+    assert chars[0]["aliases"] == ["阿甲", "乙", "阿乙"]
+    assert renames == {"乙": "甲"}
+
+
+_LEADS_AND_EXTRA = (
+    {"name": "王大锤", "aliases": ["男子"], "evidence_ids": ["A"]},
+    {"name": "李警官", "aliases": ["男子"], "evidence_ids": ["B"]},
+    {"name": "男子", "aliases": ["路人"], "evidence_ids": ["C"]},
+)
+_TWO_NAMES_IN_ONE = (
+    {"name": "丙", "aliases": ["甲", "乙"], "evidence_ids": ["丙"]},
+    {"name": "甲", "evidence_ids": ["甲"]},
+    {"name": "乙", "evidence_ids": ["乙"]},
+)
+
+
+@pytest.mark.parametrize(
+    "characters",
+    [
+        pytest.param(list(order), id=f"{label}-{'-'.join(c['evidence_ids'][0] for c in order)}")
+        for label, fixture in (("leads", _LEADS_AND_EXTRA), ("bridge", _TWO_NAMES_IN_ONE))
+        for order in itertools.permutations(fixture)
+    ],
+)
+def test_character_merging_does_not_depend_on_input_order(characters):
+    """A bridging entry (an extra named by an alias two leads share, or one entry naming two
+    people) stays on its own in every order, and never folds the others together."""
+    from index_normalize import normalize_index
+
+    relationships = [{"a": "王大锤", "b": "李警官", "relation": "对峙"}]
+    index = {"characters": characters, "relationships": relationships, "plot_points": []}
+
+    out, report = normalize_index(index)
+
+    # Every entry is its own character: the same partition in every order.
+    partition = sorted(sorted(c["evidence_ids"]) for c in out["characters"])
+    assert partition == sorted(c["evidence_ids"] for c in characters)
+    assert out["characters"] == characters
+    assert out["relationships"] == relationships
+    assert report["merged_characters"] == 0
+    assert normalize_index(out)[0] == out
 
 
 def test_a_shared_alias_alone_does_not_merge_two_characters():

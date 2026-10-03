@@ -217,16 +217,22 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
         return anchors
 
     spans = _load_cut_output_spans_for_brief(work_dir, required=True)
+    output_duration = max(span["output_end"] for span in spans)
     remapped = []
     for anchor in anchors:
         source_time = anchor["time"]
         for span in spans:
             if span["source_start"] - 0.05 <= source_time <= span["source_end"] + 0.05:
-                item = dict(anchor)
-                item["source_time"] = round(source_time, 3)
-                item["time"] = round(
+                output_time = round(
                     span["output_start"] + source_time - span["source_start"], 3
                 )
+                # The 0.05 s match slack can carry an anchor past the output's ends (a clip
+                # end frame-snapped 181.42 -> 181.40): narration cannot start there.
+                if not 0 <= output_time <= output_duration:
+                    continue
+                item = dict(anchor)
+                item["source_time"] = round(source_time, 3)
+                item["time"] = output_time
                 # Preserve the measured safe pause in OUTPUT time too, so cut-mode lint
                 # compares one clock.
                 source_pause_start = max(

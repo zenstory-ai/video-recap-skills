@@ -8,8 +8,9 @@ Two defects seen in real indexes are repaired here, after the model reply is par
   of the analysed scenes, is dropped instead of kept as a wrong timestamp.
 - The same character split into two `characters` entries where one's name is the other's name
   or alias (a shared alias alone is not enough, and an entry that would bridge two different
-  characters is left on its own). Entries are merged (first occurrence wins the name, the
-  others become aliases) and relationships are re-pointed at the surviving name.
+  characters is left on its own). Which entries merge does not depend on their order; the
+  first occurrence keeps the name, the others become aliases, and relationships are
+  re-pointed at the surviving name.
 
 Pure functions only: no I/O, no model calls.
 """
@@ -19,12 +20,17 @@ import re
 
 _TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)\s*$")
 _APPROX_RE = re.compile(r"^(?:大约|约)\s*")
+# "01:20左右" / "3分钟前后" / "80秒许": approximation words, dropped wherever they sit.
+_APPROX_WORD_RE = re.compile(r"\s*(?:左右|前后|许)")
+# "第3分钟" / "第95秒": an ordinal prefix on a time reads as that time.
+_ORDINAL_RE = re.compile(r"^第\s*(?=\d)")
 # A range starts with a digit, so a leading "-" (a negative time) is not a range separator.
 _RANGE_RE = re.compile(r"^(\d[\d:.]*?)\s*(?:秒|s|S)?\s*(?:-|~|～|—|–|至|到)\s*\d")
 _UNIT_RE = re.compile(r"\s*(?:秒|s|S)$")
-# "3分20秒" / "1小时2分3秒" / "3分钟": rewritten as "3:20" / "1:2:3" / "3:0" before parsing.
+# "3分20秒" / "1小时2分3秒" / "3分钟" / "1.5分": rewritten as seconds ("200.0" / "3723.0" /
+# "180.0" / "90.0") before parsing.
 _CN_TIME_RE = re.compile(
-    r"(?:(\d+)\s*(?:小时|时)\s*)?(\d+)\s*分(?:钟)?\s*(?:(\d+(?:\.\d+)?)\s*秒?)?"
+    r"(?:(\d+)\s*(?:小时|时)\s*)?(\d+(?:\.\d+)?)\s*分(?:钟)?\s*(?:(\d+(?:\.\d+)?)\s*秒?)?"
 )
 _DURATION_SLACK_SECONDS = 1.0
 _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -33,16 +39,18 @@ _LIST_FIELDS = ("aliases", "visual_descriptions", "asr_mentions", "evidence_ids"
 
 def _cn_time(match):
     hours, minutes, secs = match.groups()
-    secs = secs or "0"
-    return f"{hours}:{minutes}:{secs}" if hours else f"{minutes}:{secs}"
+    return repr(int(hours or 0) * 3600 + float(minutes) * 60 + float(secs or 0))
 
 
 def _plot_time_text(value):
-    """Strip the wrappers models put around a time: 约/大约, a trailing 秒/s, a range tail.
+    """Strip the wrappers models put around a time: 约/大约/左右/前后/许, an ordinal 第, a
+    trailing 秒/s, a range tail.
 
-    A full-width colon ("00：95") and minute/second words ("3分20秒") are read as "MM:SS"."""
+    A full-width colon ("00：95") is read as ":", minute/second words ("3分20秒", "1.5分")
+    are rewritten as seconds."""
     text = str(value or "").strip().replace("：", ":")
-    text = _APPROX_RE.sub("", text)
+    text = _APPROX_WORD_RE.sub("", _APPROX_RE.sub("", text))
+    text = _ORDINAL_RE.sub("", text)
     text = _CN_TIME_RE.sub(_cn_time, text)
     match = _RANGE_RE.match(text)
     if match:
@@ -54,8 +62,9 @@ def parse_plot_time(value):
     """Seconds for "MM:SS" / "H:MM:SS" / a bare number, or None when unreadable.
 
     Fields are not range-checked: "00:95" is 95 s, "1:75" is 135 s (the model wrote scene
-    seconds into the seconds field). "约01:20", "12.5秒", "00：95", "3分20秒" and the start
-    of a range ("01:20-01:45") are read too. Negative or non-finite values are unreadable."""
+    seconds into the seconds field). "约01:20", "01:20左右", "12.5秒", "00：95", "3分20秒",
+    "1.5分", "第3分钟" (read as 03:00) and the start of a range ("01:20-01:45") are read too.
+    Negative or non-finite values are unreadable."""
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -160,61 +169,105 @@ def _merge_into(target, other):
         target["confidence"] = other["confidence"]
 
 
-def _links(name, aliases, group):
-    """True when an entry names a member of `group`, or a member's name is the entry's alias.
+def _character_nodes(characters):
+    """Pool dict entries by name key: entries with the same name are one character.
 
-    Two aliases alone never link: a generic alias the model hands two people (男子, 老板)
-    must not fold them into one character."""
-    names, group_aliases = group
-    return bool(name and (name in names or name in group_aliases)) or bool(aliases & names)
+    Returns nodes as {"members": [input positions], "name": key, "aliases": alias keys}; an
+    entry without a name is a node of its own."""
+    nodes = []
+    by_name = {}
+    for position, item in enumerate(characters):
+        if not isinstance(item, dict):
+            continue
+        name = _term_key(item.get("name"))
+        aliases = _alias_keys(item)
+        if name and name in by_name:
+            node = nodes[by_name[name]]
+            node["members"].append(position)
+            node["aliases"] |= aliases
+            continue
+        if name:
+            by_name[name] = len(nodes)
+        nodes.append({"members": [position], "name": name, "aliases": set(aliases)})
+    return nodes
 
 
-def _owner(name, aliases, groups):
-    """Index of the one group an entry belongs to, or None (new entry, or ambiguous).
+def _linked(x, y):
+    """True when one node's name is the other's alias. Two aliases alone never link: a
+    generic alias the model hands two people (男子, 老板) must not fold them into one."""
+    return bool(
+        (x["name"] and x["name"] in y["aliases"]) or (y["name"] and y["name"] in x["aliases"])
+    )
 
-    An exact name match wins: member names are unique across groups, so it is unambiguous.
-    Otherwise the entry joins a group only when exactly one group links to it. An entry that
-    links to two or more groups only through aliases (an extra named 男子 when two people
-    carry the alias 男子) is ambiguous and stays its own entry instead of bridging them."""
-    if name:
-        for index, group in enumerate(groups):
-            if group and name in group[0]:
-                return index
-    owners = [i for i, group in enumerate(groups) if group and _links(name, aliases, group)]
-    return owners[0] if len(owners) == 1 else None
 
+def _character_groups(nodes):
+    """Partition nodes into characters, independent of their order.
+
+    A node whose linked neighbours include two nodes not linked to each other is a bridge
+    (a 男子 extra named by an alias two leads share, or one entry carrying two people's
+    names): it stays on its own and links nothing. The other nodes are unioned along their
+    links. Returns groups as sorted member-position lists, ordered by first occurrence."""
+    count = len(nodes)
+    links = [
+        [j for j in range(count) if j != i and _linked(nodes[i], nodes[j])]
+        for i in range(count)
+    ]
+    bridge = [
+        any(
+            not _linked(nodes[j], nodes[k])
+            for a, j in enumerate(neighbours)
+            for k in neighbours[a + 1:]
+        )
+        for neighbours in links
+    ]
+    parent = list(range(count))
+
+    def root(i):
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i in range(count):
+        if bridge[i]:
+            continue
+        for j in links[i]:
+            if not bridge[j]:
+                parent[root(i)] = root(j)
+    members = {}
+    for i, node in enumerate(nodes):
+        members.setdefault(root(i), []).extend(node["members"])
+    return sorted((sorted(group) for group in members.values()), key=lambda group: group[0])
 
 def merge_characters(characters):
     """Merge character entries that are the same person by name (case/space-insensitive).
 
-    Two entries merge when one's name equals the other's name or one of its aliases; a shared
-    alias alone does not merge, and an entry that would link two different groups is kept on
-    its own rather than folding them together. Deterministic: groups are formed in input
-    order, each group keeps the first entry's name and position. Returns (characters, renames)
-    where renames maps every merged name key to the surviving name. Non-dict entries pass
-    through."""
+    Entries with the same name are one character. Two characters merge when one's name is
+    the other's alias; a shared alias alone does not merge, and an entry that links two
+    characters not linked to each other is kept on its own instead of folding them together.
+    The partition does not depend on input order: each merged character sits at its first
+    entry's position and keeps that entry's name, the others' names become aliases. Returns
+    (characters, renames) where renames maps every merged name key to the surviving name.
+    Non-dict entries pass through."""
+    characters = list(characters or [])
+    groups = _character_groups(_character_nodes(characters))
+    first_of = {group[0]: group for group in groups}
     merged = []
-    groups = []  # per merged slot: (member name keys, member alias keys), None if not a group
     renames = {}
-    for item in characters or []:
+    for position, item in enumerate(characters):
         if not isinstance(item, dict):
             merged.append(item)
-            groups.append(None)
             continue
-        name = _term_key(item.get("name"))
-        aliases = _alias_keys(item)
-        index = _owner(name, aliases, groups)
-        if index is None:
-            merged.append(dict(item))
-            groups.append(({name} if name else set(), set(aliases)))
-            continue
-        entry = merged[index]
-        names, group_aliases = groups[index]
-        _merge_into(entry, item)
-        if name:
-            renames[name] = entry.get("name")
-            names.add(name)
-        group_aliases |= aliases
+        group = first_of.get(position)
+        if group is None:
+            continue  # folded into an earlier entry
+        entry = dict(item)
+        for other in group[1:]:
+            _merge_into(entry, characters[other])
+            name = _term_key(characters[other].get("name"))
+            if name:
+                renames[name] = entry.get("name")
+        merged.append(entry)
     return merged, renames
 
 

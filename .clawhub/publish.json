@@ -104,7 +104,7 @@
         "bin:python",
         "bin:ffmpeg",
         "bin:ffprobe",
-        "skill:worldwonderer/video-understanding@1.0.3",
+        "skill:worldwonderer/video-understanding@1.0.4",
         "skill:worldwonderer/video-cut@1.0.4",
         "skill:worldwonderer/video-script@1.0.3",
         "skill:worldwonderer/video-voiceover@1.0.3",
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.7"
+      "version": "1.0.8"
     },
     {
       "catalogMigration": true,
@@ -206,7 +206,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "274eb183710b511f30ddc830777bc6339bd0c219303b93f83f71989123bfbd23",
+      "packageDigest": "83c7ea2812b484a98432b1bf76861bb3ed48e164e2c85b7cb11a52b8019f60b1",
       "path": "skills/video-understanding",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -227,7 +227,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.3"
+      "version": "1.0.4"
     },
     {
       "catalogMigration": true,

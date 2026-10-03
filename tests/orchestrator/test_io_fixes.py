@@ -1564,6 +1564,31 @@ def test_multi_source_output_brief_labels_each_anchor_schema(tmp_path):
     ]
 
 
+def test_multi_source_output_anchors_outside_the_output_are_dropped(tmp_path):
+    """The 0.05 s source slack must not place an anchor before 0 or past the output end."""
+    work = tmp_path / "work"
+    record = {"source_id": "src_a", "source_work_dir": "sources/src_a"}
+    source = work / record["source_work_dir"]
+    source.mkdir(parents=True)
+    (source / "speech_boundary_anchors.json").write_text(
+        json.dumps({"sentence_anchors": [
+            {"time": 9.97, "confidence": "high"},
+            {"time": 50.0, "confidence": "high"},
+            {"time": 81.40, "confidence": "high"},
+            {"time": 81.42, "confidence": "high"},
+        ]}),
+        encoding="utf-8",
+    )
+    plan = {"clips": [{"source_id": "src_a", "source_start": 10.0, "source_end": 81.40,
+                       "output_start": 0.0, "output_end": 71.40}]}
+    (work / "clip_plan_validated.json").write_text(json.dumps(plan), encoding="utf-8")
+
+    payload = recap_timeline._write_multi_source_output_speech_evidence(work, [record], plan)
+
+    assert [row["time"] for row in payload["sentence_anchors"]] == [40.0, 71.4]
+    assert [row["source_time"] for row in payload["sentence_anchors"]] == [50.0, 81.4]
+
+
 class _ValidationPassed(Exception):
     pass
 
