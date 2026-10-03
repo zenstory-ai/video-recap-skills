@@ -50,6 +50,7 @@ MIX_KEYS = (
     "target_true_peak",
     "target_lra",
     "final_limiter_peak",
+    "loudness_limiter_max_db",
     "tts_segment_normalize",
     "tts_segment_target_rms_dbfs",
     "tts_segment_peak_limit",

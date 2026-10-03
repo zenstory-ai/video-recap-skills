@@ -9,7 +9,7 @@ from pathlib import Path
 
 from lib import CONFIG
 from assemble_constants import ASSEMBLY_MANIFEST, ASSEMBLY_QC
-from audio_mix import _loudness_mode
+from loudness import _loudness_mode
 from subtitles.track_binding import manifest_subtitle_evidence
 from artifacts import _source_video_identity, _timeline_provenance_status
 

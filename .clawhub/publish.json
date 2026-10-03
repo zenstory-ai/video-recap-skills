@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "4996f7861df84c978b90e041d167ae26aa63484f9bc87644a8b9a5ae2eb589a6",
+      "packageDigest": "ff2e76f61c78fefa4f6dbd2e49be33411232af83370dee01fb84062beb4b48f1",
       "path": "skills/video-assemble",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.6"
+      "version": "1.0.7"
     },
     {
       "catalogMigration": true,
@@ -108,7 +108,7 @@
         "skill:worldwonderer/video-cut@1.0.6",
         "skill:worldwonderer/video-script@1.0.5",
         "skill:worldwonderer/video-voiceover@1.0.6",
-        "skill:worldwonderer/video-assemble@1.0.6"
+        "skill:worldwonderer/video-assemble@1.0.7"
       ],
       "slug": "video-recap",
       "supportedRuntimes": [],
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.14"
+      "version": "1.0.15"
     },
     {
       "catalogMigration": true,

@@ -15,6 +15,7 @@ import pytest
 from subprocess import CompletedProcess
 import assembly_contract
 import audio_mix
+import loudness
 import media
 import narration_audio
 import render_preflight
@@ -32,7 +33,8 @@ _DELIVERY = {
 }
 from assembly_contract import _resolve_final_output
 from assembly_settings import assembly_settings_payload
-from audio_mix import _build_audio_filter_complex, final_loudnorm_filter
+from audio_mix import _build_audio_filter_complex
+from loudness import final_loudnorm_filter
 from media import _build_video_clips
 from subtitles.core import (
     _split_subtitle_chunks,
@@ -114,7 +116,7 @@ def _mock_assemble_media(monkeypatch, *, duration=4.0, has_audio=True):
     )
     monkeypatch.setattr(timeline_emit, "_emit_timeline", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(
-        audio_mix, "_run_loudnorm_first_pass", lambda *_args, **_kwargs: None
+        loudness, "_measure_loudness", lambda *_args, **_kwargs: None
     )
     monkeypatch.setattr(
         assembly_contract,
@@ -1107,7 +1109,7 @@ def test_loudnorm_first_pass_measures_on_the_installed_ffmpeg(monkeypatch, tmp_p
     monkeypatch.setitem(CONFIG, "final_loudnorm", True)
     lib._ffmpeg_reads_option_files.cache_clear()
 
-    measured = audio_mix._run_loudnorm_first_pass(
+    measured = loudness._measure_loudness(
         video, narration, [], [], "[1:a]anull[aout]", tmp_path)
 
     assert measured is not None
@@ -2742,7 +2744,7 @@ def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
     monkeypatch.setattr(timeline_emit, "_emit_timeline", lambda *args, **kwargs: None)
     monkeypatch.setattr(media, "_has_audio_stream", lambda path: True)
     monkeypatch.setattr(
-        audio_mix, "_run_loudnorm_first_pass", lambda *args, **kwargs: None
+        loudness, "_measure_loudness", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(
         assemble.lib,
