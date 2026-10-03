@@ -1,5 +1,5 @@
 {
-  "bootstrapSha": "2d2b183eabe4e9d54b13c814865a3cc6c2d40f9b",
+  "bootstrapSha": "2bbde9409cc8b55bb70d29f15e529d445afad33a",
   "repository": "zenstory-ai/video-recap-skills",
   "schemaVersion": 1,
   "skillRoots": [
@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "ea487b49920886c372bfe9e6a5b240d21d43359d0557281f834c224d2c4ef4c1",
+      "packageDigest": "4b455ab5e1ccbd5daff91fde3997cd1a00eafd0475588d752ef79f66b311cfa5",
       "path": "skills/video-assemble",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "8f36289965c94ae25b1fe903777696cfac0a29e7c6464fcda962b97e53d9ad49",
+      "packageDigest": "4c0d86075a37085f8b06217e53ef4c72d52ced91e5eef7e80ea409d537ffba17",
       "path": "skills/video-cut",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -104,10 +104,10 @@
         "bin:python",
         "bin:ffmpeg",
         "bin:ffprobe",
-        "skill:worldwonderer/video-understanding@1.0.0",
+        "skill:worldwonderer/video-understanding@1.0.1",
         "skill:worldwonderer/video-cut@1.0.1",
-        "skill:worldwonderer/video-script@1.0.0",
-        "skill:worldwonderer/video-voiceover@1.0.0",
+        "skill:worldwonderer/video-script@1.0.1",
+        "skill:worldwonderer/video-voiceover@1.0.1",
         "skill:worldwonderer/video-assemble@1.0.1"
       ],
       "slug": "video-recap",
@@ -171,7 +171,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "1a669cc3c35d444744d8e04e0cd513399fce9a8fbe6dce26c5d5ab511132dec5",
+      "packageDigest": "608b4ce170d1fcea656225d83349c2d9111585191161e6e5bac7b2eab6fb3bb1",
       "path": "skills/video-script",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -190,7 +190,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     {
       "catalogMigration": true,
@@ -206,7 +206,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "e1cef418d5703fb0d5c463d12c8ff6c9add9c1db6f6e2a40c2448988ac834dcb",
+      "packageDigest": "ab2d725c58bb7dd2452ebfa9868c7e6602f5b03129307612e5ad019022028fe9",
       "path": "skills/video-understanding",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -227,7 +227,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.0"
+      "version": "1.0.1"
     },
     {
       "catalogMigration": true,
@@ -243,7 +243,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "2d0a9fdb090698ee8df3d5274b504b40cffb9fc8b21e146a09bc3d764bf7c75a",
+      "packageDigest": "19a160b585c8553f0201ad769dd78b2c457f82e2dce93a2f7d0117dff97e2bf2",
       "path": "skills/video-voiceover",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -264,7 +264,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.0"
+      "version": "1.0.1"
     }
   ]
 }

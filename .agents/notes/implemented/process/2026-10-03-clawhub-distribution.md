@@ -32,3 +32,5 @@ Status: implemented
 `ruff check skills tests scripts` 通过。`python3 -B scripts/test.py` 的 understanding、cut、voiceover、script、reference 等组通过；本机 ffmpeg 不含 subtitles/libass，assemble 与 orchestrator 的真实烧录用例按其 fail-fast 契约失败，因此不把全套测试记为通过。该环境缺口不影响本次仅新增的清单、caller 与 README，但仍作为验证缺口保留。
 
 首轮包装验证发现 cut/assemble 的本地测试缓存混入包；中央现在排除 Python bytecode，二者明确提升到 1.0.1，并从固定 bootstrap SHA 的干净 Git 导出重新锁包。原 1.0.0 提交未删除或覆盖；recap 的两个精确依赖同步为 1.0.1，仍保留真实伴随安装阻断。此包装修复不表示渠道扫描已放行。
+
+严格主分支保护要求合并并保留并行落入 main 的 #162/#163 修复（2bbde9409cc8b55bb70d29f15e529d445afad33a）。冷启动起点随之固定到该已审提交；五个实际变更的伴随包使用 1.0.1，reference 未变仍为 1.0.0；recap 的五个依赖同步且仍 blocked。这是实际代码/包装变化的版本提升，不覆盖既有 1.0.0，也不代表可疑扫描已解决。
