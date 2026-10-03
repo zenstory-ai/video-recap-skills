@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "17e3d4193a05a28bacb40a7000f23bf24bef126ccea45b06997a84e5876b7373",
+      "packageDigest": "9325f1e3c2e1f2c2b998830b2515dddc4f0ba5ddb78fecbd597dde6577721ab2",
       "path": "skills/video-assemble",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.4"
+      "version": "1.0.5"
     },
     {
       "catalogMigration": true,
@@ -104,11 +104,11 @@
         "bin:python",
         "bin:ffmpeg",
         "bin:ffprobe",
-        "skill:worldwonderer/video-understanding@1.0.2",
+        "skill:worldwonderer/video-understanding@1.0.3",
         "skill:worldwonderer/video-cut@1.0.4",
         "skill:worldwonderer/video-script@1.0.3",
         "skill:worldwonderer/video-voiceover@1.0.2",
-        "skill:worldwonderer/video-assemble@1.0.4"
+        "skill:worldwonderer/video-assemble@1.0.5"
       ],
       "slug": "video-recap",
       "supportedRuntimes": [],
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.5"
+      "version": "1.0.6"
     },
     {
       "catalogMigration": true,
@@ -206,7 +206,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "ab3af8f1645a9928570dae1c2499411e335c153dfe8d322714e4e420dd8fc79a",
+      "packageDigest": "274eb183710b511f30ddc830777bc6339bd0c219303b93f83f71989123bfbd23",
       "path": "skills/video-understanding",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -227,7 +227,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.2"
+      "version": "1.0.3"
     },
     {
       "catalogMigration": true,
