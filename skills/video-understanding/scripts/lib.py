@@ -251,9 +251,13 @@ _MODERATION_REFUSAL_MARKERS = ("request was rejected", "considered high risk")
 
 
 def is_moderation_refusal(text):
-    """True when a MiMo reply is a moderation refusal, not a transcript or description."""
-    low = str(text or "").lower()
-    return any(marker in low for marker in _MODERATION_REFUSAL_MARKERS)
+    """True when a MiMo reply is a moderation refusal, not a transcript or description.
+
+    Both markers must appear in a short reply: one of them alone ("my request was rejected")
+    is plausible English dialogue, and a 15 s transcript window must not be blanked for it.
+    """
+    low = " ".join(str(text or "").lower().split())
+    return len(low) <= 200 and all(marker in low for marker in _MODERATION_REFUSAL_MARKERS)
 
 
 def file_identity(path):

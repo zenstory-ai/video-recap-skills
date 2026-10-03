@@ -115,6 +115,11 @@ def test_asr_moderation_refusal_is_stored_as_no_text(monkeypatch, tmp_path):
     monkeypatch.setattr(asr, "mimo_asr_api_call", lambda payload: _reply("这事违规，风险太高了"))
     assert asr._run_asr(wav) == "这事违规，风险太高了"
 
+    # English dialogue that happens to contain one marker is a transcript, not a refusal.
+    line = "My request was rejected by the board, so we start over tomorrow."
+    monkeypatch.setattr(asr, "mimo_asr_api_call", lambda payload: _reply(line))
+    assert asr._run_asr(wav) == line
+
 
 def test_analyze_scenes_sends_the_editorial_evidence_prompt_to_vlm(monkeypatch, tmp_path):
     frames = _scene_setup(monkeypatch, tmp_path)

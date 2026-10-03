@@ -12,10 +12,10 @@ MiMo 对被审核拦下的请求不报错，而是把一句英文 `The request w
 
 ## Decision
 
-- video-understanding `lib.py` 新增 `is_moderation_refusal(text)`，只匹配 MiMo 自己的措辞：`request was rejected`、`considered high risk`（不区分大小写）。
+- video-understanding `lib.py` 新增 `is_moderation_refusal(text)`，只匹配 MiMo 自己的措辞：`request was rejected` 与 `considered high risk` 两条都出现、且回复不超过 200 字符（空白归一、不区分大小写）。
 - `asr._run_asr` 遇到拒绝回复时记一条警告并返回空串，该窗口与其他无文本窗口一样按“原因未知、不代表静音”处理。
 - `vlm.analyze_scenes` 遇到拒绝回复时按空回复解析，描述是既有的 `(VLM 无法识别此场景画面)`，不写 `frame_facts`，并加 `analysis_status: "moderation_refused"`。
-- 测试：`tests/understanding/test_vlm_fixes.py` 新增两条：VLM 拒绝回复不进入分析结果并带状态；ASR 拒绝回复返回空串，而提到“违规”“风险”的真实对白原样保留。
+- 测试：`tests/understanding/test_vlm_fixes.py` 新增两条：VLM 拒绝回复不进入分析结果并带状态；ASR 拒绝回复返回空串，而提到“违规”“风险”的真实对白、只含其中一条英文措辞的英文对白都原样保留。
 
 ## Alternatives considered
 
@@ -26,5 +26,5 @@ MiMo 对被审核拦下的请求不报错，而是把一句英文 `The request w
 ## Consequences
 
 - 收益：拒绝文本不再进入 brief，也不再让 cut / 旁白校验把那段时间当成讲话。
-- 代价：被拒绝的窗口在 brief 里就是一段空白，Agent 需要靠画面、硬字幕或背景资料补足；只认这两句英文措辞，MiMo 改了拒绝文案就会漏判。
+- 代价：被拒绝的窗口在 brief 里就是一段空白，Agent 需要靠画面、硬字幕或背景资料补足；只认这两句英文措辞，MiMo 改了拒绝文案就会漏判；拒绝句若被包在超过 200 字符的回复里也会漏判，这是不清空真实对白的代价。
 - 旧 work_dir 里已经写下的拒绝文本不会被清理，需要重跑 ASR / VLM。
