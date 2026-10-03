@@ -87,7 +87,7 @@ TTS 供应商由 `--tts-provider mimo-tts|fish-audio|index-tts`（或 `TTS_PROVI
 
 - `--mimo-video-overview`：按场景块补充 MiMo 视频理解。
 
-可覆盖配置见 `references/config-playbook.md`，QC 报告的最小契约见 `references/shift-left-qc-schema.md`。
+可覆盖配置见 `references/config-playbook.md`，`final_qc.json` 的字段见 `references/data-schema.md`。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。脚本启动后会自行定位兄弟技能和资源。
 

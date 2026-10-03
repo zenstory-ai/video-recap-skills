@@ -1,10 +1,13 @@
 import json
+import sys
 
 import pytest
 
 import final_qc
-import qc_contract as qc
-import recap_stage_qc as recap
+import recap_runner
+from _helpers import seed_full_work, stub_child_run
+
+FINDING_KEYS = {"code", "message", "blocking", "evidence", "next_action"}
 
 
 def _write_json(path, value):
@@ -27,15 +30,17 @@ def _probe(duration=12.5, codec="h264"):
     }
 
 
-def _upstream_blocker(artifact="assembly_qc.json"):
-    """What video-assemble's assembly_contract / visual_render emit."""
-    return {
-        "schema_version": 1,
-        "artifact": artifact,
-        "verdict": "FAIL",
-        "blocking": True,
-        "blocking_codes": ["bad_upstream"],
-    }
+def _assert_valid(report):
+    """The final_qc.json shape that --require-final-qc and the dashboard read."""
+    assert report["schema_version"] == final_qc.SCHEMA_VERSION
+    assert report["artifact"] == "final_qc.json"
+    assert report["blocker_count"] == report["finding_count"] == len(report["findings"])
+    assert report["ok"] is (report["blocker_count"] == 0)
+    for finding in report["findings"]:
+        assert set(finding) == FINDING_KEYS
+        assert finding["blocking"] is True
+        assert finding["next_action"]
+    return True
 
 
 @pytest.mark.parametrize(
@@ -68,10 +73,9 @@ def test_missing_and_empty_final_output_are_valid_blockers(tmp_path):
     )
 
     assert report["ok"] is False
-    assert report["artifact"] == "final_qc.json"
-    assert report["stage"] == "post_render"
     assert report["findings"][0]["code"] == "missing_final_output"
-    assert qc.validate_report(report) is True
+    assert report["findings"][0]["next_action"] == "render_final_output"
+    assert _assert_valid(report)
 
     empty = tmp_path / "empty.mp4"
     empty.write_bytes(b"")
@@ -83,7 +87,7 @@ def test_missing_and_empty_final_output_are_valid_blockers(tmp_path):
 
     assert report["ok"] is False
     assert any(f["code"] == "empty_final_output" for f in report["findings"])
-    assert qc.validate_report(report) is True
+    assert _assert_valid(report)
 
 
 def test_probe_fixture_success_writes_only_a_valid_final_qc(tmp_path):
@@ -99,7 +103,7 @@ def test_probe_fixture_success_writes_only_a_valid_final_qc(tmp_path):
     assert summary["final_qc"] == {"ok": True, "blocker_count": 0}
     assert summary["written"] == ["final_qc.json"]
     assert not (tmp_path / "golden_eval.json").exists()
-    assert qc.validate_report(final_report) is True
+    assert _assert_valid(final_report)
     assert final_report["metadata"]["probe"]["format"]["duration"] == "9.5"
 
 
@@ -123,15 +127,10 @@ def test_probe_fixture_missing_objective_media_metadata_are_valid_blockers(tmp_p
         "missing_codec",
         "missing_fps",
     } <= codes
-    categories = {f["code"]: f["category"] for f in report["findings"]}
-    assert categories["missing_video_stream"] == "stream"
-    assert categories["missing_duration"] == "duration"
-    assert categories["missing_codec"] == "stream"
-    assert categories["missing_fps"] == "stream"
-    assert all(
-        f["deterministic"] is True and f["blocking"] is True for f in report["findings"]
-    )
-    assert qc.validate_report(report) is True
+    actions = {f["code"]: f["next_action"] for f in report["findings"]}
+    assert actions["missing_video_stream"] == "rerender_final_output_with_video_stream"
+    assert actions["missing_duration"] == "rerender_final_output_with_valid_duration"
+    assert _assert_valid(report)
 
 
 def test_probe_fixture_accepts_numeric_and_rational_video_fps(tmp_path):
@@ -152,8 +151,8 @@ def test_probe_fixture_accepts_numeric_and_rational_video_fps(tmp_path):
 
     assert rational["ok"] is True
     assert numeric["ok"] is True
-    assert qc.validate_report(rational) is True
-    assert qc.validate_report(numeric) is True
+    assert _assert_valid(rational)
+    assert _assert_valid(numeric)
 
 
 def _raise(error):
@@ -179,7 +178,7 @@ def test_probe_failure_on_existing_nonempty_mp4_is_deterministic_blocker(tmp_pat
 
     assert report["ok"] is False
     assert any(f["code"] == "probe_failed" for f in report["findings"])
-    assert qc.validate_report(report) is True
+    assert _assert_valid(report)
 
 
 def test_leftover_mimo_qc_from_an_older_run_is_not_read(tmp_path):
@@ -195,19 +194,30 @@ def test_leftover_mimo_qc_from_an_older_run_is_not_read(tmp_path):
     assert "mimo_qc.json" not in report["metadata"]["artifacts"]
 
 
-def test_corrupt_upstream_qc_becomes_schema_invalid_blocker(tmp_path):
+def test_upstream_qc_is_summarised_not_reraised(tmp_path):
+    """assemble exits nonzero on a blocking assembly/visual QC before recap reaches
+    final_qc, so final_qc records their verdicts in metadata and judges only the mp4."""
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
-    (tmp_path / "assembly_qc.json").write_text("not json", encoding="utf-8")
+    _write_json(tmp_path / "assembly_qc.json", {
+        "schema_version": 1, "artifact": "assembly_qc.json", "verdict": "FAIL",
+        "blocking": True, "blocking_codes": ["missing_scene"],
+    })
+    (tmp_path / "visual_qc.json").write_text("not json", encoding="utf-8")
 
     report = final_qc.build_final_qc(
         tmp_path, final_output=output, probe_fixture=_probe()
     )
 
-    assert report["ok"] is False
-    assert {finding["code"] for finding in report["findings"]} == {
-        "upstream_assembly_qc_json_schema_invalid"
+    assert report["ok"] is True
+    assert report["findings"] == []
+    artifacts = report["metadata"]["artifacts"]
+    assert artifacts["assembly_qc.json"]["summary"] == {
+        "schema_version": 1, "verdict": "FAIL", "blocking": True,
+        "blocking_codes": ["missing_scene"],
     }
+    assert artifacts["visual_qc.json"]["summary"] == {"invalid": True}
+    assert set(artifacts) == {"assembly_manifest.json", "assembly_qc.json", "visual_qc.json"}
 
 
 def test_final_output_comes_from_caller_or_assembly_manifest_only(tmp_path):
@@ -233,151 +243,43 @@ def test_final_output_comes_from_caller_or_assembly_manifest_only(tmp_path):
     assert report["metadata"]["final_output"]["path"] == "recap.mp4"
 
 
-def test_assembly_and_visual_qc_blocking_are_rolled_into_deterministic_blockers(
-    tmp_path,
-):
-    output = tmp_path / "recap.mp4"
-    output.write_bytes(b"fake mp4 bytes")
-    _write_json(
-        tmp_path / "assembly_qc.json", _upstream_blocker(artifact="assembly_qc.json")
-    )
-    _write_json(
-        tmp_path / "visual_qc.json", _upstream_blocker(artifact="visual_qc.json")
-    )
-
-    report = final_qc.build_final_qc(
-        tmp_path, final_output=output, probe_fixture=_probe()
-    )
-
-    codes = {f["code"] for f in report["findings"]}
-    assert any(code.startswith("upstream_assembly_qc_json") for code in codes)
-    assert any(code.startswith("upstream_visual_qc_json") for code in codes)
-    assert report["blocker_count"] == 2
-    assert all(
-        f["deterministic"] is True and f["blocking"] is True for f in report["findings"]
-    )
-    assert qc.validate_report(report) is True
-
-
-def test_assembly_and_visual_qc_artifact_verdict_blocking_codes_are_blockers(tmp_path):
-    output = tmp_path / "recap.mp4"
-    output.write_bytes(b"fake mp4 bytes")
-    _write_json(
-        tmp_path / "assembly_qc.json",
-        {
-            "artifact": "assembly_qc.json",
-            "verdict": "pass",
-            "blocking": True,
-            "blocking_codes": ["missing_scene", "bad_audio_mux"],
-        },
-    )
-    _write_json(
-        tmp_path / "visual_qc.json",
-        {
-            "artifact": "visual_qc.json",
-            "verdict": "failed",
-            "blocking": False,
-            "blocking_codes": ["black_frames"],
-        },
-    )
-
-    report = final_qc.build_final_qc(
-        tmp_path, final_output=output, probe_fixture=_probe()
-    )
-
-    codes = [f["code"] for f in report["findings"]]
-    assert codes == [
-        "upstream_assembly_qc_json_missing_scene",
-        "upstream_assembly_qc_json_bad_audio_mux",
-        "upstream_visual_qc_json_black_frames",
-    ]
-    assert report["blocker_count"] == 3
-    assert all(
-        f["deterministic"] is True and f["blocking"] is True for f in report["findings"]
-    )
-    assert qc.validate_report(report) is True
-
-
-def test_no_secret_persistence_in_final_qc(tmp_path):
+def test_probe_is_trimmed_so_source_tags_never_reach_final_qc(tmp_path):
+    """assemble does not strip container metadata, so ffprobe tags copied from a downloaded
+    source (comment/purl URLs) would land in final_qc.json; only checked fields are kept."""
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
     _write_json(
         tmp_path / "assembly_manifest.json",
         {"final_output": str(output), "api_key": "sk-manifest-secret"},
     )
-    _write_json(tmp_path / "preflight_qc.json", {"ok": True, "token": "tp-preflight-secret"})
 
     final_qc.run(
         tmp_path,
         final_output=output,
         probe_fixture={
-            "format": {"duration": "3.0", "secret": "sk-probe-secret"},
-            "streams": [
-                {"codec_type": "video", "codec_name": "h264", "avg_frame_rate": "30/1"}
-            ],
+            "format": {
+                "duration": "3.0", "format_name": "mov,mp4",
+                "tags": {"comment": "https://user:pass@example.test/v?token=tp-tag-secret"},
+                "filename": "/tmp/sk-probe-secret.mp4",
+            },
+            "streams": [{
+                "codec_type": "video", "codec_name": "h264", "avg_frame_rate": "30/1",
+                "tags": {"handler_name": "sk-stream-secret"},
+                "disposition": {"default": 1},
+            }],
         },
     )
     text = (tmp_path / "final_qc.json").read_text(encoding="utf-8")
-
-    assert "sk-manifest-secret" not in text
-    assert "tp-preflight-secret" not in text
-    assert "sk-probe-secret" not in text
-    assert "<redacted>" in text
-    assert (
-        qc.validate_report(
-            json.loads((tmp_path / "final_qc.json").read_text(encoding="utf-8"))
-        )
-        is True
-    )
-
-
-def test_recap_shift_left_redacts_direct_tts_and_assembly_metadata(tmp_path):
-    output = tmp_path / "recap.mp4"
-    _write_json(
-        tmp_path / "tts_meta.json",
-        {
-            "segments": [{"index": 0, "audio_path": "tts_segments/narr_000.wav"}],
-            "api_key": "plain-tts-password",
-            "note": "synthetic sk-tts-secret",
-        },
-    )
-    _write_json(
-        tmp_path / "assembly_manifest.json",
-        {
-            "final_output": str(output),
-            "callback": "https://user:pass@example.test/render?token=tp-assembly-secret#frag",
-            "credential": "plain-assembly-password",
-        },
-    )
-
-    recap._write_shift_left_stage_qc(
-        tmp_path,
-        "pre_tts",
-        metadata={
-            "direct": "sk-direct-secret",
-            "secret": "plain-direct-password",
-        },
-    )
-    recap._write_shift_left_stage_qc(
-        tmp_path, "post_tts", metadata=recap._tts_qc_metadata(tmp_path)
-    )
-    recap._write_shift_left_stage_qc(
-        tmp_path,
-        "post_render",
-        metadata=recap._post_render_qc_metadata(tmp_path, output),
-    )
-    text = (tmp_path / "preflight_qc.json").read_text(encoding="utf-8")
     report = json.loads(text)
 
-    assert "sk-direct-secret" not in text
-    assert "plain-direct-password" not in text
-    assert "plain-tts-password" not in text
-    assert "sk-tts-secret" not in text
-    assert "user:pass" not in text
-    assert "tp-assembly-secret" not in text
-    assert "plain-assembly-password" not in text
-    assert "https://example.test/render" in text
-    assert qc.validate_report(report) is True
+    for secret in ("sk-manifest-secret", "tp-tag-secret", "user:pass",
+                   "sk-probe-secret", "sk-stream-secret"):
+        assert secret not in text
+    assert report["metadata"]["probe"] == {
+        "format": {"duration": "3.0", "format_name": "mov,mp4"},
+        "streams": [{"codec_type": "video", "codec_name": "h264", "avg_frame_rate": "30/1"}],
+    }
+    assert _assert_valid(report)
 
 
 def test_missing_assembly_manifest_without_explicit_output_is_a_blocker(tmp_path):
@@ -391,4 +293,26 @@ def test_missing_assembly_manifest_without_explicit_output_is_a_blocker(tmp_path
     assert report["ok"] is False
     assert report["findings"][0]["code"] == "missing_final_output"
     assert report["metadata"]["final_output"]["exists"] is False
-    assert qc.validate_report(report) is True
+    assert _assert_valid(report)
+
+
+def test_full_run_ignores_a_corrupt_leftover_preflight_ledger(monkeypatch, tmp_path):
+    """preflight_qc.json is no longer written or read: a corrupt copy from an older run
+    used to crash the narration path at pre_tts, after the paid review call."""
+    video, work = seed_full_work(tmp_path)
+    (work / "preflight_qc.json").write_text("stale-not-json", encoding="utf-8")
+    final = tmp_path / "recap_video.mp4"
+    calls = []
+    monkeypatch.setattr("recap_runner._run", stub_child_run(work, final, calls))
+    monkeypatch.setattr("recap_runner._preflight_burn_subtitles", lambda args: None)
+    monkeypatch.setattr(
+        "recap_runner._write_final_qc_reports",
+        lambda work_dir, output: final_qc.run(work_dir, final_output=output, probe_fixture=_probe()),
+    )
+    monkeypatch.setattr(sys, "argv", ["recap.py", str(video), "--work-dir", str(work)])
+
+    recap_runner.main()
+
+    assert [script for _, script, _ in calls][-1] == "assemble.py"
+    assert (work / "preflight_qc.json").read_text(encoding="utf-8") == "stale-not-json"
+    assert _assert_valid(json.loads((work / "final_qc.json").read_text(encoding="utf-8")))

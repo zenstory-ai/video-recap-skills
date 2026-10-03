@@ -458,6 +458,8 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 > 若 `work_dir` 提供了 `packaging_plan.json` / `recap_story_plan.json` / `visual_audio_board.json`（可选、Agent 撰写），review 会把它们并入评估上下文；缺失时 review 仅基于解说与画面/对白证据评分，行为不受影响。
 
+`cut_output` 解说评审按 `source_id` 映射 `multi_source_manifest.json` 指向的逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
+
 ## tts_meta.json（partial 失败可见性）
 
 `video-voiceover` 正常输出 `{segments, engine, narration}`。当显式允许 partial TTS（`--allow-partial-tts` / `ALLOW_PARTIAL_TTS=1`）让运行在部分段失败后继续时，失败段不会只埋在日志里，而会写入 `partial` 与 `failures[]`：
@@ -530,10 +532,32 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
 
 > dub 渲染阶段在克隆前写 `dub_lint.json`，lint 非 PASS 即中止；dub 只有 `--edit-mode dub` 驱动的准备 / 渲染两个阶段，没有单独的手动 lint / review 入口。
 > 最终 `dub_<name>.mp4` 显式输出 48 kHz AAC；不能沿用 `loudnorm` 内部的 96 kHz 分析采样率。
-## shift-left QC artifacts
+## final_qc.json
 
-`preflight_qc.json`、`final_qc.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render`。详见 `shift-left-qc-schema.md`。
+渲染后 `recap.py` 写 `final_qc.json`；`scripts/final_qc.py --work-dir <dir>` 也可对已有 work_dir 单独重写。它只对最终 mp4 做本地确定性检查，每条 finding 都是阻断项：
 
-`cut_output` 解说评审按 `source_id` 映射 `multi_source_manifest.json` 指向的逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
+```json
+{
+  "schema_version": 2,
+  "artifact": "final_qc.json",
+  "ok": false,
+  "blocker_count": 1,
+  "finding_count": 1,
+  "findings": [{"code": "missing_fps", "message": "final output probe metadata is missing a positive finite video fps",
+                "blocking": true, "evidence": {"fps": null, "video_stream": {"codec_type": "video", "codec_name": "h264"}},
+                "next_action": "rerender_final_output_with_valid_fps"}],
+  "metadata": {
+    "work_dir": "/abs/work", "final_output": {"path": "/abs/out/recap_x.mp4", "exists": true, "bytes": 1048576},
+    "artifacts": {"assembly_qc.json": {"path": "assembly_qc.json", "exists": true, "bytes": 512,
+                  "summary": {"schema_version": 1, "verdict": "PASS", "blocking": false, "blocking_codes": []}}},
+    "probe": {"streams": [{"codec_type": "video", "codec_name": "h264", "width": 1920, "height": 1080, "avg_frame_rate": "30/1"}],
+              "format": {"format_name": "mov,mp4,m4a,3gp,3g2,mj2", "duration": "61.2"}},
+    "probe_error": null,
+    "auto_repair": false
+  }
+}
+```
 
-渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再写 `final_qc.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。non-deterministic finding 永远不能成为 blocker；客观佐证必须由 deterministic producer 另发 finding。所有 QC metadata/evidence 写入前都经过 `qc_contract.redact_secrets`：secret-looking key/value 会被替换，URL userinfo/query/fragment 会被移除，仅保留必要 host/path 诊断信息。
+阻断码：`missing_final_output`、`empty_final_output`、`probe_failed`（ffprobe 不可用或失败）、`missing_video_stream`、`missing_duration` / `invalid_duration`、`missing_codec`、`missing_fps` / `invalid_fps`，以及尾部 2 秒解码失败的 `undecodable_stream`。`next_action` 是可直接执行的修复提示。`ok` 为 `true` 当且仅当 `blocker_count` 为 0；`--require-final-qc` 只读这两个字段，dashboard 另外读 finding 的 `code` / `message` / `blocking`。
+
+`metadata.artifacts` 汇总 `assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json` 的 `schema_version` / `verdict` / `blocking` / `blocking_codes`（不可解析时为 `{"invalid": true}`），只作记录、不转成 final_qc 的阻断项：assembly/visual QC 阻断时 video-assemble 已经非零退出，流程到不了 final_qc。`metadata.probe` 只保留检查用到的流与容器字段（codec、宽高、帧率、时长、采样率等），不保存 `tags` / `disposition` / 文件名，因此从原片带过来的容器标签（如 comment、purl 里的 URL）不会写进报告。

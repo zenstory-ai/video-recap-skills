@@ -29,7 +29,7 @@ mimo_qc.py 两个 12 参数的纯透传函数（`mimo_qc.py` 已于 2026-10-02 �
   和三份工作产物说明；不再要求 recap 阶段先读 `creative-editing-playbook.md`，由 video-script 阶段读一次。
   recap 那份 playbook 副本仍保留（parity 测试与自包含笔记锁定），是否删除另立一篇笔记。
 - recap §7 的参数清单改为指向 `--help`；recap §3 的 Fish Audio / IndexTTS 段落压成一句透传说明，并链接
-  `references/shift-left-qc-schema.md`（此前没有任何 SKILL.md 链接它）。
+  `references/shift-left-qc-schema.md`（此前没有任何 SKILL.md 链接它；2026-10-02 该文档删除，链接改指 `data-schema.md`，见 [[2026-10-02-converge-qc-on-final-qc]]）。
 - 长段落下沉：voiceover 新增 `references/index-tts.md`；assemble 新增 `references/packaging.md` 并把 source_score
   的中文摘要追加到 `references/source-score.md`；cut 的取景复核段落并入 `references/shot-review.md`。
 - `timeline-and-jianying.md` 移到 `docs/`，README / docs 链接同步；`env-inventory-v1.json` 移到 `tests/orchestrator/`。

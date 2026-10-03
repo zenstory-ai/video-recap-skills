@@ -27,16 +27,11 @@ from recap_runtime import (
     _write_run_manifest,
 )
 from recap_stage_qc import (
-    _post_render_qc_metadata,
     _print_final_qc_pointer,
     _require_final_qc,
-    _tts_qc_metadata,
     _write_final_qc_reports,
-    _write_shift_left_stage_qc,
 )
 from recap_source import (
-    begin_local_adoption_qc,
-    begin_non_narration_qc,
     extend_assemble_args,
     load_local_assembly_evidence,
     needs_voiceover,
@@ -127,7 +122,6 @@ def _run_local_adoption(video, work_dir, args):
         (work_dir / RUN_MANIFEST).write_text(
             json.dumps(failed, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-    begin_local_adoption_qc(work_dir, _write_shift_left_stage_qc)
     assemble_args = [
         str(video),
         "--work-dir", str(work_dir),
@@ -158,11 +152,6 @@ def _run_local_adoption(video, work_dir, args):
         raise
     final_output = _read_assembly_output(work_dir)
     _record_resources(work_dir, args)
-    _write_shift_left_stage_qc(
-        work_dir,
-        "post_render",
-        metadata=_post_render_qc_metadata(work_dir, final_output),
-    )
     _finish_recap(work_dir, final_output, args)
 
 
@@ -261,15 +250,14 @@ def _reject_stale_multi_manifest(work_dir, videos, args, source_records):
 
 
 def _render_cut(video_arg, work_dir, args, *extra):
-    """Render edited_source.mp4 from clip_plan.json and record the post-cut QC stage."""
+    """Render edited_source.mp4 from clip_plan.json and print its cut QC line."""
     crender = [str(video_arg), "--work-dir", str(work_dir), *extra]
     if args.target_duration:
         crender += ["--target-duration", args.target_duration]
     if args.allow_duration_drift:
         crender.append("--allow-duration-drift")
     _run("video-cut", "cut.py", *crender)
-    cut_qc = _surface_cut_qc(work_dir)
-    _write_shift_left_stage_qc(work_dir, "post_cut", metadata={"cut_qc": cut_qc})
+    _surface_cut_qc(work_dir)
 
 
 def _reject_stale_cut_narration(work_dir, clip_plan_identity):
@@ -293,18 +281,11 @@ def _narrate(work_dir, args, timeline):
     """Review -> TTS -> visual overlays for a validated narration.json."""
     narration_json = work_dir / "narration.json"
     review_ran = run_narration_review(work_dir, args, run=_run, timeline=timeline)
-    _write_shift_left_stage_qc(
-        work_dir, "pre_tts", metadata={"review_ran": review_ran, "timeline": timeline}
-    )
     _run(
         "video-voiceover", "voiceover.py",
         *_voiceover_args(work_dir, narration_json, args),
     )
-    _write_shift_left_stage_qc(work_dir, "post_tts", metadata=_tts_qc_metadata(work_dir))
-    overlays_path = _write_canonical_visual_overlays(work_dir, narration_json)
-    _write_shift_left_stage_qc(
-        work_dir, "pre_assemble", metadata={"visual_overlays": str(overlays_path)}
-    )
+    _write_canonical_visual_overlays(work_dir, narration_json)
     return review_ran
 
 
@@ -341,11 +322,6 @@ def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assembl
 
     final_output = _read_assembly_output(work_dir)
     _record_resources(work_dir, args)
-    _write_shift_left_stage_qc(
-        work_dir,
-        "post_render",
-        metadata=_post_render_qc_metadata(work_dir, final_output),
-    )
     _finish_recap(work_dir, final_output, args)
     if uses_narration(args):
         _print_narration_review_pointer(work_dir, review_ran=review_ran)
@@ -367,8 +343,6 @@ def _run_multi_cut(videos, work_dir, args):
     if (work_dir / RUN_MANIFEST).exists():
         _reject_stale_multi_manifest(work_dir, videos, args, source_records)
     manifest_path = _write_multi_source_manifest(work_dir, source_records)
-    if not uses_narration(args):
-        begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
     if not clip_plan_json.exists():
         for record in source_records:
             _run_or_restore_understanding(
@@ -628,8 +602,6 @@ def _run_single(video, work_dir, args):
             _reject_stale_manifest()
         else:
             _write_run_manifest(work_dir, video, args)
-        if not uses_narration(args):
-            begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
         _deliver(work_dir, args, video, video.stem, "source")
         return
 
@@ -639,15 +611,11 @@ def _run_single(video, work_dir, args):
         # PASS 1: understand -> agent writes clip_plan.json ONLY.
         if not uses_narration(args) and (work_dir / RUN_MANIFEST).exists():
             _reject_stale_manifest()
-        if not uses_narration(args):
-            begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
         _understand()
         _write_run_manifest(work_dir, video, args)
         _pause(f"{clip_plan_json}（只写剪辑计划；解说下一步对着剪好的成片写）", state_hint)
         return
     _reject_stale_manifest()
-    if not uses_narration(args):
-        begin_non_narration_qc(work_dir, args, _write_shift_left_stage_qc)
     cp_identity = file_identity(clip_plan_json)
     _render_cut(video, work_dir, args)
     if uses_narration(args):

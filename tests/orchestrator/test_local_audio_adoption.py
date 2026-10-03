@@ -138,11 +138,6 @@ def test_local_bundle_runs_only_assemble_with_resolved_paths_and_no_narration(
         flag = "--" + name.replace("_", "-")
         assert assemble[assemble.index(flag) + 1] == str(bundle[name].resolve())
     assert not (work / "narration.json").exists()
-    ledger = json.loads((work / "preflight_qc.json").read_text(encoding="utf-8"))
-    stage = ledger["metadata"]["stages"]["pre_assemble"]["metadata"]
-    assert stage["tts"] == "adopted_local_not_generated"
-    assert stage["narration_review"] == "not_run"
-    assert stage["semantic_validation"] == "video-assemble"
 
 
 def test_local_bundle_ignores_hostile_ambient_tts_and_voice(monkeypatch, tmp_path):

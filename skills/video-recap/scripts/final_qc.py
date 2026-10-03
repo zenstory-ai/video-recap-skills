@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Final post-render QC report (final_qc.json) for video-recap.
 
-Local deterministic/report-only checks only: no network, no repair, no secrets.
+Local deterministic/report-only checks only: no network, no repair. Every finding is
+a blocker; ``ok`` / ``blocker_count`` are what ``--require-final-qc`` and the dashboard read.
+The ffprobe result is trimmed to the stream/format fields the checks use, so container
+tags copied from the source (comment/purl URLs) never reach the report.
 """
 from __future__ import annotations
 
@@ -14,19 +17,20 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable, Mapping, Sequence
 
-import qc_contract
 from lib import load_json
 
+SCHEMA_VERSION = 2
 FINAL_QC_ARTIFACT = "final_qc.json"
-POST_RENDER_STAGE = "post_render"
-_COLLECT_ARTIFACTS = (
-    "assembly_manifest.json",
-    "assembly_qc.json",
-    "visual_qc.json",
-    "preflight_qc.json",
+# Summarised in metadata only. video-assemble exits nonzero on a blocking assembly/visual
+# QC before recap reaches final_qc, so their verdicts are recorded, not re-raised.
+_COLLECT_ARTIFACTS = ("assembly_manifest.json", "assembly_qc.json", "visual_qc.json")
+_SUMMARY_KEYS = ("schema_version", "verdict", "blocking", "blocking_codes")
+_PROBE_STREAM_KEYS = (
+    "index", "codec_type", "codec_name", "profile", "pix_fmt", "width", "height",
+    "avg_frame_rate", "r_frame_rate", "fps", "frame_rate", "duration",
+    "sample_rate", "channels",
 )
-# video-assemble QC artifacts: {"verdict", "blocking", "blocking_codes": [...]}.
-_UPSTREAM_QC_ARTIFACTS = ("assembly_qc.json", "visual_qc.json")
+_PROBE_FORMAT_KEYS = ("format_name", "duration", "size", "bit_rate", "nb_streams")
 ProbeRunner = Callable[[Path], Mapping[str, Any]]
 
 
@@ -85,33 +89,19 @@ def _artifact_summary(work_dir: Path, name: str) -> dict[str, Any]:
         if data is None:
             meta["summary"] = {"invalid": True}
         else:
-            meta["summary"] = {
-                key: data.get(key)
-                for key in ("schema_version", "artifact", "stage", "ok", "blocker_count", "finding_count")
-            }
+            meta["summary"] = {key: data.get(key) for key in _SUMMARY_KEYS}
     return meta
 
 
-def _finding(*, finding_id: str, code: str, message: str, category: str = "schema_invalid",
-             source: Mapping[str, Any] | None = None,
-             evidence: Mapping[str, Any] | None = None,
-             next_action: str = "manual_review") -> dict[str, Any]:
-    return qc_contract.build_finding(
-        finding_id=finding_id,
-        stage=POST_RENDER_STAGE,
-        severity="blocker",
-        confidence="objective",
-        sample_policy={"type": "deterministic"},
-        category=category,
-        code=code,
-        message=message,
-        deterministic=True,
-        blocking=True,
-        source=source,
-        evidence=evidence,
-        next_action=next_action,
-        model_used="local_deterministic_final_qc_v1",
-    )
+def _finding(code: str, message: str, *, evidence: Mapping[str, Any],
+             next_action: str) -> dict[str, Any]:
+    """One deterministic blocker; next_action is a repair hint an agent can act on."""
+    return {"code": code, "message": message, "blocking": True,
+            "evidence": dict(evidence), "next_action": next_action}
+
+
+def _pick(mapping: Mapping[str, Any], keys: Sequence[str]) -> dict[str, Any]:
+    return {key: mapping[key] for key in keys if key in mapping}
 
 
 def _run_ffprobe(path: Path) -> Mapping[str, Any]:
@@ -164,10 +154,10 @@ def _probe_metadata(path: Path, *, probe_fixture: Any = None, probe_runner: Prob
             raise TypeError("probe metadata streams must be an array of objects")
         if not isinstance(format_info, Mapping):
             raise TypeError("probe metadata format must be an object")
-        normalized = dict(raw)
-        normalized["streams"] = [dict(stream) for stream in streams]
-        normalized["format"] = dict(format_info)
-        return normalized, None
+        return {
+            "streams": [_pick(stream, _PROBE_STREAM_KEYS) for stream in streams],
+            "format": _pick(format_info, _PROBE_FORMAT_KEYS),
+        }, None
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, TypeError) as exc:
         return None, {"code": "probe_failed", "message": str(exc) or "ffprobe failed"}
 
@@ -215,17 +205,13 @@ def _probe_fps(video_stream: Mapping[str, Any] | None) -> tuple[float | None, st
     ])
 
 
-def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[str, Any]) -> list[dict[str, Any]]:
+def _probe_contract_findings(probe: Mapping[str, Any]) -> list[dict[str, Any]]:
     findings: list[dict[str, Any]] = []
-    source = {"artifact": final_meta["path"]}
     video_stream = _first_video_stream(probe)
     if video_stream is None:
         findings.append(_finding(
-            finding_id="final-qc-missing-video-stream",
-            code="missing_video_stream",
-            message="final output probe metadata has no video stream",
-            category="stream",
-            source=source,
+            "missing_video_stream",
+            "final output probe metadata has no video stream",
             evidence={"streams": probe.get("streams")},
             next_action="rerender_final_output_with_video_stream",
         ))
@@ -233,22 +219,16 @@ def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[st
     _duration, problem, raw = _probe_duration(probe)
     if problem is not None:
         findings.append(_finding(
-            finding_id=f"final-qc-{problem}-duration",
-            code=f"{problem}_duration",
-            message="final output probe metadata is missing a positive finite duration" if problem == "missing" else "final output probe metadata duration is not positive and finite",
-            category="duration",
-            source=source,
+            f"{problem}_duration",
+            "final output probe metadata is missing a positive finite duration" if problem == "missing" else "final output probe metadata duration is not positive and finite",
             evidence={"duration": raw},
             next_action="rerender_final_output_with_valid_duration",
         ))
 
     if not (video_stream or {}).get("codec_name"):
         findings.append(_finding(
-            finding_id="final-qc-missing-codec",
-            code="missing_codec",
-            message="final output probe metadata is missing a video codec",
-            category="stream",
-            source=source,
+            "missing_codec",
+            "final output probe metadata is missing a video codec",
             evidence={"video_stream": video_stream},
             next_action="rerender_final_output_with_video_codec",
         ))
@@ -256,43 +236,12 @@ def _probe_contract_findings(probe: Mapping[str, Any], *, final_meta: Mapping[st
     _fps, problem, raw = _probe_fps(video_stream)
     if problem is not None:
         findings.append(_finding(
-            finding_id=f"final-qc-{problem}-fps",
-            code=f"{problem}_fps",
-            message="final output probe metadata is missing a positive finite video fps" if problem == "missing" else "final output probe metadata video fps is not positive and finite",
-            category="stream",
-            source=source,
+            f"{problem}_fps",
+            "final output probe metadata is missing a positive finite video fps" if problem == "missing" else "final output probe metadata video fps is not positive and finite",
             evidence={"fps": raw, "video_stream": video_stream},
             next_action="rerender_final_output_with_valid_fps",
         ))
     return findings
-
-
-def _upstream_blockers(work_dir: Path, artifact_name: str) -> list[dict[str, Any]]:
-    """Roll a blocking video-assemble QC artifact into one final blocker per blocking code."""
-    path = work_dir / artifact_name
-    if not path.exists():
-        return []
-    data = _read_json_mapping(path)
-    if data is None:  # unreadable upstream QC is itself a deterministic blocker
-        return [_finding(
-            finding_id=f"final-qc-invalid-upstream-{artifact_name}",
-            code=f"upstream_{artifact_name.replace('.', '_')}_schema_invalid",
-            message=f"{artifact_name} is not a valid deterministic QC report",
-            source={"artifact": artifact_name},
-            evidence={"schema_invalid": True},
-            next_action="regenerate_upstream_qc",
-        )]
-    return [
-        _finding(
-            finding_id=f"final-qc-upstream-{artifact_name}-{idx}",
-            code=f"upstream_{artifact_name.replace('.', '_')}_{code}",
-            message=f"{artifact_name} reported {code}",
-            source={"artifact": artifact_name},
-            evidence={"upstream_code": code, "upstream_verdict": data["verdict"]},
-            next_action="fix_upstream_qc_blocker",
-        )
-        for idx, code in enumerate(data["blocking_codes"])
-    ]
 
 
 def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = None,
@@ -323,36 +272,27 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
     findings: list[dict[str, Any]] = []
     if not final_meta["exists"]:
         findings.append(_finding(
-            finding_id="final-qc-missing-final-output",
-            code="missing_final_output",
-            message="final output mp4 is missing",
-            category="missing_artifact",
-            source={"artifact": str(final_output) if final_output else "final_output"},
+            "missing_final_output",
+            "final output mp4 is missing",
             evidence={"final_output": final_meta},
             next_action="render_final_output",
         ))
     elif final_meta["bytes"] == 0:
         findings.append(_finding(
-            finding_id="final-qc-empty-final-output",
-            code="empty_final_output",
-            message="final output mp4 is empty",
-            category="missing_artifact",
-            source={"artifact": final_meta["path"]},
+            "empty_final_output",
+            "final output mp4 is empty",
             evidence={"final_output": final_meta},
             next_action="rerender_final_output",
         ))
     elif metadata["probe_error"] is not None:
         findings.append(_finding(
-            finding_id="final-qc-probe-failed",
-            code="probe_failed",
-            message="ffprobe failed or was unavailable for existing non-empty final output",
-            category="stream",
-            source={"artifact": final_meta["path"]},
+            "probe_failed",
+            "ffprobe failed or was unavailable for existing non-empty final output",
             evidence=metadata["probe_error"],
             next_action="inspect_or_rerender_final_output",
         ))
     else:
-        probe_findings = _probe_contract_findings(metadata["probe"], final_meta=final_meta)
+        probe_findings = _probe_contract_findings(metadata["probe"])
         findings.extend(probe_findings)
         # Header probing cannot see a container-valid but media-truncated/corrupt payload.
         # A cheap tail decode catches it; skip for offline fixtures and when ffmpeg is absent
@@ -361,22 +301,20 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
             decode_ok, decode_detail = (decode_runner or _tail_decode_check)(selected)
             if decode_ok is False:
                 findings.append(_finding(
-                    finding_id="final-qc-undecodable-stream",
-                    code="undecodable_stream",
-                    message="final output tail failed to decode (truncated or corrupt media payload)",
-                    category="stream",
-                    source={"artifact": final_meta["path"]},
+                    "undecodable_stream",
+                    "final output tail failed to decode (truncated or corrupt media payload)",
                     evidence={"decode_error": decode_detail},
-                            next_action="rerender_final_output",
+                    next_action="rerender_final_output",
                 ))
-    for name in _UPSTREAM_QC_ARTIFACTS:
-        findings.extend(_upstream_blockers(root, name))
-    return qc_contract.build_report(
-        artifact=FINAL_QC_ARTIFACT,
-        stage=POST_RENDER_STAGE,
-        findings=findings,
-        metadata=metadata,
-    )
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "artifact": FINAL_QC_ARTIFACT,
+        "ok": not findings,
+        "blocker_count": len(findings),
+        "finding_count": len(findings),
+        "findings": findings,
+        "metadata": metadata,
+    }
 
 
 def _write_report(path: Path, report: Mapping[str, Any]) -> None:

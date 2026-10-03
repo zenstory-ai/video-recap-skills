@@ -81,5 +81,3 @@ else:
     assert output.is_file()
     subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", str(output), "-f", "null", "-"],
                    check=True, capture_output=True, timeout=60)
-    ledger = json.loads((work / "preflight_qc.json").read_text())
-    assert "not_applicable" in json.dumps(ledger)
