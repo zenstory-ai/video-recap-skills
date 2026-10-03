@@ -1062,6 +1062,29 @@ def test_edited_source_render_labels_the_picture_bt709(monkeypatch, tmp_path):
         {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709", "color_range": "tv"},
         id="disagreeing-sources-fall-back-to-bt709",
     ),
+    pytest.param(
+        [{"pix_fmt": "argb"}, {"pix_fmt": "yuv420p"}],
+        {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709", "color_range": "tv"},
+        id="rgb-by-pix-fmt-beside-untagged",
+    ),
+    pytest.param(
+        [{"pix_fmt": "pal8"}, {"color_space": "smpte170m", "color_primaries": "smpte170m",
+                               "color_transfer": "smpte170m"}],
+        {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709", "color_range": "tv"},
+        id="rgb-beside-bt601",
+    ),
+    pytest.param(
+        [{"pix_fmt": "yuvj420p", "color_range": "pc"}, {"pix_fmt": "yuv420p"}],
+        {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709", "color_range": "tv"},
+        id="full-beside-limited",
+    ),
+    pytest.param(
+        [{"color_space": "smpte170m", "color_primaries": "smpte170m",
+          "color_transfer": "smpte170m", "color_range": "pc"}] * 2,
+        {"colorspace": "smpte170m", "color_primaries": "smpte170m", "color_trc": "smpte170m",
+         "color_range": "pc"},
+        id="agreeing-full-range-bt601-kept",
+    ),
 ])
 def test_edited_source_color_tags_across_sources(formats, expected):
     assert cut_render._edited_source_color_tags(formats, rgb_converted_per_clip=True) == expected

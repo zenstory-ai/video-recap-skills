@@ -20,8 +20,8 @@ SHARED_FUNCTIONS = (
     "_color_tag_filter",
     "_color_tag_args",
 )
-SHARED_CONSTANTS = ("_COLOR_FIELDS", "_UNTAGGED_COLOR", "_RGB_COLOR_SPACE", "_KNOWN_COLOR_VALUES",
-                    "_COLOR_OPTION_SPELLING")
+SHARED_CONSTANTS = ("_COLOR_FIELDS", "_UNTAGGED_COLOR", "_RGB_COLOR_SPACE", "_RGB_PIX_FMT_PREFIXES",
+                    "_KNOWN_COLOR_VALUES", "_COLOR_OPTION_SPELLING")
 
 
 def _top_level(path):

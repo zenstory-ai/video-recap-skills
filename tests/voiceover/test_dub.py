@@ -349,6 +349,9 @@ def test_dub_mux_pins_delivery_sample_rate_after_loudnorm(monkeypatch, tmp_path)
     assert command.index("-ar") > command.index("-af")
     assert command[command.index("-movflags") + 1] == "+faststart"
     assert command.index("-movflags") < command.index(str(tmp_path / "dubbed.mp4"))
+    # The source's title/comment tags and chapters stay out of the dubbed deliverable.
+    assert command[command.index("-map_metadata") + 1] == "-1"
+    assert command[command.index("-map_chapters") + 1] == "-1"
 
 
 def test_p0_dub_chars_per_second_ignores_punctuation_for_density():

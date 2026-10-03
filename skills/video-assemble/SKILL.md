@@ -14,7 +14,8 @@ description: >
 1. 把各段旁白音频放到视频时间线上。
 2. 在旁白窗口内用固定包络压低原声（盖住原声对白时与落在安静段时各用一档音量），间隙恢复原声。
 3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。不烧录时（关闭或降级），`subtitles.srt` 复制到成片旁，名为 `recap_<stem>.srt`；烧录时删掉旧的同名外挂字幕。
-4. 可选把最终响度标准化到目标 LUFS。
+4. 可选把最终响度标准化到目标 LUFS：两遍 loudnorm，只用一个恒定增益；混音的真峰值放不下这么大的增益时，目标响度下调到刚好放得下（成片比 `TARGET_LUFS` 安静，不做动态压缩）。ffmpeg 实际用的模式记在 `assembly_qc.json` 的 `loudness_mode` 与 `loudnorm_final_pass`。
+5. 成片不带原片的容器元数据（`title`、`comment` 等标签与章节）。
 
 ## 2. 声音收尾契约
 
