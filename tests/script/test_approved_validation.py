@@ -474,7 +474,10 @@ def test_cut_output_cli_duration_failure_updates_lint(tmp_path, duration):
     if duration is not None:
         command.extend(["--output-duration", duration])
 
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+    result = subprocess.run(
+        command, capture_output=True, text=True, encoding="utf-8", check=False,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},  # messages carry "段 N"; Windows pipes default to cp1252
+    )
 
     assert result.returncode != 0
     assert '"status": "validated"' not in result.stdout
