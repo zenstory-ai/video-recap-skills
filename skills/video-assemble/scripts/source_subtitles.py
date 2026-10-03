@@ -57,11 +57,11 @@ def _source_subtitle_mask_policy(work_dir=None):
     if raw_policy == "off":
         active = False
     elif raw_policy in {"opt_in", "forced"}:
-        active = burn and legacy_flag
+        active = legacy_flag
         trigger = "burn_subtitles_and_legacy_mask_flag"
         reason = "explicit policy permits masking only with burned recap subtitles"
     elif raw_policy == "safe":
-        active = burn and (legacy_flag or user_subtitles)
+        active = legacy_flag or user_subtitles
         trigger = "safe_policy_with_burned_subtitles"
         reason = "safe policy masks only when recap subtitles are burned and an original-subtitle source is declared"
     else:
@@ -70,8 +70,15 @@ def _source_subtitle_mask_policy(work_dir=None):
         reason = "mask_source_subtitles requires explicit SOURCE_SUBTITLE_MASK_POLICY"
     if not burn and active:
         active = False
-        trigger = "burn_subtitles_disabled"
-        reason = "mask-only black band is forbidden without burned recap subtitles"
+        if CONFIG["burn_subtitles_degraded"]:
+            trigger = "burn_subtitles_degraded"
+            reason = (
+                "subtitle burn-in degraded to the .srt sidecar; a mask-only black band is "
+                "forbidden without burned recap subtitles"
+            )
+        else:
+            trigger = "burn_subtitles_disabled"
+            reason = "mask-only black band is forbidden without burned recap subtitles"
     return {
         "policy": raw_policy,
         "declared": bool(declared and raw_policy in allowed),
@@ -269,14 +276,18 @@ def _narration_gap_windows(tts_segments, video_duration, min_gap=_MIN_GAP_TO_SUB
 
 def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration):
     """Subtitle entries for the ORIGINAL dialogue during the original-audio blocks (narration
-    gaps), so the band is not blank while the original speaks. Off unless we are burning and
+    gaps), so the band is not blank while the original speaks. Off unless subtitles are
+    delivered (burned, or burn degraded to the .srt sidecar because ffmpeg lacks libass) and
     subtitle_original_in_gaps is set; no-op when there is no ASR. Cut mode remaps ASR to output."""
     # Fill the gaps when either (a) we are masking the source's own burned-in subs (so the band is
     # blank without us), or (b) the user supplied their own subtitle file — a clear signal they want
     # the original dialogue shown, e.g. a clean/foreign source with mask OFF (no burned subs to
     # double). Without a user file we keep the mask requirement so we don't double the source's own
     # visible subs. subtitle_original_in_gaps is the explicit override either way.
-    if not (CONFIG["burn_subtitles"]
+    # A degraded burn keeps the cues a burned run would show, so the sidecar .srt is the same
+    # subtitle deliverable; with the mask off only the user-file trigger can still pass.
+    delivering = CONFIG["burn_subtitles"] or bool(CONFIG["burn_subtitles_degraded"])
+    if not (delivering
             and CONFIG["subtitle_original_in_gaps"]
             and (_source_subtitle_mask_covers_gaps(work_dir) or _has_user_subtitles(work_dir))):
         return []

@@ -250,8 +250,28 @@ def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = 
         "artifacts": {name: _artifact_summary(root, name) for name in _COLLECT_ARTIFACTS},
         "probe": probe,
         "probe_error": probe_error,
+        "warnings": _render_warnings(root, selected),
         "auto_repair": False,
     }
+
+
+def _render_warnings(work_dir: Path, final_output: Path | None) -> list[dict[str, Any]]:
+    """Non-blocking render facts an agent must relay, e.g. a default subtitle burn that
+    degraded to the .srt sidecar because ffmpeg lacks libass (from visual_qc.json).
+
+    Only relayed when assembly_manifest.json says video-assemble rendered `final_output`:
+    a mode that delivers without it (dub) would otherwise inherit a stale visual_qc.json
+    left in the work_dir by an earlier full/cut run."""
+    manifest = read_json_object(work_dir / "assembly_manifest.json") or {}
+    rendered = manifest.get("final_output")
+    if final_output is None or not isinstance(rendered, str) or \
+            _resolve_in_work_dir(work_dir, rendered).resolve() != final_output.resolve():
+        return []
+    data = read_json_object(work_dir / "visual_qc.json")
+    warnings = (data or {}).get("warnings")
+    if not isinstance(warnings, list):
+        return []
+    return [dict(item) for item in warnings if isinstance(item, Mapping) and item.get("code")]
 
 
 def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
@@ -322,7 +342,8 @@ def run(work_dir: str | Path, final_output: str | Path | None = None,
     return {
         "work_dir": str(root),
         "written": [FINAL_QC_ARTIFACT],
-        "final_qc": {"ok": report["ok"], "blocker_count": report["blocker_count"]},
+        "final_qc": {"ok": report["ok"], "blocker_count": report["blocker_count"],
+                     "warnings": [item["code"] for item in report["metadata"]["warnings"]]},
     }
 
 

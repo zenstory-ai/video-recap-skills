@@ -277,3 +277,117 @@ def _select_output_geometry(source_paths, clips):
         "sources": rows,
     }
     return width, height, round(fps, 3), reason
+
+
+# Delivered-picture format. `_probe_video_format`, `_output_color_tags`,
+# `_color_tag_filter` and `_color_tag_args` are intentional function-level copies shared
+# with the final render (tests/orchestrator/test_render_format_parity.py keeps them identical).
+_COLOR_FIELDS = (
+    ("color_space", "colorspace"),
+    ("color_primaries", "color_primaries"),
+    ("color_transfer", "color_trc"),
+)
+_UNTAGGED_COLOR = {None, "", "unknown", "unspecified", "reserved", "N/A"}
+# ffprobe's colour space for an RGB picture (PNG/QuickTime RLE, libx264rgb). ffmpeg rejects
+# `-colorspace gbr`, and the delivered picture is YUV anyway, so it is never written.
+_RGB_COLOR_SPACE = "gbr"
+# Names ffprobe prints that setparams and the -colorspace/-color_primaries/-color_trc
+# output options accept and libx264 writes back (tests/assemble/test_render_delivery.py
+# runs each through a real ffmpeg); anything else is not written explicitly.
+_KNOWN_COLOR_VALUES = {
+    "colorspace": {
+        "bt709", "fcc", "bt470bg", "smpte170m", "smpte240m", "ycgco", "bt2020nc", "bt2020c",
+        "smpte2085", "chroma-derived-nc", "chroma-derived-c", "ictcp",
+    },
+    "color_primaries": {
+        "bt709", "bt470m", "bt470bg", "smpte170m", "smpte240m", "film", "bt2020",
+        "smpte428", "smpte431", "smpte432",
+    },
+    "color_trc": {
+        "bt709", "bt470m", "bt470bg", "smpte170m", "smpte240m", "linear", "log100",
+        "log316", "iec61966-2-4", "bt1361e", "iec61966-2-1", "bt2020-10", "bt2020-12",
+        "smpte2084", "smpte428", "arib-std-b67",
+    },
+}
+# setparams only knows the BT.470 transfers by their ffprobe names, while ffmpeg 8's
+# -color_trc output option only knows them as gamma22/gamma28 (ffmpeg 9 takes both).
+_COLOR_OPTION_SPELLING = {"color_trc": {"bt470m": "gamma22", "bt470bg": "gamma28"}}
+
+
+def _probe_video_format(video_path):
+    """Codec, pixel format, size and colour tags of the first video stream ({} if unreadable)."""
+    result = run_cmd([
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries",
+        "stream=codec_name,pix_fmt,width,height,color_space,color_primaries,color_transfer,color_range",
+        "-of", "json", str(video_path),
+    ])
+    if result.returncode != 0:
+        return {}
+    try:
+        streams = json.loads(result.stdout).get("streams") or []
+    except (ValueError, AttributeError):
+        return {}
+    return streams[0] if streams and isinstance(streams[0], dict) else {}
+
+
+def _output_color_tags(stream):
+    """Colour tags to write on the delivered picture, as {ffmpeg option: value}.
+
+    An untagged or BT.709 source is labelled BT.709, which is how players already decode
+    untagged web video. Any other declared colour space passes through as declared. The
+    range follows the source: full range stays `pc`, everything else is limited `tv`.
+    For a YUV source nothing here converts pixels; it only fixes the labels.
+
+    An RGB source (colour space `gbr`) has no YUV matrix to keep: it is converted to
+    BT.709 limited range, and `from_rgb` tells `_color_tag_filter` to do that conversion
+    explicitly instead of letting ffmpeg pick a matrix.
+    """
+    declared = {option: stream.get(key) for key, option in _COLOR_FIELDS}
+    from_rgb = declared["colorspace"] == _RGB_COLOR_SPACE
+    if from_rgb:
+        declared["colorspace"] = "bt709"
+    if all(value in _UNTAGGED_COLOR or value == "bt709" for value in declared.values()):
+        tags = {option: "bt709" for _, option in _COLOR_FIELDS}
+    else:
+        tags = {
+            option: value for option, value in declared.items()
+            if value in _KNOWN_COLOR_VALUES[option]
+        }
+    if from_rgb:
+        tags["color_range"] = "tv"
+        tags["from_rgb"] = True
+    else:
+        tags["color_range"] = "pc" if stream.get("color_range") == "pc" else "tv"
+    return tags
+
+
+def _color_tag_filter(tags):
+    """setparams filter that stamps the tags on every frame before the encoder.
+
+    Output options alone are not enough when re-encoding: ffmpeg 8/9 let the (untagged)
+    frame properties win for primaries and transfer, so the bitstream would stay untagged.
+    An RGB frame is first converted to BT.709 yuv420p explicitly: stamping a YUV colour
+    space on an RGB frame makes ffmpeg's own later conversion use the BT.601 matrix
+    while the file says BT.709.
+    """
+    parts = [f"{option}={tags[option]}" for _, option in _COLOR_FIELDS if option in tags]
+    parts.append(f"range={tags['color_range']}")
+    setparams = "setparams=" + ":".join(parts)
+    if tags.get("from_rgb"):
+        return (
+            f"scale=out_color_matrix=bt709:out_range={tags['color_range']},"
+            f"format=yuv420p,{setparams}"
+        )
+    return setparams
+
+
+def _color_tag_args(tags):
+    """Output options that write the tags into the container (and encoder) metadata."""
+    args = []
+    for _, option in _COLOR_FIELDS:
+        if option in tags:
+            value = _COLOR_OPTION_SPELLING.get(option, {}).get(tags[option], tags[option])
+            args += [f"-{option}", value]
+    return args + ["-color_range", tags["color_range"]]
+

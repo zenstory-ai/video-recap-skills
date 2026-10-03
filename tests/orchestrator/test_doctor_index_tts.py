@@ -8,7 +8,7 @@ import doctor
 
 
 def _base_config(monkeypatch):
-    monkeypatch.setattr(doctor, "ffmpeg_filters", lambda: {"subtitles", "ass"})
+    monkeypatch.setattr(doctor, "ffmpeg_filters", lambda: {"subtitles", "ass", "drawtext"})
     monkeypatch.setattr(
         doctor,
         "_command_path",

@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import final_qc
+from lib import read_json_object
 
 
 def _write_final_qc_reports(work_dir, final_output):
@@ -35,3 +36,27 @@ def _require_final_qc(result, work_dir):
         type(blockers) is not int or blockers != 0
     if invalid:
         raise SystemExit("严格最终 QC 未通过或摘要格式无效: final_qc")
+
+
+def _print_render_warnings(result, work_dir, final_output):
+    """Relay non-blocking render warnings (final_qc metadata.warnings) and the subtitle
+    sidecar, so a degraded run is never reported as a plain success. The sidecar comes from
+    assembly_manifest.json only when that manifest rendered `final_output` (dub never
+    writes one, so a stale manifest from an earlier run must not be quoted)."""
+    codes = (result.get("final_qc") or {}).get("warnings") or []
+    manifest = read_json_object(Path(work_dir) / "assembly_manifest.json") or {}
+    rendered = manifest.get("final_output")
+    same_render = isinstance(rendered, str) and \
+        Path(rendered).resolve() == Path(final_output).resolve()
+    sidecar = manifest.get("subtitle_sidecar") if same_render else None
+    if "subtitle_burn_degraded" in codes:
+        print(
+            "[video-recap] ⚠️  字幕未烧录进画面（当前 ffmpeg 缺 libass）："
+            f"字幕以外挂文件交付 {sidecar}；详见 final_qc.json 的 metadata.warnings"
+        )
+    elif sidecar:
+        print(f"[video-recap] 外挂字幕: {sidecar}")
+    for code in codes:
+        if code != "subtitle_burn_degraded":
+            print(f"[video-recap] ⚠️  渲染警告: {code}；详见 final_qc.json 的 metadata.warnings")
+

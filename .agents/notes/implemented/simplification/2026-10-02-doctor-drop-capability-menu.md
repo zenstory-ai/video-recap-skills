@@ -14,7 +14,7 @@ Status: implemented
 - 菜单里独有的两条信息改为 `warnings`：
   - `mimo_video_configured` 为假时：`MiMo VLM not configured: set MIMO_VIDEO_API_KEY or MIMO_API_KEY before video understanding`。
   - 实际选中的 TTS 供应商是 mimo-tts 或 fish-audio 且未配置时：`TTS provider <名> not configured: set <变量> before voiceover`，变量提示来自 `TTS_KEY_HINTS`。index-tts 仍按原来的硬失败检查。
-- 降级提示并进已有 warning：缺 libass 时写明 `run with --no-burn-subtitles or install an ffmpeg build with libass`；ASR 那条本来就写 `--skip-asr`。
+- 降级提示并进已有 warning：缺 libass 时说明默认运行改为交付外挂 `.srt`、显式 `--burn-subtitles` 会失败（文案随 [[2026-10-02-libass-optional-sidecar-degrade]] 更新）；ASR 那条本来就写 `--skip-asr`。
 - `dashboard_server` 删除 `--host` 与 `_loopback_host`，`DashboardServer` 固定绑定 `127.0.0.1`，`make_server(root, port=0)`；Host 白名单只剩 `127.0.0.1:<端口>` 与 `localhost:<端口>`。传 `--host` 即报 argparse 错误。测试改为断言服务端绑定 127.0.0.1。
 
 ## Alternatives considered

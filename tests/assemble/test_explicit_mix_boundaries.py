@@ -165,6 +165,8 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     assert mix['narration_input_binding'] == {
         'path': str((work/'narration_input_binding.json').resolve()), 'status': 'FINALIZED'}
     assert mix['status'] == 'FINALIZED'
+    # The untagged copy-safe picture is stream-copied; only its colour labels change.
+    assert mix['output_picture']['packet_identity'] == 'EXACT'
     assert [(item['output_start_sample'], item['gain']) for item in mix['segments']] == [
         (item['output_start_sample'], item['gain'])
         for item in adopted_case['document']['segments']]
@@ -223,6 +225,29 @@ def test_explicit_mix_allows_requested_reencode_without_changing_frame_clock(
     mix = json.loads((work/'audio_mix_binding.json').read_text())
     assert mix['output_picture']['frame_count'] == 48
     assert mix['output_picture']['fps'] in ['24', '24/1']
+    assert mix['output_picture']['packet_identity'] == 'REENCODED_CLOCK_MATCH'
+
+
+def test_packet_identity_ignores_only_the_colour_labels():
+    picture = {
+        'decoder': {'codec_name': 'h264', 'pix_fmt': 'yuv420p', 'color_range': None,
+                    'color_space': None, 'color_transfer': None, 'color_primaries': None},
+        'packets': [{'pts': '0', 'dts': '0', 'duration': '1/24', 'size': 100}],
+        'frame_count': 1,
+    }
+    labelled = copy.deepcopy(picture)
+    labelled['decoder'].update(color_range='tv', color_space='bt709',
+                               color_transfer='bt709', color_primaries='bt709')
+    assert audio_mix_binding._without_color_tags(labelled) == \
+        audio_mix_binding._without_color_tags(picture)
+    resized = copy.deepcopy(labelled)
+    resized['packets'][0]['size'] = 101
+    assert audio_mix_binding._without_color_tags(resized) != \
+        audio_mix_binding._without_color_tags(picture)
+    repacked = copy.deepcopy(labelled)
+    repacked['decoder']['pix_fmt'] = 'yuvj420p'
+    assert audio_mix_binding._without_color_tags(repacked) != \
+        audio_mix_binding._without_color_tags(picture)
 
 
 def test_load_adoption_binds_picture_receipt_narration_and_segments(adopted_case):

@@ -101,13 +101,23 @@ def _source_identities_for_plan(validated_plan, input_video=None):
     return {str(Path(path)): file_identity(path) for path in sorted(paths)}
 
 
+# Version of the picture-format rules in the edited_source encode (yuv420p, colour tags,
+# RGB conversion; see media_geometry._output_color_tags). Bump it whenever those rules
+# change, so a cached edited_source.mp4 rendered under older rules is rebuilt instead of
+# reaching the final render with labels it no longer matches.
+EDITED_SOURCE_PICTURE_RULES = "yuv420p-color-tags-v1"
+
+
 def edited_source_render_cache_payload():
     """Render-affecting settings that invalidate edited_source.mp4 cache reuse.
 
     Keep this payload limited to inputs that can change rendered media bytes.
     Observational QC produced after validation/render is intentionally excluded.
     """
-    return {"clip_join_audio_fade_ms": round(CONFIG["clip_join_audio_fade_ms"], 3)}
+    return {
+        "clip_join_audio_fade_ms": round(CONFIG["clip_join_audio_fade_ms"], 3),
+        "picture_rules": EDITED_SOURCE_PICTURE_RULES,
+    }
 
 
 def _write_edited_source_meta(output_path, validated_plan, input_video=None):

@@ -30,6 +30,7 @@ from recap_runtime import (
 )
 from recap_stage_qc import (
     _print_final_qc_pointer,
+    _print_render_warnings,
     _require_final_qc,
     _write_final_qc_reports,
 )
@@ -54,6 +55,7 @@ from recap_timeline import (
     _materials_enabled,
     _multi_manifest_mismatches,
     _pause_for_agent,
+    _preflight_visual_overlays,
     _print_narration_review_pointer,
     _read_assembly_output,
     _read_phase_ledger,
@@ -101,6 +103,7 @@ def _finish_recap(work_dir, final_output, args):
     if args.require_final_qc:
         _require_final_qc(final_qc_result, work_dir)
     print(f"[video-recap] ✅ 完成: {final_output}")
+    _print_render_warnings(final_qc_result, work_dir, final_output)
     _print_final_qc_pointer(final_qc_result)
 
 
@@ -309,6 +312,7 @@ def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assembl
     if project and any(t["role"] in project_binding.GEOMETRY_ROLES for t in project["templates"]):
         project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
     project_binding.sync_packaging_layers(work_dir, project)
+    _preflight_visual_overlays(work_dir, narration=uses_narration(args))
     review_ran = _narrate(work_dir, args, timeline) if uses_narration(args) else None
     aargs = [str(assemble_video), "--work-dir", str(work_dir), "--recap-stem", recap_stem]
     extend_assemble_args(aargs, args)

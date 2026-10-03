@@ -204,6 +204,16 @@ def render_explicit_mix(context, narration_context, tts_segments, work_dir):
     return runtime
 
 
+_COLOR_TAG_KEYS = ("color_range", "color_space", "color_transfer", "color_primaries")
+
+
+def _without_color_tags(picture):
+    """The picture identity minus the colour labels the final render writes on purpose
+    (an untagged copied picture gains BT.709 tags; its packets stay the same)."""
+    decoder = {k: v for k, v in picture["decoder"].items() if k not in _COLOR_TAG_KEYS}
+    return {**picture, "decoder": decoder}
+
+
 def finalize_binding(context, narration_record, rendered_output, final_output, work_dir):
     """Probe the rendered candidate and write ``audio_mix_binding.json`` into work_dir."""
     if not context.get("runtime"):
@@ -216,7 +226,8 @@ def finalize_binding(context, narration_record, rendered_output, final_output, w
         if output_clock[key] != input_clock[key]:
             raise ValueError("rendered output picture frame clock changed")
     packet_identity = (
-        "EXACT" if output_picture == context["picture_identity"]
+        "EXACT"
+        if _without_color_tags(output_picture) == _without_color_tags(context["picture_identity"])
         else "REENCODED_CLOCK_MATCH"
     )
     audio = probe_audio_packets(rendered, 0)

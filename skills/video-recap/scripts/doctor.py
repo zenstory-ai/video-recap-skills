@@ -14,7 +14,7 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from lib import CONFIG, TTS_PROVIDERS, ffmpeg_filters
+from lib import CONFIG, TTS_PROVIDERS, env_bool, ffmpeg_filters
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -103,6 +103,15 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
     else:
         tts_model = CONFIG["mimo_tts_model"]
     subtitle_filter = "subtitles" in filters
+    drawtext_filter = "drawtext" in filters
+    burn_explicit = "BURN_SUBTITLES" in os.environ and env_bool("BURN_SUBTITLES", True)
+    if not ffmpeg_path:
+        subtitle_delivery = "unavailable"
+    elif subtitle_filter:
+        subtitle_delivery = "burned"
+    else:
+        # The default burn degrades to the .srt sidecar; an explicit request fails fast.
+        subtitle_delivery = "fails_explicit_burn" if burn_explicit else "sidecar_srt"
     checks = {
         "system_tools": {
             "ffmpeg": bool(ffmpeg_path),
@@ -112,6 +121,9 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             "ffmpeg_subtitles_filter": subtitle_filter,
             "ffmpeg_ass_filter": "ass" in filters,
             "burn_subtitles_ready": bool(ffmpeg_path and subtitle_filter),
+            "subtitle_delivery": subtitle_delivery,
+            "ffmpeg_drawtext_filter": drawtext_filter,
+            "visual_overlays_ready": bool(ffmpeg_path and drawtext_filter),
         },
         "tts": {
             "provider": effective_tts_provider,
@@ -172,10 +184,22 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             )
         if not index_tts["index_tts_voice_set"]:
             failures.append("INDEX_TTS_VOICE is not set")
-    if tools["ffmpeg"] and not tools["ffmpeg_subtitles_filter"]:
+    if subtitle_delivery == "sidecar_srt":
         warnings.append(
-            "ffmpeg lacks subtitles/libass filter; subtitle burn-in will fail: "
-            "run with --no-burn-subtitles or install an ffmpeg build with libass"
+            "ffmpeg lacks subtitles/libass filter; the default run will not burn subtitles and "
+            "delivers a .srt sidecar instead (explicit --burn-subtitles fails): "
+            "install an ffmpeg build with libass to burn them"
+        )
+    elif subtitle_delivery == "fails_explicit_burn":
+        warnings.append(
+            "ffmpeg lacks subtitles/libass filter and BURN_SUBTITLES asks for burn-in, so runs "
+            "will stop at preflight: unset BURN_SUBTITLES to get a .srt sidecar, pass "
+            "--no-burn-subtitles, or install an ffmpeg build with libass"
+        )
+    if tools["ffmpeg"] and not drawtext_filter:
+        warnings.append(
+            "ffmpeg lacks the drawtext filter (libfreetype); narration visual_overlays will stop "
+            "the run before TTS: remove them or install an ffmpeg build with drawtext"
         )
     if not checks["api_config"]["api_key_set"]:
         failures.append("MIMO_API_KEY is not set; the default ASR / VLM path requires MiMo")
@@ -218,6 +242,12 @@ def _print_human(report: dict) -> None:
         f"{_status_icon(system['ffmpeg_subtitles_filter'], warning=True)} "
         f"ffmpeg subtitles/libass filter: "
         f"{'available' if system['ffmpeg_subtitles_filter'] else 'missing'}"
+        f" (subtitles: {system['subtitle_delivery']})"
+    )
+    print(
+        f"{_status_icon(system['ffmpeg_drawtext_filter'], warning=True)} "
+        f"ffmpeg drawtext filter (visual_overlays): "
+        f"{'available' if system['ffmpeg_drawtext_filter'] else 'missing'}"
     )
 
     api = checks["api_config"]

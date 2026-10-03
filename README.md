@@ -56,7 +56,7 @@
 ClawHub 分发由仓库中的 [显式发布清单](.clawhub/publish.json) 管理，并通过 [ClawHub](https://clawhub.ai/) 提供发现入口。具体 skill 链接只有在发布者、版本和匿名访问均验证后才会写入本文档，避免把尚不存在的条目当成已上架。
 
 
-前提：Python 3.10 或更新版本，`PATH` 上有带 libass 的 `ffmpeg`（默认烧录字幕），以及一个[小米 MiMo](https://platform.xiaomimimo.com) API Key。
+前提：Python 3.10 或更新版本，`PATH` 上有 `ffmpeg`，以及一个[小米 MiMo](https://platform.xiaomimimo.com) API Key。默认把字幕烧录进画面，这需要带 libass 的 ffmpeg；Homebrew 自带的 `ffmpeg` 没有 libass，这时默认运行不烧录，在成片旁输出同名 `.srt` 外挂字幕并在 `final_qc.json` 里记一条警告（显式传 `--burn-subtitles` 则在开跑前报错）。旁白里写了画面文字叠加（`visual_overlays`）时还需要带 drawtext 的 ffmpeg，缺了会在配音前报错。要在 macOS 上烧录字幕，可用 `brew install ffmpeg-full`（keg-only，需把它的 `bin` 放到 `PATH` 前面）。
 
 ```bash
 brew install ffmpeg                        # macOS；Debian/Ubuntu 用 apt，Windows 用 choco / scoop / winget

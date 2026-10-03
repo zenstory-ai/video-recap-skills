@@ -369,12 +369,30 @@ def test_edited_source_cache_settings_include_render_affecting_config(monkeypatc
     cut_contract._write_edited_source_meta(edited, plan, video)
     meta = json.loads((tmp_path / "edited_source.mp4.meta.json").read_text(encoding="utf-8"))
     assert meta["schema_version"] == 3
-    assert meta["render_cache"] == {"clip_join_audio_fade_ms": 30.0}
+    assert meta["render_cache"] == {"clip_join_audio_fade_ms": 30.0,
+                                    "picture_rules": cut_contract.EDITED_SOURCE_PICTURE_RULES}
     assert meta["sources"] == {str(video): {"size": 5, "mtime_ns": video.stat().st_mtime_ns}}
     assert cut_contract.should_reuse_edited_source(edited, plan, video) is True
 
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 80.0})
     assert cut_contract.edited_source_render_cache_payload() != meta["render_cache"]
+    assert cut_contract.should_reuse_edited_source(edited, plan, video) is False
+
+
+def test_edited_source_cache_from_before_the_picture_rules_is_rebuilt(tmp_path):
+    """A cache written before the yuv420p/colour-tag rules carried no BT.601 labels; the
+    final render would read it as untagged and relabel it BT.709, so it must not be reused."""
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
+    edited = tmp_path / "edited_source.mp4"
+    edited.write_bytes(b"edited")
+    plan = cut_contract.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    cut_contract._write_edited_source_meta(edited, plan, video)
+    assert cut_contract.should_reuse_edited_source(edited, plan, video) is True
+    meta_path = tmp_path / "edited_source.mp4.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    del meta["render_cache"]["picture_rules"]
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
     assert cut_contract.should_reuse_edited_source(edited, plan, video) is False
 
 
@@ -1018,3 +1036,154 @@ def test_edited_source_cache_from_content_hash_schema_is_a_miss(tmp_path):
     for empty in ("{}", "[]"):
         Path(f"{edited}.meta.json").write_text(empty, encoding="utf-8")
         assert cut_contract.should_reuse_edited_source(edited, plan, video) is False
+
+
+def test_edited_source_render_labels_the_picture_bt709(monkeypatch, tmp_path):
+    _, _, commands = _capture_render(
+        monkeypatch, tmp_path, [{"start": 0, "end": 1}, {"start": 2, "end": 3}], 4)
+    ffmpeg_cmd = [cmd for cmd in commands if cmd[0] == "ffmpeg"][0]
+    joined = " ".join(ffmpeg_cmd)
+    assert "[v]setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv[vtagged]" in joined
+    assert ffmpeg_cmd[ffmpeg_cmd.index("-map") + 1] == "[vtagged]"
+    for flag in ("-colorspace", "-color_primaries", "-color_trc"):
+        assert ffmpeg_cmd[ffmpeg_cmd.index(flag) + 1] == "bt709"
+    assert ffmpeg_cmd[ffmpeg_cmd.index("-color_range") + 1] == "tv"
+
+
+@pytest.mark.parametrize("formats, expected", [
+    pytest.param(
+        [{"color_space": "smpte170m", "color_primaries": "smpte170m", "color_transfer": "smpte170m"}] * 2,
+        {"colorspace": "smpte170m", "color_primaries": "smpte170m", "color_trc": "smpte170m",
+         "color_range": "tv"},
+        id="agreeing-sources-keep-their-tags",
+    ),
+    pytest.param(
+        [{"color_space": "smpte170m"}, {}],
+        {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709", "color_range": "tv"},
+        id="disagreeing-sources-fall-back-to-bt709",
+    ),
+])
+def test_edited_source_color_tags_across_sources(formats, expected):
+    assert cut_render._edited_source_color_tags(formats, rgb_converted_per_clip=True) == expected
+
+
+def test_edited_source_color_tags_rgb_converted_per_clip_matches_bt709():
+    """Per-clip converted RGB agrees with an untagged YUV source; a single RGB source
+    still asks the final tag filter to convert."""
+    rgb = {"color_space": "gbr", "color_range": "pc"}
+    bt709 = {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709",
+             "color_range": "tv"}
+    assert cut_render._edited_source_color_tags([rgb, {}], rgb_converted_per_clip=True) == bt709
+    assert cut_render._edited_source_color_tags([rgb]) == {**bt709, "from_rgb": True}
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+def test_edited_source_real_render_reports_bt709_tags(tmp_path):
+    import subprocess
+
+    video = tmp_path / "src.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=12:duration=3",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-shortest",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv422p", str(video)],
+        check=True, capture_output=True,
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    plan = normalize_clip_plan([{"start": 0.0, "end": 1.0}, {"start": 1.5, "end": 2.5}],
+                               video_duration=3.0)
+    out = build_edited_source_video(video, _with_geometry(plan, [str(video)]), work)
+    facts = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=pix_fmt,color_space,color_primaries,color_transfer,color_range",
+         "-of", "json", str(out)],
+        check=True, capture_output=True, text=True,
+    ).stdout)["streams"][0]
+    assert facts == {"pix_fmt": "yuv420p", "color_space": "bt709", "color_primaries": "bt709",
+                     "color_transfer": "bt709", "color_range": "tv"}
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+def test_edited_source_real_render_converts_rgb_source(tmp_path):
+    """An RGB source (ffprobe colour space `gbr`) used to fail at `-colorspace gbr`."""
+    import subprocess
+
+    video = tmp_path / "src.mov"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:size=160x120:rate=12:duration=3,format=rgb24",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=3", "-shortest",
+         "-c:v", "png", "-c:a", "aac", str(video)],
+        check=True, capture_output=True,
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    plan = normalize_clip_plan([{"start": 0.0, "end": 1.0}, {"start": 1.5, "end": 2.5}],
+                               video_duration=3.0)
+    out = build_edited_source_video(video, _with_geometry(plan, [str(video)]), work)
+    facts = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=pix_fmt,color_space,color_primaries,color_transfer,color_range",
+         "-of", "json", str(out)],
+        check=True, capture_output=True, text=True,
+    ).stdout)["streams"][0]
+    assert facts == {"pix_fmt": "yuv420p", "color_space": "bt709", "color_primaries": "bt709",
+                     "color_transfer": "bt709", "color_range": "tv"}
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(out), "-frames:v", "1",
+         "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    luma = len(raw) * 2 // 3
+    # Pure red in BT.709 limited range is Y=63 Cb=102 (BT.601 would be 81/90).
+    assert abs(raw[0] - 63) <= 2 and abs(raw[luma] - 102) <= 2, (raw[0], raw[luma])
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+def test_edited_source_real_multi_source_converts_rgb_clip_beside_yuv(tmp_path):
+    """Mixed RGB + YUV sources: the RGB clip must still use the BT.709 matrix."""
+    import subprocess
+
+    rgb = tmp_path / "rgb.mov"
+    yuv = tmp_path / "yuv.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:size=160x120:rate=12:duration=2,format=rgb24",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest",
+         "-c:v", "png", "-c:a", "aac", str(rgb)],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=12:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(yuv)],
+        check=True, capture_output=True,
+    )
+    manifest = {"sources": [
+        {"source_id": "a", "source_path": str(rgb), "duration": 2.0},
+        {"source_id": "b", "source_path": str(yuv), "duration": 2.0},
+    ]}
+    plan = cut_contract.normalize_multi_source_clip_plan([
+        {"source_id": "a", "start": 0.0, "end": 1.0},
+        {"source_id": "b", "start": 0.0, "end": 1.0},
+    ], manifest)
+    work = tmp_path / "work"
+    work.mkdir()
+    out = build_edited_source_video(rgb, _with_geometry(plan, [str(rgb), str(yuv)]), work)
+    facts = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=pix_fmt,color_space,color_primaries,color_transfer,color_range",
+         "-of", "json", str(out)],
+        check=True, capture_output=True, text=True,
+    ).stdout)["streams"][0]
+    assert facts == {"pix_fmt": "yuv420p", "color_space": "bt709", "color_primaries": "bt709",
+                     "color_transfer": "bt709", "color_range": "tv"}
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(out), "-frames:v", "1",
+         "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    luma = len(raw) * 2 // 3
+    # Centre pixel of the first (red) clip: BT.709 limited is Y=63 Cb=102 (BT.601 81/90).
+    w, h = 160, 120
+    y = raw[(h // 2) * w + w // 2]
+    cb = raw[luma + (h // 4) * (w // 2) + w // 4]
+    assert abs(y - 63) <= 2 and abs(cb - 102) <= 2, (y, cb)

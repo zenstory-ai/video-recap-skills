@@ -225,7 +225,7 @@ def test_recap_multi_cut_validate_failure_stops_before_review_tts_and_assemble(
     _assert_validation_replaced_stale_pass(work, "invalid_output_timeline")
 
 
-def _tools_present(monkeypatch, filters=("subtitles", "ass")):
+def _tools_present(monkeypatch, filters=("subtitles", "ass", "drawtext")):
     monkeypatch.setattr("doctor.ffmpeg_filters", lambda: set(filters))
     monkeypatch.setattr(
         "doctor._command_path",
@@ -346,15 +346,47 @@ def test_doctor_warns_when_asr_unconfigured_but_key_present(monkeypatch):
 
 
 def test_doctor_warns_when_subtitle_burn_degraded(monkeypatch):
-    _tools_present(monkeypatch, filters=("ass",))
+    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
+    _tools_present(monkeypatch, filters=("ass", "drawtext"))
     _all_mimo_keys(monkeypatch)
 
     report = doctor.build_report()
 
     assert report["ok"] is True
+    assert report["checks"]["system_tools"]["subtitle_delivery"] == "sidecar_srt"
     assert len(report["warnings"]) == 1
     assert "subtitles/libass" in report["warnings"][0]
+    assert ".srt sidecar" in report["warnings"][0]
+    assert "--burn-subtitles fails" in report["warnings"][0]
+
+
+def test_doctor_warns_explicit_burn_env_will_stop_without_libass(monkeypatch):
+    monkeypatch.setenv("BURN_SUBTITLES", "1")
+    _tools_present(monkeypatch, filters=("ass", "drawtext"))
+    _all_mimo_keys(monkeypatch)
+
+    report = doctor.build_report()
+
+    assert report["checks"]["system_tools"]["subtitle_delivery"] == "fails_explicit_burn"
+    assert len(report["warnings"]) == 1
+    assert "stop at preflight" in report["warnings"][0]
     assert "--no-burn-subtitles" in report["warnings"][0]
+
+
+def test_doctor_warns_when_drawtext_missing(monkeypatch):
+    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
+    _tools_present(monkeypatch, filters=("subtitles", "ass"))
+    _all_mimo_keys(monkeypatch)
+
+    report = doctor.build_report()
+
+    tools = report["checks"]["system_tools"]
+    assert tools["subtitle_delivery"] == "burned"
+    assert tools["ffmpeg_drawtext_filter"] is False
+    assert tools["visual_overlays_ready"] is False
+    assert len(report["warnings"]) == 1
+    assert "drawtext" in report["warnings"][0]
+    assert "before TTS" in report["warnings"][0]
 
 
 def test_doctor_warns_when_vlm_or_tts_override_missing(monkeypatch):

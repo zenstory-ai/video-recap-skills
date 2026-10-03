@@ -237,6 +237,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
             "reencode_reason": render_delivery["reencode_reason"],
             "audio_sample_rate": render_delivery["audio_sample_rate"],
             "final_compat_notes": render_delivery["final_compat_notes"],
+            "color_tags": render_delivery.get("color_tags"),
         },
         "summary": {
             "segments": len(segments),

@@ -100,7 +100,7 @@ def test_probe_fixture_success_writes_only_a_valid_final_qc(tmp_path):
     summary = final_qc.run(tmp_path, final_output=output, probe_fixture=probe_fixture)
     final_report = json.loads((tmp_path / "final_qc.json").read_text(encoding="utf-8"))
 
-    assert summary["final_qc"] == {"ok": True, "blocker_count": 0}
+    assert summary["final_qc"] == {"ok": True, "blocker_count": 0, "warnings": []}
     assert summary["written"] == ["final_qc.json"]
     assert not (tmp_path / "golden_eval.json").exists()
     assert _assert_valid(final_report)

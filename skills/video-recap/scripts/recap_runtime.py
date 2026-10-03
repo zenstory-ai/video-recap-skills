@@ -274,20 +274,41 @@ def _ffmpeg_present_but_cannot_burn():
     return not ffmpeg_has_subtitles_filter()
 
 
+def _burn_subtitles_explicit(args):
+    """Burn was asked for, not inherited: --burn-subtitles, or a truthy BURN_SUBTITLES."""
+    if args.burn_subtitles is not None:
+        return args.burn_subtitles
+    return "BURN_SUBTITLES" in os.environ and env_bool("BURN_SUBTITLES", True)
+
+
 def _preflight_burn_subtitles(args):
-    """Fail fast BEFORE any understanding/VLM/ASR/TTS spend when subtitle burn-in is on but
-    this ffmpeg can't burn it. Without it the run only dies at the final assemble
-    `-vf subtitles=` step — after the whole expensive pipeline has run. Dub renders through
-    dub.py, which never burns subtitles, so it is exempt."""
+    """Settle subtitle burn-in BEFORE any understanding/VLM/ASR/TTS spend when this ffmpeg
+    lacks libass. An explicit request fails fast here, since otherwise the run only dies at
+    the final assemble `-vf subtitles=` step. The default burn only warns: assemble then
+    delivers the .srt sidecar and records `subtitle_burn_degraded` in visual_qc.json, which
+    final_qc.json carries in metadata.warnings. Dub renders through its own script, which
+    never burns subtitles, so it is exempt."""
     if args.edit_mode == "dub" or not _burn_subtitles_intended(args):
         return
-    if _ffmpeg_present_but_cannot_burn():
+    if not _ffmpeg_present_but_cannot_burn():
+        return
+    doctor = f"python3 {shlex.quote(str(_entry('video-recap', 'doctor.py')))}"
+    if _burn_subtitles_explicit(args):
         raise SystemExit(
-            "字幕烧录已开启，但当前 ffmpeg 不支持 subtitles/libass 滤镜，整条流程会跑到最后渲染才失败。\n"
-            "  解决其一：(1) 安装带 libass 的 ffmpeg；(2) 加 --no-burn-subtitles 关闭烧录"
-            "（仍输出 .srt 外挂字幕）。\n"
-            f"  自检：python3 {shlex.quote(str(_entry('video-recap', 'doctor.py')))}"
+            "已显式要求烧录字幕（--burn-subtitles 或 BURN_SUBTITLES），但当前 ffmpeg 不支持"
+            " subtitles/libass 滤镜，整条流程会跑到最后渲染才失败。\n"
+            "  解决其一：(1) 安装带 libass 的 ffmpeg；(2) 去掉显式烧录要求，默认运行会改为输出"
+            " .srt 外挂字幕；(3) 加 --no-burn-subtitles。\n"
+            f"  自检：{doctor}"
         )
+    print(
+        "[video-recap] ⚠ 当前 ffmpeg 不支持 subtitles/libass 滤镜：本次成片不烧录字幕。"
+        "有字幕条目时改为在成片旁输出同名 .srt 外挂字幕（final_qc.json 的 metadata.warnings"
+        " 会记录 subtitle_burn_degraded）；没有字幕条目的运行（如 source 音频模式且没有"
+        " user_subtitles.*）不输出 .srt，也不记警告。要烧录字幕请安装带 libass 的 ffmpeg；"
+        f"自检：{doctor}",
+        flush=True,
+    )
 
 
 def _entry(skill, script):

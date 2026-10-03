@@ -367,11 +367,13 @@ def _build_dub_track(lines, duration, out_wav):
 
 
 def _mux(video, dub_wav, out_video):
+    # The picture is stream-copied as the source has it (no yuv420p / colour-tag
+    # normalisation in dub mode); +faststart is copy-safe and lets web players start early.
     _ffmpeg(["-i", str(video), "-i", str(dub_wav),
              "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy",
              "-af", "loudnorm=I=-16:TP=-1.5:LRA=11", "-c:a", "aac", "-b:a", "192k",
              "-ar", str(DUB_DELIVERY_SR),
-             "-shortest", str(out_video)])
+             "-shortest", "-movflags", "+faststart", str(out_video)])
 
 
 # ── stages ───────────────────────────────────────────────────────────
