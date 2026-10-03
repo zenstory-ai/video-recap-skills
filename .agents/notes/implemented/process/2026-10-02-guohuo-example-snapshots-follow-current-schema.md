@@ -21,7 +21,7 @@ Status: implemented
 
 - **维持“历史快照不改”，只在 README 标注为旧版本存档。** 最强理由：样例记录的是一次真实制作，任何改动都会让它和当时实际写出的文件不一致。没采用：README / runbook 把它当作复现的对照目标，存档标注挡不住复现者按不存在的字段核对；删掉的键都是当时就恒定或重复的副本（`release_gate.delivery_qc` 恒为 PASS、rollup 是 `visual_qc.json` 的拷贝），删掉不丢失任何只在这里有的测量值。
 - **按当前代码重新生成两份文件。** 最强理由：形状与新运行完全一致。没采用：原片和 Fish 音色都不在仓库里，只能用替身素材重跑，得到的就不是这次制作的数据了。
-- **把 Remotion 常量改成 JSON props / `calculateMetadata`。** 最强理由：复现时只改数据、不改代码。没采用：这需要在有无头 Chrome 的环境里重新渲染验证，本次只能静态改动；先在 runbook 写清要改哪几个常量。
+- **把 Remotion 常量改成 JSON props / `calculateMetadata`。** 最强理由：复现时只改数据、不改代码。没采用：这需要在有无头 Chrome 的环境里重新渲染验证，本次只能静态改动；先在 runbook 写清要改哪几个常量。（该决定已由 [[2026-10-02-guohuo-remotion-overlay-data-driven]] 翻转：常量移入 `overlay.json`，并做了真实渲染验证。）
 
 ## Consequences
 

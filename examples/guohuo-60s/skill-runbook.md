@@ -77,10 +77,10 @@ ASR 默认按 15 秒一窗（`ASR_SEGMENT_SECONDS`）给出粗时间，按窗内
 
 内容母版通过后才读取 `remotion/`：
 
-1. 把新 placed audio 对齐得到的 cue 写入 Remotion `captions.json`（`remotion/src/captions.json` 与目录下的 `captions.json` 保持一致）。Skill 不提供从 placed audio 生成 cue 的工具，可从 assemble 写出的 `work_dir/subtitles.srt` 或 `work_dir/_placed_*.wav` 的实测停顿切分。
-2. 按新母版重定时写死在源码里的常量：`src/index.tsx` 的 `durationInFrames`（= 母版秒数 × 25），`src/RecapOverlay.tsx` 的 `flowerCues`（四条花字的起止秒和文字）、`TitleMark` 的首段与复现窗口（0.18–9.75 秒、42.2–50.3 秒）以及片名文字。只换 `captions.json` 时，透明层会比母版短，花字也会落在错误的镜头上。
+1. 在 `examples/guohuo-60s` 下用 `remotion/sync_overlay.py` 把这次运行接到透明层：`python3 remotion/sync_overlay.py --srt <work_dir>/subtitles.srt --master <锁定母版.mp4>`。它从 assemble 写出的 `subtitles.srt`（cue 已按实际 placed audio 拆分）重建 `remotion/src/captions.json`，按母版时长把 `remotion/src/overlay.json` 的 `durationInFrames` 设为秒数 × 25；字幕、片名窗口或花字落到母版之外时列出来并以退出码 1 结束（文件照常写出）。要同步更新目录下公开的 `captions.json` 时再加一个 `--out captions.json`。只有 `--duration <秒>` 而没有母版文件也可以。
+2. 看新母版重新放置 `remotion/src/overlay.json` 里的创作项：`title.text` 与 `title.windows`（本例 0.18–9.75 秒、42.2–50.3 秒），`flowerCues` 四条花字的起止秒、文字与位置。工具只检查它们是否越界，不替你挪：花字要落在对应的镜头上，靠看片决定。TSX 里没有时间或文字常量；也可以不改仓库里的文件，把 `{"captions": [...], "overlay": {...}}` 写成一份 JSON，渲染时用 `--props=<文件>` 传入，时长随 props 一起变。
 3. 抽检开头、亮背景、暗背景、人物近景和最长字幕。
-4. 渲染完整透明层（需要 Remotion 下载的无头 Chrome），由本项目自己叠到锁定母版。`package.json` 只锁定了直接依赖，`package-lock.json` 不入库，传递依赖版本可能与原运行不同。
+4. 在 `remotion/` 里 `npm install`，可先 `npm run typecheck` 做类型检查，再 `npm run render:overlay` 渲染完整透明层（需要 Remotion 下载的无头 Chrome；先用 `npx remotion still src/index.tsx RecapOverlay <png> --frame=<n>` 抽几帧看字幕、片名和花字），由本项目自己叠到锁定母版。`package.json` 只锁定了直接依赖，`package-lock.json` 不入库，传递依赖版本可能与原运行不同。
 5. 包装合成时 stream-copy 已通过的音频；复核字幕边界、片名安全区和花字信息增量。
 
 这是 `video-assemble` Skill 的可选包装路径，Remotion 是本案例的项目级实现；渲染与合成都在项目里完成，

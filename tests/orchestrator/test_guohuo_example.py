@@ -1,6 +1,8 @@
+import importlib.util
 import json
 from pathlib import Path
 import re
+import sys
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -101,9 +103,104 @@ def test_guohuo_timeline_delivery_and_source_ids_agree():
     clip_source_ids = {item["source_id"] for item in clip_plan["clips"]}
     assert clip_source_ids <= known_source_ids
 
-    composition = (EXAMPLE / "remotion/src/index.tsx").read_text(encoding="utf-8")
-    assert f"durationInFrames={{{media['frames']}}}" in composition
-    assert f"fps={{{media['fps']}}}" in composition
+    overlay = _load("remotion/src/overlay.json")
+    assert overlay["durationInFrames"] == media["frames"]
+    assert overlay["fps"] == media["fps"]
+    assert (overlay["width"], overlay["height"]) == (1920, 1080)
+
+
+def test_guohuo_overlay_timing_lives_in_data_not_tsx():
+    """Re-timing for a new run edits overlay.json / captions.json only."""
+    overlay = _load("remotion/src/overlay.json")
+    duration = overlay["durationInFrames"] / overlay["fps"]
+    tsx = "\n".join(
+        (EXAMPLE / "remotion/src" / name).read_text(encoding="utf-8")
+        for name in ("index.tsx", "RecapOverlay.tsx")
+    )
+    assert str(overlay["durationInFrames"]) not in tsx
+    assert overlay["title"]["text"] not in tsx
+    for cue in overlay["flowerCues"]:
+        assert cue["text"] not in tsx
+        assert 0 <= cue["start"] < cue["end"] <= duration
+    for window in overlay["title"]["windows"]:
+        assert 0 <= window["start"] < window["end"] <= duration
+    assert "calculateMetadata" in tsx
+
+
+def _load_sync_overlay(monkeypatch):
+    # No __pycache__ inside the public example: its .pyc embeds this machine's paths.
+    monkeypatch.setattr(sys, "dont_write_bytecode", True)
+    spec = importlib.util.spec_from_file_location(
+        "guohuo_sync_overlay", EXAMPLE / "remotion" / "sync_overlay.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def _srt_time(seconds):
+    millis = round(seconds * 1000)
+    hours, millis = divmod(millis, 3_600_000)
+    minutes, millis = divmod(millis, 60_000)
+    secs, millis = divmod(millis, 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+def test_sync_overlay_rebuilds_the_published_captions_and_length_from_a_run(
+    monkeypatch, tmp_path
+):
+    """An SRT shaped like assemble's subtitles.srt for the adopted cut reproduces the
+    published captions.json and durationInFrames exactly."""
+    sync = _load_sync_overlay(monkeypatch)
+    captions = _load("captions.json")
+    srt = tmp_path / "subtitles.srt"
+    srt.write_text(
+        "\n".join(
+            f"{index}\n{_srt_time(cue['start'])} --> {_srt_time(cue['end'])}\n{cue['text']}\n"
+            for index, cue in enumerate(captions, start=1)
+        ),
+        encoding="utf-8",
+    )
+    overlay = tmp_path / "overlay.json"
+    overlay.write_text((EXAMPLE / "remotion/src/overlay.json").read_text(encoding="utf-8"),
+                       encoding="utf-8")
+    out = tmp_path / "captions.json"
+    duration = _load("delivery-qc.json")["media"]["duration_seconds"]
+
+    assert sync.main([
+        "--srt", str(srt), "--duration", str(duration),
+        "--overlay", str(overlay), "--out", str(out),
+    ]) == 0
+
+    assert json.loads(out.read_text(encoding="utf-8")) == captions
+    assert overlay.read_text(encoding="utf-8") == (
+        EXAMPLE / "remotion/src/overlay.json"
+    ).read_text(encoding="utf-8")
+
+
+def test_sync_overlay_flags_title_and_flower_cues_past_a_shorter_master(
+    monkeypatch, tmp_path, capsys
+):
+    sync = _load_sync_overlay(monkeypatch)
+    srt = tmp_path / "subtitles.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,500\n新的解说\n", encoding="utf-8")
+    overlay = tmp_path / "overlay.json"
+    overlay.write_text((EXAMPLE / "remotion/src/overlay.json").read_text(encoding="utf-8"),
+                       encoding="utf-8")
+    out = tmp_path / "captions.json"
+
+    assert sync.main([
+        "--srt", str(srt), "--duration", "40", "--overlay", str(overlay), "--out", str(out),
+    ]) == 1
+
+    assert json.loads(out.read_text(encoding="utf-8")) == [
+        {"start": 1.0, "end": 2.5, "text": "新的解说"}
+    ]
+    assert json.loads(overlay.read_text(encoding="utf-8"))["durationInFrames"] == 1000
+    err = capsys.readouterr().err
+    assert "title window 42.2-50.3s" in err
+    assert "'重逢已迟'" in err and "'本能不会说谎'" in err
+    assert "'旧情难藏'" not in err
 
 
 def test_guohuo_story_picture_audio_and_caption_contracts_agree():

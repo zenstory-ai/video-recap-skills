@@ -53,7 +53,7 @@ video-understanding
 
 ## Remotion 包装
 
-包装画布为 1920×1080、25fps、1474 帧（时长、花字时间和片名窗口写死在 `remotion/src` 里，复现时按新母版重定时，见 runbook），透明背景包含三层：
+包装画布为 1920×1080、25fps、1474 帧。时长、片名文字与窗口、花字都在 `remotion/src/overlay.json`，字幕在 `remotion/src/captions.json`，TSX 只读这两份数据；复现时用 `remotion/sync_overlay.py` 从新运行的 `subtitles.srt` 和母版时长重建字幕与总帧数，再看片重放片名和花字（见 runbook）。透明背景包含三层：
 
 1. **片名标识**：横排在顶部黑边，不侵入正片画面。
 2. **花字**：低频出现，使用“旧情难藏 / 克制失守 / 本能不会说谎 / 重逢已迟”补充情绪，不复述字幕。
