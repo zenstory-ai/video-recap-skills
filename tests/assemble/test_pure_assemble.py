@@ -54,6 +54,12 @@ from lib import CONFIG, env_float
 import assemble
 
 
+def _render_command(commands):
+    """The final render: the delivered-peak measurement that follows it writes no file."""
+    return next(cmd for cmd in reversed(commands) if "-movflags" in cmd)
+
+
+
 @pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
 def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
     monkeypatch.setenv("NONFINITE_FLOAT", raw)
@@ -949,7 +955,7 @@ def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
         output,
     )
 
-    ffmpeg_cmd = commands[-1]
+    ffmpeg_cmd = _render_command(commands)
     assert (tmp_path / "subtitles.srt").exists()
     assert (tmp_path / "subtitles.ass").exists()
     assert "-vf" in ffmpeg_cmd
@@ -1020,7 +1026,7 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(
 
     assemble_video(video, segments, tmp_path, output)
 
-    ffmpeg_cmd = commands[-1]
+    ffmpeg_cmd = _render_command(commands)
     assert script_option in ffmpeg_cmd
     assert "-vf" not in ffmpeg_cmd
     assert video_filter_scripts[0][1].count("drawbox=") == 375
@@ -1198,7 +1204,7 @@ def test_assemble_video_no_burn_keeps_video_copy_and_ignores_source_mask_default
         output,
     )
 
-    ffmpeg_cmd = commands[-1]
+    ffmpeg_cmd = _render_command(commands)
     assert (tmp_path / "subtitles.srt").exists()
     assert not (tmp_path / "subtitles.ass").exists()
     assert "-vf" not in ffmpeg_cmd
