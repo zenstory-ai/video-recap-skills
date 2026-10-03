@@ -1470,6 +1470,71 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     assert output_evidence["quiet_windows"][0]["end"] == 1.2
 
 
+def test_multi_source_output_brief_labels_each_anchor_schema(tmp_path):
+    """The safe-entry list labels schema-1 anchors (no `boundary_use`) `unverified` without a
+    bound and drops their low-confidence rows; schema-2 rows keep their own use and bound."""
+    work = tmp_path / "project"
+    src = work / "sources" / "src_a"
+    src.mkdir(parents=True)
+    (src / "speech_boundary_anchors.json").write_text(
+        json.dumps(
+            {
+                "sentence_anchors": [
+                    {"time": 2.0, "confidence": "high"},
+                    {"time": 3.0, "confidence": "medium"},
+                    {"time": 4.0, "confidence": "low"},
+                    {"time": 5.0, "confidence": "high", "boundary_use": "verified"},
+                    {
+                        "time": 6.0,
+                        "confidence": "medium",
+                        "boundary_use": "unverified",
+                        "timing_bound_seconds": 1.5,
+                    },
+                    {"time": 7.0, "confidence": "high", "boundary_use": "none"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    records = [
+        {
+            "source_id": "src_a",
+            "source_name": "a.mp4",
+            "source_path": str(tmp_path / "a.mp4"),
+            "source_work_dir": "sources/src_a",
+        }
+    ]
+    plan = work / "clip_plan_validated.json"
+    plan.write_text(
+        json.dumps(
+            {
+                "clips": [
+                    {
+                        "source_id": "src_a",
+                        "source_start": 1.0,
+                        "source_end": 8.0,
+                        "output_start": 10.0,
+                        "output_end": 17.0,
+                        "reason": "",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    recap_timeline._write_multi_source_output_brief(work, records, plan)
+
+    text = (work / "agent_narration_brief.md").read_text(encoding="utf-8")
+    section = text.split("## 原声句末安全切入点", 1)[1].split("\n## ", 1)[0]
+    assert re.findall(r"(?m)^- .+$", section) == [
+        "- 11.000s [unverified] (src_a)",
+        "- 12.000s [unverified] (src_a)",
+        "- 14.000s [high] (src_a)",
+        "- 15.000s [unverified ±1.5s] (src_a)",
+    ]
+
+
 class _ValidationPassed(Exception):
     pass
 
