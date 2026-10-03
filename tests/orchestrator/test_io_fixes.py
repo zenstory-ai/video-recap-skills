@@ -1563,11 +1563,14 @@ def _seed_multi_source_speech(work, record):
 def _multi_cut_through_real_validation(work, clip):
     """Pass 2 stubs cut.py's render; pass 3 models cut.py reusing edited_source.mp4, which
     leaves an unchanged clip_plan_validated.json untouched (pinned by the video-cut group).
-    video-script/validate.py always runs for real."""
+    video-script/validate.py always runs for real; the advisory storyboard step is a no-op."""
     def run(skill, script, *cli_args):
         if (skill, script) == ("video-cut", "cut.py"):
             if not (work / "clip_plan_validated.json").exists():
                 write_cut_output(work, [clip])
+            return None
+        if (skill, script) == ("video-understanding", "understand.py"):
+            assert "--edited-storyboard-only" in cli_args
             return None
         if (skill, script) == ("video-script", "validate.py"):
             return recap_runtime._run(skill, script, *cli_args)
@@ -1628,6 +1631,51 @@ def test_multi_source_cut_output_validate_reads_recap_written_evidence(
     else:
         assert codes == [error_code]
         assert lint["errors"][0]["suggested_start"] == 2.0
+
+
+@pytest.mark.parametrize("storyboard_fails", [False, True])
+def test_multi_source_pass2_builds_the_output_storyboard_after_the_brief(
+    monkeypatch, tmp_path, capsys, storyboard_fails
+):
+    """Like the single-source --brief-only rebuild, multi-source pass 2 asks
+    video-understanding for the cut-output storyboard once the brief exists; the step is
+    advisory, so a failing child warns and the narration pause still happens."""
+    args = manifest_args(edit_mode="cut", review_narration=False)
+    videos, work, records = seed_multi_work(tmp_path, args)
+    calls = []
+
+    def understand(cli):
+        assert (work / "agent_narration_brief.md").read_text(encoding="utf-8").startswith(
+            "# Multi-source Output Narration Brief"
+        )
+        if storyboard_fails:
+            raise SystemExit("video-understanding/understand.py 失败 (exit 1)")
+
+    monkeypatch.setattr(
+        "recap_runner._run",
+        stub_child_run(
+            work,
+            calls=calls,
+            cut=lambda cli: write_cut_output(
+                work, [{**multi_cut_clip(records, videos), "reason": "b1 | hook"}]
+            ),
+            understand=understand,
+        ),
+    )
+
+    recap._run_multi_cut(videos, work, args)
+
+    assert [(skill, script) for skill, script, _ in calls] == [
+        ("video-cut", "cut.py"),
+        ("video-understanding", "understand.py"),
+    ]
+    assert calls[1][2] == [
+        str(videos[0]), "--work-dir", str(work), "--edited-storyboard-only"
+    ]
+    out = capsys.readouterr().out
+    assert ("剪后故事板未生成" in out) is storyboard_fails
+    assert "⏸" in out
+    assert (work / "recap_phase.json").exists()
 
 
 def test_multi_source_excerpt_preserves_source_evidence_from_a_long_brief(tmp_path):

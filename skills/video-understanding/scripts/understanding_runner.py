@@ -27,6 +27,7 @@ from understanding_brief import (
     _research_context,
     _write_brief_from_existing_artifacts,
 )
+from understanding_storyboard import _write_edited_storyboard_only
 from understanding_cache import (
     _asr_cache_payload,
     _asr_cache_state,
@@ -101,6 +102,14 @@ def main():
         help="rebuild agent_narration_brief.md from existing artifacts only; no extraction/API",
     )
     ap.add_argument(
+        "--edited-storyboard-only",
+        action="store_true",
+        help=(
+            "write storyboard/edited_storyboard.* from clip_plan_validated.json (single- or "
+            "multi-source) and add its pointer to the existing brief; no extraction/API"
+        ),
+    )
+    ap.add_argument(
         "--consolidate",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -112,6 +121,8 @@ def main():
         help="also clean the ASR transcript (Pass A)",
     )
     args = ap.parse_args()
+    if args.brief_only and args.edited_storyboard_only:
+        ap.error("--brief-only and --edited-storyboard-only are mutually exclusive")
 
     video = args.video
     work_dir = Path(args.work_dir)
@@ -142,6 +153,9 @@ def main():
 
     if args.brief_only:
         _write_brief_from_existing_artifacts(video, work_dir, args, video_duration)
+        return
+    if args.edited_storyboard_only:
+        _write_edited_storyboard_only(video, work_dir)
         return
 
     scenes_json = work_dir / "scenes.json"

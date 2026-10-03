@@ -8,8 +8,9 @@ one image instead of opening dozens of frames:
   - edited_storyboard.{jpg,json}  — one row per kept clip over the cut OUTPUT timeline,
                                     each tile dual-labelled (output time / source time).
 
-Both reuse the frames already extracted by understand.py (frames/frame_*.jpg at CONFIG["fps"]).
-Nothing here re-extracts video. Every function returns dict|None and degrades to
+Both reuse the frames already extracted by understand.py (frames/frame_*.jpg at CONFIG["fps"];
+a multi-source edited sheet reads each source's own work_dir frames at the fps its frames
+manifest records). Nothing here re-extracts video. Every function returns dict|None and degrades to
 None + log(...) on ANY failure (no frames, ffmpeg missing/non-zero, font probe raises),
 so a storyboard quirk can NEVER block the pipeline (Principle 1: advisory, never blocking).
 
@@ -157,28 +158,80 @@ def _scene_anchor_timestamps(scenes, max_tiles):
     return anchors
 
 
-def _labelled_frame(frame_path, label, font_path, scratch_dir, out_name):
-    """Burn `label` onto a copy of frame_path via drawtext; return the labelled path or None.
-
-    None signals the caller to fall back to the original frame (and flip labels_burned off).
-    A drawtext failure here is non-fatal: the unlabelled frame still tiles fine.
-    """
-    out_path = scratch_dir / out_name
-    safe_label = label.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
-    drawtext = (
-        f"drawtext=fontfile='{font_path}':text='{safe_label}':"
-        "x=8:y=8:fontsize=28:fontcolor=white:"
-        "box=1:boxcolor=black@0.55:boxborderw=6"
-    )
-    cmd = ["ffmpeg", "-y", "-i", str(frame_path), "-vf", drawtext, "-frames:v", "1", str(out_path)]
+def _frame_size(frame_path):
+    """(width, height) of one extracted frame via ffprobe, or None on any failure."""
+    cmd = [
+        "ffprobe", "-v", "error", "-select_streams", "v:0",
+        "-show_entries", "stream=width,height", "-of", "csv=p=0:s=x", str(frame_path),
+    ]
     try:
         result = run_cmd(cmd)
-    except Exception as exc:  # noqa: BLE001 - a label render must never abort the sheet
-        log(f"storyboard drawtext 异常（降级为不烧时间戳）: {exc}")
+        width, height = (int(v) for v in result.stdout.strip().split("x"))
+    except Exception:  # noqa: BLE001 - an unreadable size only means "normalise this tile"
+        return None
+    if result.returncode != 0 or width <= 0 or height <= 0:
+        return None
+    return width, height
+
+
+def _prepared_frame(frame_path, label, font_path, fit, scratch_dir, out_name):
+    """Copy frame_path through ffmpeg, letterboxed into `fit` and/or labelled; path or None.
+
+    `fit` = (w, h) letterboxes a frame into one tile size and pixel format. A sheet mixing
+    sources needs both: the tile filter's input is re-initialised whenever frame size or
+    pixel format changes mid-sequence (a 4:4:4 source next to a 4:2:0 one), which silently
+    drops the tiles already placed, and mixed sizes would otherwise be squashed to the first.
+    `font_path=None` skips the label. None signals the caller to degrade; a failure here is
+    never fatal to the pipeline.
+    """
+    filters = []
+    if fit is not None:
+        width, height = fit
+        filters.append(
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,format=yuvj420p"
+        )
+    if font_path:
+        safe_label = label.replace("\\", "\\\\").replace(":", "\\:").replace("'", "’")
+        filters.append(
+            f"drawtext=fontfile='{font_path}':text='{safe_label}':"
+            "x=8:y=8:fontsize=28:fontcolor=white:"
+            "box=1:boxcolor=black@0.55:boxborderw=6"
+        )
+    out_path = scratch_dir / out_name
+    cmd = [
+        "ffmpeg", "-y", "-i", str(frame_path), "-vf", ",".join(filters),
+        "-frames:v", "1", str(out_path),
+    ]
+    try:
+        result = run_cmd(cmd)
+    except Exception as exc:  # noqa: BLE001 - a tile render must never abort the sheet
+        log(f"storyboard 帧处理异常（降级）: {exc}")
         return None
     if result.returncode != 0 or not out_path.exists():
         return None
     return out_path
+
+
+def _prepare_frames(tiles, font_path, scratch_dir, out_stem):
+    """Frames to tile, labelled when font_path is set; None as soon as one render fails.
+
+    A tile with neither a label nor a `fit` uses its extracted frame as-is (no ffmpeg).
+    """
+    frames = []
+    for idx, tile in enumerate(tiles):
+        fit = tile.get("fit")
+        if not font_path and fit is None:
+            frames.append(Path(tile["frame_file"]))
+            continue
+        prepared = _prepared_frame(
+            Path(tile["frame_file"]), tile["label"], font_path, fit, scratch_dir,
+            f"lbl_{out_stem}_{idx:05d}.jpg",
+        )
+        if prepared is None:
+            return None
+        frames.append(prepared)
+    return frames
 
 
 def _tile_pages(frame_paths, columns, out_dir, out_stem, scratch_dir):
@@ -241,8 +294,9 @@ def work_dir_relative_pages(pages):
 def _render_storyboard(work_dir, tiles, out_stem):
     """Shared render path: optionally burn labels, tile to pages, return (page_paths, labels_burned).
 
-    `tiles` is a list of dicts that ALREADY carry a resolved `frame_file` (absolute path) and a
-    `label` string. Returns (None, _) on hard failure so callers degrade to None.
+    `tiles` is a list of dicts that ALREADY carry a resolved `frame_file` (absolute path), a
+    `label` string and optionally a `fit` tile size. Returns (None, _) on hard failure so
+    callers degrade to None.
     """
     if not _ffmpeg_available():
         log("storyboard 跳过：未找到 ffmpeg")
@@ -255,27 +309,22 @@ def _render_storyboard(work_dir, tiles, out_stem):
     scratch_dir.mkdir(parents=True, exist_ok=True)
 
     font_path = _probe_font()
-    labels_burned = bool(font_path)
-    render_frames = []
-    if labels_burned:
-        for idx, tile in enumerate(tiles):
-            labelled = _labelled_frame(
-                Path(tile["frame_file"]), tile["label"], font_path, scratch_dir,
-                f"lbl_{out_stem}_{idx:05d}.jpg",
-            )
-            if labelled is None:
-                # First failure → abandon labelling entirely so the WHOLE sheet is consistent
-                # (no half-labelled pages). The JSON sidecar still carries every timestamp.
-                labels_burned = False
-                break
-            render_frames.append(labelled)
-    if not labels_burned:
-        render_frames = [Path(tile["frame_file"]) for tile in tiles]
-
     try:
-        pages = _tile_pages(
-            render_frames, CONFIG["storyboard_columns"],
-            storyboard_dir, out_stem, scratch_dir,
+        render_frames = (
+            _prepare_frames(tiles, font_path, scratch_dir, out_stem) if font_path else None
+        )
+        labels_burned = render_frames is not None
+        if render_frames is None:
+            # First label failure → abandon labelling for the WHOLE sheet (no half-labelled
+            # pages). The JSON sidecar still carries every timestamp.
+            render_frames = _prepare_frames(tiles, None, scratch_dir, out_stem)
+        pages = (
+            _tile_pages(
+                render_frames, CONFIG["storyboard_columns"],
+                storyboard_dir, out_stem, scratch_dir,
+            )
+            if render_frames is not None
+            else []
         )
     finally:
         shutil.rmtree(scratch_dir, ignore_errors=True)
@@ -367,7 +416,19 @@ def _source_to_output(source_time, clip):
     return round(max(out_start, min(mapped, out_end)), 3)
 
 
-def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fps):
+def _multi_source_tile_size(frame_sets):
+    """One tile size for a multi-source sheet: the first source's frame size (640x360 when no
+    frame can be probed). Every multi-source tile is re-encoded into it — see _prepared_frame."""
+    for entry in frame_sets.values():
+        size = _frame_size(entry["paths"][0])
+        if size:
+            return size
+    return 640, 360
+
+
+def build_edited_storyboard(
+    work_dir, source_video_path, clip_plan_validated, fps, *, source_frames=None
+):
     """OUTPUT-timeline contact sheet: one row per kept clip over the cut. Returns dict|None.
 
     For each kept clip, samples source start / mid / (end − 0.5s), maps each to the nearest
@@ -375,13 +436,28 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
     dedupes so a ≤1s clip yields 1-2 tiles (not 3 identical). Each tile is dual-labelled with
     both `output_timestamp` and `source_timestamp` (+ `source_clip_id`). Writes
     storyboard/edited_storyboard.json. Returns None + log on any failure.
+
+    Single-source plans read work_dir/frames at `fps`. A multi-source plan passes
+    `source_frames` = {source_id: {"paths", "numbers", "fps"[, "source_path"]}} built from each
+    source's own work_dir; its tiles also carry `source_id` and a short `S<n>` label listed
+    under `sources`, and `frame_file` keeps the full path (frame names repeat across sources).
     """
     try:
         work_dir = Path(work_dir)
-        paths, numbers = _frame_index(work_dir)
-        if not paths:
-            log("storyboard 跳过 edited：frames/ 为空或缺失")
-            return None
+        if source_frames is None:
+            paths, numbers = _frame_index(work_dir)
+            if not paths:
+                log("storyboard 跳过 edited：frames/ 为空或缺失")
+                return None
+            frame_sets = {None: {"paths": paths, "numbers": numbers, "fps": fps}}
+            tile_size = None
+        else:
+            frame_sets = {sid: entry for sid, entry in source_frames.items() if entry["paths"]}
+            if not frame_sets:
+                log("storyboard 跳过 edited：所有来源的 frames/ 为空或缺失")
+                return None
+            tile_size = _multi_source_tile_size(frame_sets)
+        short_labels = {sid: f"S{n}" for n, sid in enumerate(frame_sets, start=1)}
         clips = clip_plan_validated["clips"]
         if not clips:
             log("storyboard 跳过 edited：clip_plan_validated 无 clips")
@@ -401,10 +477,16 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
                 continue
             if source_end <= source_start:
                 continue
+            source_id = clip.get("source_id") if source_frames is not None else None
+            frame_set = frame_sets.get(source_id)
+            if frame_set is None:
+                continue  # this source has no extracted frames (e.g. a material restore)
             mid = (source_start + source_end) / 2.0
             end_sample = max(source_start, source_end - 0.5)
             for src_ts in (source_start, mid, end_sample):
-                frame = _nearest_existing_frame(src_ts, fps, paths, numbers)
+                frame = _nearest_existing_frame(
+                    src_ts, frame_set["fps"], frame_set["paths"], frame_set["numbers"]
+                )
                 if frame is None:
                     continue
                 key = (clip_id, str(frame))
@@ -412,14 +494,20 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
                     continue  # same clip resolving to the same frame → drop the duplicate tile
                 seen_frames.add(key)
                 out_ts = _source_to_output(src_ts, clip)
-                tiles.append({
+                src_label = "src" if source_id is None else short_labels[source_id]
+                tile = {
                     "tile_id": tile_id,
                     "output_timestamp": out_ts,
                     "source_timestamp": round(float(src_ts), 3),
                     "source_clip_id": clip_id,
-                    "label": f"out {_fmt_mmss(out_ts)} / src {_fmt_mmss(src_ts)}",
+                    "label": f"out {_fmt_mmss(out_ts)} / {src_label} {_fmt_mmss(src_ts)}",
                     "frame_file": str(frame),
-                })
+                }
+                if source_id is not None:
+                    tile["source_id"] = source_id
+                if tile_size is not None:
+                    tile["fit"] = tile_size
+                tiles.append(tile)
                 tile_id += 1
         if not tiles:
             log("storyboard 跳过 edited：未解析到任何帧")
@@ -433,12 +521,17 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
             return None
 
         for tile in tiles:
-            tile["frame_file"] = Path(tile["frame_file"]).name
+            tile["frame_file"] = (
+                Path(tile["frame_file"]).name
+                if source_frames is None
+                else str(tile["frame_file"])
+            )
+            tile.pop("fit", None)
         edited_source = Path(work_dir) / "edited_source.mp4"
         payload = {
             "schema_version": 1,
             "timeline": "output",
-            "source_video_path": str(source_video_path),
+            "source_video_path": str(source_video_path) if source_frames is None else None,
             "edited_video_path": edited_source.name if edited_source.exists() else None,
             "labels_burned": labels_burned,
             "page_images": work_dir_relative_pages(pages),
@@ -449,6 +542,15 @@ def build_edited_storyboard(work_dir, source_video_path, clip_plan_validated, fp
             },
             "tiles": tiles,
         }
+        if source_frames is not None:
+            payload["sources"] = [
+                {
+                    "label": short_labels[sid],
+                    "source_id": sid,
+                    "source_path": frame_sets[sid].get("source_path"),
+                }
+                for sid in frame_sets
+            ]
         json_path = work_dir / "storyboard" / "edited_storyboard.json"
         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         log(f"storyboard edited: {len(tiles)} tiles → {len(pages)} page(s), labels_burned={labels_burned}")
