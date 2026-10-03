@@ -236,6 +236,16 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
                 item["pause_start"] = round(
                     span["output_start"] + source_pause_start - span["source_start"], 3
                 )
+                # `time` IS the pause end; keep the source value apart so the artifact
+                # never mixes clocks.
+                item["source_pause_end"] = round(anchor.get("pause_end", source_time), 3)
+                item["pause_end"] = item["time"]
+                if "expected_time" in anchor:
+                    expected = float(anchor["expected_time"])
+                    item["source_expected_time"] = round(expected, 3)
+                    item["expected_time"] = round(
+                        span["output_start"] + expected - span["source_start"], 3
+                    )
                 remapped.append(item)
 
     speech_rows = [
@@ -262,19 +272,30 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
     return out_payload["sentence_anchors"]
 
 
+def _anchor_boundary_use(anchor):
+    # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+    # labels there are usable but unverified.
+    return anchor.get("boundary_use") or (
+        "unverified" if anchor["confidence"] in {"high", "medium"} else "none"
+    )
+
+
 def _format_sentence_entry_anchors_for_brief(work_dir, edit_mode):
     anchors = [
         anchor
         for anchor in _sentence_entry_anchors_for_brief(work_dir, edit_mode)
-        if anchor["confidence"] in {"high", "medium"}
+        if _anchor_boundary_use(anchor) != "none"
     ]
     if not anchors:
         return []
     lines = [
         "## 原声句末安全切入点",
         "",
-        "这些时间是 ASR 句末标点与短声学停顿对齐后的旁白安全入口。旁白在原声已开始后切入时，"
+        "这些时间是 ASR 句末标点与短声学停顿对齐后的旁白入口。旁白在原声已开始后切入时，"
         "必须从其中一个点开始；否则会在 TTS 前被 `interrupts_source_sentence` 硬阻断。",
+        "- 标 `unverified` 的点是由粗粒度 ASR 窗口里的标点位置估计、再吸附到短停顿得到的："
+        "落在停顿里，不会切断单词，但不保证原声句子已经说完（误差上限见 `±`）。请自己听一下再定；"
+        "门禁本身照常生效。",
         "- 调整方式：优先把 `start` 移到建议锚点；放不下时缩短文本、移动整块或删除该旁白，不能让脚本静默挪音频。",
         '- 原声句子完整性是硬约束：切入块写 `"source_entry_policy": "sentence_boundary"`；'
         "不存在 `intentional_interrupt` 绕过方式。没有后续可靠句末锚点时，移动、缩短或删除旁白块。",
@@ -284,8 +305,17 @@ def _format_sentence_entry_anchors_for_brief(work_dir, edit_mode):
             f" (SOURCE {anchor['source_time']:.2f}s)" if "source_time" in anchor else ""
         )
         text_tail = str(anchor.get("text_tail", "")).strip()
+        if _anchor_boundary_use(anchor) == "verified":
+            label = anchor["confidence"]
+        else:
+            # Schema-1 anchors carry no error bound to print.
+            label = (
+                f"unverified ±{float(anchor['timing_bound_seconds']):.1f}s"
+                if "timing_bound_seconds" in anchor
+                else "unverified"
+            )
         lines.append(
-            f"- {anchor['time']:.2f}s [{anchor['confidence']}]{source_suffix} {text_tail}".rstrip()
+            f"- {anchor['time']:.2f}s [{label}]{source_suffix} {text_tail}".rstrip()
         )
     lines.append("")
     return lines

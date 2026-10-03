@@ -67,7 +67,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 
 - 重跑只复用分段 sidecar 中记录的文本、TTS 设置与该 WAV 的 `size`/`mtime_ns` 均与当前相等的分段音频；
   修改旁白或合成参数后，只重生成受影响的 WAV。
-- 批准稿保护策略属于缓存设置：严格模式不会命中旧的自动缩稿缓存；只有同一严格策略下、
+- 批准稿保护策略属于缓存设置：严格模式与默认策略（`report-over-budget-v2`）互不命中，旧的自动缩稿缓存也不再复用；只有同一严格策略下、
   `spoken_text` 完整匹配且 WAV 存在非空的缓存才可离线复用。
 - 严格 CLI 在本轮合成前把旧 `tts_meta.json` 按时间戳归档至 `tts_meta.history/`，因此失败时
   当前路径不会继续冒充本轮成功；成功元数据通过同目录临时文件原子替换。
@@ -85,7 +85,7 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 
 ## 7. 能力边界
 
-- 超窗时默认在句界自动缩稿并在 `spoken_text/truncated` 留痕；批准稿加 `--preserve-approved-text`。
+- 超窗时保留原稿并记录日志；assemble 有界提速放不下则在渲染前以 `no_safe_fit` 阻断。批准稿加 `--preserve-approved-text`，超窗即在 TTS 阶段失败。
 - 不混流、不压低原声、不渲染字幕。
 - 不分析视频，也不选择时间点；只为输入稿件中的既定分段配音。
 - Fish Audio 与 IndexTTS 路径都不接受本地 `--voice-ref`；前者用已创建的 `FISH_TTS_REFERENCE_ID` 选择音色。

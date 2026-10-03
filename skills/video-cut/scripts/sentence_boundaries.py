@@ -20,11 +20,12 @@ def _find_source_artifact(work_dir, filename, source_id=None, source_work_dir=No
 
 
 def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=None):
-    """Load reliable sentence-end pause windows produced by video-understanding.
+    """Load usable sentence-end pause windows produced by video-understanding.
 
     A sentence anchor's `time` is the acoustic pause end, while `pause_start` is already
-    after the final spoken sample. Any cut within that closed interval preserves the sentence.
-    Low-confidence anchors are deliberately excluded from the hard-safety path.
+    after the final spoken sample. Any cut within that closed interval is word-safe.
+    `boundary_use: unverified` anchors (coarse-ASR estimates) stay usable but keep that
+    label so an edge resting on one is reported as such; `none` anchors are excluded.
     """
     path = _find_source_artifact(
         work_dir, "speech_boundary_anchors.json", source_id, source_work_dir
@@ -32,21 +33,88 @@ def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=No
     if path is None:
         return []
     payload = json.loads(path.read_text(encoding="utf-8"))
-    windows = [
-        {
+    windows = []
+    for anchor in payload["sentence_anchors"]:
+        # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+        # labels there are usable but unverified.
+        use = anchor.get("boundary_use") or (
+            "unverified" if anchor["confidence"] in {"high", "medium"} else "none"
+        )
+        if use == "none":
+            continue
+        windows.append({
             "start": round(anchor["pause_start"], 3),
             "end": round(anchor["time"], 3),
             "kind": "sentence_anchor",
             "confidence": anchor["confidence"],
-        }
-        for anchor in payload["sentence_anchors"]
-        if anchor["confidence"] in {"high", "medium"}
-    ]
+            "boundary_use": use,
+        })
     return sorted(windows, key=lambda row: (row["start"], row["end"]))
 
 
+# Interjections and common ASR artifacts on screams/music. A window whose text is only these
+# is not dialogue at a clip edge or narration entry; real short lines such as "救我！" still are.
+# Same copy in video-cut, video-script and video-assemble (parity-tested by function).
+_NON_DIALOGUE_TOKENS = frozenset(
+    "啊 嗯 哼 哦 呃 唉 嘿 呦 哈 呀 hi yeah ok okay oh uh ah hmm".split()
+)
+_NON_DIALOGUE_CJK = frozenset("啊嗯哼哦呃唉嘿呦哈呀")
+# Lines cross 15s ASR window edges (a line may run 13.2–15.4 while its window ends at 15.0),
+# so an interjection-only window next to real dialogue keeps this much of its shared edge.
+_INTERJECTION_GUARD_SECONDS = 1.0
+
+
+def _interjection_only(text):
+    tokens = [token for token in re.split(r"[\W_]+", text.lower()) if token]
+    # Punctuation-only rows ("……", "？") are often ASR for unintelligible speech: keep them.
+    return bool(tokens) and all(
+        token in _NON_DIALOGUE_TOKENS or set(token) <= _NON_DIALOGUE_CJK for token in tokens
+    )
+
+
+def _dialogue_speech_spans(rows):
+    """Merged dialogue spans from timed ASR rows.
+
+    A row holding only interjections ("啊！", "Hi.") is not dialogue, except a
+    `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue row. A row
+    without text is timing-only evidence and counts as dialogue.
+    """
+    rows = sorted(
+        (
+            {
+                "start": row["start"],
+                "end": row["end"],
+                "dialogue": not _interjection_only(row.get("text", "")),
+            }
+            for row in rows
+        ),
+        key=lambda row: (row["start"], row["end"]),
+    )
+    spans = []
+    for idx, row in enumerate(rows):
+        if row["dialogue"]:
+            spans.append({"start": row["start"], "end": row["end"]})
+            continue
+        before = rows[idx - 1] if idx > 0 else None
+        after = rows[idx + 1] if idx + 1 < len(rows) else None
+        if before and before["dialogue"] and row["start"] - before["end"] <= 0.05:
+            end = min(row["end"], row["start"] + _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": row["start"], "end": end})
+        if after and after["dialogue"] and after["start"] - row["end"] <= 0.05:
+            start = max(row["start"], row["end"] - _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": start, "end": row["end"]})
+    spans.sort(key=lambda row: (row["start"], row["end"]))
+    merged = []
+    for span in spans:
+        if merged and span["start"] <= merged[-1]["end"] + 0.05:
+            merged[-1]["end"] = max(merged[-1]["end"], span["end"])
+        else:
+            merged.append(span)
+    return merged
+
+
 def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
-    """Merged ASR speech spans (asr_clean.json wins over asr_result.json).
+    """Merged ASR dialogue spans (asr_clean.json wins over asr_result.json).
 
     Only used to decide whether an unsafe edge blocks; a missing transcript means unchecked.
     """
@@ -57,24 +125,28 @@ def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
             payload = json.loads(path.read_text(encoding="utf-8"))
             rows = payload["segments"] if filename == "asr_clean.json" else payload
             break
-    spans = sorted(
-        ({"start": row["start"], "end": row["end"]} for row in rows if row["text"].strip()),
-        key=lambda row: (row["start"], row["end"]),
-    )
-    merged = []
-    for span in spans:
-        if merged and span["start"] <= merged[-1]["end"] + 0.05:
-            merged[-1]["end"] = max(merged[-1]["end"], span["end"])
-        else:
-            merged.append(span)
-    return merged
+    return _dialogue_speech_spans(row for row in rows if row["text"].strip())
+
+
+def _unverified_window(row):
+    return row.get("boundary_use") == "unverified"
 
 
 def _combine_boundary_windows(*groups):
-    unique = {
-        (round(row["start"], 3), round(row["end"], 3)) for group in groups for row in group
-    }
-    return [{"start": start, "end": end} for start, end in sorted(unique)]
+    """Dedupe windows by span; a span backed by any verified/quiet row counts as verified."""
+    unique = {}
+    for group in groups:
+        for row in group:
+            key = (round(row["start"], 3), round(row["end"], 3))
+            if key not in unique or _unverified_window(unique[key]):
+                unique[key] = row
+    combined = []
+    for (start, end), row in sorted(unique.items()):
+        item = {"start": start, "end": end, "kind": row.get("kind", "quiet_window")}
+        if _unverified_window(row):
+            item["boundary_use"] = "unverified"
+        combined.append(item)
+    return combined
 
 
 def _same_source(left, right):
@@ -97,12 +169,15 @@ def enforce_clip_sentence_boundaries(
 ):
     """Block any audible clip edge that falls inside detected source speech.
 
-    Safe edges are: source start/end, a reliable sentence/quiet pause, or a truly contiguous
-    same-source join (no media is removed). Missing ASR timing degrades to `unchecked` rather
-    than inventing speech. Once ASR says an edge is speech-owned, failure to snap is blocking.
+    Safe edges are: source start/end, a sentence/quiet pause (`unverified_sentence_boundary`
+    when only a coarse-ASR sentence estimate covers it), or a truly contiguous same-source
+    join (no media is removed). Missing ASR timing degrades to `unchecked` rather than
+    inventing speech. Once ASR says an edge is speech-owned, failure to snap is blocking.
     """
     clips = plan["clips"]
     checks, new_blockers = [], []
+    verified_windows = [row for row in boundary_windows if not _unverified_window(row)]
+    unverified_windows = [row for row in boundary_windows if _unverified_window(row)]
 
     def inside(rows, ts):
         return any(row["start"] - tolerance <= ts <= row["end"] + tolerance for row in rows)
@@ -124,8 +199,13 @@ def enforce_clip_sentence_boundaries(
                 status, reason = "safe", "source_end"
             elif contiguous:
                 status, reason = "safe", "continuous_source_join"
-            elif inside(boundary_windows, ts):
+            elif inside(verified_windows, ts):
                 status, reason = "safe", "sentence_or_quiet_boundary"
+            elif inside(unverified_windows, ts) and (
+                not speech_spans or inside(speech_spans, ts)
+            ):
+                # Word-safe pause, but the sentence end is only a coarse-ASR estimate.
+                status, reason = "safe", "unverified_sentence_boundary"
             elif not speech_spans:
                 status, reason = "unchecked", "speech_timing_unavailable"
             elif not inside(speech_spans, ts):

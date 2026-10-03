@@ -181,6 +181,19 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     assert qc['loudness_mode'] == 'fixed_master_gain_no_loudnorm'
 
 
+def test_segment_level_blocking_stops_explicit_mix_before_the_video_encode(
+        adopted_case, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        assemble.assembly_contract, '_placed_audio_matches_timeline', lambda _seg: False)
+    with pytest.raises(assemble.AssemblyBlockedBeforeRender, match='timeline_audio_mismatch'):
+        render(adopted_case, tmp_path)
+    work = tmp_path / 'render'
+    assert not (work / 'output.mp4').exists()
+    qc = json.loads((work / 'assembly_qc.json').read_text())
+    assert qc['blocking_codes'] == ['timeline_audio_mismatch']
+    assert qc['delivery_qc']['video_encode_passes'] == 0
+
+
 def test_integer_mono_is_converted_to_float_before_equal_power_pan(adopted_case, tmp_path):
     # Real providers also return integer PCM. Panning s16 directly quantizes the
     # channel matrix before resampling even if the final output claims float PCM.

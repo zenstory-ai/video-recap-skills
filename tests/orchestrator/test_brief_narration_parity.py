@@ -166,3 +166,21 @@ def test_ffmpeg_filter_file_helpers_stay_identical():
     assert set(assemble) == names
     assert assemble == cut
 
+
+
+def test_interjection_rule_stays_identical_across_cut_script_assemble():
+    """The cut gate, narration lint, and assemble entry check agree on what is dialogue."""
+    names = {
+        "_NON_DIALOGUE_TOKENS", "_NON_DIALOGUE_CJK", "_INTERJECTION_GUARD_SECONDS",
+        "_interjection_only", "_dialogue_speech_spans",
+    }
+    cut, script, assemble = (
+        _top_level_definitions(ROOT / "skills" / path, names)
+        for path in (
+            "video-cut/scripts/sentence_boundaries.py",
+            "video-script/scripts/speech_ownership.py",
+            "video-assemble/scripts/audio_mix.py",
+        )
+    )
+    assert set(cut) == names
+    assert script == cut and assemble == cut

@@ -21,8 +21,6 @@ from providers.fish_audio import synthesize_fish_audio
 import providers.index_tts as index_provider
 from lib import (
     CONFIG,
-    _text_char_count,
-    _truncate_at_sentence,
     file_identity,
     get_video_duration,
     log,
@@ -138,44 +136,35 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice
     rate_offset = _parse_rate_offset(rate)
     budget = narration_tempo_budget(rate_offset)
     raw_budget = available * budget["max_raw_duration_factor"]
-    truncated = False
-    truncate_reason = "none"
     try:
         enforce_approved_text_policy(i, seg, seg["narration"], text, dur, available, raw_budget)
     except ApprovedTextDurationError:
         _cleanup_partial_tts_outputs(output_wav)
         raise
-    if dur > raw_budget and len(text) > 5:
-        chars_per_sec = _text_char_count(text) / dur
-        target_chars = max(5, int(raw_budget * chars_per_sec) - 1)
-        shortened = _truncate_at_sentence(text, target_chars)
-        if shortened and len(shortened) >= 5 and shortened != text:
-            log(f"  段 {i+1}: 解说超出片段时长，按累计语速预算句界缩短 {len(text)}→{len(shortened)} 字以适配（建议在解说里改写得更短）")
-            text = shortened
-            truncated = True
-            truncate_reason = "sentence_boundary"
-            provider_receipt = _run_tts_engine(
-                engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"),
-                voice_ref_b64=voice_ref_b64,
-            )
-            dur = get_video_duration(output_wav)
+    if dur > raw_budget:
+        # Never shorten authored text here: a truncated segment always blocked later as
+        # `truncated_speech`. assemble either fits it with bounded tempo or blocks it as
+        # `no_safe_fit` before the video encode.
+        log(
+            f"  段 {i+1}: 超出预算 {dur:.1f}s > {raw_budget:.1f}s，保留原稿，"
+            "交由 assemble 有界提速或在渲染前阻断"
+        )
 
     norm_meta = _maybe_normalize_tts_wav(output_wav)
     if norm_meta:
         dur = get_video_duration(output_wav)
     _write_tts_segment_cache(output_wav, cache_inputs, text, dur, rate_offset,
-                             truncated, truncate_reason, norm_meta, provider_receipt)
+                             norm_meta, provider_receipt)
     return _build_tts_segment_result(
-        i, seg, text, output_wav, dur, rate_offset, truncated, truncate_reason, norm_meta,
-        provider_receipt)
+        i, seg, text, output_wav, dur, rate_offset, norm_meta, provider_receipt)
 
 
 def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offset,
-                              truncated=False, truncate_reason="none", norm_meta=None,
-                              provider_receipt=None):
+                              norm_meta=None, provider_receipt=None):
     budget = narration_tempo_budget(rate_offset)
     authored_text = _clean_narration_text(seg["narration"])
-    resolved_truncated = truncated or text != authored_text
+    # voiceover never shortens text; still flag any spoken/authored mismatch (e.g. a reused sidecar).
+    resolved_truncated = text != authored_text
     result = {
         "segment_audio_schema_version": SEGMENT_AUDIO_SCHEMA_VERSION,
         "index": index,
@@ -185,7 +174,7 @@ def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offse
         "authored_text": seg["narration"],
         "spoken_text": text,
         "truncated": resolved_truncated,
-        "truncate_reason": (truncate_reason if truncate_reason != "none" else "sentence_boundary") if resolved_truncated else "none",
+        "truncate_reason": "sentence_boundary" if resolved_truncated else "none",
         "fit_status": "pending_assembly",
         "audio_path": str(output_wav),
         "audio_duration": duration,
@@ -444,8 +433,6 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
         output_wav,
         cached["audio_duration"],
         cached["tts_rate_offset"],
-        cached["truncated"],
-        cached["truncate_reason"],
         cached["normalization"],
         cached.get("provider_receipt"),
     )
@@ -493,8 +480,7 @@ def _load_tts_segment_cache(output_wav, cache_inputs):
 
 
 def _write_tts_segment_cache(output_wav, cache_inputs, spoken_text, duration, rate_offset,
-                             truncated=False, truncate_reason="none", norm_meta=None,
-                             provider_receipt=None):
+                             norm_meta=None, provider_receipt=None):
     """Persist non-secret inputs and the WAV identity for safe per-segment TTS reuse."""
     _tts_segment_cache_path(output_wav).write_text(
         json.dumps({
@@ -503,8 +489,6 @@ def _write_tts_segment_cache(output_wav, cache_inputs, spoken_text, duration, ra
             "spoken_text": spoken_text,
             "audio_duration": duration,
             "tts_rate_offset": rate_offset,
-            "truncated": truncated,
-            "truncate_reason": truncate_reason if truncated else "none",
             "normalization": norm_meta or None,
             "provider_receipt": provider_receipt,
         }, ensure_ascii=False, indent=2),

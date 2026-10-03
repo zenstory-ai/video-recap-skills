@@ -1,6 +1,7 @@
 """Load measured source-speech evidence and classify narration ownership."""
 
 import json
+import re
 from pathlib import Path
 
 from lib import CONFIG, file_identity
@@ -10,9 +11,71 @@ def _empty_evidence(mode):
     return {
         "anchors": [],
         "speech_spans": [],
+        "dialogue_spans": [],
         "quiet_windows": [],
         "require_measured": mode == "cut_output",
     }
+
+
+# Interjections and common ASR artifacts on screams/music. A window whose text is only these
+# is not dialogue at a clip edge or narration entry; real short lines such as "救我！" still are.
+# Same copy in video-cut, video-script and video-assemble (parity-tested by function).
+_NON_DIALOGUE_TOKENS = frozenset(
+    "啊 嗯 哼 哦 呃 唉 嘿 呦 哈 呀 hi yeah ok okay oh uh ah hmm".split()
+)
+_NON_DIALOGUE_CJK = frozenset("啊嗯哼哦呃唉嘿呦哈呀")
+# Lines cross 15s ASR window edges (a line may run 13.2–15.4 while its window ends at 15.0),
+# so an interjection-only window next to real dialogue keeps this much of its shared edge.
+_INTERJECTION_GUARD_SECONDS = 1.0
+
+
+def _interjection_only(text):
+    tokens = [token for token in re.split(r"[\W_]+", text.lower()) if token]
+    # Punctuation-only rows ("……", "？") are often ASR for unintelligible speech: keep them.
+    return bool(tokens) and all(
+        token in _NON_DIALOGUE_TOKENS or set(token) <= _NON_DIALOGUE_CJK for token in tokens
+    )
+
+
+def _dialogue_speech_spans(rows):
+    """Merged dialogue spans from timed ASR rows.
+
+    A row holding only interjections ("啊！", "Hi.") is not dialogue, except a
+    `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue row. A row
+    without text is timing-only evidence and counts as dialogue.
+    """
+    rows = sorted(
+        (
+            {
+                "start": row["start"],
+                "end": row["end"],
+                "dialogue": not _interjection_only(row.get("text", "")),
+            }
+            for row in rows
+        ),
+        key=lambda row: (row["start"], row["end"]),
+    )
+    spans = []
+    for idx, row in enumerate(rows):
+        if row["dialogue"]:
+            spans.append({"start": row["start"], "end": row["end"]})
+            continue
+        before = rows[idx - 1] if idx > 0 else None
+        after = rows[idx + 1] if idx + 1 < len(rows) else None
+        if before and before["dialogue"] and row["start"] - before["end"] <= 0.05:
+            end = min(row["end"], row["start"] + _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": row["start"], "end": end})
+        if after and after["dialogue"] and after["start"] - row["end"] <= 0.05:
+            start = max(row["start"], row["end"] - _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": start, "end": row["end"]})
+    spans.sort(key=lambda row: (row["start"], row["end"]))
+    merged = []
+    for span in spans:
+        if merged and span["start"] <= merged[-1]["end"] + 0.05:
+            merged[-1]["end"] = max(merged[-1]["end"], span["end"])
+        else:
+            merged.append(span)
+    return merged
 
 
 def _read_json(path):
@@ -54,14 +117,22 @@ def load_source_sentence_evidence(work_dir, mode="full"):
             payload = {"sentence_anchors": [], "speech_spans": [], "quiet_windows": []}
         speech_spans = payload["speech_spans"]
         quiet_windows = payload["quiet_windows"]
+    # `boundary_use` (schema 2) keeps coarse-ASR estimates usable as `unverified`; schema-1
+    # anchors (no `boundary_use`) were all coarse estimates: high/medium are `unverified`.
     anchors = [
         anchor
         for anchor in payload["sentence_anchors"]
-        if anchor["confidence"] in {"high", "medium"}
+        if (
+            anchor.get("boundary_use")
+            or ("unverified" if anchor["confidence"] in {"high", "medium"} else "none")
+        )
+        != "none"
     ]
     return {
         "anchors": sorted(anchors, key=lambda item: item["time"]),
         "speech_spans": speech_spans,
+        # Entry ownership only: an interjection-only window has no sentence to interrupt.
+        "dialogue_spans": _dialogue_speech_spans(speech_spans),
         "quiet_windows": quiet_windows,
         "require_measured": mode == "cut_output",
     }
@@ -124,7 +195,7 @@ def entry_overlaps_source_speech(start, evidence, *, authored_overlap=True, tole
         return False
     if any(
         row["start"] - tolerance <= start < row["end"] - tolerance
-        for row in evidence["speech_spans"]
+        for row in evidence["dialogue_spans"]
     ):
         return True
     if evidence["speech_spans"]:

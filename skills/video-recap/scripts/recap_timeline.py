@@ -381,7 +381,14 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
                 time=round(output_start + when - source_start, 3),
                 source_pause_start=round(pause, 3),
                 pause_start=round(output_start + pause - source_start, 3),
+                # `time` IS the pause end; keep the source value apart (one clock per field).
+                source_pause_end=round(float(anchor.get("pause_end", when)), 3),
             )
+            item["pause_end"] = item["time"]
+            if "expected_time" in anchor:
+                expected = float(anchor["expected_time"])
+                item["source_expected_time"] = round(expected, 3)
+                item["expected_time"] = round(output_start + expected - source_start, 3)
             mapped_anchors.append(item)
         for rows, destination, require_text in (
             (speech_rows, mapped_speech, True),
@@ -462,14 +469,31 @@ def _write_multi_source_output_brief(work_dir, source_records, validated_plan_pa
             f"{c['source_id']} `{src['source_path']}` "
             f"source {_fmt_range(c['source_start'], c['source_end'])}{reason}"
         )
-    anchors = speech_evidence["sentence_anchors"]
-    if anchors:
-        lines += ["", "## 原声句末安全切入点"]
-        lines.extend(
-            f"- {row['time']:.3f}s ({row['source_id']})"
-            for row in anchors
-            if row["confidence"] in {"high", "medium"}
+    anchors = []
+    for row in speech_evidence["sentence_anchors"]:
+        # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+        # labels there are usable but unverified.
+        use = row.get("boundary_use") or (
+            "unverified" if row["confidence"] in {"high", "medium"} else "none"
         )
+        if use != "none":
+            anchors.append((row, use))
+    if anchors:
+        lines += [
+            "",
+            "## 原声句末安全切入点",
+            "",
+            "`unverified` 点是粗粒度 ASR 窗口里的标点位置估计、再吸附到短停顿：不切断单词，"
+            "但不保证原声句子已说完（误差上限见 `±`）；门禁照常生效。",
+        ]
+        for row, use in anchors:
+            if use == "verified":
+                label = row["confidence"]
+            elif "timing_bound_seconds" in row:
+                label = f"unverified ±{float(row['timing_bound_seconds']):.1f}s"
+            else:  # schema-1 anchors carry no error bound
+                label = "unverified"
+            lines.append(f"- {row['time']:.3f}s [{label}] ({row['source_id']})")
     lines += ["", "## Source work dirs"]
     for s in source_records:
         lines.append(f"- {s['source_id']}: `{_source_work_dir(work_dir, s)}`")

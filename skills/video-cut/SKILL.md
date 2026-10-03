@@ -30,7 +30,7 @@ description: >
 - `start` / `end` 是原片秒数；也接受 `source_start` / `source_end` 或 `in` / `out`。
 - 顶层可选 `target_duration`，例如 `"10m"`。
 - 多视频项目的每个片段还必须填写 `source_id`（不接受 `id` 代替），并用 `--sources-manifest` 传入来源清单（形状见下）。
-- `speech_boundary_anchors.json` 与 ASR 时间段由理解阶段提供；Agent 先写大致区间，工具会尝试吸附并把仍在讲话区间内的入/出点作为 blocker 返回。
+- `speech_boundary_anchors.json` 与 ASR 时间段由理解阶段提供；Agent 先写大致区间，工具会尝试吸附并把仍在讲话区间内的入/出点作为 blocker 返回。只含语气词或 ASR 杂音的窗口（"啊！"、"Hi."）不算讲话区间，只在紧挨真实对白的一侧保留 1 秒保护。只有标点的窗口（"……"）仍算讲话。
 
 多视频来源清单只接受一种形状，其他形状直接报错并写明期望形状：
 

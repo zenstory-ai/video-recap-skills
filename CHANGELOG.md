@@ -57,6 +57,10 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- **粗粒度 ASR 的句末锚点不再冒充 `high`。** understanding 按 ASR 窗口推出每个锚点的最坏误差 `timing_bound_seconds`，15 秒窗口里的锚点如实标为 `low` 并带 `boundary_use: unverified`，而不是凭字数比例猜出的 `high`；`speech_boundary_anchors.json` 升到 schema 2，旧文件有 `audio.wav` 时重新检测；素材库恢复（不带音频）时按 `asr_result.json` 原地重标、锚点时间不变，标不了就保持原样，不会被空的 `unavailable` 文件覆盖；没有 `boundary_use` 的 schema 1 锚点一律按 `unverified` 读，不再冒充已验证。cut、script、assemble、brief 按 `boundary_use` 选锚点，选中的集合和门禁结果不变，状态与 brief 改写为 `unverified`（brief 显示 `[unverified ±N s]`）。剪后输出时钟的锚点也映射了 `pause_end` 和 `expected_time`（原片值保留在 `source_pause_end` / `source_expected_time`）。
+- **只有语气词或 ASR 杂音的窗口（"啊！"、"Hi."）不再让整段窗口都不能下刀或切入旁白。** cut 门禁、script 的旁白入口检查和 assemble 的入口检查都不再把这类窗口当作对白，只在紧挨真实对白的一侧保留 1 秒保护；"救我！"这类短台词和只有标点的窗口（"……"）仍算对白。
+- **旁白结束后原声 3 秒内回满。** assemble 只等 3 秒内的句末锚点，否则在旁白结束处回满（`bounded_release`），不再把原声压到远处的锚点或片尾；`assembly_qc.summary.max_source_duck_hold_seconds` 记录最长的压低延续。
+- **默认路径不再截短旁白。** voiceover 超预算时保留原稿只记日志（截短后的产物以前总会被 `truncated_speech` 阻断）；assemble 有界提速仍放不下的段在视频编码前以 `no_safe_fit` 阻断，错误里写明段号与 `needed_tempo_factor`，不再白跑一遍完整渲染、也不再多调一次 TTS；显式 adopted full-sound 路径同样在编码前阻断。TTS 缓存策略名改为 `report-over-budget-v2`，旧的截短缓存不会被复用。
 - **故事索引被截断时不再报 ok。** consolidate 的索引调用此前上限 3000 token，5 分钟的解说素材就会被截断（`finish_reason=length`），解析出空列表后照样写出空的 `understanding_index.json`，`consolidation.status.json` 仍是 `ok`，brief 拿到 0 个角色。现在索引与 ASR 清洗两次调用的上限都是 8000 token，被截断时加倍预算重试一次；仍被截断或返回的不是 JSON 时不写产物，`consolidation.status.json` 记为 `failed` 并写明原因，brief 照常提示。索引 prompt 要求更紧凑的输出（每条描述不超过 40 字、剧情节点最多 20 条等），已有索引会按新 prompt 重建一次。
 - **ASR 读不到音频文件时报错，** 不再当作空转写继续。
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。

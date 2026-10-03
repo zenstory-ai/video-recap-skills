@@ -323,26 +323,3 @@ def api_call(payload, *, api_url, api_key, api_env_var, max_retries=8):
                 raise RuntimeError(f"API 调用失败 {max_retries} 次: {safe_error}")
 
 
-def _text_char_count(text):
-    """计算文本的有效字数（去除标点和空白，这些不占 TTS 朗读时间）。"""
-    return len(re.sub(r'[，。！？、；：…“”‘’《》〈〉\s"\'「」『』（）()【】\[\]—～·,.!?;:\\-]', '', text))
-
-
-def _truncate_at_sentence(text, max_chars):
-    """在句子边界截断，不产生残句。max_chars 按有效字符计（不含标点空白）。"""
-    if _text_char_count(text) <= max_chars:
-        return text
-    eff = 0
-    cutoff = len(text)
-    for i, ch in enumerate(text):
-        eff += 1 if _text_char_count(ch) else 0
-        if eff > max_chars:
-            cutoff = i + 1
-            break
-    idx = max(text[:cutoff].rfind(sep) for sep in ['。', '！', '？', '!', '?'])
-    if idx > 0:
-        return text[:idx + 1]
-    idx = max(text[:cutoff].rfind(sep) for sep in ['，', '、', '；', ','])
-    if idx > 3:
-        return text[:idx] + '。'
-    return ""

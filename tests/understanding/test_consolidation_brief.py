@@ -864,7 +864,7 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
     assert fusion[0]["narration_slots"][0]["start"] == pytest.approx(6.0)
     assert "ASR chunk 1: 1.0-5.0s" in text
     assert "ASR chunk 1: 101.0-105.0s" not in text
-    assert "4.00s [high] (SOURCE 104.00s)" in text
+    assert "4.00s [unverified] (SOURCE 104.00s)" in text  # schema-1 anchor
     output_anchors = json.loads(
         (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
     )
@@ -900,6 +900,39 @@ def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):
     anchors = brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
 
     assert [row["time"] for row in anchors] == [4.0, 14.0]
+
+
+def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path):
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {"clips": [{"source_start": 100.0, "source_end": 110.0,
+                    "output_start": 0.0, "output_end": 10.0}]},
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(
+        tmp_path / "speech_boundary_anchors.json",
+        {"schema_version": 2, "sentence_anchors": [
+            {"time": 104.0, "pause_start": 103.8, "pause_end": 104.0, "expected_time": 103.5,
+             "confidence": "low", "boundary_use": "unverified",
+             "timing_bound_seconds": 9.24, "text_tail": "估计句末。"},
+            {"time": 106.0, "pause_start": 105.8, "pause_end": 106.0,
+             "confidence": "low", "boundary_use": "none",
+             "timing_bound_seconds": 9.0, "text_tail": "不可用。"},
+        ]},
+    )
+
+    lines = brief_timeline._format_sentence_entry_anchors_for_brief(tmp_path, "cut")
+
+    text = "\n".join(lines)
+    assert "4.00s [unverified ±9.2s] (SOURCE 104.00s) 估计句末。" in text
+    assert "不可用" not in text
+    output = json.loads(
+        (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )
+    mapped = output["sentence_anchors"][0]
+    assert mapped["pause_end"] == mapped["time"] == 4.0
+    assert mapped["source_pause_end"] == 104.0
+    assert (mapped["expected_time"], mapped["source_expected_time"]) == (3.5, 103.5)
 
 
 @pytest.mark.parametrize(

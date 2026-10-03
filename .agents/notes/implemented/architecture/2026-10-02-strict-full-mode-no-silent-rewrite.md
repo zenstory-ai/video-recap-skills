@@ -2,6 +2,8 @@
 
 Status: implemented
 
+Superseded in part by [[2026-10-02-voiceover-no-default-truncation]]
+
 ## Problem
 
 [[2026-05-18-agent-owned-narration-cli-mechanical]] 把"创作归 Agent、CLI 只做机械步骤"定为原则，但给 full 模式留了一个例外：`validate.py` 默认走 `_align_narration_to_quiet`，先经 `_validate_narration_budget` 改写 Agent 的稿子，再按"安静窗口覆盖率"算 `overlaps_speech`。改写包括：

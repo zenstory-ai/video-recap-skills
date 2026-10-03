@@ -164,6 +164,12 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
             timeline_audio_failed.append(s["index"])
 
     placed = [s["placed_audio_duration"] for s in segments]
+    # Information only: how long original audio stays ducked after each narration run ends.
+    duck_holds = [
+        float(s["source_restore_at"]) - float(s["actual_place_end"])
+        for s in segments
+        if s.get("source_restore_at") is not None and s.get("actual_place_end") is not None
+    ]
     blocking_codes = []
     if audio_mode == "narration" and not segments:
         blocking_codes.append("missing_narration")
@@ -241,6 +247,9 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
             "truncated_segments": truncated,
             "unsafe_source_handoff_segments": handoff_failed,
             "timeline_audio_mismatch_segments": timeline_audio_failed,
+            "max_source_duck_hold_seconds": (
+                round(max(0.0, max(duck_holds)), 4) if duck_holds else None
+            ),
         },
         "output": output,
     }

@@ -7,7 +7,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-LEGACY_TEXT_POLICY = "legacy-auto-truncate-v1"
+# Part of the TTS cache key: renaming it invalidates audio cached under the old default,
+# which re-synthesized truncated text.
+LEGACY_TEXT_POLICY = "report-over-budget-v2"
 PRESERVE_APPROVED_TEXT_POLICY = "preserve-approved-text-v1"
 
 

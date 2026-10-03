@@ -730,3 +730,77 @@ def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
         validate_bounds([{"start": 0.0, "end": 1.0}], float("nan"))
 
 
+
+
+def _full_mode_entry_lint(tmp_path, anchors, start):
+    _write_json(
+        tmp_path / "speech_boundary_anchors.json",
+        {"schema_version": 2, "sentence_anchors": anchors},
+    )
+    _write_json(tmp_path / "asr_result.json", [{"start": 0.0, "end": 30.0, "text": "持续原声。"}])
+    report = lint_narration(
+        [{"start": start, "end": start + 3.0, "narration": "入口测试。", "overlaps_speech": True}],
+        mode="full",
+        work_dir=tmp_path,
+    )
+    return [item for item in report["errors"] if "source_sentence" in item["code"]]
+
+
+_UNVERIFIED_ANCHOR = {
+    "time": 12.0, "pause_start": 11.8, "confidence": "low",
+    "boundary_use": "unverified", "timing_bound_seconds": 9.0,
+}
+
+
+def test_entry_at_unverified_anchor_passes_the_sentence_gate(tmp_path):
+    assert _full_mode_entry_lint(tmp_path, [_UNVERIFIED_ANCHOR], 12.0) == []
+
+
+def test_mid_speech_entry_with_unverified_anchors_names_the_boundary_use(tmp_path):
+    errors = _full_mode_entry_lint(tmp_path, [_UNVERIFIED_ANCHOR], 8.0)
+    assert [item["code"] for item in errors] == ["interrupts_source_sentence"]
+    assert errors[0]["suggested_start"] == 12.0
+    assert errors[0]["anchor_boundary_use"] == "unverified"
+
+
+def test_only_unusable_anchors_still_report_anchors_unavailable(tmp_path):
+    errors = _full_mode_entry_lint(
+        tmp_path, [{**_UNVERIFIED_ANCHOR, "boundary_use": "none"}], 8.0
+    )
+    assert [item["code"] for item in errors] == ["source_sentence_anchors_unavailable"]
+
+
+def test_schema1_anchor_is_reported_as_unverified(tmp_path):
+    _write_source_anchors(tmp_path, [{"time": 12.0, "pause_start": 11.8, "confidence": "high"}])
+    _write_json(tmp_path / "asr_result.json", [{"start": 0.0, "end": 30.0, "text": "持续原声。"}])
+    report = lint_narration(
+        [{"start": 8.0, "end": 11.0, "narration": "入口测试。", "overlaps_speech": True}],
+        mode="full",
+        work_dir=tmp_path,
+    )
+    errors = [item for item in report["errors"] if "source_sentence" in item["code"]]
+    assert [item["code"] for item in errors] == ["interrupts_source_sentence"]
+    assert errors[0]["anchor_boundary_use"] == "unverified"
+
+
+@pytest.mark.parametrize(("start", "blocked"), [(16.0, False), (15.5, True)])
+def test_entry_ignores_interjection_only_window_beyond_the_dialogue_guard(
+    tmp_path, start, blocked
+):
+    # Same rule as the cut gate: "啊！" has no sentence to interrupt, except the 1s guard
+    # on the edge it shares with real dialogue.
+    _write_json(
+        tmp_path / "speech_boundary_anchors.json",
+        {"schema_version": 2, "sentence_anchors": [_UNVERIFIED_ANCHOR]},
+    )
+    _write_json(
+        tmp_path / "asr_result.json",
+        [{"start": 0.0, "end": 15.0, "text": "真实对白。"}, {"start": 15.0, "end": 30.0, "text": "啊！"}],
+    )
+    report = lint_narration(
+        [{"start": start, "end": start + 3.0, "narration": "入口测试。", "overlaps_speech": True}],
+        mode="full",
+        work_dir=tmp_path,
+    )
+    codes = [item["code"] for item in report["errors"] if "source_sentence" in item["code"]]
+    assert codes == (["interrupts_source_sentence"] if blocked else [])

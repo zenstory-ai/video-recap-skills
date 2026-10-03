@@ -80,11 +80,15 @@
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "sentence_anchors": [
     {
       "time": 5.809,
-      "confidence": "high",
+      "confidence": "low",
+      "boundary_use": "unverified",
+      "timing_bound_seconds": 9.778,
+      "timing_basis": "asr_window",
+      "alignment_error": 0.012,
       "text_tail": "带你重走詹姆斯的二十一年。",
       "pause_start": 5.222,
       "pause_end": 5.809
@@ -93,8 +97,16 @@
 }
 ```
 
+ASR 时间只到窗口级，句末位置只能在窗口内估计。`timing_bound_seconds` 是停顿到窗口两端的较远距离，
+即句末真实位置的最坏误差；`confidence` 取它与 `alignment_error` 的较大值（≤0.6 high，≤1.2 medium，否则 low）。
+`boundary_use` 决定下游用不用：`verified`（high/medium）、`unverified`（窗口太粗但吸附误差 ≤1.2s，仍作门禁锚点，
+brief 里标 `unverified ±N s`）、`none`（不用）。缺 `boundary_use` 的锚点来自 schema 1 的旧估计器：high/medium 视为 `unverified`、其余为 `none`；
+理解阶段发现 `schema_version` 不是 2 时：有 `audio.wav` 就重新生成本文件；没有（素材库恢复）就按 `asr_result.json`
+原地重标（锚点时间不变，记 `upgraded_from_schema: 1`），重标不了就保持原样。剪后输出时钟的
+`speech_boundary_anchors_output.json` 里 `time` / `pause_start` / `pause_end` / `expected_time` 都是输出时钟，原片值在 `source_*` 字段。
+
 当 `overlaps_speech=true` 且旁白不是从 0 秒冷开场时，`narration` lint 要求 `start`
-贴近 `high`/`medium` 锚点。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回
+贴近 `boundary_use` 不为 `none` 的锚点。入口是否落在原声讲话里，与 cut 门禁用同一条语气词规则：只有语气词的 ASR 窗口（"啊！"、"Hi."）不算讲话，只在紧挨真实对白的一侧保留 1 秒；assemble 的入口检查同样如此。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回
 `suggested_start` 与 `source_text_tail` 给 Agent 调整。常规块使用
 `source_entry_policy: "sentence_boundary"`；原声语句完整性没有抢断 override。最后一个可靠
 锚点之后又进入已声明的原声讲话区时，`suggested_start` 可为 `null`，Agent 必须移动、缩短或删除该旁白块。
@@ -324,7 +336,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 ```
 
 `qc.boundary_status.sentence_checks` 逐项记录每个片段 start/end 是 `safe`、`unchecked`
-还是 `blocking`。理解阶段已有 ASR 讲话时间时，任何未落到源头/源尾、可靠句末/静音窗，且
+还是 `blocking`（落在 `unverified` 句末锚点上的边界为 `safe`，`reason` 记 `unverified_sentence_boundary`）。理解阶段已有 ASR 讲话时间时，任何未落到源头/源尾、句末锚点/静音窗，且
 不是同源无损连续连接的边界都会写入 `qc.blocking[].code=unsafe_clip_sentence_boundary`。
 切镜吸附先执行，句末吸附最后执行，保证视觉边界不会覆盖声音安全边界。
 
@@ -485,8 +497,14 @@ full / cut 流程（含本地采用路径）合成完成后，video-recap 在 `w
 `source_restore_at` 与 `source_handoff_status`。组装阶段从不按时间裁旁白尾音：放不下时用
 `no_safe_fit` 阻断。`placed_audio_path` 是实际写入 canonical `narration.wav` 的完整逐段 PCM；
 `timeline.json`/剪映必须引用它而不是更长的加速前文件。素材时长与序列化后的时间线段长不一致时，
-`assembly_qc.json` 用 `timeline_audio_mismatch` 阻断。原声恢复在 `pause_start` 前保持压低，
-只在实测停顿内渐强，并于 `source_restore_at` 完成，避免渐强提前泄露上一句尾音。
+`assembly_qc.json` 用 `timeline_audio_mismatch` 阻断。旁白结束后原声最多再压低 3 秒，等这段时间内的
+第一个句末锚点：压到它的 `pause_start`（`source_duck_end`），只在实测停顿内渐强，并于 `source_restore_at`
+完成，避免渐强提前泄露上一句尾音。`source_handoff_status` 取值：`sentence_boundary`（已验证锚点）、
+`sentence_boundary_unverified`（锚点为 `unverified`，含 schema 1 旧锚点）、`held_to_timeline_end`（3 秒内无锚点且离片尾
+不足 3 秒，压到片尾）、`bounded_release`（3 秒内无锚点，在旁白结束处以 `duck_fade_seconds` 渐强回满，不阻断）、
+`anchors_unavailable`（原声有讲话但没有可用锚点，阻断）、`no_source_speech`；入口状态在 `source_entry_status`
+（`sentence_boundary` / `sentence_boundary_unverified` / `quiet_source` / `unverified` / `unsafe_entry` / `anchors_unavailable`）。
+每次压低延续 = `source_restore_at - actual_place_end`，最大值写在 `assembly_qc.json` 的 `summary.max_source_duck_hold_seconds`，只作信息、不阻断。
 
 ## dub_lint.json
 

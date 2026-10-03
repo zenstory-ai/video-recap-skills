@@ -354,6 +354,106 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
     return periods
 
 
+SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION = 2
+
+
+def anchors_current(work_dir):
+    """True when speech_boundary_anchors.json exists and has the current schema.
+
+    Schema 1 labelled coarse-ASR anchors `high` from a proportional position guess; a cached
+    schema-1 artifact must be regenerated rather than trusted.
+    """
+    path = Path(work_dir) / "speech_boundary_anchors.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("schema_version") == SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION
+    )
+
+
+def _anchor_confidence(seconds):
+    return "high" if seconds <= 0.6 else ("medium" if seconds <= 1.2 else "low")
+
+
+def _classify_anchor(timing_bound, error):
+    """(confidence, boundary_use) from the ASR-window bound and the pause-snap distance."""
+    confidence = _anchor_confidence(max(timing_bound, error))
+    if confidence in {"high", "medium"}:
+        return confidence, "verified"
+    return confidence, ("unverified" if error <= 1.2 else "none")
+
+
+def _upgrade_schema1_anchors(payload, asr_result):
+    """Relabel a schema-1 payload as schema 2 without audio, or return None.
+
+    Schema 1 already stores each anchor's pause, snap error and ASR window index, so the
+    schema-2 labels can be recomputed from `asr_result` alone. Anchor times are unchanged.
+    Returns None when any anchor cannot be mapped back to its ASR window.
+    """
+    segments = list(asr_result or [])
+    upgraded = []
+    for anchor in payload.get("sentence_anchors") or []:
+        try:
+            segment = segments[int(anchor["asr_segment_index"])]
+            seg_start = float(segment["start"])
+            seg_end = float(segment["end"])
+            pause_start = float(anchor["pause_start"])
+            error = float(anchor["alignment_error"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            return None
+        tail = str(anchor.get("text_tail") or "").strip()
+        if seg_end <= seg_start or (tail and tail not in str(segment.get("text", ""))):
+            return None
+        timing_bound = max(pause_start - seg_start, seg_end - pause_start, 0.0)
+        confidence, boundary_use = _classify_anchor(timing_bound, error)
+        upgraded.append({
+            **anchor,
+            "timing_bound_seconds": round(timing_bound, 3),
+            "timing_basis": "asr_window",
+            "confidence": confidence,
+            "boundary_use": boundary_use,
+        })
+    return {
+        **payload,
+        "schema_version": SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION,
+        "sentence_anchors": upgraded,
+        "upgraded_from_schema": payload.get("schema_version"),
+    }
+
+
+def ensure_speech_boundary_anchors(work_dir, asr_result):
+    """Bring speech_boundary_anchors.json to the current schema without losing anchors.
+
+    With `audio.wav` present the anchors are re-detected. Without it (a material-library
+    restore copies the anchors but not the audio) a schema-1 file is relabelled in place from
+    `asr_result`; if that is impossible the file is left untouched, because consumers read
+    schema-1 high/medium as before. Usable anchors are never replaced by an `unavailable`
+    artifact. Only a missing file with no audio falls through to the detector's
+    `unavailable` report, as before.
+    """
+    work_dir = Path(work_dir)
+    if anchors_current(work_dir):
+        return
+    path = work_dir / "speech_boundary_anchors.json"
+    if (work_dir / "audio.wav").exists() or not path.exists():
+        detect_speech_boundary_anchors(work_dir, asr_result)
+        return
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return
+    if not isinstance(payload, dict):
+        return
+    upgraded = _upgrade_schema1_anchors(payload, asr_result)
+    if upgraded is None:
+        log("⚠️  speech_boundary_anchors.json 为旧格式且无法从 asr_result 重新标注，保持原样")
+        return
+    path.write_text(json.dumps(upgraded, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def detect_speech_boundary_anchors(work_dir, asr_result):
     """Write sentence-end entry anchors by aligning ASR punctuation to short pauses.
 
@@ -361,13 +461,20 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
     punctuation time from its character position inside the ASR window, then snap it to the
     closest short acoustic pause. The output is guidance + a deterministic pre-TTS gate; it
     never rewrites narration timing on its own.
+
+    The character-position estimate is a guess, so `confidence` is not taken from the snap
+    distance alone: the sentence end can be anywhere inside the ASR window, which bounds the
+    real error by `timing_bound_seconds` (the farther window edge from the pause). Only a
+    narrow window can yield `high`/`medium` (`boundary_use: verified`); a wide window yields
+    `low`, and an anchor that still snapped within the alignment limit is `unverified`
+    (usable by gates, labelled as an estimate) rather than dropped.
     """
     work_dir = Path(work_dir)
     audio_path = work_dir / "audio.wav"
     out_path = work_dir / "speech_boundary_anchors.json"
     segments = list(asr_result or [])
     report = {
-        "schema_version": 1,
+        "schema_version": SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION,
         "artifact": "speech_boundary_anchors.json",
         "status": "completed",
         "detector": {
@@ -439,14 +546,18 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
             used.add(pause["index"])
             last_midpoint = pause["midpoint"]
             error = abs(pause["midpoint"] - expected)
-            confidence = "high" if error <= 0.6 else ("medium" if error <= 1.2 else "low")
+            timing_bound = max(pause["start"] - seg_start, seg_end - pause["start"], 0.0)
+            confidence, boundary_use = _classify_anchor(timing_bound, error)
             anchors.append({
                 "time": pause["end"],
                 "pause_start": pause["start"],
                 "pause_end": pause["end"],
                 "expected_time": round(expected, 3),
                 "alignment_error": round(error, 3),
+                "timing_bound_seconds": round(timing_bound, 3),
+                "timing_basis": "asr_window",
                 "confidence": confidence,
+                "boundary_use": boundary_use,
                 "punctuation": match.group(0),
                 "text_tail": text[max(0, match.end() - 32):match.end()],
                 "asr_segment_index": asr_index,
