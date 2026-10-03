@@ -21,8 +21,6 @@ from providers.fish_audio import synthesize_fish_audio
 import providers.index_tts as index_provider
 from lib import (
     CONFIG,
-    _text_char_count,
-    _truncate_at_sentence,
     file_identity,
     get_video_duration,
     log,
@@ -145,20 +143,14 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice
     except ApprovedTextDurationError:
         _cleanup_partial_tts_outputs(output_wav)
         raise
-    if dur > raw_budget and len(text) > 5:
-        chars_per_sec = _text_char_count(text) / dur
-        target_chars = max(5, int(raw_budget * chars_per_sec) - 1)
-        shortened = _truncate_at_sentence(text, target_chars)
-        if shortened and len(shortened) >= 5 and shortened != text:
-            log(f"  段 {i+1}: 解说超出片段时长，按累计语速预算句界缩短 {len(text)}→{len(shortened)} 字以适配（建议在解说里改写得更短）")
-            text = shortened
-            truncated = True
-            truncate_reason = "sentence_boundary"
-            provider_receipt = _run_tts_engine(
-                engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"),
-                voice_ref_b64=voice_ref_b64,
-            )
-            dur = get_video_duration(output_wav)
+    if dur > raw_budget:
+        # Never shorten authored text here: a truncated segment always blocked later as
+        # `truncated_speech`. assemble either fits it with bounded tempo or blocks it as
+        # `no_safe_fit` before the video encode.
+        log(
+            f"  段 {i+1}: 超出预算 {dur:.1f}s > {raw_budget:.1f}s，保留原稿，"
+            "交由 assemble 有界提速或在渲染前阻断"
+        )
 
     norm_meta = _maybe_normalize_tts_wav(output_wav)
     if norm_meta:

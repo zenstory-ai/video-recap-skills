@@ -185,10 +185,10 @@ def test_tts_cache_inputs_change_with_narration_speed(monkeypatch, tmp_path):
     assert key_normal != key_fast
 
 
-def test_synthesize_segment_block_truncation_accounts_for_narration_speed(monkeypatch, tmp_path):
-    # assemble speeds every segment up by narration_speed before placement, so the slot holds
-    # raw_dur / narration_speed. A block whose RAW tts overflows the slot but fits after the 1.3x
-    # speedup must NOT be truncated; only a block that overflows even then is trimmed.
+def test_synthesize_segment_never_truncates_over_budget_blocks(monkeypatch, tmp_path):
+    # assemble speeds every segment up by narration_speed before placement. Neither a block
+    # that fits only after that speedup nor one that overflows even then is shortened here:
+    # the authored text is synthesized once and assemble decides fit or no_safe_fit.
     monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
     calls = _offline_mimo_segment(monkeypatch, write=lambda text, _n: text.encode("utf-8"))
     monkeypatch.setattr("voiceover.get_video_duration",
@@ -204,14 +204,14 @@ def test_synthesize_segment_block_truncation_accounts_for_narration_speed(monkey
     assert calls == [block]                       # exactly one TTS call -> NOT truncated
     assert res["narration"] == block
 
-    # 100-char block -> raw 30s: overflows even after the speedup -> still truncated (two calls).
+    # 100-char block -> raw 30s: overflows even after the speedup -> kept whole, one call.
     calls.clear()
     huge = "情节推进。" * 20
     res2 = _synthesize_segment(1, {"start": 0.0, "end": 12.0, "narration": huge, "pause_after_ms": 200},
                                [huge], tts_dir, "mimo-tts")
-    assert len(calls) == 2                         # re-synthesized after truncation
-    assert res2["narration"] == huge               # authored narration stays intact for schema stability
-    assert len(res2["spoken_text"]) < len(huge)     # rendered text is what gets shortened
+    assert calls == [huge]
+    assert res2["spoken_text"] == huge
+    assert res2["truncated"] is False
 
 
 def test_synthesize_segment_rejects_cache_when_wav_bytes_change(monkeypatch, tmp_path):
@@ -675,29 +675,6 @@ def test_partial_tts_meta_records_failed_segment_details(monkeypatch, tmp_path):
         "error": "network timeout",
     }]
     assert [seg["index"] for seg in meta["segments"]] == [0]
-
-
-def test_p0_synthesize_segment_budget_uses_cumulative_tempo_cap(monkeypatch, tmp_path):
-    """Voiceover rewrite budget must match assemble's cumulative tempo cap, not old 1.2 headroom."""
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.2)
-    monkeypatch.setitem(CONFIG, "narration_cumulative_tempo_max", 1.35)
-    calls = _offline_mimo_segment(monkeypatch, write=lambda text, _n: text.encode("utf-8"))
-    monkeypatch.setattr(
-        "voiceover.get_video_duration",
-        lambda p: len(Path(p).read_text(encoding="utf-8")) * 0.3 if Path(p).exists() else 0.0,
-    )
-    tts_dir = tmp_path / "tts_segments"
-    tts_dir.mkdir()
-
-    # slot 10s, pause 0s. With global speed 1.2 and cumulative cap 1.35,
-    # raw budget = 10 * 1.35 = 13.5s, not old 10*1.2*1.2=14.4s.
-    text = "情节推进。" * 10  # synthetic 15s, should be rewritten under P0 cap.
-    res = _synthesize_segment(0, {"start": 0.0, "end": 10.0, "narration": text, "pause_after_ms": 0}, [text], tts_dir, "mimo-tts")
-
-    assert len(calls) == 2
-    assert res["spoken_text"] != text
-    assert res["truncated"] is True
-    assert res["effective_tempo"] <= 1.35 + 1e-6
 
 
 def _write_constant_wav(path, amplitude, seconds=0.25, sample_rate=24000):

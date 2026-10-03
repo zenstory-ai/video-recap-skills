@@ -143,13 +143,6 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                 tts_segments, narration_wav, video_duration, work_dir,
                 tempo_policy=binding["tempo_policy"],
             )
-            if any(
-                segment.get("blocking") or segment.get("fit_status") == "no_safe_fit"
-                for segment in tts_segments
-            ):
-                raise RuntimeError(
-                    "严格 narration adoption 存在 no_safe_fit，禁止提速或裁尾渲染"
-                )
         else:
             narration_audio._build_timed_narration(
                 tts_segments, narration_wav, video_duration, work_dir
@@ -163,6 +156,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                     for item in handoffs
                 )
             )
+        _block_before_render(tts_segments, video_duration, work_dir, output_path, audio_mode)
         narration_binding.seal_render_inputs(binding, tts_segments, narration_wav)
 
     # 始终生成 SRT 字幕文件（原声留白处补烧原声字幕，传入成片时长以计算留白区间）
@@ -431,6 +425,46 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     )
     lib.log(f"最终视频: {render_output} ({render_output.stat().st_size / 1024 / 1024:.1f}MB)")
     return render_output
+
+
+def _block_before_render(tts_segments, video_duration, work_dir, output_path, audio_mode):
+    """Fail before the video encode when the narration track can already never pass QC.
+
+    The segment-level codes (no_safe_fit, skipped_segments, unsafe_source_handoff, ...) are
+    final once narration is placed; `main` would block the same codes after a full render.
+    """
+    qc = assembly_contract._build_assembly_qc(
+        tts_segments, video_duration, audio_operations={},
+        render_delivery={
+            "video_encode_passes": 0, "reencode_reason": ["blocked_before_render"],
+            "audio_sample_rate": None, "final_compat_notes": [],
+        },
+        audio_mode=audio_mode,
+    )
+    if not qc["blocking"]:
+        return
+    Path(output_path).unlink(missing_ok=True)  # never leave an earlier render beside a FAIL
+    assembly_contract._write_assembly_qc(work_dir, qc)
+    summary = qc["summary"]
+    blocked = sorted(set(
+        summary["no_safe_fit_segments"] + summary["skipped_segments"]
+        + summary["tempo_exceeded_segments"] + summary["truncated_segments"]
+        + summary["unsafe_source_handoff_segments"]
+        + summary["timeline_audio_mismatch_segments"]
+    ))
+    needed = {
+        seg["index"]: seg["needed_tempo_factor"]
+        for seg in tts_segments if seg.get("needed_tempo_factor") is not None
+    }
+    detail = ", ".join(
+        f"段{index}" + (f" needed_tempo_factor={needed[index]:.2f}" if index in needed else "")
+        for index in blocked
+    )
+    raise RuntimeError(
+        f"组装 QC 在渲染前阻断: {', '.join(qc['blocking_codes'])}"
+        + (f"（{detail}）" if detail else "")
+        + f"；详见 {Path(work_dir) / constants.ASSEMBLY_QC}"
+    )
 
 
 def main():

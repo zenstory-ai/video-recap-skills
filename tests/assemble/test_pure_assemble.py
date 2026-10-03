@@ -2567,6 +2567,8 @@ def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
             actual_place_start=0.0,
             actual_place_end=1.0,
             placed_audio_duration=1.0,
+            # The pre-render QC checks the placed WAV against the timeline window.
+            placed_audio_path=str(_write_silent_wav(tmp_path / "_placed_0000.wav", 1.0)),
             fit_status="fit",
             effective_tempo=1.0,
             narration="hello",
@@ -2613,6 +2615,47 @@ def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
         or json.loads(qc_path.read_text(encoding="utf-8")).get("verdict") != "PASS"
     )
     assert (tmp_path / "visual_qc.json").exists()
+
+
+def test_default_path_blocks_no_safe_fit_before_the_video_encode(monkeypatch, tmp_path):
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"video")
+    output = tmp_path / "output.mp4"
+    output.write_bytes(b"stale render from an earlier run")
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
+    monkeypatch.setitem(CONFIG, "bgm_path", "")
+    monkeypatch.setattr(assemble.lib, "get_video_duration", lambda _path: 10.0)
+    monkeypatch.setattr(media, "_probe_canvas", lambda _path: _canvas())
+    monkeypatch.setattr(media, "_has_audio_stream", lambda _path: True)
+    monkeypatch.setattr(
+        narration_audio, "_apply_narration_speed", lambda *_args, **_kwargs: None
+    )
+
+    def fake_build_timed_narration(segments, wav, duration, work_dir, **_kwargs):
+        segments[0].update(
+            fit_status="no_safe_fit", blocking=True, truncate_reason="no_safe_boundary",
+            placed_audio_duration=0.0, actual_place_start=1.0, actual_place_end=1.0,
+            needed_tempo_factor=1.31,
+        )
+        Path(wav).write_bytes(b"wav")
+
+    monkeypatch.setattr(narration_audio, "_build_timed_narration", fake_build_timed_narration)
+    encodes = []
+    monkeypatch.setattr(
+        assemble.lib, "run_cmd",
+        lambda cmd, **_kwargs: encodes.append(cmd) or CompletedProcess(cmd, 0, "", ""),
+    )
+    segs = [tts_segment(index=0, start=1.0, end=4.0, audio_duration=5.2,
+                        audio_path=str(tmp_path / "narr.wav"))]
+
+    with pytest.raises(RuntimeError, match=r"渲染前阻断: no_safe_fit.*needed_tempo_factor=1\.31"):
+        assemble_video(video, segs, tmp_path, output)
+
+    assert encodes == []
+    assert not output.exists()
+    qc = json.loads((tmp_path / "assembly_qc.json").read_text(encoding="utf-8"))
+    assert qc["blocking_codes"] == ["no_safe_fit"]
+    assert qc["delivery_qc"]["video_encode_passes"] == 0
 
 
 def test_malformed_visual_overlays_is_rejected(tmp_path):
