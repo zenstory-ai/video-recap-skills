@@ -103,15 +103,25 @@ def _maybe_normalize_tts_wav(output_wav):
     return meta
 
 
-# Speech units for the duration bound: a CJK character or digit is one syllable, a Latin word
-# about one and a half. Pause marks get a fixed allowance each; "……" is a long pause.
-_CJK_OR_DIGIT = re.compile(r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff0-9]")
+# Speech units for the duration bound: a CJK character or a digit (half or full width, read
+# one by one as in 二〇二六) is one syllable, "%" is three (百分之), a Latin word about one and
+# a half. Pause marks get a fixed allowance each; "……" is a long pause.
+_CJK_OR_DIGIT = re.compile(r"[\u3007\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff0-9\uff10-\uff19]")
+_PERCENT = re.compile(r"[%\uff05]")
+_PERCENT_UNITS = 3
 _LATIN_WORD = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
 _LONG_PAUSE = re.compile(r"……|\.\.\.|——")
 _PAUSE_MARK = re.compile(r"[，。！？；：、,.!?;:]")
 TTS_EDGE_SILENCE_SECONDS = 1.5
 TTS_PAUSE_SECONDS = 0.4
 TTS_LONG_PAUSE_SECONDS = 0.8
+
+
+def speech_units(text):
+    """Syllable-like units a faithful reading of `text` speaks (pauses not included)."""
+    rest = _LONG_PAUSE.sub("", text)
+    return (len(_CJK_OR_DIGIT.findall(rest)) + _PERCENT_UNITS * len(_PERCENT.findall(rest))
+            + 1.5 * len(_LATIN_WORD.findall(rest)))
 
 
 def max_plausible_tts_seconds(text):
@@ -127,8 +137,7 @@ def max_plausible_tts_seconds(text):
         return None
     long_pauses = len(_LONG_PAUSE.findall(text))
     rest = _LONG_PAUSE.sub("", text)
-    units = len(_CJK_OR_DIGIT.findall(rest)) + 1.5 * len(_LATIN_WORD.findall(rest))
-    return (TTS_EDGE_SILENCE_SECONDS + units / min_rate
+    return (TTS_EDGE_SILENCE_SECONDS + speech_units(text) / min_rate
             + TTS_PAUSE_SECONDS * len(_PAUSE_MARK.findall(rest))
             + TTS_LONG_PAUSE_SECONDS * long_pauses)
 
@@ -139,5 +148,18 @@ def implausible_tts_duration(text, duration):
     if limit is None or duration <= limit:
         return None
     return (f"音频 {duration:.1f}s 超过这段文字（{len(text)} 字）的合理上限 {limit:.1f}s，"
-            "疑似 TTS 多读了原稿以外的内容（幻读），这段音频不会被缓存或交付；"
-            "确认音频无误时可调低 TTS_MIN_SPEECH_RATE（0 关闭检查）")
+            "疑似 TTS 多读了原稿以外的内容（幻读），这段音频不会被缓存或交付")
+
+
+def rejected_take_path(output_wav):
+    """Where the latest take rejected by the bound is kept for listening."""
+    output_wav = Path(output_wav)
+    return output_wav.with_name(f"{output_wav.stem}.rejected{output_wav.suffix}")
+
+
+def rejected_take_hint(rejected):
+    """Where the last rejected take is, and how to accept such takes; empty when none was kept."""
+    if not Path(rejected).is_file():
+        return ""
+    return (f"；最后一次被拒的音频保留在 {rejected}，试听确认确实只读了原稿时，"
+            "可调低 TTS_MIN_SPEECH_RATE（0 关闭检查）后重跑")

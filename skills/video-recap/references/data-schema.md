@@ -540,7 +540,7 @@ full / cut 流程（含本地采用路径）合成完成后，video-recap 在 `w
 
 Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 deterministic lint，把明显不可发布的脚本挡在昂贵的克隆 TTS 之前。空译文、相邻行重叠、时间越界、`room < 0.4s` 等 **error** 会 `verdict=FAIL` 并阻断 render；`fast_speech`、`trim_risk`（有效字数 ≥ 7 字/秒；`dub_brief.md` 要求的目标约 5 字/秒）等是 warning，不阻断。
 
-每行 voiceclone 原始 WAV 会把中文台词、模型/提示等合成设置和参考音频信息写入相邻的 `*.wav.meta.json`。台词与设置完全相等且 WAV 可读取时，dub render 直接复用并在 `dub_manifest.json.lines[].tts_cache` 记录 `hit`；台词、参考音频、模型或提示变化都会重新合成。
+每行 voiceclone 原始 WAV 会把中文台词、模型/提示等合成设置和参考音频信息写入相邻的 `*.wav.meta.json`。台词与设置完全相等且 WAV 可读取时，dub render 直接复用并在 `dub_manifest.json.lines[].tts_cache` 记录 `hit`；台词、参考音频、模型或提示变化都会重新合成。时长远超读完台词所需（`TTS_MIN_SPEECH_RATE`）的克隆音频视为幻读：按 `TTS_RETRIES` 重试、不写 `.meta.json`，用尽则 render 失败，最后一次被拒的音频留在 `dub_tts/line_NNN_raw.rejected.wav`；旧缓存里的这类 WAV 会重新合成。
 
 ```json
 {

@@ -65,10 +65,12 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 
 ## 6. 运行规则
 
-- 重跑只复用分段 sidecar 中记录的文本、TTS 设置与该 WAV 的 `size`/`mtime_ns` 均与当前相等的分段音频；
-  修改旁白或合成参数后，只重生成受影响的 WAV。
+- 分段音频按内容缓存在 `tts_segments/cache/`：键是实读文本、语速/音高、情绪与 TTS 设置，不含段序号和时间窗；
+  缓存 WAV 的 `size`/`mtime_ns` 变了即失效。`narr_NNN.wav` 是指向缓存的硬链接（不支持时为副本），`tts_meta.json`
+  照旧引用它。删掉、插入或挪动某段后，只重生成文本或语速/音高变了的段（语速随首段、末两段的位置变化）；
+  旧版的 `narr_NNN.wav.cache.json` 不再读取。
 - 批准稿保护策略属于缓存设置：严格模式与默认策略（`report-over-budget-v2`）互不命中，旧的自动缩稿缓存也不再复用；只有同一严格策略下、
-  `spoken_text` 完整匹配且 WAV 存在非空的缓存才可离线复用。
+  `spoken_text` 完整匹配且 WAV 存在非空的缓存才可离线复用；复用时仍按当前时间窗检查，放不下照样失败。
 - 严格 CLI 在本轮合成前把旧 `tts_meta.json` 按时间戳归档至 `tts_meta.history/`，因此失败时
   当前路径不会继续冒充本轮成功；成功元数据通过同目录临时文件原子替换。
 - `auto` 优先使用已配置的 MiMo，MiMo key 缺失且设置了 `FISH_API_KEY` 时使用 Fish Audio；需要可复现的 provider 选择时显式传 `--tts-provider`。
@@ -80,7 +82,9 @@ python3 scripts/voiceover.py --work-dir <work_dir> --narration <narration.json> 
 - dub voiceclone 原始 WAV 也会按模型、提示、台词和参考音频的 `size`/`mtime_ns` 缓存；匹配重跑不再重复请求或计费，
   `dub_manifest.json` 逐行记录 `tts_cache=hit|miss`。
 - 合成出的段音频比按 `TTS_MIN_SPEECH_RATE`（默认 2.5 字/秒，英文按每词 1.5 字）读完全文、再加停顿与首尾静音的上限还长时，
-  视为 TTS 幻读（读完原稿后又编出一段话），按失败重试，不缓存也不交给 assemble；重试用尽则该段失败，报错写明时长与上限。
+  视为 TTS 幻读（读完原稿后又编出一段话），按失败重试，不缓存也不交给 assemble；重试用尽则该段失败，报错写明时长与上限，
+  最后一次被拒的音频留在 `tts_segments/narr_NNN.rejected.wav` 供试听。数字（半角/全角）逐个计 1 字，`%` 计 3 字（百分之）。
+  dub 的 voiceclone 台词走同一道检查与重试（被拒的留在 `dub_tts/line_NNN_raw.rejected.wav`）。
   旧版本缓存下的这类 WAV 在重跑时不再复用，会重新合成。设为 `0` 关闭这道检查。
 - `TTS_WORKERS`、`TTS_TIMEOUT`、`TTS_RETRIES`、`ALLOW_PARTIAL_TTS` 用于调整并发、超时、重试与部分成功策略。
 - dub 模式有独立的确定性门禁：`dub.py --stage render` 在语音克隆前写 `dub_lint.json`，
