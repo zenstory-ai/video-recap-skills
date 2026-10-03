@@ -30,6 +30,9 @@ All notable changes to this project are documented here.
 - **`dashboard_server.py` 删除 `--host`。** 服务固定绑定 127.0.0.1（原来也只接受回环地址），传 `--host` 即报 unrecognized arguments；此前传非默认的回环地址时打印的访问地址是错的。
 - **删除逐阶段账本 `preflight_qc.json`。** 流水线不再在 `pre_tts` / `post_tts` / `pre_assemble` / `post_cut` / `post_render` 写它：它从不含 finding、永远 `ok: true`，内容只是 `tts_meta.json`、`assembly_manifest.json`、cut QC 的整份拷贝，除 `final_qc` 的一行摘要外没有读取方。`final_qc.json` 的 `metadata.artifacts` 不再列出它；旧 work_dir 里残留的文件不再被读取，也不会被清理。
 
+- **解说评审只产出 verdict 与 findings。** `review.py` 的 prompt 不再要求 16 维 1-5 分 scorecard 和 hook 候选、留存风险、最高回报改动、信息增量、口语改写、断言来源六个建议列表，`narration_review.json` / `.md` 也不再含这些键与小节；它们从不改变 verdict、不进门禁，也没有任何环节读取。评审 prompt 不再嵌入 deslop 报告（其 blocker 在评审前已是 lint error）。模型返回的 `OK` 记为 `PASS`，verdict 词表只剩 `PASS|REVISE|FAIL`。严格评审的门禁不变，仍只看 `findings` 里的 error 和解析失败。
+- **不再写三个无人读取的产物。** 评审不再写 `grounding_qc.json`，recap 成片后也不再打印「🧭 Grounding QC」一行（评审关闭或失败时它会打印旧运行留下的文件）；video-understanding 不再写 `silence_periods.qc.json`，每个安静窗口的判定依据仍在 `silence_periods.json`；校验不再单独写 `deslop_qc.json`，报告保留在 `narration_lint.json` 的 `deslop_qc` 字段。
+
 ### Fixed
 
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。

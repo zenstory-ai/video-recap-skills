@@ -389,7 +389,8 @@ def test_cut_output_cli_duration_failure_updates_lint(tmp_path, duration):
     assert current["errors"][0]["message"] in result.stderr
     assert current["warning_count"] == len(current["warnings"])
     assert any(warning["code"] == "over_budget" for warning in current["warnings"])
-    assert current["deslop_qc"] == _read_json(tmp_path / "deslop_qc.json")
+    assert "blockers" in current["deslop_qc"]
+    assert not (tmp_path / "deslop_qc.json").exists()
 
 
 def test_cut_output_retry_clears_failure_and_keeps_duration_tolerance(monkeypatch, tmp_path):

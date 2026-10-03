@@ -218,7 +218,7 @@ python3 scripts/review.py --work-dir <work_dir>
 
 重复修改并评审，直到：
 
-- `verdict` 为 `PASS` / `OK` 且没有 `error`；或
+- `verdict` 为 `PASS` 且没有 `error`；或
 - 对仍保留的问题做明确 override。
 
 覆盖决定追加到 `work_dir/narration_review_override.md`：

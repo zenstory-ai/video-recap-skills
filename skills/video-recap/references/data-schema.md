@@ -241,9 +241,9 @@ CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解�
 }
 ```
 
-## deslop_qc.json（CLI 生成，报告型 QC）
+## narration_lint.json 的 deslop_qc（CLI 生成，报告型 QC）
 
-`deslop_qc.json` 由本地 deterministic scanner 生成，Agent 不手写。它只是 report-only QC：不是 AIGC detector，不判断文本是不是 AI 写的，不会自动改写。修改仍由 Agent/人工根据报告回到 `narration.json`、`style_card.json` 或字幕源里处理。
+`narration_lint.json` 的 `deslop_qc` 字段由本地 deterministic scanner 生成，Agent 不手写；不再单独写 `deslop_qc.json`。它只是 report-only QC：不是 AIGC detector，不判断文本是不是 AI 写的，不会自动改写。修改仍由 Agent/人工根据报告回到 `narration.json`、`style_card.json` 或字幕源里处理。
 
 报告分两层：
 
@@ -438,28 +438,18 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 ## narration_review.json
 
-解说评审阶段输出 LLM-as-judge 结果。旧字段 `verdict/summary/findings` 仍然有效；新增一份 **advisory** 的内容效果 scorecard 与改稿清单。**scorecard 不改变 verdict、也不作硬门禁**——硬门禁仍是 `findings` 里的 error（事实矛盾/残句）经 `--require-narration-review` 严格模式拦截。`verdict` 词表为 `PASS|REVISE|FAIL`，`OK` 作为旧值的兼容别名。
+解说评审阶段输出 LLM-as-judge 结果，只有 `verdict` / `summary` / `findings` 三项内容字段，外加运行记录 `evidence_contract`（时间轴、时钟、选中的证据区间、分块数、警告）；有警告时另有顶层 `warnings`，分块评审时另有 `chunked_review` 计数，评审输出无法解析时另有 `parse_error` / `raw`。硬门禁是 `findings` 里的 error（事实矛盾/残句）经 `--require-narration-review` 严格模式拦截；`verdict` 只是建议信号，词表为 `PASS|REVISE|FAIL`，模型偶尔返回的 `OK` 按 `PASS` 记录。
 
 ```json
 {
-  "verdict": "PASS|REVISE|FAIL|OK",
+  "verdict": "PASS|REVISE|FAIL",
   "summary": "总体判断",
-  "scorecard": {
-    "promise_match": 4, "hook_3s": 4, "first_15s_delivery": 4, "spine_clarity": 4,
-    "stakes_escalation": 4, "information_gain": 4, "spoken_language": 4, "sentence_brevity": 4,
-    "tts_pacing": 4, "grounding": 4, "original_audio_use": 4, "subtitle_readability": 4
-  },
-  "hook_candidates_review": [{"candidate": "首句", "type": "suspense", "score": 4, "keep": true}],
-  "retention_risk_points": [{"time": "00:28", "risk": "信息重复可能掉人", "fix": "删掉复述画面的句子"}],
-  "highest_return_edits": ["最值得先改的一件事"],
-  "information_gain_notes": [{"segment": 0, "label": "motive|...|visual_restatement", "note": "证据/改法"}],
-  "spoken_language_rewrites": [{"segment": 0, "original": "原句", "rewrite": "口语改写", "why": "为什么更适合听"}],
-  "grounding_assertions": [{"segment": 0, "assertion": "人物/关系/因果断言", "source": "visual|asr|research|user_context|unsupported", "risk": "谨慎说明"}],
-  "findings": [{"segment": 0, "severity": "warning", "category": "weak_hook", "issue": "问题", "fix": "改法"}]
+  "findings": [{"segment": 0, "severity": "warning", "category": "weak_hook", "issue": "问题", "fix": "改法"}],
+  "evidence_contract": {"schema_version": 1, "timeline": "source", "clock": "source", "selected_ranges": [], "chunk_count": 1, "warnings": []}
 }
 ```
 
-> 若 `work_dir` 提供了 `packaging_plan.json` / `recap_story_plan.json` / `visual_audio_board.json`（可选、Agent 撰写），review 会把它们并入评估上下文；缺失时 review 仅基于解说与画面/对白证据评分，行为不受影响。
+> 若 `work_dir` 提供了 `packaging_plan.json` / `recap_story_plan.json` / `visual_audio_board.json` / `style_card.json`（可选、Agent 撰写），review 会把它们并入评审上下文；缺失时 review 仅基于解说与画面/对白证据评审，行为不受影响。
 
 `cut_output` 解说评审按 `source_id` 映射 `multi_source_manifest.json` 指向的逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
 

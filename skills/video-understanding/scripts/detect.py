@@ -198,13 +198,12 @@ def _compact_ffmpeg_error(stderr, limit=400):
     return "…" + text[-limit:]
 
 def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=None, configured_segment_seconds=None):
-    """Pure helper: annotate quiet windows with ASR-overlap confidence and QC.
+    """Pure helper: annotate quiet windows with ASR-overlap confidence.
 
     Coarse grid ASR (large synthetic windows from chunking) must not turn every quiet
-    window into speech. The return value is (annotated_periods, qc). Inputs are copied.
+    window into speech. Returns the annotated periods; inputs are copied.
     """
     out = [dict(p) for p in (periods or [])]
-    qc = {"coarse_asr_windows": 0, "low_confidence_speech_flags": 0, "asr_granularity": "none"}
     for qp in out:
         qp.setdefault("speech_overlap_ratio", 0.0)
         qp.setdefault("asr_overlap_seconds", 0.0)
@@ -212,7 +211,7 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
         qp.setdefault("has_speech", False)
         qp.setdefault("has_speech_reason", "no_asr_overlap")
     if not asr_result:
-        return out, qc
+        return out
 
     valid_segments = []
     for seg in asr_result:
@@ -232,8 +231,6 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
         (avg_seg_dur >= configured * 0.9 and asr_coverage > float(video_duration) * 0.7)
     )
     granularity = "coarse_grid" if coarse_asr else "segment"
-    qc["asr_granularity"] = granularity
-    qc["avg_asr_segment_seconds"] = round(avg_seg_dur, 3)
     for qp in out:
         overlap_seconds = 0.0
         for ss, se in valid_segments:
@@ -245,8 +242,6 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
         if coarse_asr:
             qp["has_speech"] = False
             qp["has_speech_reason"] = "coarse_asr_overlap_ignored" if overlap_seconds > 0 else "coarse_asr_no_overlap"
-            if overlap_seconds > 0:
-                qc["coarse_asr_windows"] += 1
             continue
         if ratio >= 0.3:
             qp["has_speech"] = True
@@ -254,11 +249,10 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
         elif overlap_seconds > 0:
             qp["has_speech"] = False
             qp["has_speech_reason"] = "asr_overlap_low_confidence_quiet"
-            qc["low_confidence_speech_flags"] += 1
         else:
             qp["has_speech"] = False
             qp["has_speech_reason"] = "no_asr_overlap"
-    return out, qc
+    return out
 
 
 def detect_silence_periods(video_path, work_dir, asr_result=None):
@@ -343,15 +337,12 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
     periods = [p for p in merged if p["duration"] >= quiet_min]
 
     # 与 ASR 交叉验证：标记有语音的窗口，并记录可观测 confidence/reason。
-    periods, qc = annotate_quiet_windows_with_asr(
+    periods = annotate_quiet_windows_with_asr(
         periods,
         asr_result,
         video_duration=get_video_duration(str(audio_path)) if asr_result else None,
         configured_segment_seconds=CONFIG["asr_segment_seconds"],
     )
-
-    (work_dir / "silence_periods.qc.json").write_text(
-        json.dumps(qc, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # 保存
     (work_dir / "silence_periods.json").write_text(

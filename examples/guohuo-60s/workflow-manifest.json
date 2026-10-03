@@ -57,8 +57,7 @@
       ],
       "generated_but_not_distributed": [
         "speech_boundary_anchors_output.json",
-        "narration_lint.json",
-        "deslop_qc.json"
+        "narration_lint.json"
       ]
     },
     {

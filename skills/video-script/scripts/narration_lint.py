@@ -656,9 +656,6 @@ def lint_narration(
         "warnings": warnings,
     }
     if work_dir is not None:
-        Path(work_dir, "deslop_qc.json").write_text(
-            json.dumps(deslop_qc, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
         Path(work_dir, "narration_lint.json").write_text(
             json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
         )

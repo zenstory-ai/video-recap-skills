@@ -1,4 +1,4 @@
-"""Run narration review and write its advisory artifacts."""
+"""Run narration review and write narration_review.json / .md."""
 
 import argparse
 
@@ -9,7 +9,7 @@ from pathlib import Path
 
 from lib import CONFIG, log, api_call
 
-from evidence_bundle import build_evidence_bundle
+from evidence_bundle import EVIDENCE_CONTRACT_VERSION, build_evidence_bundle
 from review_grounding import (
     _load_cut_clip_spans,
     _load_required,
@@ -20,15 +20,10 @@ from review_response import (
     _chunk_evidence_bundle,
     _load_review_research_context,
     _merge_chunk_reviews,
-    _write_grounding_qc,
     build_review_messages,
     format_review_md,
     parse_review_response,
 )
-
-EVIDENCE_CONTRACT_VERSION = 1
-
-COVERAGE_POLICY_VERSION = "coverage_policy_v1"
 
 
 def review_narration(work_dir, *, timeline="source", strict_evidence=False):
@@ -94,13 +89,10 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
         "schema_version": EVIDENCE_CONTRACT_VERSION,
         "timeline": timeline,
         "clock": bundle["clock"],
-        "coverage_policy_version": COVERAGE_POLICY_VERSION,
         "selected_ranges": bundle["coverage"]["selected_ranges"],
         "chunk_count": len(chunks),
         "warnings": warnings,
     }
-    _write_grounding_qc(work_dir, review, bundle, timeline=timeline)
-
     (work_dir / "narration_review.json").write_text(
         json.dumps(review, ensure_ascii=False, indent=2), encoding="utf-8"
     )
