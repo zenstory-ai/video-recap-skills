@@ -10,7 +10,7 @@ Status: implemented
 
 - `storyboard.work_dir_relative_pages(pages)` 把页面写成 `storyboard/<文件名>`：页面总在 `<work_dir>/storyboard/` 下，只保留文件名。`build_source_storyboard` / `build_edited_storyboard` 都用它写 `page_images`；`edited_video_path` 写 `edited_source.mp4`（相对 work_dir），`video_path` / `source_video_path` 是原片路径，不在 work_dir 里，保持原样。
 - `understanding_storyboard._reuse_cached_storyboard`：缓存命中时把 `page_images` 和 `edited_video_path` 按文件名重新推导；与磁盘上不同（旧版本写的绝对路径）就改写 JSON 并重新盖 sidecar，下次仍然命中。
-- brief 头部写"路径相对 work_dir"。
+- brief 头部写"路径相对 work_dir"。`--edited-storyboard-only` 重复执行时替换已有头部（见 [[2026-10-02-multi-source-edited-storyboard]]），按共同前缀 `_STORYBOARD_HEADING_PREFIX` 识别，所以旧版本写的不带"路径相对 work_dir"的头部（里面是绝对路径）也会被替换，不叠加两份。多源成片 storyboard 的 `source_video_path` 为 `null`、`edited_video_path` 同样是 `edited_source.mp4`。
 - 测试：`tests/understanding/test_storyboard.py` 断言新写的 `page_images` 是相对路径且相对 work_dir 存在；构造旧版绝对路径的缓存，断言命中时不重建、返回值与磁盘都改成相对路径、再次调用仍命中。
 
 ## Alternatives considered
