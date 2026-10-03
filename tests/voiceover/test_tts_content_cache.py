@@ -135,3 +135,29 @@ def test_a_changed_block_file_is_restored_from_the_cache_or_resynthesized(engine
         handle.write(b"-mutated")
     voiceover.synthesize_tts(narration, tmp_path)
     assert engine_calls == [BLOCKS[0], BLOCKS[0]]
+
+
+def test_materialize_replaces_a_slot_holding_another_take_with_the_same_size_and_mtime(tmp_path):
+    """Two different takes of equal length written within one timestamp tick must not be
+    mistaken for each other (a coarse-mtime filesystem made the old shortcut keep stale audio)."""
+    import tts_cache
+
+    tts_dir = tmp_path
+    third, fourth = {"source_text": "第三块"}, {"source_text": "第四块"}
+    for name, inputs, payload in (("a.wav", third, b"audio:third"), ("b.wav", fourth, b"audio:forth")):
+        wav = tts_dir / name  # one file per take: store() hard-links it into the cache
+        wav.write_bytes(payload)
+        tts_cache.store(wav, inputs, {})
+    slot = tts_dir / "narr_002.wav"
+    tts_cache.materialize(tts_dir, third, slot)
+    stored_fourth, _ = tts_cache.cache_entry(tts_dir, fourth)
+    tick = 1_700_000_000_000_000_000
+    for path in (slot, stored_fourth):
+        os.utime(path, ns=(tick, tick))
+    # The precondition the old shortcut tripped on: same size, same mtime, different bytes.
+    assert slot.stat().st_size == stored_fourth.stat().st_size
+    assert slot.stat().st_mtime_ns == stored_fourth.stat().st_mtime_ns
+
+    tts_cache.materialize(tts_dir, fourth, slot)
+
+    assert slot.read_bytes() == b"audio:forth"

@@ -80,8 +80,9 @@ def materialize(tts_dir, cache_inputs, output_wav):
                 return
         except OSError:
             pass
-        if file_identity(output_wav) == file_identity(stored_wav):
-            return  # an earlier copy (filesystem without hard links)
+    # Anything else is re-linked (or re-copied): {size, mtime_ns} cannot tell two takes of the
+    # same length apart when they were written within one timestamp tick, and a stale slot
+    # would silently play the wrong block.
     tmp = _tmp_path(output_wav)
     _link_or_copy(stored_wav, tmp)
     os.replace(tmp, output_wav)
