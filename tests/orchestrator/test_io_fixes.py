@@ -237,10 +237,6 @@ def _all_mimo_keys(monkeypatch, value="tp-test-key"):
         monkeypatch.setitem(doctor.CONFIG, k, value)
 
 
-def _capability_names(report, group):
-    return {item["name"] for item in report["capability_menu"][group]}
-
-
 def test_doctor_ok_when_tools_and_mimo_key_present(monkeypatch):
     _tools_present(monkeypatch)
     _all_mimo_keys(monkeypatch)
@@ -249,21 +245,8 @@ def test_doctor_ok_when_tools_and_mimo_key_present(monkeypatch):
 
     assert report["ok"] is True
     assert report["failures"] == []
-    assert {"ok", "repo_root", "checks", "failures", "warnings"} <= set(report)
-    assert set(report["capability_menu"]) == {
-        "ready",
-        "blocked",
-        "warnings/degraded",
-        "optional_upgrades",
-    }
-    assert "default_recap_pipeline" in _capability_names(report, "ready")
-    assert "mimo_asr" in _capability_names(report, "ready")
-    assert "subtitle_burn" in _capability_names(report, "ready")
-    assert report["capability_menu"]["blocked"] == []
-    assert _capability_names(report, "optional_upgrades") == {
-        "jianying_export",
-        "burned_subtitles",
-    }
+    assert set(report) == {"ok", "repo_root", "checks", "failures", "warnings"}
+    assert report["warnings"] == []
 
 
 def test_doctor_fails_without_mimo_key(monkeypatch):
@@ -274,8 +257,6 @@ def test_doctor_fails_without_mimo_key(monkeypatch):
 
     assert report["ok"] is False
     assert any("MIMO_API_KEY" in f for f in report["failures"])
-    assert "mimo_credentials" in _capability_names(report, "blocked")
-    assert "default_recap_pipeline" in _capability_names(report, "blocked")
 
 
 def test_doctor_accepts_fish_audio_as_the_selected_tts_provider(monkeypatch):
@@ -289,8 +270,20 @@ def test_doctor_accepts_fish_audio_as_the_selected_tts_provider(monkeypatch):
 
     assert report["ok"] is True
     assert report["checks"]["tts"]["provider"] == "fish-audio"
-    assert "fish_audio_tts" in _capability_names(report, "ready")
-    assert "default_recap_pipeline" in _capability_names(report, "ready")
+    assert report["warnings"] == []
+
+
+def test_doctor_warns_when_selected_fish_audio_has_no_key(monkeypatch):
+    _tools_present(monkeypatch)
+    _all_mimo_keys(monkeypatch, "tp-x")
+    monkeypatch.setitem(doctor.CONFIG, "fish_api_key", "")
+
+    report = doctor.build_report(tts_provider="fish-audio")
+
+    assert report["ok"] is True
+    assert report["warnings"] == [
+        "TTS provider fish-audio not configured: set FISH_API_KEY before voiceover"
+    ]
 
 
 def test_doctor_provider_override_does_not_mutate_global_config(monkeypatch):
@@ -335,7 +328,6 @@ def test_doctor_missing_ffmpeg_is_failure(monkeypatch):
 
     assert report["ok"] is False
     assert any("ffmpeg" in f for f in report["failures"])
-    assert {"ffmpeg", "ffprobe"} <= _capability_names(report, "blocked")
 
 
 def test_doctor_warns_when_asr_unconfigured_but_key_present(monkeypatch):
@@ -347,10 +339,9 @@ def test_doctor_warns_when_asr_unconfigured_but_key_present(monkeypatch):
     report = doctor.build_report()
 
     assert report["ok"] is True
-    assert any("ASR not configured" in w for w in report["warnings"])
-    assert "mimo_asr" in _capability_names(report, "warnings/degraded")
-    assert "recap_degraded_mode" in _capability_names(report, "warnings/degraded")
-    assert "default_recap_pipeline" not in _capability_names(report, "ready")
+    assert [w for w in report["warnings"] if "ASR not configured" in w] == [
+        "ASR not configured (MIMO_API_KEY); pipeline can run with --skip-asr"
+    ]
 
 
 def test_doctor_warns_when_subtitle_burn_degraded(monkeypatch):
@@ -360,13 +351,12 @@ def test_doctor_warns_when_subtitle_burn_degraded(monkeypatch):
     report = doctor.build_report()
 
     assert report["ok"] is True
-    assert "subtitle_burn" in _capability_names(report, "warnings/degraded")
-    assert "recap_degraded_mode" in _capability_names(report, "warnings/degraded")
-    assert "default_recap_pipeline" not in _capability_names(report, "ready")
-    assert _capability_names(report, "optional_upgrades") == {"jianying_export"}
+    assert len(report["warnings"]) == 1
+    assert "subtitles/libass" in report["warnings"][0]
+    assert "--no-burn-subtitles" in report["warnings"][0]
 
 
-def test_doctor_blocks_default_pipeline_when_vlm_or_tts_override_missing(monkeypatch):
+def test_doctor_warns_when_vlm_or_tts_override_missing(monkeypatch):
     _tools_present(monkeypatch)
     monkeypatch.setitem(doctor.CONFIG, "api_key", "tp-x")
     monkeypatch.setitem(doctor.CONFIG, "mimo_asr_api_key", "tp-x")
@@ -376,25 +366,23 @@ def test_doctor_blocks_default_pipeline_when_vlm_or_tts_override_missing(monkeyp
     report = doctor.build_report()
 
     assert report["ok"] is True
-    assert {"mimo_vlm", "mimo_tts", "default_recap_pipeline"} <= _capability_names(
-        report, "blocked"
-    )
-    assert "default_recap_pipeline" not in _capability_names(report, "ready")
+    assert report["warnings"] == [
+        "MiMo VLM not configured: set MIMO_VIDEO_API_KEY or MIMO_API_KEY before video understanding",
+        "TTS provider mimo-tts not configured: set MIMO_TTS_API_KEY or MIMO_API_KEY before voiceover",
+    ]
 
 
-def test_doctor_human_output_prints_capability_menu(monkeypatch, capsys):
+def test_doctor_human_output_prints_warnings(monkeypatch, capsys):
     _tools_present(monkeypatch)
     _all_mimo_keys(monkeypatch)
+    monkeypatch.setitem(doctor.CONFIG, "mimo_video_api_key", "")
 
     doctor._print_human(doctor.build_report())
     out = capsys.readouterr().out
 
-    assert "[capability menu]" in out
-    assert "ready:" in out
-    assert "blocked:" in out
-    assert "warnings/degraded:" in out
-    assert "optional_upgrades:" in out
-    assert "default_recap_pipeline" in out
+    assert "[capability menu]" not in out
+    assert "Warnings:\n- MiMo VLM not configured" in out
+    assert "Status: OK" in out
 
 
 def test_recap_full_mode_passes_explicit_narration_json(monkeypatch, tmp_path):
