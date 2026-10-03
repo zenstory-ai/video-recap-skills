@@ -407,6 +407,26 @@ def test_parse_review_keeps_only_verdict_summary_and_findings():
     assert "Scorecard" not in md and "## Findings" in md
 
 
+def test_review_markdown_numbers_blocks_from_one_while_json_keeps_draft_index():
+    r = _parse(
+        {
+            "verdict": "REVISE",
+            "summary": "s",
+            "findings": [
+                {"segment": 0, "severity": "warning", "category": "weak_hook", "issue": "开头平淡"},
+                {"segment": "2", "severity": "warning", "category": "cliche", "issue": "套话"},
+                {"segment": None, "severity": "suggestion", "category": "other", "issue": "整体"},
+            ],
+        }
+    )
+    assert [f["segment"] for f in r["findings"]] == [0, "2", None]
+    md = review_response.format_review_md(r)
+    assert "] 段 1** — 开头平淡" in md
+    assert "] 段 3** — 套话" in md
+    assert "] 整体** — 整体" in md
+    assert "段 0" not in md
+
+
 def test_build_review_messages_includes_optional_planning_and_style_artifacts(tmp_path):
     _write_json(tmp_path / "packaging_plan.json", {"viewer_promise": "看到反转"})
     _write_json(

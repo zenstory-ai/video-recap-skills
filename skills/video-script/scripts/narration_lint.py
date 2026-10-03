@@ -10,12 +10,14 @@ from pathlib import Path
 
 from lib import CONFIG, log
 from agent_text import (
+    TTS_UTTERANCE_OVERHEAD_SECONDS,
     _find_scene_for_midpoint,
-    _recommended_char_budget,
+    _lint_char_budget,
     _scene_available_seconds,
     _text_char_count,
 )
 from deslop_qc import analyze_deslop_qc
+from lint_summary import format_lint_failure
 from speech_ownership import (
     entry_overlaps_source_speech,
     load_source_sentence_evidence,
@@ -210,7 +212,7 @@ def _over_budget_error(index, start, end, char_count, budget):
         "error",
         index,
         "over_budget",
-        f"Segment {index} [{start:.2f}-{end:.2f}s] has {char_count} chars; the window holds "
+        f"段 {index + 1} [{start:.2f}-{end:.2f}s] has {char_count} chars; the window holds "
         f"about {budget} (hard limit {limit}), {char_count - limit} over the limit. "
         "Shorten the text or widen/move the window, then rerun validate; "
         "validation never shortens approved text.",
@@ -220,6 +222,7 @@ def _over_budget_error(index, start, end, char_count, budget):
         limit_chars=limit,
         actual_chars=char_count,
         over_chars=char_count - limit,
+        tts_overhead_seconds=TTS_UTTERANCE_OVERHEAD_SECONDS,
     )
 
 
@@ -329,11 +332,12 @@ def lint_narration(
                 continue
 
             char_count = _text_char_count(text)
-            budget = _recommended_char_budget(start, end)
+            budget = _lint_char_budget(start, end)
             # estimate at the REAL playback rate (after the narration_speed atempo); otherwise a
-            # beat sized to its 1.3x-sped slot looks "over budget" when it actually fits.
+            # beat sized to its 1.3x-sped slot looks "over budget" when it actually fits. The
+            # utterance's TTS edge silence takes room too.
             play_rate = CONFIG["speech_rate"] * CONFIG["narration_speed"]
-            estimated_tts_seconds = char_count / play_rate
+            estimated_tts_seconds = char_count / play_rate + TTS_UTTERANCE_OVERHEAD_SECONDS
             slot_seconds = _scene_available_seconds(start, end)
             over_limit = (
                 mode == "full" and char_count > budget * OVER_BUDGET_ERROR_RATIO
@@ -668,6 +672,16 @@ def lint_narration(
     return report
 
 
+class NarrationLintError(ValueError):
+    """Lint found blocking errors: an ordinary result for the author to fix, not a crash.
+
+    str() is the compact per-block summary; `report` is the full lint report."""
+
+    def __init__(self, report, lint_path=None):
+        self.report = report
+        super().__init__(format_lint_failure(report, lint_path))
+
+
 def validate_narration_or_raise(
     narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
 ):
@@ -675,10 +689,9 @@ def validate_narration_or_raise(
         narration, scenes_analysis, clip_plan=clip_plan, mode=mode, work_dir=work_dir,
     )
     if report["errors"]:
-        sample = "; ".join(
-            f"#{e['index']}: {e['code']}" for e in report["errors"][:3]
+        raise NarrationLintError(
+            report, None if work_dir is None else Path(work_dir, "narration_lint.json")
         )
-        raise ValueError(f"narration.json 预检失败: {sample}; 详见 narration_lint.json")
     if report["warnings"]:
         log(
             f"narration lint: {len(report['warnings'])} warnings (see narration_lint.json)"

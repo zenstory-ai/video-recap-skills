@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -107,19 +108,30 @@ def test_full_over_budget_text_fails_lint_with_actionable_budget(monkeypatch, tm
     ]
     path, raw = _write_narration(tmp_path, approved, indent=2)
 
-    with pytest.raises(ValueError, match="#1: over_budget"):
+    with pytest.raises(SystemExit) as exc_info:
         _run_validate(monkeypatch, tmp_path)
 
+    # A documented lint failure reaches the author as a compact per-block summary
+    # (1-based block numbers, the key numbers, the fix, the report path), not a traceback.
+    summary = str(exc_info.value.code)
+    assert summary.splitlines()[1] == (
+        "- 段 2 over_budget：10.00s-13.00s 写了 42 字，窗口约 8 字（硬上限 10，超出 32 字）。"
+        "改法：缩短文字，或放宽/挪动时间窗"
+    )
+    assert str(tmp_path / "narration_lint.json") in summary
     assert path.read_text(encoding="utf-8") == raw
     lint = _read_json(tmp_path / "narration_lint.json")
     [error] = [item for item in lint["errors"] if item["code"] == "over_budget"]
+    # JSON keeps the 0-based index; 3 s minus the 0.45 s TTS edge silence and the 0.1 s
+    # tail pad leaves 2.45 s at 3.5 * 0.85 * 1.15 chars/s.
     assert error["index"] == 1
-    assert error["budget_chars"] == 9
-    assert error["limit_chars"] == 11
+    assert error["budget_chars"] == 8
+    assert error["limit_chars"] == 10
     assert error["actual_chars"] == 42
-    assert error["over_chars"] == 31
-    assert "Segment 1 [10.00-13.00s] has 42 chars" in error["message"]
-    assert "31 over the limit" in error["message"]
+    assert error["over_chars"] == 32
+    assert error["tts_overhead_seconds"] == 0.45
+    assert "段 2 [10.00-13.00s] has 42 chars" in error["message"]
+    assert "32 over the limit" in error["message"]
     assert not any(item["code"] == "over_budget" for item in lint["warnings"])
 
 
@@ -127,16 +139,66 @@ def test_full_over_budget_text_fails_lint_with_actionable_budget(monkeypatch, tm
 def test_full_over_budget_error_starts_just_past_the_hard_limit(
     tmp_path, extra_chars, ok
 ):
-    from agent_text import _recommended_char_budget
+    from agent_text import _lint_char_budget
     from narration_lint import OVER_BUDGET_ERROR_RATIO, lint_narration
 
-    limit = int(_recommended_char_budget(0, 10) * OVER_BUDGET_ERROR_RATIO)
+    limit = int(_lint_char_budget(0, 10) * OVER_BUDGET_ERROR_RATIO)
     text = "门" * (limit + extra_chars) + "。"
     report = lint_narration(
         [{"start": 0, "end": 10, "narration": text}], [], mode="full", work_dir=tmp_path
     )
 
     assert ("over_budget" in {item["code"] for item in report["errors"]}) is not ok
+
+
+def test_lint_budget_reserves_one_utterance_of_tts_edge_silence():
+    from agent_text import (
+        TTS_UTTERANCE_OVERHEAD_SECONDS,
+        _lint_char_budget,
+        _recommended_char_budget,
+    )
+
+    # The brief's per-window budget, minus one utterance's edge silence.
+    assert _lint_char_budget(0, 2.5) == _recommended_char_budget(
+        0, 2.5 - TTS_UTTERANCE_OVERHEAD_SECONDS
+    )
+    assert _lint_char_budget(0, 2.5) < _recommended_char_budget(0, 2.5)
+    assert _lint_char_budget(0, 0.3) == 0
+
+
+def test_short_window_that_fits_the_brief_fails_full_lint_before_tts(tmp_path):
+    """A 2.5 s window: the brief's rate alone admits 9 chars, but a TTS utterance of 9
+    chars plus its edge silence does not fit, so lint stops it instead of assemble."""
+    from agent_text import _lint_char_budget, _recommended_char_budget
+    from narration_lint import OVER_BUDGET_ERROR_RATIO, lint_narration
+
+    brief_budget = _recommended_char_budget(0, 2.5)
+    assert brief_budget > int(_lint_char_budget(0, 2.5) * OVER_BUDGET_ERROR_RATIO)
+    segment = {"start": 0, "end": 2.5, "narration": "门" * brief_budget + "。"}
+
+    full = lint_narration([segment], [], mode="full", work_dir=tmp_path)
+    [error] = [e for e in full["errors"] if e["code"] == "over_budget"]
+    assert error["budget_chars"] == _lint_char_budget(0, 2.5)
+
+
+
+def test_cut_output_warning_counts_the_utterance_edge_silence():
+    """cut_output keeps over_budget a warning, but its spoken-length estimate now includes
+    the TTS edge silence: 10 chars read at the median rate fit 2.4 s, the utterance does not."""
+    from agent_text import TTS_UTTERANCE_OVERHEAD_SECONDS
+    from narration_lint import lint_narration
+
+    segment = {"start": 0, "end": 2.5, "narration": "门" * 10 + "。"}
+    speech_only = 10 / (CONFIG["speech_rate"] * CONFIG["narration_speed"])
+    assert speech_only < 2.4 < speech_only + TTS_UTTERANCE_OVERHEAD_SECONDS
+
+    report = lint_narration([segment], [], mode="cut_output", work_dir=None)
+
+    assert not [e for e in report["errors"] if e["code"] == "over_budget"]
+    [warning] = [w for w in report["warnings"] if w["code"] == "over_budget"]
+    assert warning["estimated_tts_seconds"] == round(
+        speech_only + TTS_UTTERANCE_OVERHEAD_SECONDS, 2
+    )
 
 
 def test_cut_output_over_budget_text_stays_a_warning(monkeypatch, tmp_path):
@@ -228,7 +290,7 @@ def test_strict_input_failures_leave_narration_byte_identical(
 ):
     path, raw = _write_narration(tmp_path, segments, indent=1)
 
-    with pytest.raises(ValueError, match=code):
+    with pytest.raises(SystemExit, match=code):
         _run_validate(monkeypatch, tmp_path)
 
     assert path.read_text(encoding="utf-8") == raw
@@ -264,10 +326,15 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
         ],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
 
-    assert result.returncode != 0
+    assert result.returncode == 1
+    assert "Traceback" not in result.stderr
+    assert "段 1 invalid_narration：narration must be a string" in result.stderr
+    assert str(tmp_path / "narration_lint.json") in result.stderr
     assert narration_path.read_text(encoding="utf-8") == raw
     current = _read_json(tmp_path / "narration_lint.json")
     assert set(current) == set(stale)
@@ -305,10 +372,12 @@ def test_full_derives_quiet_ownership_without_changing_other_approved_fields(
 
 
 def test_short_slot_that_fits_warns_without_dropping_segment(monkeypatch, tmp_path):
+    # 1.4 s leaves 0.85 s of speech after the TTS edge silence and tail pad: room for
+    # three characters at the conservative rate.
     approved = [
         {
             "start": 0,
-            "end": 1.2,
+            "end": 1.4,
             "narration": "他转身。",
             "pause_after_ms": 0,
             "tag": "keep",
@@ -328,10 +397,39 @@ def test_slot_too_short_for_its_text_fails_instead_of_being_dropped(monkeypatch,
         tmp_path, [{"start": 0, "end": 0.1, "narration": "短。"}], separators=(",", ":")
     )
 
-    with pytest.raises(ValueError, match="over_budget"):
+    with pytest.raises(SystemExit, match="段 1 over_budget"):
         _run_validate(monkeypatch, tmp_path)
 
     assert path.read_text(encoding="utf-8") == raw
+
+
+def test_unexpected_validate_errors_still_raise_with_a_traceback(monkeypatch, tmp_path):
+    _write_narration(tmp_path, [{"start": 0, "end": 5, "narration": "正常的一段。"}])
+
+    def broken(*_args, **_kwargs):
+        raise RuntimeError("ownership measurement crashed")
+
+    monkeypatch.setattr(narration_validate, "measure_narration_speech_ownership", broken)
+    with pytest.raises(RuntimeError, match="ownership measurement crashed"):
+        _run_validate(monkeypatch, tmp_path)
+
+
+def test_lint_failure_summary_lists_a_bounded_number_of_blocks():
+    from lint_summary import MAX_LISTED_ERRORS, format_lint_failure
+
+    errors = [
+        {"level": "error", "index": i, "code": "empty_narration", "message": "narration text must not be empty"}
+        for i in range(MAX_LISTED_ERRORS + 3)
+    ]
+    errors.append({"level": "error", "index": None, "code": "empty_narration_file", "message": "m"})
+    summary = format_lint_failure({"errors": errors}, "narration_lint.json")
+    lines = summary.splitlines()
+
+    assert lines[0].startswith(f"narration.json 预检失败：{len(errors)} 个 error")
+    assert lines[1] == "- 段 1 empty_narration：narration text must not be empty"
+    assert len(lines) == 1 + MAX_LISTED_ERRORS + 2
+    assert lines[-2] == "- …另有 4 个 error 未列出"
+    assert lines[-1].endswith("narration_lint.json")
 
 
 def test_source_boundary_failure_keeps_approved_file_bytes(monkeypatch, tmp_path):
@@ -345,7 +443,7 @@ def test_source_boundary_failure_keeps_approved_file_bytes(monkeypatch, tmp_path
         separators=(",", ":"),
     )
 
-    with pytest.raises(ValueError, match="source_sentence_anchors_unavailable"):
+    with pytest.raises(SystemExit, match="段 1 source_sentence_anchors_unavailable"):
         _run_validate(monkeypatch, tmp_path)
 
     assert path.read_text(encoding="utf-8") == raw

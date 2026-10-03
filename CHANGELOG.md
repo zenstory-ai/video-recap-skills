@@ -36,6 +36,7 @@ All notable changes to this project are documented here.
 - **ASR 缓存缺少 `asr_timing_evidence.json` 时重跑 ASR。** video-understanding 删除 `LEGACY_UNVERIFIED` 状态：sidecar 被删掉、或重跑 ASR 时被 Ctrl-C 中断的 work_dir 不再离线复用旧转写，旧版本写下的 `LEGACY_UNVERIFIED` sidecar 也视为未命中。VLM prompt 模板缺失时直接报错，不再静默换用一份已过时的两段式兜底 prompt。
 - **video-cut 的 `--sources-manifest` 只接受一种形状。** 清单必须是 `{"sources": [{"source_id", "source_path"[, "duration", "source_work_dir"]}]}`（即 recap 写出的 `multi_source_manifest.json`）；裸数组、以 `source_id` 为键的映射，以及 `id` / `name`、`path` / `video_path` / `video` / `file`、`duration_seconds` / `source_duration` 等别名一律报错，报错写明期望形状。多源 `clip_plan.json` 的片段必须写 `source_id`，不再把 `id` 当来源；顶层目标时长只认 `target_duration`，不再认 `target_duration_seconds`。形状写进了 video-cut SKILL.md。
 - **测试组 `inspect` 并入 `orchestrator`。** `python3 scripts/test.py` 现在跑六组，`scripts/test.py inspect` 不再是有效组名，`recap_inspect` 的测试随 `orchestrator` 一起跑；跨 skill 的评审门禁测试与 `tools/measure_subtitle.py` 的测试也移到 `orchestrator`。剪映协议测试直接读 `references/jianying/` 的模板并钉住哈希，不再在测试目录里保留一份相同的副本。
+- **旁白 lint 的字数预算扣掉每块 TTS 首尾静音。** 每块是一次 TTS 合成，自带约 0.45 秒首尾静音（MiMo 实测中位数，按放进时间线计），以前预算只按字数折算，2–3 秒的短窗口能过 lint、TTS 计费后才在 assemble 以 `no_safe_fit` 阻断。现在 video-script 的预算先从时间窗扣 0.45 秒再折算字数，full 模式超过它 1.25 倍报 `over_budget` error（`narration_lint.json` 多一个 `tts_overhead_seconds`），cut_output 的超预算 warning 也把这段静音算进估计时长；error / warning 的分工不变。每块预算少约 1–2 字；brief 里每个窗口标的字数还没扣这一项，短窗口要比它少写。
 
 ### Removed
 
@@ -104,6 +105,7 @@ All notable changes to this project are documented here.
 - **复制 work_dir 后 brief 的 storyboard 路径指向自己的目录。** `storyboard/*.json` 的 `page_images` 改存相对 work_dir 的 `storyboard/<文件名>`，`edited_video_path` 存 `edited_source.mp4`；旧版本写的绝对路径在缓存命中时改写，不重建拼图。
 - **brief 的时长标签不再取整到分钟。** cut 的目标与剪后时长以前按整分钟显示，90 秒目标写成 `~2min`、101.5 秒的剪辑也是 `~2min`；现在不足一分钟写秒（`45s`），整分钟写 `2min`，其余写分秒（`1m30s`、`1m42s`）。
 - **cut 第二轮 brief 的 Scene timing guide 改用 OUTPUT 时间。** 第二轮要求按 `edited_source.mp4` 的时间写 `narration.json`，结尾却附着整片原片时间的场景表（含剪掉的场景、片尾演职员表，以及按原片场景算的"fully narrated"字数上限）。现在第二轮的这一节标题为 `## Scene timing guide (OUTPUT time)`，只列保留下来的片段，起止、安静窗口、帧动作、ASR 与字数上限都按输出时间计，被拆到多个片段的场景写作 `source scene N part M`；第一轮（写 `clip_plan.json`）仍是原片时间的场景表。
+- **validate 的 lint 失败不再显示为 Python traceback，块号从 1 数。** `over_budget`、`interrupts_source_sentence` 这类普通 lint 失败以前抛出未处理的异常，最后一行只有 `#1: over_budget`（从 0 数的下标），改稿要的数字全在 `narration_lint.json` 里。现在 `validate.py` 以退出码 1 结束，只打印一段摘要：逐块写「段 N」（narration.json 里第 N 块，从 1 数）、错误码、关键数字（时间窗、字数、预算、硬上限、超出字数，或入点与建议入点）和改法，末行是 `narration_lint.json` 的路径；其他异常仍带 traceback。`over_budget` 的 message、cut_output 越界错误和 `narration_review.md` 的 findings 也改用从 1 数的「段 N」；`narration_lint.json` 的 `index` 与 `narration_review.json` 的 `segment` 仍从 0 数。
 
 ## [0.6.0] - 2026-09-27
 

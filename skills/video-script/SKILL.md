@@ -168,7 +168,7 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 2. **按连续思路写**：旁白拥有一个 beat 时，用一个或少量完整句子完成“前提 → 触发动作 → 变化/意义”，并在一次 TTS 中合成。句号服从口语思路和呼吸，不服从字幕换行；不要固定句数，也不要“一句一停”。
 3. **7:3 不是配额**：只在素材判断不足时作为避免墙到墙旁白的粗略首稿参考。实际比例服从 `audio_owner`；强对白、动作声或沉默可以完整拥有一个 beat。
 4. **视听接力**：旁白若引出原声，块尾要让观众想听；原声结束后的下一块要承接它造成的变化。
-5. **按有效语速控量**：用 `字数 / brief 头部 speech budget` 估算窗口；装不下时删减或拆分叙事任务，不用加速堆字。
+5. **按有效语速控量**：用 `字数 / brief 头部 speech budget` 估算朗读秒数，每块再加约 0.45 秒 TTS 首尾静音。brief 里每个窗口标的字数没扣这段静音，2–3 秒的短窗口要比它少写一两个字；装不下时删减或拆分叙事任务，不用加速堆字。
 6. **不看图说话**：旁白只增加上下文、因果、预期、证据支持的解释或跨越。
 7. **人物与证据优先**：优先使用已知角色名；关系、动机、潜台词和结果必须指向 visual / ASR / research / user context，且不能把背景资料伪装成当前画面事实。
 8. **写给耳朵听**：使用具体名词和动词，句子完整、口语可听；避免字幕腔、半句、空泛拔高和破折号。TTS 文本先保证听感连续，字幕再按阅读宽度拆分，不能反过来把朗读稿切碎。
@@ -243,7 +243,7 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full
 # cut 输出时间线由编排器使用 --mode cut_output
 ```
 
-命令写出 `narration_lint.json`。full 与 cut_output 用同一套声音归属算法（原声对白区间减去安静窗口）回写 `overlaps_speech`，其余字段原样保留，不截短、不合并、不补标点、不重排。full 模式下某段字数超过该时间窗推荐字数的 1.25 倍即报 `over_budget` error，报告里写明段号、时间窗、`budget_chars`、`limit_chars`、`actual_chars` 和 `over_chars`：缩短文字或放宽/挪动时间窗，不要指望 TTS 替你缩稿。修复所有 error 后重复运行，直到校验干净，再继续 TTS 与合成。
+命令写出 `narration_lint.json`。full 与 cut_output 用同一套声音归属算法（原声对白区间减去安静窗口）回写 `overlaps_speech`，其余字段原样保留，不截短、不合并、不补标点、不重排。推荐字数按时间窗先扣 0.45 秒 TTS 首尾静音再计算；full 模式下某段字数超过推荐字数的 1.25 倍即报 `over_budget` error，报告里写明时间窗、`budget_chars`、`limit_chars`、`actual_chars` 和 `over_chars`：缩短文字或放宽/挪动时间窗，不要指望 TTS 替你缩稿。有 error 时命令以非零退出，逐块列出「段 N」（narration.json 里第 N 块，从 1 数；`narration_lint.json` 的 `index` 仍从 0 数）、错误码、关键数字和改法。修复所有 error 后重复运行，直到校验干净，再继续 TTS 与合成。
 
 片名或题材明确但缺少剧情上下文时，先按本技能的 `references/research-guide.md` 写 `background_research.json`。若理解素材偏薄，brief 中的数量只能当上限：宁可少写、写实，也不要为凑数复述画面。
 
