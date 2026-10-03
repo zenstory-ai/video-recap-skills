@@ -354,6 +354,30 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
     return periods
 
 
+SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION = 2
+
+
+def anchors_current(work_dir):
+    """True when speech_boundary_anchors.json exists and has the current schema.
+
+    Schema 1 labelled coarse-ASR anchors `high` from a proportional position guess; a cached
+    schema-1 artifact must be regenerated rather than trusted.
+    """
+    path = Path(work_dir) / "speech_boundary_anchors.json"
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("schema_version") == SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION
+    )
+
+
+def _anchor_confidence(seconds):
+    return "high" if seconds <= 0.6 else ("medium" if seconds <= 1.2 else "low")
+
+
 def detect_speech_boundary_anchors(work_dir, asr_result):
     """Write sentence-end entry anchors by aligning ASR punctuation to short pauses.
 
@@ -361,13 +385,20 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
     punctuation time from its character position inside the ASR window, then snap it to the
     closest short acoustic pause. The output is guidance + a deterministic pre-TTS gate; it
     never rewrites narration timing on its own.
+
+    The character-position estimate is a guess, so `confidence` is not taken from the snap
+    distance alone: the sentence end can be anywhere inside the ASR window, which bounds the
+    real error by `timing_bound_seconds` (the farther window edge from the pause). Only a
+    narrow window can yield `high`/`medium` (`boundary_use: verified`); a wide window yields
+    `low`, and an anchor that still snapped within the alignment limit is `unverified`
+    (usable by gates, labelled as an estimate) rather than dropped.
     """
     work_dir = Path(work_dir)
     audio_path = work_dir / "audio.wav"
     out_path = work_dir / "speech_boundary_anchors.json"
     segments = list(asr_result or [])
     report = {
-        "schema_version": 1,
+        "schema_version": SPEECH_BOUNDARY_ANCHORS_SCHEMA_VERSION,
         "artifact": "speech_boundary_anchors.json",
         "status": "completed",
         "detector": {
@@ -439,14 +470,24 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
             used.add(pause["index"])
             last_midpoint = pause["midpoint"]
             error = abs(pause["midpoint"] - expected)
-            confidence = "high" if error <= 0.6 else ("medium" if error <= 1.2 else "low")
+            timing_bound = max(pause["start"] - seg_start, seg_end - pause["start"], 0.0)
+            confidence = _anchor_confidence(max(timing_bound, error))
+            if confidence in {"high", "medium"}:
+                boundary_use = "verified"
+            elif error <= 1.2:
+                boundary_use = "unverified"
+            else:
+                boundary_use = "none"
             anchors.append({
                 "time": pause["end"],
                 "pause_start": pause["start"],
                 "pause_end": pause["end"],
                 "expected_time": round(expected, 3),
                 "alignment_error": round(error, 3),
+                "timing_bound_seconds": round(timing_bound, 3),
+                "timing_basis": "asr_window",
                 "confidence": confidence,
+                "boundary_use": boundary_use,
                 "punctuation": match.group(0),
                 "text_tail": text[max(0, match.end() - 32):match.end()],
                 "asr_segment_index": asr_index,

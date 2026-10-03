@@ -177,8 +177,62 @@ def test_detect_speech_boundary_anchors_aligns_sentence_punctuation_to_short_pau
 
     assert [round(item["time"], 2) for item in report["sentence_anchors"]] == [5.81, 14.34]
     assert all(item["punctuation"] == "。" for item in report["sentence_anchors"])
-    assert all(item["confidence"] in {"high", "medium"} for item in report["sentence_anchors"])
+    # A 15s ASR window cannot place a sentence end: the snap is close, the label is honest.
+    assert all(item["confidence"] == "low" for item in report["sentence_anchors"])
+    assert all(item["boundary_use"] == "unverified" for item in report["sentence_anchors"])
+    assert all(item["timing_bound_seconds"] >= 7.5 for item in report["sentence_anchors"])
+    assert report["schema_version"] == 2
     assert (tmp_path / "speech_boundary_anchors.json").exists()
+
+
+def _one_anchor(monkeypatch, tmp_path, pause, segment):
+    (tmp_path / "audio.wav").write_bytes(b"RIFF")
+    stderr = f"silence_start: {pause[0]}\nsilence_end: {pause[1]}"
+    monkeypatch.setattr("detect.run_cmd", lambda cmd, **kw: _ok(stderr=stderr))
+    report = detect_speech_boundary_anchors(tmp_path, [segment])
+    assert len(report["sentence_anchors"]) == 1
+    return report["sentence_anchors"][0]
+
+
+def test_speech_boundary_anchor_in_wide_window_is_unverified(monkeypatch, tmp_path):
+    # "...。" at the window end: expected 15.0, pause midpoint 15.01 -> alignment_error 0.01.
+    anchor = _one_anchor(
+        monkeypatch, tmp_path, (14.92, 15.1), {"start": 0, "end": 15, "text": "一句完整的话。"}
+    )
+    assert anchor["alignment_error"] <= 0.02
+    assert anchor["confidence"] == "low"
+    assert anchor["boundary_use"] == "unverified"
+    assert anchor["timing_basis"] == "asr_window"
+    assert anchor["timing_bound_seconds"] >= 7.5
+
+
+def test_speech_boundary_anchor_in_narrow_window_stays_verified(monkeypatch, tmp_path):
+    anchor = _one_anchor(
+        monkeypatch, tmp_path, (10.5, 10.9), {"start": 10.0, "end": 11.0, "text": "好。"}
+    )
+    assert anchor["confidence"] == "high"
+    assert anchor["boundary_use"] == "verified"
+    assert anchor["timing_bound_seconds"] <= 0.6
+
+
+def test_speech_boundary_anchor_beyond_alignment_limit_is_unusable(monkeypatch, tmp_path):
+    # expected 15.0, pause midpoint 13.7 -> alignment_error 1.3 (> 1.2, within the 2.1 snap limit).
+    anchor = _one_anchor(
+        monkeypatch, tmp_path, (13.6, 13.8), {"start": 0, "end": 15, "text": "一句完整的话。"}
+    )
+    assert anchor["alignment_error"] == 1.3
+    assert anchor["boundary_use"] == "none"
+
+
+def test_anchors_current_regenerates_only_stale_schema(tmp_path):
+    import json
+
+    path = tmp_path / "speech_boundary_anchors.json"
+    assert detect.anchors_current(tmp_path) is False
+    path.write_text(json.dumps({"schema_version": 1, "sentence_anchors": []}), encoding="utf-8")
+    assert detect.anchors_current(tmp_path) is False
+    path.write_text(json.dumps({"schema_version": 2, "sentence_anchors": []}), encoding="utf-8")
+    assert detect.anchors_current(tmp_path) is True
 
 
 def test_detect_silence_reextracts_audio_when_source_video_changes(monkeypatch, tmp_path):

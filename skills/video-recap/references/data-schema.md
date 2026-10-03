@@ -80,11 +80,15 @@
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "sentence_anchors": [
     {
       "time": 5.809,
-      "confidence": "high",
+      "confidence": "low",
+      "boundary_use": "unverified",
+      "timing_bound_seconds": 9.778,
+      "timing_basis": "asr_window",
+      "alignment_error": 0.012,
       "text_tail": "带你重走詹姆斯的二十一年。",
       "pause_start": 5.222,
       "pause_end": 5.809
@@ -93,8 +97,14 @@
 }
 ```
 
+ASR 时间只到窗口级，句末位置只能在窗口内估计。`timing_bound_seconds` 是停顿到窗口两端的较远距离，
+即句末真实位置的最坏误差；`confidence` 取它与 `alignment_error` 的较大值（≤0.6 high，≤1.2 medium，否则 low）。
+`boundary_use` 决定下游用不用：`verified`（high/medium）、`unverified`（窗口太粗但吸附误差 ≤1.2s，仍作门禁锚点，
+brief 里标 `unverified ±N s`）、`none`（不用）。缺 `boundary_use` 的旧文件按 high/medium 视为 `verified`；
+理解阶段发现 `schema_version` 不是 2 会重新生成本文件。
+
 当 `overlaps_speech=true` 且旁白不是从 0 秒冷开场时，`narration` lint 要求 `start`
-贴近 `high`/`medium` 锚点。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回
+贴近 `boundary_use` 不为 `none` 的锚点。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回
 `suggested_start` 与 `source_text_tail` 给 Agent 调整。常规块使用
 `source_entry_policy: "sentence_boundary"`；原声语句完整性没有抢断 override。最后一个可靠
 锚点之后又进入已声明的原声讲话区时，`suggested_start` 可为 `null`，Agent 必须移动、缩短或删除该旁白块。
@@ -324,7 +334,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 ```
 
 `qc.boundary_status.sentence_checks` 逐项记录每个片段 start/end 是 `safe`、`unchecked`
-还是 `blocking`。理解阶段已有 ASR 讲话时间时，任何未落到源头/源尾、可靠句末/静音窗，且
+还是 `blocking`（落在 `unverified` 句末锚点上的边界为 `safe`，`reason` 记 `unverified_sentence_boundary`）。理解阶段已有 ASR 讲话时间时，任何未落到源头/源尾、句末锚点/静音窗，且
 不是同源无损连续连接的边界都会写入 `qc.blocking[].code=unsafe_clip_sentence_boundary`。
 切镜吸附先执行，句末吸附最后执行，保证视觉边界不会覆盖声音安全边界。
 

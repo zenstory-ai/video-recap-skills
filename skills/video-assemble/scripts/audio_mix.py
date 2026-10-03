@@ -115,8 +115,14 @@ def _seg_place_window(seg):
     return seg["actual_place_start"], seg["actual_place_end"]
 
 
+# After narration ends, original audio may stay ducked this long waiting for a sentence-end
+# anchor. Beyond it the duck releases at the narration end: coarse-ASR anchors are estimates,
+# and holding a duck for tens of seconds buries dialogue the viewer must hear.
+SOURCE_HANDOFF_MAX_HOLD_SECONDS = 3.0
+
+
 def _load_sentence_handoff_anchors(work_dir):
-    """Load high/medium sentence anchors and their measured pause windows."""
+    """Load usable sentence anchors (`boundary_use` verified/unverified) and their pauses."""
     work_dir = Path(work_dir)
     cut_mode = (work_dir / "edited_source.mp4").exists() or (
         work_dir / "clip_plan_validated.json"
@@ -139,15 +145,22 @@ def _load_sentence_handoff_anchors(work_dir):
         payload = {**payload, "require_measured": True}
     anchors = {}
     for item in payload["sentence_anchors"]:
-        if item["confidence"] not in {"high", "medium"}:
+        # Schema-1 artifacts predate `boundary_use`; their high/medium labels were the old rule.
+        use = item.get("boundary_use") or (
+            "verified" if item["confidence"] in {"high", "medium"} else "none"
+        )
+        if use == "none":
             continue
         when = float(item["time"])
         pause_start = float(item.get("pause_start", when - 0.12))
         row = {
             "time": round(when, 4),
             "pause_start": round(max(0.0, min(pause_start, when)), 4),
+            "verified": use == "verified",
         }
-        anchors[(row["time"], row["pause_start"])] = row
+        key = (row["time"], row["pause_start"])
+        row["verified"] = row["verified"] or anchors.get(key, {}).get("verified", False)
+        anchors[key] = row
     return sorted(anchors.values(), key=lambda row: row["time"]), artifact, payload
 
 
@@ -239,10 +252,13 @@ def _work_has_source_speech(work_dir, speech_spans, require_measured):
 
 
 def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
-    """Keep source audio ducked until a safe sentence boundary after narration.
+    """Keep source audio ducked until a nearby sentence boundary after narration.
 
     This does not move or trim narration. It only extends the ORIGINAL-audio duck
-    envelope so returning the source track cannot reveal the middle of a sentence.
+    envelope so returning the source track does not reveal the middle of a sentence —
+    for at most SOURCE_HANDOFF_MAX_HOLD_SECONDS. With no anchor in that window the duck
+    releases at the narration end (`bounded_release`) instead of burying source dialogue
+    until a distant anchor.
     """
     fade = CONFIG["duck_fade_seconds"]
     bridge = CONFIG["duck_bridge_seconds"]
@@ -297,20 +313,34 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             report.append({"start": run["start"], "end": run["end"], "status": "quiet_source"})
             continue
         last = run["segments"][-1]
-        start_safe = run["start"] <= 0.25 or any(
-            anchor["pause_start"] - 0.05 <= run["start"] <= anchor["time"] + 0.08
-            for anchor in anchors
+        entry_anchor = next(
+            (
+                anchor
+                for anchor in anchors
+                if anchor["pause_start"] - 0.05 <= run["start"] <= anchor["time"] + 0.08
+            ),
+            None,
         )
+        start_safe = run["start"] <= 0.25 or entry_anchor is not None
         if entry_owned and anchors and not start_safe:
             first["source_handoff_blocking"] = True
             first["source_entry_status"] = "unsafe_entry"
         elif not entry_owned:
             first["source_entry_status"] = "quiet_source"
+        elif not anchors:
+            first["source_entry_status"] = "unverified"
+        elif entry_anchor is not None and not entry_anchor["verified"]:
+            first["source_entry_status"] = "sentence_boundary_unverified"
         else:
-            first["source_entry_status"] = "sentence_boundary" if anchors else "unverified"
+            first["source_entry_status"] = "sentence_boundary"
 
+        max_hold = SOURCE_HANDOFF_MAX_HOLD_SECONDS
         restore_anchor = next(
-            (anchor for anchor in anchors if anchor["time"] >= run["end"] - 0.01),
+            (
+                anchor
+                for anchor in anchors
+                if run["end"] - 0.01 <= anchor["time"] <= run["end"] + max_hold
+            ),
             None,
         )
         if restore_anchor is not None:
@@ -319,12 +349,23 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             # before the anchor when that would expose the final source phoneme.
             duck_end = max(run["end"], restore_anchor["pause_start"])
             restore_at = max(duck_end, restore_anchor["time"])
-            status = "sentence_boundary"
-        elif anchors:
-            # No later complete source sentence: never expose a fragment at the tail.
+            status = (
+                "sentence_boundary"
+                if restore_anchor["verified"]
+                else "sentence_boundary_unverified"
+            )
+        elif anchors and float(video_duration) - run["end"] <= max_hold:
+            # No complete source sentence before a near tail: never expose a fragment there.
             restore_at = float(video_duration)
             duck_end = float(video_duration)
             status = "held_to_timeline_end"
+        elif anchors:
+            # No anchor within the bound: release at the narration end, same values as
+            # `no_source_speech`. Up to the ramp of a source tail is audible; a long duck
+            # would instead bury dialogue that may matter more.
+            restore_at = run["end"] + fade
+            duck_end = run["end"]
+            status = "bounded_release"
         elif source_has_speech:
             first["source_handoff_blocking"] = True
             first["source_entry_status"] = "anchors_unavailable"
@@ -343,6 +384,7 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             "start": round(run["start"], 4),
             "end": round(run["end"], 4),
             "restore_at": last["source_restore_at"],
+            "hold_seconds": round(max(0.0, last["source_restore_at"] - run["end"]), 4),
             "status": status,
             "anchor_artifact": artifact,
         })

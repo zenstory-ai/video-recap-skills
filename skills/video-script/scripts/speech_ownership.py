@@ -54,10 +54,16 @@ def load_source_sentence_evidence(work_dir, mode="full"):
             payload = {"sentence_anchors": [], "speech_spans": [], "quiet_windows": []}
         speech_spans = payload["speech_spans"]
         quiet_windows = payload["quiet_windows"]
+    # `boundary_use` (schema 2) keeps coarse-ASR estimates usable as `unverified`; schema-1
+    # artifacts fall back to the old high/medium rule. Same selected set either way.
     anchors = [
         anchor
         for anchor in payload["sentence_anchors"]
-        if anchor["confidence"] in {"high", "medium"}
+        if (
+            anchor.get("boundary_use")
+            or ("verified" if anchor["confidence"] in {"high", "medium"} else "none")
+        )
+        != "none"
     ]
     return {
         "anchors": sorted(anchors, key=lambda item: item["time"]),

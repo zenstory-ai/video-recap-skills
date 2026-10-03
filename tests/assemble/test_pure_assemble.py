@@ -1978,6 +1978,62 @@ def test_source_handoff_holds_to_end_when_no_later_sentence_anchor(
     ) == pytest.approx(0.2)
 
 
+def _eval_duck(expr, t):
+    names = {
+        "min": min,
+        "max": max,
+        "between": lambda value, lo, hi: 1.0 if lo <= value <= hi else 0.0,
+    }
+    return eval(expr, {"__builtins__": {}}, {**names, "t": t})
+
+
+def test_source_handoff_releases_when_next_anchor_is_beyond_the_hold_bound(
+    monkeypatch, tmp_path
+):
+    _write_legacy_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "pause_start": 5.22, "confidence": "high"},
+            {"time": 27.0, "pause_start": 26.8, "confidence": "high"},
+        ],
+    )
+    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
+    seg = {"index": 0, "actual_place_start": 5.81, "actual_place_end": 12.0,
+           "overlaps_speech": True}
+
+    report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 60.0)
+
+    assert report[0]["status"] == "bounded_release"
+    assert seg["source_duck_end"] == pytest.approx(12.0)
+    assert seg["source_restore_at"] == pytest.approx(12.3)
+    assert report[0]["hold_seconds"] == pytest.approx(0.3)
+    assert seg.get("source_handoff_blocking") is not True
+    expr = audio_mix._duck_envelope([seg], 1.0, 0.2, 0.12, 0.3, bridge=1.5)
+    assert _eval_duck(expr, 13.0) == pytest.approx(1.0)
+
+
+def test_source_handoff_marks_unverified_anchor_restores_and_entries(monkeypatch, tmp_path):
+    _write_legacy_anchors(
+        tmp_path,
+        [
+            {"time": 5.81, "pause_start": 5.22, "confidence": "low",
+             "boundary_use": "unverified"},
+            {"time": 14.0, "pause_start": 13.8, "confidence": "low",
+             "boundary_use": "unverified"},
+        ],
+    )
+    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
+    seg = {"index": 0, "actual_place_start": 5.81, "actual_place_end": 12.0,
+           "overlaps_speech": True}
+
+    report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 60.0)
+
+    assert report[0]["status"] == "sentence_boundary_unverified"
+    assert seg["source_entry_status"] == "sentence_boundary_unverified"
+    assert seg["source_restore_at"] == pytest.approx(14.0)
+    assert report[0]["hold_seconds"] == pytest.approx(2.0)
+
+
 def test_source_handoff_blocks_unsafe_entry_and_missing_anchors_with_speech(tmp_path):
     _write_legacy_anchors(tmp_path, [{"time": 10.0, "confidence": "high"}])
     unsafe = {
@@ -2235,6 +2291,22 @@ def test_assembly_qc_blocks_unsafe_narration(
     assert expected_codes <= set(qc["blocking_codes"])
     for key, value in expected_summary.items():
         assert qc["summary"][key] == value
+
+
+def test_assembly_qc_reports_longest_source_duck_hold_without_blocking():
+    segments = [
+        tts_segment(index=0, fit_status="fit", placed_audio_duration=0.0,
+                    actual_place_start=1.0, actual_place_end=4.0, source_restore_at=4.3),
+        tts_segment(index=1, fit_status="fit", placed_audio_duration=0.0,
+                    actual_place_start=6.0, actual_place_end=8.0, source_restore_at=10.5),
+        tts_segment(index=2, fit_status="fit", placed_audio_duration=0.0,
+                    actual_place_start=9.0, actual_place_end=9.5),
+    ]
+    qc = assembly_contract._build_assembly_qc(
+        segments, 12.0, audio_operations={}, render_delivery=_DELIVERY
+    )
+    assert qc["summary"]["max_source_duck_hold_seconds"] == pytest.approx(2.5)
+    assert "max_source_duck_hold_seconds" not in qc["blocking_codes"]
 
 
 # --- Subtitle / visual-presentation special plan contracts -------------------

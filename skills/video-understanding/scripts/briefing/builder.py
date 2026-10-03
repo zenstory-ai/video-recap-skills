@@ -257,7 +257,7 @@ def build_agent_brief(
                     "- Clip length follows the moment. Vary pace; after any cold-open, order clips by causality so the cut reads as one coherent story, not a flat highlights reel.",
                     "- Inspect dense scene-change candidates before locking boundaries. For source-authored cuts, delete irrelevant short shots and extend relevant shots to a complete action/reaction; for edit-created joins, move boundaries, restore same-source motion, or merge clips so the artificial cut disappears where possible. Do not hide a bad join with a transition.",
                     "- Preserve complete spoken lines, but do not infer completeness from ASR window ends or quiet-window suggestions. Directly listen and inspect picture around each proposed boundary, then place the cut after the verified utterance/reaction; automatic snapping is only an advisory candidate.",
-                    "- Advisory does not mean absent: the cut CLI still snaps clip ends to sentence boundaries by default and blocks a cut that lands mid-sentence, using `silence_periods.json` and `speech_boundary_anchors.json` as the executable safety net under your listening.",
+                    "- Advisory does not mean absent: the cut CLI still snaps clip ends to sentence boundaries by default and blocks a cut inside ASR-detected speech unless it lands in a quiet window or a sentence-end pause estimate, using `silence_periods.json` and `speech_boundary_anchors.json` as the executable safety net under your listening.",
                     "",
                     "### clip_plan.json shape (original source timestamps)",
                     "",

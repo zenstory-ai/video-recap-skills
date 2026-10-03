@@ -446,14 +446,48 @@ def test_sentence_anchor_pause_window_snaps_both_clip_edges(tmp_path):
     ]}), encoding="utf-8")
     boundaries = sentence_boundaries._load_sentence_boundary_windows(tmp_path)
     assert boundaries == [
-        {"start": 8.2, "end": 8.4, "kind": "sentence_anchor", "confidence": "high"},
-        {"start": 14.0, "end": 14.3, "kind": "sentence_anchor", "confidence": "medium"},
+        {"start": 8.2, "end": 8.4, "kind": "sentence_anchor", "confidence": "high",
+         "boundary_use": "verified"},
+        {"start": 14.0, "end": 14.3, "kind": "sentence_anchor", "confidence": "medium",
+         "boundary_use": "verified"},
     ]
     plan = _make_plan([(10.0, 13.5)], video_duration=30.0)
     plan = sentence_boundaries.snap_clip_starts_to_lines(plan, boundaries, 30.0, max_prepend=1.8)
     plan = sentence_boundaries.snap_clip_ends_to_lines(plan, boundaries, 30.0, max_extend=2.0)
     assert plan["clips"][0]["source_start"] == 8.4
     assert plan["clips"][0]["source_end"] == 14.0
+
+
+def test_sentence_boundary_gate_labels_edges_on_unverified_anchors(tmp_path):
+    (tmp_path / "speech_boundary_anchors.json").write_text(json.dumps({
+        "schema_version": 2,
+        "sentence_anchors": [
+            {"time": 3.2, "pause_start": 3.0, "confidence": "low", "boundary_use": "unverified"},
+            {"time": 7.2, "pause_start": 7.0, "confidence": "low", "boundary_use": "none"},
+        ],
+    }), encoding="utf-8")
+    boundaries = sentence_boundaries._combine_boundary_windows(
+        [], sentence_boundaries._load_sentence_boundary_windows(tmp_path)
+    )
+    assert boundaries == [{"start": 3.0, "end": 3.2, "kind": "sentence_anchor",
+                           "boundary_use": "unverified"}]
+    plan = _make_plan([(3.1, 7.1)], video_duration=10.0)
+    out = sentence_boundaries.enforce_clip_sentence_boundaries(
+        plan, boundary_windows=boundaries,
+        speech_spans=[{"start": 0.0, "end": 10.0}], video_duration=10.0)
+    checks = {row["edge"]: row for row in out["qc"]["boundary_status"]["sentence_checks"]}
+    assert (checks["start"]["status"], checks["start"]["reason"]) == (
+        "safe", "unverified_sentence_boundary")
+    # A `none` anchor is not a boundary: the end edge still blocks.
+    assert checks["end"]["status"] == "blocking"
+
+
+def test_quiet_window_outranks_an_unverified_anchor_on_the_same_span():
+    combined = sentence_boundaries._combine_boundary_windows(
+        [{"start": 3.0, "end": 3.2, "kind": "sentence_anchor", "boundary_use": "unverified"}],
+        [{"start": 3.0, "end": 3.2}],
+    )
+    assert combined == [{"start": 3.0, "end": 3.2, "kind": "quiet_window"}]
 
 
 def test_sentence_boundary_gate_blocks_unsnapped_speech_edges():
