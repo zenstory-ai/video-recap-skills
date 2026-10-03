@@ -16,7 +16,6 @@ SCRIPT_SCRIPTS = ROOT / "skills" / "video-script" / "scripts"
 SHARED_FUNCTIONS = {
     "_recommended_char_budget": ("agent_text.py", "agent_text.py"),
     "_scene_available_seconds": ("agent_text.py", "agent_text.py"),
-    "_overlap_seconds": ("agent_text.py", "agent_text.py"),
     "_sentence_pieces": ("agent_text.py", "deslop_qc.py"),
     "_text_units": ("agent_text.py", "deslop_qc.py"),
 }

@@ -83,10 +83,6 @@ def _voiceover_args(work_dir, narration_path, args):
     return result
 
 
-def _approved_validation_args(args):
-    return ["--preserve-approved-text"] if args.preserve_approved_text else []
-
-
 def _record_resources(work_dir, args):
     """Write resource_lock.json for the finished render and surface anything needing a person."""
     try:
@@ -265,12 +261,11 @@ def _reject_stale_cut_narration(work_dir, clip_plan_identity):
         )
 
 
-def _validate_cut_output_narration(work_dir, args):
+def _validate_cut_output_narration(work_dir):
     output_duration = _read_video_duration_or_raise(work_dir / "edited_source.mp4")
     _run(
         "video-script", "validate.py", "--work-dir", work_dir,
         "--mode", "cut_output", "--output-duration", f"{output_duration:.3f}",
-        *_approved_validation_args(args),
     )
 
 
@@ -380,7 +375,7 @@ def _run_multi_cut(videos, work_dir, args):
             )
             return
         _write_phase_ledger(work_dir, cp_identity)
-        _validate_cut_output_narration(work_dir, args)
+        _validate_cut_output_narration(work_dir)
 
     _deliver(work_dir, args, edited_source, f"multi_{videos[0].stem}", "cut_output")
 
@@ -582,10 +577,7 @@ def _run_single(video, work_dir, args):
                 _pause(f"{narration_json}", state_hint)
                 return
             _reject_stale_manifest()
-            _run(
-                "video-script", "validate.py", "--work-dir", work_dir,
-                "--mode", "full", *_approved_validation_args(args),
-            )
+            _run("video-script", "validate.py", "--work-dir", work_dir, "--mode", "full")
         elif (work_dir / RUN_MANIFEST).exists():
             _reject_stale_manifest()
         else:
@@ -620,7 +612,7 @@ def _run_single(video, work_dir, args):
             )
             return
         _write_phase_ledger(work_dir, cp_identity)
-        _validate_cut_output_narration(work_dir, args)
+        _validate_cut_output_narration(work_dir)
     # let the timeline / 剪映 export reference the original clips, not edited_source.mp4
     _deliver(
         work_dir, args, edited_source, video.stem, "cut_output",

@@ -172,7 +172,8 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
     "original_block_count": 4
   },
   "errors": [
-    {"level": "error", "index": 2, "code": "time_overlap", "message": "Segment overlaps the previous narration segment"}
+    {"level": "error", "index": 2, "code": "time_overlap", "message": "Segment overlaps the previous narration segment"},
+    {"level": "error", "index": 5, "code": "over_budget", "budget_chars": 28, "limit_chars": 35, "actual_chars": 42, "over_chars": 7}
   ],
   "warnings": [
     {"level": "warning", "index": 0, "code": "over_budget", "budget_chars": 28, "actual_chars": 42}
@@ -180,7 +181,9 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
 }
 ```
 
-常见 code：`invalid_time`、`empty_narration`、`time_overlap`、`outside_clip_plan`、`over_budget`、`incomplete_sentence`、`slot_too_short`、`under_narrated`、`over_narrated`、`fragmented_beats`、`no_original_blocks`。
+full 模式下字数超过推荐字数 1.25 倍的段是 `over_budget` error（校验不会替 Agent 截短）；略超实际朗读时长但未过硬上限、以及 cut_output 的超预算仍是 warning。段落必须按 `start` 排序，否则报 `out_of_order` error。
+
+常见 code：`invalid_time`、`out_of_order`、`empty_narration`、`time_overlap`、`outside_clip_plan`、`over_budget`、`incomplete_sentence`、`slot_too_short`、`under_narrated`、`over_narrated`、`fragmented_beats`、`no_original_blocks`。
 
 ## recap_story_plan.json / visual_audio_board.json（Agent 创作工作产物）
 

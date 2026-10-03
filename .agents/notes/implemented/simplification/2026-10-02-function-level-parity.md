@@ -14,10 +14,10 @@ understanding 真正用到的共享部分只有 `briefing/builder.py` 的 brief 
 ## Decision
 
 - video-understanding 删除 `narration_lint.py`、`speech_ownership.py`、`deslop_qc.py`。`agent_text.py` 只保留 brief 半边（ASR 写作分块、帧动作格式化）和预算原语，`_sentence_pieces`、`_text_units` 从 `deslop_qc` 搬进来；lint/改写半边（`_text_char_count`、`_truncate_at_sentence`、`_post_dedup_narration`、`_normalise_narration_segment` 等）删除。`timeline_fusion.py` 不再 import `narration_lint`，`_align_narration_to_quiet` 从这里删除。
-- video-script 删除 `timeline_fusion.py`；`_align_narration_to_quiet` 和它用到的 `_quiet_windows` 并入 `narration_lint.py`，`validate.py` 从那里 import。`agent_text.py` 删除 brief 半边，只保留 lint 用的文本处理和预算原语。
+- video-script 删除 `timeline_fusion.py`；`_align_narration_to_quiet` 和它用到的 `_quiet_windows` 并入 `narration_lint.py`，`validate.py` 从那里 import。`agent_text.py` 删除 brief 半边，只保留 lint 用的文本处理和预算原语。full 模式改写退役后（[[2026-10-02-strict-full-mode-no-silent-rewrite]]），`_align_narration_to_quiet`、`_quiet_windows` 和 script 那份 `_overlap_seconds` 也已删除。
 - CONFIG 跟着收缩（由 `test_no_skill_declares_config_it_never_reads` 强制）：understanding 的 `lib.py` 删除只有 lint 读取的 `narration_coverage_min/max`、`original_block_min_seconds`、`narration_block_min_chars`、`quiet_overlap_min_ratio`、`visual_beat_max_seconds/facts`；script 的 `lib.py` 删除 `asr_chunk_min/max_chars` 和随之没有调用者的 `env_int`。`ASR_CHUNK_*` 环境变量仍由 understanding 读取，行为不变。
 - `tests/orchestrator/test_brief_narration_parity.py` 改为函数级：
-  - `SHARED_FUNCTIONS` 只列 `_recommended_char_budget`、`_scene_available_seconds`、`_overlap_seconds`、`_sentence_pieces`、`_text_units`，按 `ast.dump` 比对；`_sentence_pieces`、`_text_units` 在 understanding 的 `agent_text.py` 与 script 的 `deslop_qc.py` 之间比对。`_text_char_count` 不在清单里，understanding 只在已删除的 lint 半边用过它。
+  - `SHARED_FUNCTIONS` 只列 `_recommended_char_budget`、`_scene_available_seconds`、`_sentence_pieces`、`_text_units`，按 `ast.dump` 比对（`_overlap_seconds` 原本也在清单里，script 侧随 [[2026-10-02-strict-full-mode-no-silent-rewrite]] 失去调用者后按下面的重访信号移出）；`_sentence_pieces`、`_text_units` 在 understanding 的 `agent_text.py` 与 script 的 `deslop_qc.py` 之间比对。`_text_char_count` 不在清单里，understanding 只在已删除的 lint 半边用过它。
   - 每个共享函数必须在本 skill 内有调用点，不为凑 parity 留死副本。
   - 预算函数读取的四个 CONFIG 键（`speech_rate`、`speech_safety_margin`、`narration_speed`、`narration_tail_pad_seconds`）在两份 `lib.py` 里的默认表达式必须一致，否则 brief 的字数预算和 lint 的预算会悄悄分叉。
   - 曾经整文件复制的四个模块各自只能出现在一个 skill 里。

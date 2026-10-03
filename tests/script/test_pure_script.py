@@ -9,8 +9,8 @@ import os
 import validate as narration_validate
 import pytest
 from lib import CONFIG, env_float, file_identity
-from agent_text import _post_dedup_narration, _text_char_count
-from narration_lint import _align_narration_to_quiet, lint_narration
+from agent_text import _text_char_count
+from narration_lint import lint_narration
 
 
 def _write_json(path, payload):
@@ -623,71 +623,45 @@ def test_lint_flags_wall_to_wall_narration_with_no_original_blocks(monkeypatch):
     assert report["metrics"]["narration_coverage"] > 0.85
 
 
-def test_align_narration_to_quiet_sets_overlap_flag_without_moving_beats(monkeypatch):
-    """New contract: keep the agent's timing; only (re)compute overlaps_speech."""
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 12.0}]
-    monkeypatch.setitem(CONFIG, "quiet_overlap_min_ratio", 0.8)
+# A beat that is 84% quiet but still covers 0.7s of source speech: the retired full-mode
+# quiet-ratio rule called it quiet; speech ownership (speech minus quiet) does not.
+_MOSTLY_QUIET_BEAT = {"start": 0.0, "end": 5.0, "narration": "门外安静了很久。"}
+_QUIET_WINDOW = {"start": 0.0, "end": 4.2}
+_LATE_SPEECH = {"start": 4.3, "end": 5.0, "text": "等等我"}
 
-    # Beat fully inside a quiet window -> overlaps_speech False, timing untouched.
-    inside = _align_narration_to_quiet(
-        [
-            {"start": 2.5, "end": 5.5, "narration": "完全落在安静窗口里。"},
-        ],
-        scenes,
-        [{"start": 2.0, "end": 6.0, "duration": 4.0, "has_speech": False}],
+
+def _validated_ownership(monkeypatch, work_dir, mode):
+    _write_json(work_dir / "narration.json", [dict(_MOSTLY_QUIET_BEAT)])
+    if mode == "full":
+        _run_validate(monkeypatch, work_dir, "full")
+    else:
+        _run_validate_cut_output(monkeypatch, work_dir)
+    persisted = json.loads((work_dir / "narration.json").read_text(encoding="utf-8"))
+    return persisted[0]["overlaps_speech"]
+
+
+def test_full_and_cut_output_measure_speech_ownership_with_one_algorithm(
+    monkeypatch, tmp_path
+):
+    full_dir, cut_dir = tmp_path / "full", tmp_path / "cut"
+    full_dir.mkdir()
+    cut_dir.mkdir()
+    _write_json(full_dir / "asr_result.json", [_LATE_SPEECH])
+    _write_json(
+        full_dir / "silence_periods.json", [{**_QUIET_WINDOW, "has_speech": False}]
     )
-    assert inside[0]["start"] == 2.5
-    assert inside[0]["end"] == 5.5
-    assert inside[0]["overlaps_speech"] is False
-
-    # Beat mostly outside the quiet window -> overlaps_speech True, timing untouched
-    # (the old code would have shifted it; we no longer move it off the picture).
-    outside = _align_narration_to_quiet(
-        [
-            {"start": 0.0, "end": 4.0, "narration": "大部分都在对白区。"},
-        ],
-        scenes,
-        [{"start": 3.0, "end": 6.0, "duration": 3.0, "has_speech": False}],
+    _write_output_evidence(
+        cut_dir,
+        {"clips": []},
+        sentence_anchors=[],
+        speech_spans=[_LATE_SPEECH],
+        quiet_windows=[_QUIET_WINDOW],
     )
-    assert outside[0]["start"] == 0.0
-    assert outside[0]["end"] == 4.0
-    assert outside[0]["overlaps_speech"] is True
 
+    full = _validated_ownership(monkeypatch, full_dir, "full")
+    cut_output = _validated_ownership(monkeypatch, cut_dir, "cut_output")
 
-def test_align_narration_to_quiet_never_blanks_agent_text(monkeypatch):
-    """Regression: the old gap-cascade could blank a squeezed segment to '' and drop it."""
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 12.0}]
-    monkeypatch.setitem(CONFIG, "quiet_overlap_min_ratio", 0.8)
-    result = _align_narration_to_quiet(
-        [
-            {"start": 0.0, "end": 5.0, "narration": "他终于回来了。"},
-            {"start": 5.3, "end": 9.5, "narration": "屋里气氛骤然变冷。"},
-        ],
-        scenes,
-        [{"start": 0.5, "end": 2.0, "duration": 1.5, "has_speech": False}],
-    )
-    assert len(result) == 2
-    assert all(seg["narration"].strip() for seg in result)
-
-
-def test_post_dedup_keeps_distinct_short_beats(monkeypatch):
-    """Parallel short beats sharing common chars must not be merged (threshold raised to >0.6)."""
-    narration = [
-        {
-            "start": 0.0,
-            "end": 4.0,
-            "narration": "他不再试探。",
-            "overlaps_speech": True,
-        },
-        {
-            "start": 4.3,
-            "end": 8.0,
-            "narration": "他直接赌上全力。",
-            "overlaps_speech": True,
-        },
-    ]
-    result = _post_dedup_narration([dict(n) for n in narration])
-    assert len(result) == 2
+    assert full is cut_output is True
 
 
 def test_cut_validate_uses_validated_plan_only_when_newer_than_raw(tmp_path):
@@ -708,8 +682,8 @@ def test_cut_validate_uses_validated_plan_only_when_newer_than_raw(tmp_path):
     assert fresh["clips"][0]["source_start"] == 40.0
 
 
-def test_full_validation_rewrite_preserves_visual_overlays(tmp_path, monkeypatch):
-    """Full mode normalizes and rewrites narration.json without losing render metadata."""
+def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
+    """Full mode persists measured ownership without losing render metadata."""
     overlays = [
         {"type": "top_title", "text": "二十一年", "start": 0.0, "end": 2.0},
         {"type": "inline_label_or_callout", "text": "2003", "start": 2.0, "end": 3.0},

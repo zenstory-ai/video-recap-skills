@@ -12,10 +12,8 @@ import validate as narration_validate
 from lib import CONFIG, file_identity
 
 
-def _run_validate(monkeypatch, work_dir, mode="full", *extra, preserve=True):
+def _run_validate(monkeypatch, work_dir, mode="full", *extra):
     argv = ["validate.py", "--work-dir", str(work_dir), "--mode", mode, *extra]
-    if preserve:
-        argv.append("--preserve-approved-text")
     monkeypatch.setattr(sys, "argv", argv)
     narration_validate.main()
 
@@ -96,29 +94,64 @@ def test_full_preserves_refrain_punctuation_pause_and_unknown_metadata(
         _assert_fields_and_types_preserved(actual, original)
 
 
-@pytest.mark.parametrize("preserve", [True, False], ids=["preserved", "legacy_rewrite"])
-def test_full_over_budget_text_is_kept_only_with_preserve_flag(
-    monkeypatch, tmp_path, preserve
-):
+def test_full_over_budget_text_fails_lint_with_actionable_budget(monkeypatch, tmp_path):
+    """Text that does not fit goes back to the author; validate never shortens it."""
     monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
     approved = [
+        {"start": 0, "end": 10, "narration": "这一段长度合适。"},
         {
-            "start": 0,
-            "end": 3,
+            "start": 10,
+            "end": 13,
             "narration": "少年停在了门外。他终于明白同伴为什么坚持等候，也决定先把受伤的人送回家再去寻找失踪的同伴。",
-        }
+        },
     ]
+    path, raw = _write_narration(tmp_path, approved, indent=2)
+
+    with pytest.raises(ValueError, match="#1: over_budget"):
+        _run_validate(monkeypatch, tmp_path)
+
+    assert path.read_text(encoding="utf-8") == raw
+    lint = _read_json(tmp_path / "narration_lint.json")
+    [error] = [item for item in lint["errors"] if item["code"] == "over_budget"]
+    assert error["index"] == 1
+    assert error["budget_chars"] == 9
+    assert error["limit_chars"] == 11
+    assert error["actual_chars"] == 42
+    assert error["over_chars"] == 31
+    assert "Segment 1 [10.00-13.00s] has 42 chars" in error["message"]
+    assert "31 over the limit" in error["message"]
+    assert not any(item["code"] == "over_budget" for item in lint["warnings"])
+
+
+@pytest.mark.parametrize("extra_chars, ok", [(0, True), (1, False)], ids=["at_limit", "over"])
+def test_full_over_budget_error_starts_just_past_the_hard_limit(
+    tmp_path, extra_chars, ok
+):
+    from agent_text import _recommended_char_budget
+    from narration_lint import OVER_BUDGET_ERROR_RATIO, lint_narration
+
+    limit = int(_recommended_char_budget(0, 10) * OVER_BUDGET_ERROR_RATIO)
+    text = "门" * (limit + extra_chars) + "。"
+    report = lint_narration(
+        [{"start": 0, "end": 10, "narration": text}], [], mode="full", work_dir=tmp_path
+    )
+
+    assert ("over_budget" in {item["code"] for item in report["errors"]}) is not ok
+
+
+def test_cut_output_over_budget_text_stays_a_warning(monkeypatch, tmp_path):
+    _write_output_evidence(tmp_path)
+    approved = [{"start": 0, "end": 3, "narration": "等待同伴。" * 10}]
     path, _ = _write_narration(tmp_path, approved)
 
-    _run_validate(monkeypatch, tmp_path, preserve=preserve)
+    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "10")
 
-    assert (_read_json(path)[0]["narration"] == approved[0]["narration"]) is preserve
-    if preserve:
-        lint = _read_json(tmp_path / "narration_lint.json")
-        assert any(item["code"] == "over_budget" for item in lint["warnings"])
+    assert _approved_fields(_read_json(path)[0]) == approved[0]
+    lint = _read_json(tmp_path / "narration_lint.json")
+    assert any(item["code"] == "over_budget" for item in lint["warnings"])
 
 
-def test_cut_preserve_mode_validates_without_writing(monkeypatch, tmp_path):
+def test_cut_mode_validates_without_writing(monkeypatch, tmp_path):
     approved = [
         {
             "start": 1,
@@ -228,7 +261,6 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
             str(tmp_path),
             "--mode",
             "full",
-            "--preserve-approved-text",
         ],
         capture_output=True,
         text=True,
@@ -272,12 +304,12 @@ def test_full_derives_quiet_ownership_without_changing_other_approved_fields(
     _assert_fields_and_types_preserved(persisted[0], approved[0])
 
 
-def test_strict_very_short_slot_warns_without_dropping_segment(monkeypatch, tmp_path):
+def test_short_slot_that_fits_warns_without_dropping_segment(monkeypatch, tmp_path):
     approved = [
         {
             "start": 0,
-            "end": 0.1,
-            "narration": "短。",
+            "end": 1.2,
+            "narration": "他转身。",
             "pause_after_ms": 0,
             "tag": "keep",
         }
@@ -289,6 +321,17 @@ def test_strict_very_short_slot_warns_without_dropping_segment(monkeypatch, tmp_
     assert _approved_fields(_read_json(path)[0]) == approved[0]
     lint = _read_json(tmp_path / "narration_lint.json")
     assert any(item["code"] == "slot_too_short" for item in lint["warnings"])
+
+
+def test_slot_too_short_for_its_text_fails_instead_of_being_dropped(monkeypatch, tmp_path):
+    path, raw = _write_narration(
+        tmp_path, [{"start": 0, "end": 0.1, "narration": "短。"}], separators=(",", ":")
+    )
+
+    with pytest.raises(ValueError, match="over_budget"):
+        _run_validate(monkeypatch, tmp_path)
+
+    assert path.read_text(encoding="utf-8") == raw
 
 
 def test_source_boundary_failure_keeps_approved_file_bytes(monkeypatch, tmp_path):
@@ -320,9 +363,8 @@ def test_cut_output_bounds_failure_keeps_approved_file_bytes(monkeypatch, tmp_pa
     assert path.read_text(encoding="utf-8") == raw
 
 
-@pytest.mark.parametrize("preserve", [False, True])
 @pytest.mark.parametrize("duration", [None, "10", "0", "-1", "nan", "inf"])
-def test_cut_output_cli_duration_failure_updates_lint(tmp_path, preserve, duration):
+def test_cut_output_cli_duration_failure_updates_lint(tmp_path, duration):
     _write_output_evidence(tmp_path)
     path, raw = _write_narration(
         tmp_path, [{"start": 0, "end": 11, "narration": "等待同伴。" * 30}], indent=3
@@ -331,8 +373,6 @@ def test_cut_output_cli_duration_failure_updates_lint(tmp_path, preserve, durati
     report_path.write_text(json.dumps({"ok": True, "stale": True}), encoding="utf-8")
     command = [sys.executable, str(Path(narration_validate.__file__)),
                "--work-dir", str(tmp_path), "--mode", "cut_output"]
-    if preserve:
-        command.append("--preserve-approved-text")
     if duration is not None:
         command.extend(["--output-duration", duration])
 
@@ -369,18 +409,21 @@ def test_cut_output_retry_clears_failure_and_keeps_duration_tolerance(monkeypatc
     assert _approved_fields(_read_json(path)[0]) == narration[0]
 
 
-def test_chronological_order_is_only_required_by_the_approved_text_policy(tmp_path):
-    """Lint sorts segments for its timing checks; only --preserve-approved-text rejects
-    input that is not already in order (the approved timeline must stay byte-identical)."""
+@pytest.mark.parametrize("mode", ["full", "cut_output"])
+def test_lint_always_requires_chronological_order(tmp_path, mode):
+    """Validation never reorders segments, so unordered input goes back to the author."""
     from narration_lint import lint_narration
 
     unsorted = [
         {"start": 5.0, "end": 6.0, "narration": "第二段。"},
         {"start": 0.0, "end": 1.0, "narration": "第一段。"},
     ]
-    relaxed = lint_narration(unsorted, [], mode="full", work_dir=tmp_path)
-    assert "out_of_order" not in {item["code"] for item in relaxed["errors"]}
-    strict = lint_narration(
-        unsorted, [], mode="full", work_dir=tmp_path, require_chronological=True
-    )
-    assert "out_of_order" in {item["code"] for item in strict["errors"]}
+    report = lint_narration(unsorted, [], mode=mode, work_dir=tmp_path)
+    assert "out_of_order" in {item["code"] for item in report["errors"]}
+
+
+def test_validate_no_longer_accepts_preserve_approved_text(monkeypatch, tmp_path):
+    _write_narration(tmp_path, [{"start": 0, "end": 2, "narration": "批准稿。"}])
+
+    with pytest.raises(SystemExit):
+        _run_validate(monkeypatch, tmp_path, "full", "--preserve-approved-text")

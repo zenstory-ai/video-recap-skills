@@ -49,8 +49,8 @@ video-understanding ─▶ Agent 按 video-script 写计划与旁白 ─▶ [vid
 
 复制按函数算，不按文件算：同一个函数出现在两个技能里时 AST 必须一致，清单以
 `tests/orchestrator/test_brief_narration_parity.py` 的 `SHARED_FUNCTIONS` 为准。目前只有 video-understanding 的
-brief 预算与 video-script 的旁白 lint 共用的五个文本原语（`_recommended_char_budget`、`_scene_available_seconds`、
-`_overlap_seconds`、`_sentence_pieces`、`_text_units`），以及它们读取的四个预算 CONFIG 键。每个副本都必须在本技能内被调用，
+brief 预算与 video-script 的旁白 lint 共用的四个文本原语（`_recommended_char_budget`、`_scene_available_seconds`、
+`_sentence_pieces`、`_text_units`），以及它们读取的四个预算 CONFIG 键。每个副本都必须在本技能内被调用，
 不为凑 parity 保留死副本。模块各归一个技能：brief 生成链与 `timeline_fusion` 只在 video-understanding，
 `narration_lint`、`speech_ownership`、`deslop_qc` 只在 video-script；两边各有一个 `agent_text`，内容不同
 （`simplification/2026-10-02-function-level-parity.md`）。

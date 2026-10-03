@@ -10,15 +10,10 @@ from pathlib import Path
 
 from lib import CONFIG, log
 from agent_text import (
-    _clean_narration_punctuation,
     _find_scene_for_midpoint,
-    _normalise_narration_segment,
-    _overlap_seconds,
-    _post_dedup_narration,
     _recommended_char_budget,
     _scene_available_seconds,
     _text_char_count,
-    _truncate_at_sentence,
 )
 from deslop_qc import analyze_deslop_qc
 from speech_ownership import (
@@ -197,14 +192,37 @@ def _has_connected_predecessor(narration, idx, start):
     return False
 
 
+# Full-mode hard text budget: a segment longer than this multiple of its recommended
+# character budget cannot be spoken in its window, so lint returns it to the author
+# instead of anything downstream shortening it.
+OVER_BUDGET_ERROR_RATIO = 1.25
+
+
+def _over_budget_error(index, start, end, char_count, budget):
+    limit = int(budget * OVER_BUDGET_ERROR_RATIO)
+    return _lint_issue(
+        "error",
+        index,
+        "over_budget",
+        f"Segment {index} [{start:.2f}-{end:.2f}s] has {char_count} chars; the window holds "
+        f"about {budget} (hard limit {limit}), {char_count - limit} over the limit. "
+        "Shorten the text or widen/move the window, then rerun validate; "
+        "validation never shortens approved text.",
+        start=start,
+        end=end,
+        budget_chars=budget,
+        limit_chars=limit,
+        actual_chars=char_count,
+        over_chars=char_count - limit,
+    )
+
+
 def lint_narration(
     narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
-    require_chronological=False,
 ):
     """Preflight-check agent narration before TTS; write narration_lint.json when work_dir is set.
 
-    Segments are sorted by start for the timing checks; ``require_chronological`` (the
-    --preserve-approved-text contract) additionally rejects input that is not already in order."""
+    Segments must already be in chronological order; validation never reorders them."""
     scenes_analysis = scenes_analysis or []
     errors = []
     warnings = []
@@ -241,7 +259,7 @@ def lint_narration(
                     )
                 )
                 continue
-            if require_chronological and previous_start is not None and start < previous_start:
+            if previous_start is not None and start < previous_start:
                 errors.append(
                     _lint_issue(
                         "error",
@@ -311,6 +329,11 @@ def lint_narration(
             play_rate = CONFIG["speech_rate"] * CONFIG["narration_speed"]
             estimated_tts_seconds = char_count / play_rate
             slot_seconds = _scene_available_seconds(start, end)
+            over_limit = (
+                mode == "full" and char_count > budget * OVER_BUDGET_ERROR_RATIO
+            )
+            if over_limit:
+                errors.append(_over_budget_error(idx, start, end, char_count, budget))
             if budget < 5:
                 warnings.append(
                     _lint_issue(
@@ -323,7 +346,7 @@ def lint_narration(
                         budget_chars=budget,
                     )
                 )
-            elif estimated_tts_seconds > slot_seconds:
+            elif not over_limit and estimated_tts_seconds > slot_seconds:
                 warnings.append(
                     _lint_issue(
                         "warning",
@@ -644,11 +667,9 @@ def lint_narration(
 
 def validate_narration_or_raise(
     narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
-    require_chronological=False,
 ):
     report = lint_narration(
         narration, scenes_analysis, clip_plan=clip_plan, mode=mode, work_dir=work_dir,
-        require_chronological=require_chronological,
     )
     if report["errors"]:
         sample = "; ".join(
@@ -663,74 +684,3 @@ def validate_narration_or_raise(
         log("narration lint: ok")
     return report
 
-
-def _validate_narration_budget(narration, scenes_analysis):
-    """Trim lint-validated narration to its timing budgets; drop what cannot be spoken."""
-    del scenes_analysis  # scene boundaries are advisory (lint warns); authored timing is kept
-    cleaned = []
-    for raw in narration:
-        item = _normalise_narration_segment(raw)
-        max_chars = _recommended_char_budget(item["start"], item["end"])
-        if max_chars < 5:
-            log(f"  丢弃过短解说段 {item['start']:.1f}-{item['end']:.1f}s")
-            continue
-        if _text_char_count(item["narration"]) > max_chars * 1.25:
-            truncated = _truncate_at_sentence(item["narration"], max_chars)
-            if truncated and _text_char_count(truncated) >= 5:
-                log(f"  解说超预算，已截短: {item['start']:.1f}-{item['end']:.1f}s")
-                item["narration"] = truncated
-            else:
-                log(
-                    f"  解说超预算且无法安全截断，已丢弃: {item['start']:.1f}-{item['end']:.1f}s"
-                )
-                continue
-        item["narration"] = _clean_narration_punctuation(item["narration"])
-        stripped = item["narration"].strip()
-        if stripped and stripped[-1] in "，：、；,—":
-            item["narration"] = stripped.rstrip("，：、；,—") + "。"
-        cleaned.append(item)
-
-    cleaned.sort(key=lambda n: n["start"])
-    deduped = []
-    for item in cleaned:
-        if deduped and item["start"] < deduped[-1]["end"]:
-            prev = deduped[-1]
-            log(
-                f"  解说时间重叠: {item['start']:.1f}-{item['end']:.1f}s vs "
-                f"{prev['start']:.1f}-{prev['end']:.1f}s"
-            )
-            if _text_char_count(item["narration"]) > _text_char_count(
-                prev["narration"]
-            ):
-                deduped[-1] = item
-        else:
-            deduped.append(item)
-    return _post_dedup_narration(deduped)
-
-
-def _quiet_windows(silence_periods):
-    return [qp for qp in silence_periods if not qp["has_speech"]]
-
-
-def _align_narration_to_quiet(narration, scenes_analysis, silence_periods):
-    """Recompute overlaps_speech from real quiet windows; keep the agent's timing.
-
-    The dense continuous-bed design places narration ON the pictured beat over a
-    ducked original bed, so segments are never relocated into silence gaps. Only
-    the overlaps_speech flag that the ducking stage consumes is corrected, leaving
-    the agent's start/end (and text) intact.
-
-    Budget/dedup runs FIRST so a dedup-merged beat's overlaps_speech reflects its
-    extended timing, not its original shorter span.
-    """
-    aligned = _validate_narration_budget(narration, scenes_analysis)
-    quiet_windows = _quiet_windows(silence_periods)
-    quiet_ratio_min = CONFIG["quiet_overlap_min_ratio"]
-    for n in aligned:
-        seg_dur = n["end"] - n["start"]
-        quiet_overlap = sum(
-            _overlap_seconds(n["start"], n["end"], qw["start"], qw["end"])
-            for qw in quiet_windows
-        )
-        n["overlaps_speech"] = quiet_overlap < max(0.3, seg_dur * quiet_ratio_min)
-    return aligned
