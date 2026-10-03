@@ -280,7 +280,7 @@ def normalize_multi_source_clip_plan(
         if not allow_overlap and _overlaps_authored_range(ranges, raw_start, raw_end):
             raise ValueError(
                 f"clip #{idx + 1} overlaps an earlier source range for source_id {source_id}; "
-                "split or remove duplicate source footage before mapping narration"
+                "split or remove duplicate source footage in the clip plan"
             )
         ranges.append((raw_start, raw_end))
 
@@ -381,7 +381,7 @@ def normalize_clip_plan(
         if not allow_overlap and _overlaps_authored_range(source_ranges, raw_start, raw_end):
             raise ValueError(
                 f"clip #{idx + 1} overlaps an earlier source range; "
-                "split or remove duplicate source footage before mapping narration"
+                "split or remove duplicate source footage in the clip plan"
             )
         source_ranges.append((raw_start, raw_end))
 

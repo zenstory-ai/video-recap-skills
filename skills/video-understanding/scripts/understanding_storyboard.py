@@ -130,7 +130,6 @@ def _prepend_storyboard_brief_header(
 ):
     """Post-process the RETURNED brief markdown FILE (C1): prepend a short storyboard header.
 
-    Editing the brief FILE on disk (not brief.py) keeps the brief⇄narration twin byte-identical.
     Branches the edited-storyboard line on clip_plan_validated presence (edited_storyboard truthy)
     so pass1 never prints a not-yet-existing path. If labels_burned:false, point to inspect clip-map.
     """

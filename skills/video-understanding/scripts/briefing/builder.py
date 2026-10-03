@@ -110,8 +110,7 @@ def build_agent_brief(
         f"- Target duration (cut mode): {target_duration}",
         f"- Effective speech budget: {effective_rate:.2f} Chinese chars/sec after {breath_sec:.2f}s pause allowance",
     ]
-    # Understanding validates evidence before calling; the standalone script skill
-    # has no producer dependency and must not invent an available ASR status.
+    # A caller that passes no ASR evidence must not get an invented available status.
     if asr_evidence is None:
         asr_evidence = {"status": "MISSING_OR_STALE", "glossary_modifications": None}
 

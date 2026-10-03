@@ -12,18 +12,15 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-cut" / "scripts"))
 import cut
 import cut_contract
+import cut_qc
 import cut_render
 import lib
 import media_geometry
 import sentence_boundaries
+from cut_contract import normalize_clip_plan, parse_duration_seconds
+from cut_render import build_edited_source_video
 from lib import env_float
-from cut import (
-    build_edited_source_video,
-    normalize_clip_plan,
-    parse_duration_seconds,
-    snap_clip_ends_to_lines,
-    snap_clips_off_shot_changes,
-)
+from sentence_boundaries import snap_clip_ends_to_lines, snap_clips_off_shot_changes
 
 _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
@@ -209,13 +206,13 @@ def test_clip_padding_does_not_make_back_to_back_clips_look_duplicated():
 
 def test_multi_source_clip_padding_only_collides_on_authored_ranges():
     manifest = {"sources": [{"source_id": "a", "source_path": "a.mp4", "duration": 60.0}]}
-    plan = cut.normalize_multi_source_clip_plan(
+    plan = cut_contract.normalize_multi_source_clip_plan(
         [{"source_id": "a", "start": 0.0, "end": 10.0}, {"source_id": "a", "start": 10.0, "end": 20.0}],
         manifest, clip_padding=0.5,
     )
     assert len(plan["clips"]) == 2
     with pytest.raises(ValueError, match="source_id a"):
-        cut.normalize_multi_source_clip_plan(
+        cut_contract.normalize_multi_source_clip_plan(
             [{"source_id": "a", "start": 0.0, "end": 10.0}, {"source_id": "a", "start": 5.0, "end": 15.0}],
             manifest, clip_padding=0.5,
         )
@@ -319,7 +316,7 @@ def _seed_cached_cut(tmp_path):
     work.mkdir()
     raw_plan = [{"start": 10.0, "end": 20.0}]
     (work / "clip_plan.json").write_text(json.dumps(raw_plan), encoding="utf-8")
-    validated = cut.normalize_clip_plan(raw_plan, video_duration=100.0)
+    validated = cut_contract.normalize_clip_plan(raw_plan, video_duration=100.0)
     edited = work / "edited_source.mp4"
     edited.write_bytes(b"cached-edited")
     cut_contract._write_edited_source_meta(edited, validated, video)
@@ -371,7 +368,7 @@ def test_edited_source_cache_settings_include_render_affecting_config(monkeypatc
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
     edited.write_bytes(b"edited")
-    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    plan = cut_contract.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
 
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 30.0})
     cut_contract._write_edited_source_meta(edited, plan, video)
@@ -379,11 +376,11 @@ def test_edited_source_cache_settings_include_render_affecting_config(monkeypatc
     assert meta["schema_version"] == 3
     assert meta["render_cache"] == {"clip_join_audio_fade_ms": 30.0}
     assert meta["sources"] == {str(video): {"size": 5, "mtime_ns": video.stat().st_mtime_ns}}
-    assert cut.should_reuse_edited_source(edited, plan, video) is True
+    assert cut_contract.should_reuse_edited_source(edited, plan, video) is True
 
     monkeypatch.setattr("cut_contract.CONFIG", {**cut_contract.CONFIG, "clip_join_audio_fade_ms": 80.0})
-    assert cut.edited_source_render_cache_payload() != meta["render_cache"]
-    assert cut.should_reuse_edited_source(edited, plan, video) is False
+    assert cut_contract.edited_source_render_cache_payload() != meta["render_cache"]
+    assert cut_contract.should_reuse_edited_source(edited, plan, video) is False
 
 
 @pytest.mark.parametrize("metadata", ["not json"])
@@ -394,18 +391,18 @@ def test_edited_source_cache_corrupt_own_metadata_raises(tmp_path, metadata):
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
     edited.write_bytes(b"edited")
-    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
-    assert cut.should_reuse_edited_source(edited, plan, video) is False
+    plan = cut_contract.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    assert cut_contract.should_reuse_edited_source(edited, plan, video) is False
     Path(f"{edited}.meta.json").write_text(metadata, encoding="utf-8")
     with pytest.raises(ValueError):
-        cut.should_reuse_edited_source(edited, plan, video)
+        cut_contract.should_reuse_edited_source(edited, plan, video)
 
 
 def test_build_edited_source_video_requires_selected_output_geometry(tmp_path):
-    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    plan = cut_contract.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
     plan["qc"] = {}
     with pytest.raises(KeyError, match="output_geometry"):
-        cut.build_edited_source_video(tmp_path / "video.mp4", plan, tmp_path)
+        cut_render.build_edited_source_video(tmp_path / "video.mp4", plan, tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -465,15 +462,15 @@ def test_sentence_anchor_pause_window_snaps_both_clip_edges(tmp_path):
         {"start": 14.0, "end": 14.3, "kind": "sentence_anchor", "confidence": "medium"},
     ]
     plan = _make_plan([(10.0, 13.5)], video_duration=30.0)
-    plan = cut.snap_clip_starts_to_lines(plan, boundaries, 30.0, max_prepend=1.8)
-    plan = cut.snap_clip_ends_to_lines(plan, boundaries, 30.0, max_extend=2.0)
+    plan = sentence_boundaries.snap_clip_starts_to_lines(plan, boundaries, 30.0, max_prepend=1.8)
+    plan = sentence_boundaries.snap_clip_ends_to_lines(plan, boundaries, 30.0, max_extend=2.0)
     assert plan["clips"][0]["source_start"] == 8.4
     assert plan["clips"][0]["source_end"] == 14.0
 
 
 def test_sentence_boundary_gate_blocks_unsnapped_speech_edges():
     plan = _make_plan([(3.0, 7.0)], video_duration=10.0)
-    out = cut.enforce_clip_sentence_boundaries(
+    out = sentence_boundaries.enforce_clip_sentence_boundaries(
         plan, boundary_windows=[{"start": 4.8, "end": 5.0}],
         speech_spans=[{"start": 0.0, "end": 10.0}], video_duration=10.0)
     assert {b["edge"] for b in out["qc"]["blocking"]
@@ -482,7 +479,7 @@ def test_sentence_boundary_gate_blocks_unsnapped_speech_edges():
 
 def test_sentence_boundary_gate_allows_source_ends_and_contiguous_same_source_join():
     plan = _make_plan([(0.0, 5.0), (5.0, 10.0)], video_duration=10.0)
-    out = cut.enforce_clip_sentence_boundaries(
+    out = sentence_boundaries.enforce_clip_sentence_boundaries(
         plan, boundary_windows=[], speech_spans=[{"start": 0.0, "end": 10.0}], video_duration=10.0)
     assert not out["qc"].get("blocking")
     checks = out["qc"]["boundary_status"]["sentence_checks"]
@@ -502,7 +499,7 @@ def test_sentence_boundary_gate_allows_source_ends_and_contiguous_same_source_jo
 ])
 def test_snap_clip_starts_single_clip(clip, silence, expected_start, event):
     plan = _make_plan([clip])
-    out = cut.snap_clip_starts_to_lines(plan, silence, video_duration=30.0, max_prepend=1.8, max_trim=0.35)
+    out = sentence_boundaries.snap_clip_starts_to_lines(plan, silence, video_duration=30.0, max_prepend=1.8, max_trim=0.35)
     c = out["clips"][0]
     assert c["source_start"] == expected_start
     assert c["duration"] == pytest.approx(14.0 - expected_start)
@@ -513,7 +510,7 @@ def test_snap_clip_starts_single_clip(clip, silence, expected_start, event):
 def test_snap_clip_starts_warns_when_prepend_would_overlap():
     plan = _make_plan([(8.0, 10.0), (10.0, 14.0)])
     silence = [{"start": 7.5, "end": 8.4}]
-    out = cut.snap_clip_starts_to_lines(plan, silence, video_duration=30.0, max_prepend=1.8, max_trim=0.35)
+    out = sentence_boundaries.snap_clip_starts_to_lines(plan, silence, video_duration=30.0, max_prepend=1.8, max_trim=0.35)
     assert out["clips"][1]["source_start"] == 10.0
     assert out["qc"]["boundary_status"]["start_snaps"][1]["start_unsnapped_reason"] == "overlap_or_collapse"
     assert any(w["code"] == "clip_start_unsnapped" for w in out["qc"]["warnings"])
@@ -569,7 +566,7 @@ def test_normalize_multi_source_clip_plan_maps_sources_and_validates_per_source_
         {"source_id": "a", "source_path": str(tmp_path / "a.mp4"), "duration": 10.0},
         {"source_id": "b", "source_path": str(tmp_path / "b.mp4"), "duration": 5.0},
     ]}
-    plan = cut.normalize_multi_source_clip_plan([
+    plan = cut_contract.normalize_multi_source_clip_plan([
         {"source_id": "a", "start": 1.0, "end": 4.0, "reason": "A"},
         {"source_id": "b", "start": 4.0, "end": 8.0, "reason": "B"},
         {"source_id": "b", "start": 0.0, "end": 1.0, "reason": "B2"},
@@ -583,12 +580,12 @@ def test_normalize_multi_source_clip_plan_maps_sources_and_validates_per_source_
     assert plan["clips"][2]["output_start"] == 5.5
 
     with pytest.raises(ValueError, match="source_id a"):
-        cut.normalize_multi_source_clip_plan(
+        cut_contract.normalize_multi_source_clip_plan(
             [{"source_id": "a", "start": 1.0, "end": 4.0}, {"source_id": "a", "start": 3.5, "end": 5.0}], manifest)
     with pytest.raises(ValueError, match="missing source_id"):
-        cut.normalize_multi_source_clip_plan([{"start": 1.0, "end": 2.0}], manifest)
+        cut_contract.normalize_multi_source_clip_plan([{"start": 1.0, "end": 2.0}], manifest)
     with pytest.raises(ValueError, match="unknown source_id"):
-        cut.normalize_multi_source_clip_plan([{"source_id": "missing", "start": 1.0, "end": 2.0}], manifest)
+        cut_contract.normalize_multi_source_clip_plan([{"source_id": "missing", "start": 1.0, "end": 2.0}], manifest)
 
 
 def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_meta(monkeypatch, tmp_path):
@@ -599,7 +596,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
     b.write_bytes(b"bbb")
     work_dir = tmp_path / "work"
     work_dir.mkdir()
-    plan = cut.normalize_multi_source_clip_plan(
+    plan = cut_contract.normalize_multi_source_clip_plan(
         [{"source_id": "a", "start": 0, "end": 1}, {"source_id": "b", "start": 2, "end": 3},
          {"source_id": "a", "start": 4, "end": 5}],
         {"sources": [{"source_id": "a", "source_path": str(a), "duration": 10},
@@ -618,7 +615,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
     monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 3.0)
 
-    out = cut.build_edited_source_video("ignored.mp4", _with_geometry(plan, [str(a), str(b)]), work_dir)
+    out = cut_render.build_edited_source_video("ignored.mp4", _with_geometry(plan, [str(a), str(b)]), work_dir)
 
     ffmpeg_cmd = [cmd for cmd in commands if cmd[0] == "ffmpeg"][0]
     # Only the two media inputs: audio is synthesized per-clip inside filter_complex.
@@ -632,7 +629,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
     assert "scale=1280:720" in joined and "setsar=1" in joined and "format=yuv420p" in joined
     assert "anullsrc=r=48000:cl=stereo" in joined
     assert "concat=n=3:v=1:a=1" in joined
-    assert cut.should_reuse_edited_source(out, plan, "ignored.mp4") is True
+    assert cut_contract.should_reuse_edited_source(out, plan, "ignored.mp4") is True
 
 
 @pytest.mark.skipif(
@@ -664,14 +661,14 @@ def test_build_edited_source_video_multi_resolution_mixed_audio_real_render(tmp_
     )
     work = tmp_path / "work"
     work.mkdir()
-    plan = cut.normalize_multi_source_clip_plan(
+    plan = cut_contract.normalize_multi_source_clip_plan(
         [{"source_id": "a", "start": 0.0, "end": 1.0}, {"source_id": "b", "start": 0.0, "end": 1.0},
          {"source_id": "a", "start": 1.0, "end": 2.0}],
         {"sources": [{"source_id": "a", "source_path": str(a), "duration": 2.0},
                      {"source_id": "b", "source_path": str(b), "duration": 2.0}]},
     )
 
-    out = cut.build_edited_source_video(str(a), _with_geometry(plan, [str(a), str(b)]), work)
+    out = cut_render.build_edited_source_video(str(a), _with_geometry(plan, [str(a), str(b)]), work)
     assert out.exists() and out.stat().st_size > 0
 
     def _has_stream(kind):
@@ -717,7 +714,7 @@ def _snap_multi(plan, sources, work, **overrides):
     kwargs = dict(line_max_extend=2.0, scene_margin=0.5, scene_threshold=0.4,
                   start_max_prepend=1.8, start_max_trim=0.35)
     kwargs.update(overrides)
-    return cut.snap_multi_source_clips(plan, sources, work, **kwargs)
+    return sentence_boundaries.snap_multi_source_clips(plan, sources, work, **kwargs)
 
 
 def test_snap_multi_source_clips_line_snaps_each_clip_against_its_own_source(tmp_path):
@@ -842,7 +839,7 @@ def test_cut_probe_video_geometry_uses_display_geometry(monkeypatch, stream, exp
 
 def test_select_output_geometry_qc_exposes_rotation_sar_dar_facts(monkeypatch):
     probes = {
-        "/rotated.mp4": cut.VideoGeometry(1080, 1920, 30.0, {
+        "/rotated.mp4": media_geometry.VideoGeometry(1080, 1920, 30.0, {
             "coded_width": 1920, "coded_height": 1080, "display_width": 1080, "display_height": 1920,
             "rotation": 90, "rotation_swaps_axes": True, "sample_aspect_ratio": "1:1",
             "sample_aspect_ratio_float": 1.0, "display_aspect_ratio": "16:9"}),
@@ -915,7 +912,7 @@ def test_contiguous_same_source_join_does_not_fade_inside_sentence(monkeypatch, 
 ])
 def test_update_cut_qc_duration_status_and_allow_drift(kwargs, allowed_by):
     plan = {"clips": [{"duration": 4.0}], "total_duration": 4.0, "target_duration": 10.0}
-    cut.update_cut_qc(plan, **kwargs)
+    cut_qc.update_cut_qc(plan, **kwargs)
     assert plan["qc"]["target_duration_status"] == "under"
     if allowed_by is None:
         assert plan["qc"]["blocking"][0]["code"] == "target_duration_drift"
@@ -931,13 +928,13 @@ def test_edited_source_cache_from_content_hash_schema_is_a_miss(tmp_path):
     video.write_bytes(b"video")
     edited = tmp_path / "edited_source.mp4"
     edited.write_bytes(b"edited")
-    plan = cut.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
+    plan = cut_contract.normalize_clip_plan([{"start": 0.0, "end": 1.0}], video_duration=2.0)
     Path(f"{edited}.meta.json").write_text(json.dumps({
         "schema_version": 2, "clip_plan_fingerprint": "a" * 32, "render_fingerprint": "b" * 32,
         "render_cache": {}, "source_fingerprints": {str(video): "c" * 64},
         "edited_source_fingerprint": "d" * 64, "total_duration": 1.0, "clip_count": 1,
     }), encoding="utf-8")
-    assert cut.should_reuse_edited_source(edited, plan, video) is False
+    assert cut_contract.should_reuse_edited_source(edited, plan, video) is False
     for empty in ("{}", "[]"):
         Path(f"{edited}.meta.json").write_text(empty, encoding="utf-8")
-        assert cut.should_reuse_edited_source(edited, plan, video) is False
+        assert cut_contract.should_reuse_edited_source(edited, plan, video) is False

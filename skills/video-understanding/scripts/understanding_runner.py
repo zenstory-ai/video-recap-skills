@@ -22,7 +22,8 @@ from vlm import (
     mimo_video_overview_cache_fresh,
 )
 
-from brief import build_agent_brief, assess_understanding_substrate
+from briefing.builder import build_agent_brief
+from briefing.context import assess_understanding_substrate
 
 
 from understanding_brief import _research_context, _write_brief_from_existing_artifacts
@@ -364,8 +365,7 @@ def main():
         mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )
-    # C1: post-process the RETURNED brief FILE (not brief.py) so the brief⇄narration twin stays
-    # byte-identical. Prepends a storyboard header pointing the agent at the sheet(s).
+    # C1: prepend a storyboard header to the returned brief file, pointing the agent at the sheet(s).
     _prepend_storyboard_brief_header(
         brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode
     )

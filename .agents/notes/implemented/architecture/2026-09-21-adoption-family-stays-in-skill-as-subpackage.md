@@ -20,7 +20,7 @@ speech_ownership / timeline_fusion`）名字相近却归属不同。
     家族与 adopted 模式的字幕轨，一并进包。原先同为顶层入口的 `pair_media.py`、`compose_foreground.py` 已删除，
     它们的画面帧钟 / AAC 包区间 helper 移入 `adoption/av_clock.py`，见 [[2026-10-02-drop-pair-media-compose-foreground]]。
   - `video-understanding/scripts/briefing/{builder,context,inputs,timeline}.py`
-    （原 `agent_brief / brief_context / brief_inputs / brief_timeline`）；入口 `brief.py` 与 `agent_text`、`timeline_fusion` 留在顶层。
+    （原 `agent_brief / brief_context / brief_inputs / brief_timeline`）；`agent_text`、`timeline_fusion` 留在顶层。原再导出入口 `brief.py` 已删除，调用方直接导入 `briefing.builder` / `briefing.context`，见 [[2026-10-02-collapse-cut-brief-facades]]。
 - 顶层保留的模块就是"每次成片都会经过"的核心与公开入口；子包名即功能族名。
 
 ## Alternatives considered

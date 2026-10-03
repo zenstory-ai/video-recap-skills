@@ -11,7 +11,8 @@ from asr_timing_evidence import asr_evidence_summary_for_brief
 from detect import detect_speech_boundary_anchors
 
 
-from brief import build_agent_brief, assess_understanding_substrate
+from briefing.builder import build_agent_brief
+from briefing.context import assess_understanding_substrate
 
 
 from understanding_cache import _load_json, _merge_overview_into_scenes

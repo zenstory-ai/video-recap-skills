@@ -24,6 +24,7 @@ All notable changes to this project are documented here.
 - **`subtitle_track.json` 的 binding 不再容忍 `sha256` / `edit_sha256`。** 这两个摘要键按未知字段拒绝（`unknown field(s)`），删掉即可；没有任何已发布版本写过带这两个键的字幕轨。
 - **assemble 的时间线溯源只认 `clip_plan_validated.json`。** `clip_plan.json` 比它新（改了计划却没重新剪）时，assemble 在渲染前报 `clip_plan_validated.json 已过期`，不再改用原始计划拼出与画面不符的 `timeline.json` 和重映射字幕；重新剪辑即可。没有 validated 计划时按整片处理，散落的 `clip_plan.json` 不再参与字幕重映射。
 - **voiceover 的参考音频每次运行只转码一次，并按参数传给各段。** 有段落需要合成时才转码，全部命中缓存的重跑仍不调用 ffmpeg；配音期间参考音频被改动会报 `参考音频在配音期间被修改`，不再静默沿用旧快照。`tts_meta.json` 与 TTS 段缓存键不变。
+- **cut 与 understanding 收掉只为测试存在的门面。** `cut.py` 只导出 `main`，video-understanding 删除再导出用的 `brief.py`，`narration_mapping.py` 改名 `cut_qc.py`；进程内导入这些名字的脚本需改从所属模块导入。cut 计划里源区间重叠的报错结尾改为 `split or remove duplicate source footage in the clip plan`。命令行、参数与产物不变。
 
 ### Removed
 
