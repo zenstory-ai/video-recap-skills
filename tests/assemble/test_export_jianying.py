@@ -367,7 +367,7 @@ def test_exporter_handles_timeline_without_bgm():
 
 def test_exporter_skips_empty_audio_track():
     tl = {
-        "schema_version": 1,
+        "schema_version": 2,
         "canvas": {"width": 100, "height": 100, "fps": 30},
         "duration": 5.0,
         "tracks": [
@@ -418,7 +418,7 @@ def test_core_assemble_does_not_import_exporter():
 
 def test_local_image_overlay_builds_photo_material_and_overlap_safe_tracks():
     tl = {
-        "schema_version": 1,
+        "schema_version": 2,
         "canvas": {"width": 100, "height": 100, "fps": 30},
         "duration": 3.0,
         "tracks": [
@@ -430,11 +430,8 @@ def test_local_image_overlay_builds_photo_material_and_overlap_safe_tracks():
                         "source_path": "/overlay.png",
                         "timeline_start": 0.0,
                         "timeline_end": 2.0,
-                        "opacity": 0.75,
-                        "rotation_degrees": 15,
                         "scale": {"x": 0.5, "y": 0.6},
                         "position": {"x": 0.25, "y": -0.4},
-                        "flip": {"horizontal": True, "vertical": False},
                     },
                     {
                         "source_path": "/overlay-2.png",
@@ -460,9 +457,9 @@ def test_local_image_overlay_builds_photo_material_and_overlap_safe_tracks():
     ]
     clip = content["tracks"][0]["segments"][0]["clip"]
     assert clip == {
-        "alpha": 0.75,
-        "flip": {"horizontal": True, "vertical": False},
-        "rotation": 15.0,
+        "alpha": 1.0,
+        "flip": {"horizontal": False, "vertical": False},
+        "rotation": 0.0,
         "scale": {"x": 0.5, "y": 0.6},
         "transform": {"x": 0.25, "y": -0.4},
     }
@@ -477,16 +474,7 @@ def test_track_allocator_uses_layout_bands_and_suffixes_overlaps():
         TRACK_LAYOUT_BANDS["image"].layout_order
         < TRACK_LAYOUT_BANDS["subtitle"].layout_order
     )
-    assert {
-        "audio",
-        "sound",
-        "video",
-        "image",
-        "mask",
-        "sticker",
-        "subtitle",
-        "text_template",
-    } <= set(TRACK_LAYOUT_BANDS)
+    assert set(TRACK_LAYOUT_BANDS) == {"audio", "video", "image", "subtitle", "text"}
 
     allocator = TrackAllocator()
     assert allocator.allocate("subtitle", "subtitle", 0, 5_000_000).name == "subtitle"

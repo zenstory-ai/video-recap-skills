@@ -82,7 +82,7 @@ def test_build_timeline_subtitle_segments_skip_invalid_entries():
     ]
 
 
-def test_build_timeline_v2_passes_local_image_overlays_through():
+def test_build_timeline_passes_local_image_overlays_through():
     tl = build_timeline(
         {"width": 1280, "height": 720, "fps": 30},
         5.0,
@@ -93,11 +93,8 @@ def test_build_timeline_v2_passes_local_image_overlays_through():
                 "source_path": "/card.png",
                 "timeline_start": 1,
                 "timeline_end": 4,
-                "opacity": 0.8,
-                "rotation_degrees": 12,
                 "scale": {"x": 0.5, "y": 0.6},
                 "position": {"x": 0.2, "y": -0.3},
-                "flip": {"horizontal": True},
             },
             {"source_path": "/plain.png", "timeline_start": 4, "timeline_end": 5},
         ],
@@ -109,11 +106,8 @@ def test_build_timeline_v2_passes_local_image_overlays_through():
             "source_path": "/card.png",
             "timeline_start": 1.0,
             "timeline_end": 4.0,
-            "opacity": 0.8,
-            "rotation_degrees": 12,
             "scale": {"x": 0.5, "y": 0.6},
             "position": {"x": 0.2, "y": -0.3},
-            "flip": {"horizontal": True},
         },
         {"source_path": "/plain.png", "timeline_start": 4.0, "timeline_end": 5.0},
     ]
@@ -129,64 +123,6 @@ def test_build_timeline_rejects_malformed_image_overlay():
             [],
             image_segments=[{"source_path": "/missing-time.png", "timeline_start": 1}],
         )
-
-
-def test_build_timeline_preserves_jianying_authoring_extensions():
-    video = {
-        "source_path": "/source.mp4",
-        "source_start": 0,
-        "source_end": 4,
-        "timeline_start": 0,
-        "timeline_end": 2,
-        "speed": 2.0,
-        "reverse": True,
-        "reverse_path": "/source-reversed.mp4",
-        "opacity": 0.7,
-        "position": {"x": 0.2, "y": -0.1},
-        "transition": "fade-package",
-    }
-    resource_packages = {
-        "sticker-package": {"main_config": {"type": "sticker"}},
-        "fade-package": {"main_config": {"type": "transition"}},
-    }
-    style_presets = {"title": {"font_size": 24, "fill_color": "#FF0000"}}
-    sticker_track = {
-        "kind": "sticker",
-        "name": "sticker",
-        "segments": [
-            {
-                "timeline_start": 0,
-                "timeline_end": 1,
-                "resource_package": "sticker-package",
-            }
-        ],
-    }
-
-    timeline = build_timeline(
-        {"width": 1280, "height": 720, "fps": 30},
-        2.0,
-        [video],
-        [],
-        resource_packages=resource_packages,
-        style_presets=style_presets,
-        extra_tracks=[sticker_track],
-    )
-
-    authored = _track(timeline, "video")["clips"][0]
-    extension_keys = (
-        "speed",
-        "reverse",
-        "reverse_path",
-        "opacity",
-        "position",
-        "transition",
-    )
-    assert {key: authored[key] for key in extension_keys} == {
-        key: video[key] for key in extension_keys
-    }
-    assert timeline["resource_packages"] == resource_packages
-    assert timeline["style_presets"] == style_presets
-    assert _track(timeline, "sticker") == sticker_track
 
 
 def test_ducking_keyframes_holds_idle_and_dips_under_window():

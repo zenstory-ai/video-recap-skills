@@ -21,9 +21,7 @@ adapter binary, or credential is included. See ACKNOWLEDGEMENTS / 致谢.
 """
 
 import json
-import os
 import subprocess
-import tempfile
 import uuid
 
 from jianying.builders import build_timeline_track as _build_timeline_track
@@ -77,11 +75,7 @@ def _probe_media(path):
 
 def build_draft(timeline, new_id=None, probe=None):
     """Build the 剪映 draft_content dict and companion meta from a timeline."""
-    return _build_normalized_draft(_normalize_timeline(timeline), new_id, probe)
-
-
-def _build_normalized_draft(timeline, new_id=None, probe=None):
-    """`timeline` has already passed jianying.timeline_contract.normalize_timeline."""
+    timeline = _normalize_timeline(timeline)
     new_id = new_id or _default_id
     probe = probe or _probe_media
     ctx = _DraftBuildContext.from_timeline(timeline, new_id, probe)
@@ -104,63 +98,6 @@ def _build_normalized_draft(timeline, new_id=None, probe=None):
     return content, meta, ctx.notes
 
 
-def _generate_reversed_media(source_path, output_path):
-    commands = [
-        [
-            "ffmpeg",
-            "-y",
-            "-v",
-            "error",
-            "-i",
-            source_path,
-            "-vf",
-            "reverse",
-            "-af",
-            "areverse",
-            output_path,
-        ],
-        [
-            "ffmpeg",
-            "-y",
-            "-v",
-            "error",
-            "-i",
-            source_path,
-            "-vf",
-            "reverse",
-            "-an",
-            output_path,
-        ],
-    ]
-    errors = []
-    for command in commands:
-        result = subprocess.run(command, capture_output=True, text=True)
-        if result.returncode == 0 and os.path.isfile(output_path):
-            return
-        errors.append(
-            (result.stderr or result.stdout or "unknown ffmpeg error").strip()
-        )
-    raise RuntimeError(
-        f"failed to reverse JianYing source {source_path}: {'; '.join(errors)}"
-    )
-
-
-def _prepare_reverse_sources(clips, temporary_dir):
-    """Generate a reversed copy for each clip and record it as the clip's reverse_path."""
-    generated = []
-    for clip in clips:
-        source_path = clip["source_path"]
-        if not os.path.isfile(source_path):
-            raise ValueError(f"reverse source does not exist: {source_path}")
-        output_path = os.path.join(
-            temporary_dir, f"reversed-{uuid.uuid4().hex}.mp4"
-        )
-        _generate_reversed_media(source_path, output_path)
-        clip["reverse_path"] = output_path
-        generated.append(source_path)
-    return generated
-
-
 def export_timeline_to_jianying(
     timeline, out_dir, draft_name="recap", new_id=None, probe=None, bundle_media=True
 ):
@@ -170,43 +107,15 @@ def export_timeline_to_jianying(
     portable. Pass bundle_media=False only when external absolute paths are
     intentionally required.
     """
-    # Validate once at the boundary; everything below trusts the normalized copy.
-    timeline = _normalize_timeline(timeline)
-    reverse_clips = [
-        clip
-        for track in timeline["tracks"]
-        if track["kind"] == "video"
-        for clip in track["clips"]
-        if clip.get("reverse") and "reverse_path" not in clip
-    ]
-    if reverse_clips and not bundle_media:
-        raise ValueError("automatic reverse generation requires media bundling")
-    if not reverse_clips:
-        content, meta, notes = _build_normalized_draft(timeline, new_id=new_id, probe=probe)
-        return _write_draft(
-            content,
-            meta,
-            notes,
-            out_dir,
-            draft_name,
-            bundle_media_enabled=bundle_media,
-        )
-
-    os.makedirs(out_dir, exist_ok=True)
-    with tempfile.TemporaryDirectory(
-        prefix="jianying-reverse-", dir=out_dir
-    ) as temporary_dir:
-        generated = _prepare_reverse_sources(reverse_clips, temporary_dir)
-        content, meta, notes = _build_normalized_draft(timeline, new_id=new_id, probe=probe)
-        notes.extend(f"已生成倒放素材: {source}" for source in generated)
-        return _write_draft(
-            content,
-            meta,
-            notes,
-            out_dir,
-            draft_name,
-            bundle_media_enabled=True,
-        )
+    content, meta, notes = build_draft(timeline, new_id=new_id, probe=probe)
+    return _write_draft(
+        content,
+        meta,
+        notes,
+        out_dir,
+        draft_name,
+        bundle_media_enabled=bundle_media,
+    )
 
 
 def main():

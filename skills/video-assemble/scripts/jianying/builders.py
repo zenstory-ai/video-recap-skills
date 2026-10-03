@@ -2,25 +2,14 @@
 
 import json
 import os
-from copy import deepcopy
 
-from jianying.schema import scrub_platform_identity, us
+from jianying.schema import us
 from jianying.templates import template
 from jianying.tracks import SEGMENT_RENDER_INDEX
 
 
 def timerange(start_us, dur_us):
     return {"start": int(start_us), "duration": int(dur_us)}
-
-
-def speed_material(new_id, speed=1.0):
-    return {
-        "id": new_id(),
-        "speed": float(speed),
-        "type": "speed",
-        "mode": 0,
-        "curve_speed": None,
-    }
 
 
 def volume_keyframes(keyframes, seg_start_s, new_id):
@@ -83,22 +72,20 @@ def windowed_volume_keyframes(keyframes, seg_start_s, seg_end_s, default_gain, n
 
 
 def clip_from_segment(segment):
-    """Map optional authoring transforms (validated as objects by the timeline contract)."""
+    """Map the optional scale/position transform (validated as objects by the contract).
+
+    Positions use JianYing's normalized, canvas-center, Y-up coordinates.
+    """
     scale = segment.get("scale", {})
     position = segment.get("position", {})
-    flip = segment.get("flip", {})
     return {
-        "alpha": round(float(segment.get("opacity", 1.0)), 4),
-        "flip": {
-            "horizontal": bool(flip.get("horizontal", False)),
-            "vertical": bool(flip.get("vertical", False)),
-        },
-        "rotation": float(segment.get("rotation_degrees", 0.0)),
+        "alpha": 1.0,
+        "flip": {"horizontal": False, "vertical": False},
+        "rotation": 0.0,
         "scale": {
             "x": float(scale.get("x", 1.0)),
             "y": float(scale.get("y", 1.0)),
         },
-        # Timeline v2 uses JianYing's normalized, canvas-center, Y-up coordinates.
         "transform": {
             "x": float(position.get("x", 0.0)),
             "y": float(position.get("y", 0.0)),
@@ -128,346 +115,29 @@ def audio_segment_piece(material_id, target_start_us, target_dur_us, source_star
     return seg
 
 
-def _hex_rgb(color):
-    value = str(color or "#FFFFFF").lstrip("#")
-    if len(value) == 8:
-        value = value[:6]
-    if len(value) != 6:
-        raise ValueError(f"invalid text color: {color!r}")
-    try:
-        return [round(int(value[index:index + 2], 16) / 255.0, 6) for index in (0, 2, 4)]
-    except ValueError as exc:
-        raise ValueError(f"invalid text color: {color!r}") from exc
+def text_content(text):
+    """duo-video's rich-text payload with one default style over the whole string.
 
-
-def _text_style(style, start, end):
-    fill_color = style.get("fill_color", "#FFFFFF")
-    authored = template("text_style")["styles"][0]
-    authored.update({
+    Ranges are UTF-16 code units, matching JianYing rather than Python code points.
+    """
+    style = template("text_style")["styles"][0]
+    style.update({
         "fill": {
             "alpha": 1.0,
-            "content": {
-                "render_type": "solid",
-                "solid": {"alpha": 1.0, "color": _hex_rgb(fill_color)},
-            },
+            "content": {"render_type": "solid", "solid": {"alpha": 1.0, "color": [1.0, 1.0, 1.0]}},
         },
-        "range": [int(start), int(end)],
-        "size": float(style.get("font_size", 8.0)),
-        "bold": bool(style.get("bold", False)),
-        "italic": bool(style.get("italic", False)),
-        "underline": bool(style.get("underline", False)),
-        "strokes": list(style.get("strokes", [])),
+        "range": [0, len(text.encode("utf-16-le")) // 2],
+        "size": 8.0,
+        "bold": False,
+        "italic": False,
+        "underline": False,
+        "strokes": [],
+        "use_letter_color": True,
     })
-    if style.get("font_path") or style.get("font_id"):
-        authored["font"] = {
-            "id": str(style.get("font_id", "")),
-            "path": str(style.get("font_path", "")),
-        }
-    if style.get("stroke_color") and float(style.get("stroke_width", 0)) > 0:
-        width = float(style["stroke_width"])
-        authored["strokes"] = [{
-            "alpha": 1.0,
-            "content": {
-                "render_type": "solid",
-                "solid": {"alpha": 1.0, "color": _hex_rgb(style["stroke_color"])},
-            },
-            "width": round(0.00196 * (width ** 1.013), 6),
-        }]
-    if style.get("shadow_color"):
-        authored["shadows"] = [{
-            "alpha": float(style.get("shadow_opacity", 90)) / 100.0,
-            "angle": int(style.get("shadow_angle", -45)),
-            "distance": int(style.get("shadow_width", 5)),
-            "feather": float(style.get("shadow_vague", 45)) / 100.0,
-            "content": {
-                "render_type": "solid",
-                "solid": {"alpha": 1.0, "color": _hex_rgb(style["shadow_color"])},
-            },
-        }]
-    if isinstance(style.get("effect_style"), dict):
-        authored["effect_style"] = deepcopy(style["effect_style"])
-    authored["use_letter_color"] = True
-    return authored
-
-
-def rich_text_content(text, base_style=None, words=None, style_presets=None):
-    """Build duo-video text styles using UTF-16 code-unit ranges."""
-    base_style = dict(base_style or {})
-    length = len(text.encode("utf-16-le")) // 2
-    style_presets = style_presets or {}
-    normalized_words = []
-    boundaries = {0, length}
-    for word in words or []:
-        start = max(0, min(length, int(word.get("index", 0))))
-        end = max(start, min(length, start + int(word.get("length", 0))))
-        if end <= start:
-            continue
-        word_style = dict(style_presets.get(str(word.get("style_id")), {}))
-        word_style.update(word)
-        normalized_words.append((start, end, word_style))
-        boundaries.update((start, end))
-
-    styles = []
-    points = sorted(boundaries)
-    for start, end in zip(points, points[1:]):
-        style = dict(base_style)
-        for word_start, word_end, word in normalized_words:
-            if word_start <= start and end <= word_end:
-                style.update({key: value for key, value in word.items() if key not in {"index", "length"}})
-        styles.append(_text_style(style, start, end))
     content = template("text_style")
     content["text"] = text
-    content["styles"] = styles
+    content["styles"] = [style]
     return content
-
-
-RESOURCE_TRACKS = {
-    "sound": "audios",
-    "sticker": "stickers",
-    "text_template": "text_templates",
-    "video_effect": "video_effects",
-    "face_effect": "video_effects",
-}
-
-
-def _resource_material(segment, kind, new_id):
-    """The contract guarantees exactly one of material / resource_config (resolved package)."""
-    config = segment.get("resource_config")
-    if config is None:
-        raw = deepcopy(segment["material"])
-    else:
-        raw = deepcopy(config["main_config"])
-        resource_id = config.get("resource_id")
-        if resource_id is not None:
-            raw.setdefault("resource_id", resource_id)
-        if config.get("resources"):
-            raw["_bundle_resources"] = deepcopy(config["resources"])
-        cover_img = config.get("cover_img")
-        if kind == "sticker" and cover_img:
-            raw["icon_url"] = cover_img
-            raw["preview_cover_url"] = cover_img
-    raw["id"] = new_id()
-    return raw
-
-
-def build_resource_track(ctx, timeline_track):
-    kind = timeline_track["kind"]
-    materials_key = RESOURCE_TRACKS[kind]
-    track_name = timeline_track.get("name", kind)
-    for item in timeline_track["segments"]:
-        ts, te = float(item["timeline_start"]), float(item["timeline_end"])
-        duration_us = us(te - ts)
-        authored_item = item
-        package_name = item.get("resource_package")
-        if package_name is not None:
-            package = ctx.resource_packages.get(str(package_name))
-            if not isinstance(package, dict):
-                raise ValueError(f"unknown JianYing resource package: {package_name}")
-            authored_item = dict(item)
-            authored_item["resource_config"] = package
-        material = _resource_material(authored_item, kind, ctx.new_id)
-        ctx.materials[materials_key].append(material)
-        config = authored_item.get("resource_config") or {}
-        if kind == "text_template":
-            subordinate_resources = deepcopy(material.get("_bundle_resources", []))
-            subordinate_texts = deepcopy(config.get("texts", []))
-            subordinate_effects = deepcopy(config.get("effects", []))
-            if subordinate_resources:
-                for subordinate in subordinate_texts + subordinate_effects:
-                    if isinstance(subordinate, dict):
-                        subordinate["_bundle_resources"] = deepcopy(subordinate_resources)
-            ctx.materials["texts"].extend(subordinate_texts)
-            ctx.materials["effects"].extend(subordinate_effects)
-        seg = base_segment(material["id"], us(ts), duration_us, 1.0, [], ctx.new_id)
-        speed_value = float(item.get("speed", 1.0))
-        seg["source_timerange"] = timerange(0, round(duration_us * speed_value))
-        seg["track_render_index"] = 0
-        seg["extra_material_refs"] = []
-        seg["speed"] = speed_value
-        if abs(speed_value - 1.0) > 1e-9:
-            speed = speed_material(ctx.new_id, speed_value)
-            ctx.materials["speeds"].append(speed)
-            seg["extra_material_refs"].append(speed["id"])
-        seg["clip"] = clip_from_segment(item)
-        ctx.add_segment(kind, track_name, us(ts), duration_us, seg)
-
-
-def _attachment_material(spec, kind, new_id):
-    material = deepcopy(spec)
-    config = material.pop("main_config", None)
-    resources = material.pop("resources", None)
-    resource_id = material.pop("resource_id", None)
-    if config is not None:
-        if not isinstance(config, dict):
-            raise ValueError(f"video {kind}.main_config must be an object")
-        merged = deepcopy(config)
-        merged.update(material)
-        material = merged
-    if resource_id is not None:
-        material.setdefault("resource_id", resource_id)
-    if resources:
-        material["_bundle_resources"] = deepcopy(resources)
-    material["id"] = new_id()
-    return material
-
-
-def _resolve_attachment_spec(ctx, spec, kind):
-    if isinstance(spec, str):
-        package = ctx.resource_packages.get(spec)
-        if not isinstance(package, dict):
-            raise ValueError(f"unknown JianYing {kind} resource package: {spec}")
-        return package
-    return spec
-
-
-def apply_video_attachments(ctx, clip, segment):
-    """Attach duo-video transition, mask, and LUT authoring data."""
-    semantic_kind = "video"
-    transition_spec = clip.get("transition")
-    if transition_spec is not None:
-        transition_spec = _resolve_attachment_spec(ctx, transition_spec, "transition")
-        transition = _attachment_material(transition_spec, "transition", ctx.new_id)
-        ctx.materials["transitions"].append(transition)
-        segment["extra_material_refs"].append(transition["id"])
-
-    mask_spec = clip.get("mask")
-    if mask_spec is not None:
-        mask_spec = _resolve_attachment_spec(ctx, mask_spec, "mask")
-        mask = _attachment_material(mask_spec, "mask", ctx.new_id)
-        ctx.materials["masks"].append(mask)
-        ctx.materials["common_mask"].append(deepcopy(mask))
-        segment["extra_material_refs"].append(mask["id"])
-        semantic_kind = "mask"
-
-    lut_spec = clip.get("lut")
-    if lut_spec is not None:
-        lut_spec = _resolve_attachment_spec(ctx, lut_spec, "lut")
-        lut = _attachment_material(lut_spec, "lut", ctx.new_id)
-        lut["value"] = float(lut.pop("strength", 100)) / 100.0
-        lut.pop("skin_tone_correction", None)
-        ctx.materials["effects"].append(lut)
-        segment["extra_material_refs"].append(lut["id"])
-        if lut_spec.get("skin_tone_correction") is not None:
-            lumi_hub_path = str(lut.get("lumi_hub_path") or "")
-            if not lumi_hub_path:
-                raise ValueError(
-                    "LUT skin_tone_correction requires an offline effect "
-                    "main_config with lumi_hub_path"
-                )
-            effect_path = lumi_hub_path.rsplit("/", 1)[0]
-            skin_tone = deepcopy(lut)
-            skin_tone["id"] = ctx.new_id()
-            skin_tone["type"] = "skin_tone_correction"
-            skin_tone["version"] = "v3"
-            skin_tone["value"] = float(lut_spec["skin_tone_correction"]) / 100.0
-            skin_tone["path"] = effect_path
-            skin_tone["lumi_hub_path"] = effect_path
-            ctx.materials["effects"].append(skin_tone)
-            segment["extra_material_refs"].append(skin_tone["id"])
-    return semantic_kind
-
-
-def _track_object(ctx, name, track_type, segments, flag):
-    return {
-        "attribute": 0,
-        "flag": flag,
-        "id": ctx.new_id(),
-        "is_default_name": True,
-        "name": name,
-        "segments": segments,
-        "type": track_type,
-    }
-
-
-def build_compound_video(ctx, clip, material, foreground_segment, track_name, ts, te):
-    """Build duo-video's nested green-screen/compound draft structure."""
-    background_spec = clip["green_background"]
-    chroma_spec = _resolve_attachment_spec(ctx, clip["chroma"], "chroma")
-
-    duration_us = us(te - ts)
-    full_material_duration_us = material["duration"]
-    outer_source_timerange = deepcopy(foreground_segment["source_timerange"])
-    outer_target_timerange = deepcopy(foreground_segment["target_timerange"])
-    background_path = background_spec["source_path"]
-
-    background_id = ctx.new_id()
-    background = template("video")
-    background.update({
-        "duration": full_material_duration_us,
-        "height": int(background_spec.get("height") or ctx.height),
-        "id": background_id,
-        "material_name": os.path.basename(background_path),
-        "path": background_path,
-        "type": background_spec.get("type", "photo"),
-        "width": int(background_spec.get("width") or ctx.width),
-    })
-
-    chroma = _attachment_material(chroma_spec, "chroma", ctx.new_id)
-    foreground_segment = deepcopy(foreground_segment)
-    foreground_segment["source_timerange"] = timerange(0, full_material_duration_us)
-    foreground_segment["target_timerange"] = timerange(0, full_material_duration_us)
-    foreground_segment["extra_material_refs"].append(chroma["id"])
-
-    background_segment = base_segment(
-        background_id, 0, full_material_duration_us, 1.0, [], ctx.new_id
-    )
-    background_segment["source_timerange"] = timerange(0, full_material_duration_us)
-    background_segment["render_index"] = 1
-    background_segment["track_render_index"] = 1
-    background_segment["clip"] = clip_from_segment(background_spec)
-
-    draft = template("draft")
-    draft["id"] = ctx.new_id()
-    draft["combination_id"] = ctx.new_id()
-    nested = draft["draft"]
-    nested["id"] = ctx.new_id()
-    nested["canvas_config"] = {
-        "width": ctx.width,
-        "height": ctx.height,
-        "ratio": "original",
-    }
-    nested["duration"] = full_material_duration_us
-    nested["fps"] = float(ctx.fps)
-    scrub_platform_identity(nested)
-    nested["materials"]["videos"] = [material, background]
-    nested["materials"]["chromas"] = [chroma]
-    referenced = set(foreground_segment["extra_material_refs"])
-    nested_speeds = [
-        item for item in ctx.materials["speeds"] if item.get("id") in referenced
-    ]
-    if nested_speeds:
-        nested["materials"]["speeds"] = nested_speeds
-        ctx.materials["speeds"] = [
-            item for item in ctx.materials["speeds"] if item.get("id") not in referenced
-        ]
-    nested["tracks"] = [
-        _track_object(ctx, "green_background", "video", [background_segment], 0),
-        _track_object(ctx, "video", "video", [foreground_segment], 2),
-    ]
-    ctx.materials["drafts"].append(draft)
-
-    combination_material = template("combination_video")
-    combination_material.update({
-        "duration": full_material_duration_us,
-        "height": ctx.height,
-        "id": ctx.new_id(),
-        "width": ctx.width,
-    })
-    ctx.materials["videos"].append(combination_material)
-
-    combination_segment = template("combination_segment")
-    combination_segment.update({
-        "id": ctx.new_id(),
-        "material_id": combination_material["id"],
-        "extra_material_refs": [draft["id"]],
-        "source_timerange": outer_source_timerange,
-        "target_timerange": outer_target_timerange,
-    })
-    semantic_kind = apply_video_attachments(ctx, clip, combination_segment)
-    authored_track_name = "mask" if semantic_kind == "mask" else track_name
-    ctx.add_segment(
-        semantic_kind, authored_track_name, us(ts), duration_us, combination_segment
-    )
 
 
 def build_video_track(ctx, timeline_track):
@@ -476,14 +146,6 @@ def build_video_track(ctx, timeline_track):
         ts, te = float(clip["timeline_start"]), float(clip["timeline_end"])
         ss, se = float(clip["source_start"]), float(clip["source_end"])
         path = clip["source_path"]
-        speed_value = float(clip.get("speed", 1.0))
-        reverse = bool(clip.get("reverse", False))
-        if reverse:
-            # The contract allows omitting reverse_path so export_timeline_to_jianying
-            # can generate it; building directly from such a clip is an authoring error.
-            if "reverse_path" not in clip:
-                raise ValueError("reverse video clips require a local reverse_path")
-            path = clip["reverse_path"]
         src_dur_us, width, height = ctx.probe(path)
         if src_dur_us <= 0:
             raise ValueError(f"JianYing video source has no probed duration: {path}")
@@ -497,33 +159,20 @@ def build_video_track(ctx, timeline_track):
             "path": path,
             "width": width or ctx.width,
         })
+        ctx.materials["videos"].append(material)
         audio = clip.get("audio", {})
         keyframes = volume_keyframes(audio.get("volume_keyframes"), ts, ctx.new_id)
         volume = audio.get("base_gain", 1.0) if not keyframes else 1.0
         seg = base_segment(mat_id, us(ts), us(te - ts), volume, keyframes, ctx.new_id)
-        source_start = ss
-        if reverse:
-            source_start = max(0.0, (src_dur_us / 1_000_000) - se)
-        seg["source_timerange"] = timerange(us(source_start), us(se - ss))
-        seg["speed"] = speed_value
-        seg["extra_material_refs"] = []
-        if abs(speed_value - 1.0) > 1e-9:
-            speed = speed_material(ctx.new_id, speed_value)
-            ctx.materials["speeds"].append(speed)
-            seg["extra_material_refs"].append(speed["id"])
+        seg["source_timerange"] = timerange(us(ss), us(se - ss))
         seg["clip"] = clip_from_segment(clip)
-        if clip.get("compound") or clip.get("green_background") or clip.get("chroma"):
-            build_compound_video(ctx, clip, material, seg, track_name, ts, te)
-            continue
-        ctx.materials["videos"].append(material)
-        semantic_kind = apply_video_attachments(ctx, clip, seg)
-        authored_track_name = "mask" if semantic_kind == "mask" else track_name
-        ctx.add_segment(semantic_kind, authored_track_name, us(ts), us(te - ts), seg)
+        ctx.add_segment("video", track_name, us(ts), us(te - ts), seg)
 
 
 def build_audio_track(ctx, timeline_track):
     role = timeline_track.get("role", timeline_track.get("name", "audio"))
     track_name = timeline_track.get("name", role)
+    looped_bgm = role == "bgm" and timeline_track.get("loop")
     for segment in timeline_track["segments"]:
         ts, te = float(segment["timeline_start"]), float(segment["timeline_end"])
         path = segment["source_path"]
@@ -531,15 +180,10 @@ def build_audio_track(ctx, timeline_track):
         if mat_dur_us <= 0:
             raise ValueError(f"JianYing audio source has no probed duration: {path}")
         want_us = us(te - ts)
-        speed_value = float(segment.get("speed", 1.0))
         place_us = want_us
-        required_source_us = int(round(want_us * speed_value))
-        if required_source_us > mat_dur_us:
-            if role == "bgm" and timeline_track.get("loop"):
-                place_us = want_us
-            else:
-                place_us = int(mat_dur_us / speed_value)
-            if role == "bgm" and not timeline_track.get("loop"):
+        if want_us > mat_dur_us and not looped_bgm:
+            place_us = int(mat_dur_us)
+            if role == "bgm":
                 ctx.note(
                     f"BGM 素材({mat_dur_us/1e6:.1f}s) 短于时间线({(te - ts):.1f}s)，"
                     "剪映中未循环铺满（可在剪映里手动复制延长）"
@@ -554,12 +198,10 @@ def build_audio_track(ctx, timeline_track):
         ctx.materials["audios"].append(material)
         keyframes = volume_keyframes(segment.get("volume_keyframes"), ts, ctx.new_id)
         volume = segment.get("gain", 1.0) if not keyframes else 1.0
-        if role == "bgm" and timeline_track.get("loop") and required_source_us > mat_dur_us:
+        if looped_bgm and want_us > mat_dur_us:
             cursor = 0
             while cursor < want_us:
-                piece = min(int(mat_dur_us / speed_value), want_us - cursor)
-                if piece <= 0:
-                    break
+                piece = min(int(mat_dur_us), want_us - cursor)
                 piece_start_s = ts + (cursor / 1_000_000)
                 piece_end_s = ts + ((cursor + piece) / 1_000_000)
                 piece_kfs = windowed_volume_keyframes(
@@ -567,24 +209,13 @@ def build_audio_track(ctx, timeline_track):
                     segment.get("gain", 1.0), ctx.new_id)
                 piece_volume = segment.get("gain", 1.0) if not piece_kfs else 1.0
                 piece_seg = audio_segment_piece(
-                    mat_id, us(ts) + cursor, piece, 0, int(round(piece * speed_value)),
+                    mat_id, us(ts) + cursor, piece, 0, piece,
                     piece_volume, piece_kfs, ctx.new_id)
-                piece_seg["speed"] = speed_value
-                if abs(speed_value - 1.0) > 1e-9:
-                    speed = speed_material(ctx.new_id, speed_value)
-                    ctx.materials["speeds"].append(speed)
-                    piece_seg["extra_material_refs"].append(speed["id"])
                 ctx.add_segment("audio", track_name, us(ts) + cursor, piece, piece_seg)
                 cursor += piece
         else:
             audio_seg = audio_segment_piece(
-                mat_id, us(ts), place_us, 0, int(round(place_us * speed_value)),
-                volume, keyframes, ctx.new_id)
-            audio_seg["speed"] = speed_value
-            if abs(speed_value - 1.0) > 1e-9:
-                speed = speed_material(ctx.new_id, speed_value)
-                ctx.materials["speeds"].append(speed)
-                audio_seg["extra_material_refs"].append(speed["id"])
+                mat_id, us(ts), place_us, 0, place_us, volume, keyframes, ctx.new_id)
             ctx.add_segment("audio", track_name, us(ts), place_us, audio_seg)
 
 
@@ -593,69 +224,19 @@ def build_text_track(ctx, timeline_track):
     track_kind = "subtitle" if track_name == "subtitle" else "text"
     for segment in timeline_track["segments"]:
         ts, te = float(segment["timeline_start"]), float(segment["timeline_end"])
-        text = segment["text"]
         mat_id = ctx.new_id()
-        authored_style = dict(ctx.style_presets.get(str(segment.get("style_id")), {}))
-        authored_style.update(segment.get("style") or {})
-        content = rich_text_content(
-            text, authored_style, segment.get("words"), ctx.style_presets
-        )
         material = template("text")
         material.update({
             "id": mat_id,
-            "content": json.dumps(content, ensure_ascii=False),
-            "type": "subtitle" if track_kind == "subtitle" else "text",
-            "alignment": int(authored_style.get("text_align", 1)),
-            "font_size": float(authored_style.get("font_size", 8.0)),
-            "text_color": authored_style.get("fill_color", "#FFFFFF"),
-            "line_spacing": float(authored_style.get("line_spacing", 0.02)),
-            "letter_spacing": float(authored_style.get("letter_spacing", 0.0)),
+            "content": json.dumps(text_content(segment["text"]), ensure_ascii=False),
+            "type": track_kind,
+            "alignment": 1,
+            "font_size": 8.0,
+            "text_color": "#FFFFFF",
+            "line_spacing": 0.02,
+            "letter_spacing": 0.0,
             "check_flag": 15,
         })
-        bundle_resources = []
-        for content_style in content["styles"]:
-            font_path = content_style.get("font", {}).get("path")
-            if font_path and not str(font_path).startswith(("Resources/", "##_draftpath_placeholder_")):
-                bundle_resources.append({
-                    "source_path": str(font_path),
-                    "resource_kind": "fonts",
-                })
-            effect_path = content_style.get("effect_style", {}).get("path")
-            if effect_path and not str(effect_path).startswith(("Resources/", "##_draftpath_placeholder_")):
-                bundle_resources.append({
-                    "source_path": str(effect_path),
-                    "resource_kind": "effect",
-                })
-        if bundle_resources:
-            material["_bundle_resources"] = bundle_resources
-        if authored_style.get("background_color"):
-            material.update({
-                "background_color": authored_style["background_color"],
-                "background_alpha": float(authored_style.get("background_opacity", 100)) / 100.0,
-                "background_style": 1,
-                "background_height": float(authored_style.get("background_height", 14)) / 100.0,
-                "background_width": float(authored_style.get("background_width", 14)) / 100.0,
-                "background_horizontal_offset": float(authored_style.get("background_offset_x", 50)) * 0.02 - 1,
-                "background_vertical_offset": float(authored_style.get("background_offset_y", 50)) * 0.02 - 1,
-                "background_round_radius": float(authored_style.get("background_radius", 6)) / 100.0,
-                "check_flag": 31,
-            })
-        if authored_style.get("stroke_color") and float(authored_style.get("stroke_width", 0)) > 0:
-            material["bold_width"] = round(
-                0.00196 * (float(authored_style["stroke_width"]) ** 1.013), 6
-            )
-            material["border_color"] = authored_style["stroke_color"]
-        if authored_style.get("shadow_color"):
-            material.update({
-                "has_shadow": True,
-                "shadow_color": authored_style["shadow_color"],
-                "shadow_alpha": float(authored_style.get("shadow_opacity", 90)) / 100.0,
-                "shadow_angle": float(authored_style.get("shadow_angle", -45)),
-                "shadow_distance": float(authored_style.get("shadow_width", 5)),
-                "shadow_smoothing": float(authored_style.get("shadow_vague", 45)) / 100.0,
-            })
-        if authored_style or segment.get("words"):
-            material["is_rich_text"] = True
         ctx.materials["texts"].append(material)
         duration_us = us(te - ts)
         seg = base_segment(mat_id, us(ts), duration_us, 1.0, [], ctx.new_id)
@@ -687,19 +268,9 @@ def build_image_track(ctx, timeline_track):
         })
         ctx.materials["videos"].append(material)
         seg = base_segment(mat_id, us(ts), duration_us, 1.0, [], ctx.new_id)
-        speed_value = float(segment.get("speed", 1.0))
-        seg["source_timerange"] = timerange(0, round(duration_us * speed_value))
+        seg["source_timerange"] = timerange(0, duration_us)
         seg["clip"] = clip_from_segment(segment)
-        seg["speed"] = speed_value
-        if abs(speed_value - 1.0) > 1e-9:
-            speed = speed_material(ctx.new_id, speed_value)
-            ctx.materials["speeds"].append(speed)
-            seg["extra_material_refs"].append(speed["id"])
-        semantic_kind = apply_video_attachments(ctx, segment, seg)
-        authored_track_name = "mask" if semantic_kind == "mask" else track_name
-        if semantic_kind == "video":
-            semantic_kind = "image"
-        ctx.add_segment(semantic_kind, authored_track_name, us(ts), duration_us, seg)
+        ctx.add_segment("image", track_name, us(ts), duration_us, seg)
 
 
 def build_timeline_track(ctx, timeline_track):
@@ -712,7 +283,5 @@ def build_timeline_track(ctx, timeline_track):
         build_audio_track(ctx, timeline_track)
     elif kind == "text":
         build_text_track(ctx, timeline_track)
-    elif kind == "image":
+    else:  # normalize_timeline admits only video/audio/text/image track kinds
         build_image_track(ctx, timeline_track)
-    else:  # normalize_timeline admits only RESOURCE_TRACKS kinds past this point
-        build_resource_track(ctx, timeline_track)
