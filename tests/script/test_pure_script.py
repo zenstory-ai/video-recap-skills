@@ -10,8 +10,7 @@ import validate as narration_validate
 import pytest
 from lib import CONFIG, env_float, file_identity
 from agent_text import _post_dedup_narration, _text_char_count
-from narration_lint import lint_narration
-from timeline_fusion import _align_narration_to_quiet, _build_timeline_fusion
+from narration_lint import _align_narration_to_quiet, lint_narration
 
 
 def _write_json(path, payload):
@@ -245,6 +244,53 @@ def _write_cut_output_speech_evidence(work_dir):
         speech_spans=[{"start": 0.0, "end": 10.0}],
         quiet_windows=[{"start": 3.8, "end": 4.1}],
     )
+
+
+def test_cut_lint_suggests_output_clock_anchor_from_brief_evidence(tmp_path):
+    """Lint reads the output-clock anchors video-understanding writes for cut pass 2."""
+    _write_output_evidence(
+        tmp_path,
+        {
+            "clips": [
+                {
+                    "source_start": 100.0,
+                    "source_end": 110.0,
+                    "output_start": 0.0,
+                    "output_end": 10.0,
+                }
+            ]
+        },
+        sentence_anchors=[
+            {
+                "time": 4.0,
+                "pause_start": 3.88,
+                "source_time": 104.0,
+                "source_pause_start": 103.88,
+                "text_tail": "输出第四秒句末。",
+                "confidence": "high",
+            }
+        ],
+        speech_spans=[{"start": 1.0, "end": 5.0, "text": "清洗后一到五秒对白。"}],
+        quiet_windows=[{"start": 6.0, "end": 8.0}],
+    )
+
+    report = lint_narration(
+        [
+            {
+                "start": 2.0,
+                "end": 6.0,
+                "narration": "剪后时间中途切入。",
+                "overlaps_speech": True,
+            },
+        ],
+        mode="cut",
+        work_dir=tmp_path,
+    )
+
+    issue = next(
+        item for item in report["errors"] if item["code"] == "interrupts_source_sentence"
+    )
+    assert issue["suggested_start"] == 4.0
 
 
 def test_validate_cut_output_uses_output_clock_sentence_anchors(
@@ -642,41 +688,6 @@ def test_post_dedup_keeps_distinct_short_beats(monkeypatch):
     ]
     result = _post_dedup_narration([dict(n) for n in narration])
     assert len(result) == 2
-
-
-def test_timeline_fusion_aligns_scenes_dialogue_and_quiet_slots():
-    fusion = _build_timeline_fusion(
-        [
-            {
-                "scene_id": 0,
-                "start": 0.0,
-                "end": 10.0,
-                "description": "对峙",
-                "frame_facts": {"1.0": ["看门"]},
-            }
-        ],
-        [
-            {"start": 2.0, "end": 4.0, "text": "你到底是谁"},
-            {"start": 8.0, "end": 12.0, "text": "跨场对白"},
-        ],
-        [
-            {"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False},
-            {"start": 5.0, "end": 7.0, "duration": 2.0, "has_speech": False},
-            {"start": 9.0, "end": 9.5, "duration": 0.5, "has_speech": True},
-        ],
-    )
-
-    item = fusion[0]
-    assert item["dialogue_overlap_seconds"] == 4.0
-    assert [seg["text"] for seg in item["dialogue_segments"]] == [
-        "你到底是谁",
-        "跨场对白",
-    ]
-    assert [(slot["start"], slot["end"]) for slot in item["narration_slots"]] == [
-        (0.0, 1.0),
-        (5.0, 7.0),
-    ]
-    assert item["frame_facts"] == {"1.0": ["看门"]}
 
 
 def test_cut_validate_uses_validated_plan_only_when_newer_than_raw(tmp_path):

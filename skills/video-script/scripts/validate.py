@@ -14,11 +14,11 @@ from pathlib import Path
 
 from lib import CONFIG, log
 from narration_lint import (
+    _align_narration_to_quiet,
     _validate_narration_budget,
     validate_narration_or_raise,
 )
 from speech_ownership import measure_narration_speech_ownership
-from timeline_fusion import _align_narration_to_quiet
 
 
 def _load(path):

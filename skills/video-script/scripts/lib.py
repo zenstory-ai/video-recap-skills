@@ -73,11 +73,6 @@ def _env_number(name, default, cast, minimum):
     return value
 
 
-def env_int(name, default, *, minimum=None):
-    """Read an integer env var, rejecting malformed or below-minimum values."""
-    return _env_number(name, default, int, minimum)
-
-
 def env_bool(name, default=False):
     """Read common boolean env var forms."""
     raw = os.environ.get(name)
@@ -120,8 +115,6 @@ CONFIG = {
     "quiet_overlap_min_ratio": 0.8,  # 解说段至少多少比例落在安静窗口内才标记为非对白重叠
     "visual_beat_max_seconds": 18.0,  # 单段解说超过该时长且跨多个帧锚点时给 lint 提醒
     "visual_beat_max_facts": 3,  # 单段解说最多建议覆盖的 frame_facts 锚点数量
-    "asr_chunk_min_chars": env_int("ASR_CHUNK_MIN_CHARS", 500, minimum=1),  # brief 中 ASR 写作分块最小字数/词数
-    "asr_chunk_max_chars": env_int("ASR_CHUNK_MAX_CHARS", 800, minimum=1),  # brief 中 ASR 写作分块最大字数/词数
     "edit_mode": os.environ.get("EDIT_MODE", "full"),  # full | cut
 }
 

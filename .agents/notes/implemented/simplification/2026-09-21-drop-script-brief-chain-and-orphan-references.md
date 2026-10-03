@@ -60,6 +60,7 @@ Status: implemented
   references 少两份重复文件；brief 行为测试回到生产它的 skill 组。
 - **代价**：video-script 单独安装时不再能离线生成 brief（此前也没有入口这样做）；README 的手册链接换目录。
 - 重访信号：若日后需要 video-script 在没有理解阶段的宿主上自己产 brief，另开笔记恢复该链，而不是回滚本篇。
+- 2026-10-02：本篇留下的五个整文件副本已按函数归属拆开，parity 只剩五个函数，见 [[2026-10-02-function-level-parity]]。
 
 ## Verification
 

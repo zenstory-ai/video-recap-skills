@@ -13,6 +13,7 @@ from agent_text import (
     _clean_narration_punctuation,
     _find_scene_for_midpoint,
     _normalise_narration_segment,
+    _overlap_seconds,
     _post_dedup_narration,
     _recommended_char_budget,
     _scene_available_seconds,
@@ -705,3 +706,31 @@ def _validate_narration_budget(narration, scenes_analysis):
         else:
             deduped.append(item)
     return _post_dedup_narration(deduped)
+
+
+def _quiet_windows(silence_periods):
+    return [qp for qp in silence_periods if not qp["has_speech"]]
+
+
+def _align_narration_to_quiet(narration, scenes_analysis, silence_periods):
+    """Recompute overlaps_speech from real quiet windows; keep the agent's timing.
+
+    The dense continuous-bed design places narration ON the pictured beat over a
+    ducked original bed, so segments are never relocated into silence gaps. Only
+    the overlaps_speech flag that the ducking stage consumes is corrected, leaving
+    the agent's start/end (and text) intact.
+
+    Budget/dedup runs FIRST so a dedup-merged beat's overlaps_speech reflects its
+    extended timing, not its original shorter span.
+    """
+    aligned = _validate_narration_budget(narration, scenes_analysis)
+    quiet_windows = _quiet_windows(silence_periods)
+    quiet_ratio_min = CONFIG["quiet_overlap_min_ratio"]
+    for n in aligned:
+        seg_dur = n["end"] - n["start"]
+        quiet_overlap = sum(
+            _overlap_seconds(n["start"], n["end"], qw["start"], qw["end"])
+            for qw in quiet_windows
+        )
+        n["overlaps_speech"] = quiet_overlap < max(0.3, seg_dur * quiet_ratio_min)
+    return aligned
