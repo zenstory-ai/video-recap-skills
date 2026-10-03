@@ -667,13 +667,16 @@ def _publish_subtitle_sidecar(work_dir, final_output):
     """Ship subtitles.srt next to the recap when the subtitles are not burned in.
 
     The pair shares the stable recap_<stem> alias, so a burned run removes a sidecar left by
-    an earlier unburned run instead of letting players stack it over the burned text.
+    an earlier unburned run instead of letting players stack it over the burned text. A run
+    with no subtitle cues (e.g. source-mix without user subtitles) ships no empty sidecar.
     """
     sidecar = final_output.with_suffix(".srt")
-    if lib.CONFIG["burn_subtitles"]:
+    srt = work_dir / "subtitles.srt"
+    has_cues = srt.is_file() and bool(srt.read_text(encoding="utf-8").strip())
+    if lib.CONFIG["burn_subtitles"] or not has_cues:
         sidecar.unlink(missing_ok=True)
         return None
-    shutil.copy2(work_dir / "subtitles.srt", sidecar)
+    shutil.copy2(srt, sidecar)
     return sidecar
 
 

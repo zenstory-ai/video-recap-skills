@@ -54,6 +54,16 @@ _BT709 = {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709
     pytest.param({"color_space": "bt470bg", "color_primaries": "unknown",
                   "color_transfer": "not-a-real-name"},
                  {"colorspace": "bt470bg", "color_range": "tv"}, id="only-known-tags-pass"),
+    pytest.param({"color_space": "bt470bg", "color_primaries": "bt470bg",
+                  "color_transfer": "bt470bg"},
+                 {"colorspace": "bt470bg", "color_primaries": "bt470bg",
+                  "color_trc": "bt470bg", "color_range": "tv"}, id="pal-bt470-transfer-kept"),
+    pytest.param({"color_space": "gbr", "color_range": "pc"},
+                 {**_BT709, "from_rgb": True}, id="rgb-source-becomes-bt709-limited"),
+    pytest.param({"color_space": "gbr", "color_primaries": "smpte170m",
+                  "color_transfer": "unknown", "color_range": "pc"},
+                 {"colorspace": "bt709", "color_primaries": "smpte170m", "color_range": "tv",
+                  "from_rgb": True}, id="rgb-source-never-writes-gbr"),
 ])
 def test_output_color_tags(stream, expected):
     assert media._output_color_tags(stream) == expected
@@ -70,6 +80,35 @@ def test_color_tag_filter_and_args_spell_every_tag():
     partial = {"colorspace": "bt470bg", "color_range": "pc"}
     assert media._color_tag_filter(partial) == "setparams=colorspace=bt470bg:range=pc"
     assert media._color_tag_args(partial) == ["-colorspace", "bt470bg", "-color_range", "pc"]
+    pal = {"color_trc": "bt470bg", "color_range": "tv"}
+    assert media._color_tag_filter(pal) == "setparams=color_trc=bt470bg:range=tv"
+    assert media._color_tag_args(pal) == ["-color_trc", "gamma28", "-color_range", "tv"]
+    rgb = {**_BT709, "from_rgb": True}
+    assert media._color_tag_filter(rgb) == (
+        "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
+        "setparams=colorspace=bt709:color_primaries=bt709:color_trc=bt709:range=tv"
+    )
+    assert media._color_tag_args(rgb) == media._color_tag_args(_BT709)
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+@pytest.mark.parametrize("option, value", sorted(
+    (option, value) for option, values in media._KNOWN_COLOR_VALUES.items() for value in values
+))
+def test_every_known_colour_value_is_accepted_by_ffmpeg(tmp_path, option, value):
+    """Each tag the policy may write must pass setparams and the output option, as spelled
+    by `_color_tag_filter` / `_color_tag_args`, and land in the file as ffprobe names it."""
+    tags = {option: value, "color_range": "tv"}
+    output = tmp_path / "tagged.mp4"
+    result = subprocess.run(
+        ["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "color=c=gray:s=32x32:d=0.1",
+         "-vf", media._color_tag_filter(tags), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+         *media._color_tag_args(tags), str(output)],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert result.returncode == 0, result.stderr
+    field = {opt: key for key, opt in media._COLOR_FIELDS}[option]
+    assert _probe(output).get(field) == value
 
 
 @pytest.mark.parametrize("stream, safe", [
@@ -199,7 +238,9 @@ def test_degraded_burn_records_machine_readable_warning(monkeypatch, tmp_path):
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
-    qc = visual_render._build_visual_qc([], tmp_path, 4.0, _canvas())
+    segs = [tts_segment(start=0.0, end=3.0, actual_place_start=0.5, actual_place_end=2.0,
+                        narration="解说", audio_duration=1.5)]
+    qc = visual_render._build_visual_qc(segs, tmp_path, 4.0, _canvas())
     assert qc["subtitles"]["renderer"] == "sidecar_srt"
     assert qc["subtitles"]["burn_degraded_reason"] == "ffmpeg_missing_libass"
     assert qc["mask"]["trigger"] == "burn_subtitles_degraded" and not qc["mask"]["active"]
@@ -207,6 +248,29 @@ def test_degraded_burn_records_machine_readable_warning(monkeypatch, tmp_path):
     assert warning["code"] == "subtitle_burn_degraded"
     assert warning["delivered"] == "sidecar_srt" and warning["mask_dropped"] is True
     assert qc["blocking"] is False
+
+
+def test_degraded_burn_without_any_subtitles_records_no_warning(monkeypatch, tmp_path):
+    """source-mix / adopted copy without user subtitles: nothing was lost to the missing
+    libass, so nothing is relayed to the user."""
+    _degraded(monkeypatch)
+    monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
+    qc = visual_render._build_visual_qc([], tmp_path, 4.0, _canvas())
+    assert qc["warnings"] == []
+
+
+def test_empty_subtitles_ship_no_sidecar_and_retire_a_stale_one(monkeypatch, tmp_path):
+    work = tmp_path / "work"
+    work.mkdir()
+    final = tmp_path / "recap_x.mp4"
+    stale = tmp_path / "recap_x.srt"
+    stale.write_text("1\n00:00:00,000 --> 00:00:01,000\n旧字幕\n\n", encoding="utf-8")
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
+    (work / "subtitles.srt").write_text("", encoding="utf-8")
+    assert assemble._publish_subtitle_sidecar(work, final) is None
+    assert not stale.exists()
+    (work / "subtitles.srt").unlink()
+    assert assemble._publish_subtitle_sidecar(work, final) is None
 
 
 def test_sidecar_ships_next_to_an_unburned_recap_and_is_retired_by_a_burned_one(
@@ -327,6 +391,42 @@ def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, aud
     qc = json.loads((work / "assembly_qc.json").read_text(encoding="utf-8"))
     assert qc["delivery_qc"]["color_tags"] == _BT709
     assert qc["delivery_qc"]["video_encode_passes"] == (0 if pix_fmt == "yuv420p" else 1)
+
+
+def _first_yuv_pixel(path):
+    """(Y, Cb, Cr) of the top-left pixel of the first frame, decoded as 8-bit yuv420p."""
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(path), "-frames:v", "1",
+         "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    luma = len(raw) * 2 // 3
+    return raw[0], raw[luma], raw[luma + luma // 4]
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+@pytest.mark.parametrize("codec", ["png", "libx264rgb"])
+def test_real_render_converts_rgb_source_to_bt709(monkeypatch, tmp_path, codec):
+    """An RGB source (ffprobe colour space `gbr`) used to fail at `-colorspace gbr`."""
+    _quiet(monkeypatch)
+    source = tmp_path / ("source.mov" if codec == "png" else "source.mp4")
+    work = tmp_path / "work"
+    work.mkdir()
+    _run("ffmpeg", "-y", "-loglevel", "error",
+         "-f", "lavfi", "-i", "color=c=red:s=160x120:r=12:d=2,format=rgb24",
+         "-f", "lavfi", "-i", "sine=frequency=431:sample_rate=48000:d=2",
+         "-c:v", codec, "-c:a", "aac", str(source))
+    assert _probe(source)["color_space"] == "gbr"
+
+    output = assemble_video(source, [], work, work / "output.mp4", audio_mode="source-mix")
+
+    facts = _probe(output)
+    assert (facts["pix_fmt"], facts["color_space"], facts["color_primaries"],
+            facts["color_transfer"], facts["color_range"]) == (
+        "yuv420p", "bt709", "bt709", "bt709", "tv")
+    # Pure red in BT.709 limited range is Y=63 Cb=102 Cr=240 (BT.601 would be 81/90/240).
+    y, cb, cr = _first_yuv_pixel(output)
+    assert abs(y - 63) <= 2 and abs(cb - 102) <= 2 and abs(cr - 240) <= 2, (y, cb, cr)
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")

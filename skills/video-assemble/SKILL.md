@@ -88,7 +88,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
 - 烧录字幕需要带 `subtitles` / libass 的 ffmpeg，合成阶段在渲染前预检。显式要求烧录（`--burn-subtitles` 或环境变量 `BURN_SUBTITLES`）时缺 libass 直接失败；只是默认开启时降级：不烧录，交付外挂 `.srt`（留白里的 `「」` 原声对白照常写进去），`visual_qc.json` 的 `warnings` 与 `assembly_manifest.json` 的 `warnings` 记一条 `subtitle_burn_degraded`，`subtitles.burn_degraded_reason` 写原因。降级后遮罩照旧关闭（`mask.trigger` 为 `burn_subtitles_degraded`）。
 - `visual_overlays.json` 的文字叠加用 ffmpeg `drawtext`（libfreetype）。缺 drawtext 时合成在渲染前失败；叠加是写稿时明确加的内容，不会被静默丢掉。
-- 成片画面一律是 H.264 `yuv420p` 并带 `+faststart`：不需要滤镜、且源画面已是 H.264 8-bit 4:2:0、宽高为偶数时才流复制，否则重编码。色彩标记：源未标记或已是 BT.709 时标为 BT.709（`-colorspace/-color_primaries/-color_trc bt709`），其它已声明的色彩空间原样保留；全范围（`pc`）源保留 `pc`，其余标 `tv`。只改标记，不转换像素；结果记在 `assembly_qc.json` 的 `delivery_qc.color_tags`。
+- 成片画面一律是 H.264 8-bit 4:2:0 并带 `+faststart`：不需要滤镜、且源画面已是 H.264 8-bit 4:2:0（`yuv420p`，或全范围的 `yuvj420p`）、宽高为偶数时才流复制，原样交付；否则重编码为 `yuv420p`。色彩标记：源未标记或已是 BT.709 时标为 BT.709（`-colorspace/-color_primaries/-color_trc bt709`），其它已声明的色彩空间原样保留；全范围（`pc`）源保留 `pc`，其余标 `tv`。YUV 源只改标记，不转换像素；RGB 源（ffprobe 报 `gbr`，如 PNG/QuickTime RLE 封装的 MOV）没有 YUV 矩阵可保留，按 BT.709 limited 转换。结果记在 `assembly_qc.json` 的 `delivery_qc.color_tags`（RGB 源多一个 `from_rgb: true`）。
 - 原声留白中的对白字幕优先读取 Agent 校对的 `original_subtitles.json`；否则保守映射 ASR。只有遮罩覆盖留白或用户字幕明确要求替换时才烧录原声对白，并用 `「」` 与旁白区分。
 
 ### 按原片区间准备声音，而不是整体压低旧成片

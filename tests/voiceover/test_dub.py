@@ -347,6 +347,8 @@ def test_dub_mux_pins_delivery_sample_rate_after_loudnorm(monkeypatch, tmp_path)
     command = commands[0]
     assert command[command.index("-ar") + 1] == "48000"
     assert command.index("-ar") > command.index("-af")
+    assert command[command.index("-movflags") + 1] == "+faststart"
+    assert command.index("-movflags") < command.index(str(tmp_path / "dubbed.mp4"))
 
 
 def test_p0_dub_chars_per_second_ignores_punctuation_for_density():

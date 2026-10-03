@@ -268,10 +268,14 @@ def _visual_overlay_filters(work_dir, canvas, video_duration):
     return filters, qc
 
 
-def _subtitle_delivery_warnings(mask):
-    """Non-blocking, machine-readable record of a default burn that degraded to the sidecar."""
+def _subtitle_delivery_warnings(mask, *, has_subtitles):
+    """Non-blocking, machine-readable record of a default burn that degraded to the sidecar.
+
+    A run with no subtitle entries loses nothing to the missing libass (a burned empty ASS
+    shows nothing either), so it ships no sidecar and records no warning.
+    """
     reason = CONFIG["burn_subtitles_degraded"]
-    if not reason:
+    if not reason or not has_subtitles:
         return []
     return [{
         "code": "subtitle_burn_degraded",
@@ -303,7 +307,7 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
     })
     if overlay_qc is None:
         overlay_qc = _visual_overlay_filters(work_dir, canvas, video_duration)[1]
-    warnings = _subtitle_delivery_warnings(mask)
+    warnings = _subtitle_delivery_warnings(mask, has_subtitles=bool(entries))
     blocking_codes = []
     if mask["blocking"]:
         blocking_codes.append("mask_policy_not_explicit")
