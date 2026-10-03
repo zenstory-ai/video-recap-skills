@@ -72,11 +72,11 @@ else:
         assert (work / "edited_source.mp4").is_file()
     assert not (work / "narration.json").exists()
     assert not (work / "tts_meta.json").exists()
-    manifest = json.loads((work / "assembly_manifest.json").read_text())
+    manifest = json.loads((work / "assembly_manifest.json").read_text(encoding="utf-8"))
     assert manifest["audio_mode"] == audio_mode
     assert manifest["tts_segments"] == 0
     assert manifest["tts_meta"] is None
-    assert json.loads((work / "assembly_qc.json").read_text())["verdict"] == "PASS"
+    assert json.loads((work / "assembly_qc.json").read_text(encoding="utf-8"))["verdict"] == "PASS"
     output = Path(manifest["final_output"])
     assert output.is_file()
     subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", str(output), "-f", "null", "-"],

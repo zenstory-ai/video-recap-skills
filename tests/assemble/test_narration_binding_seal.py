@@ -43,14 +43,14 @@ def test_binding_record_rejects_invalid_report(tmp_path, field, value):
         "final_output": {"path": str(output)},
     }
     assert narration_binding.binding_record(tmp_path) is None
-    (tmp_path / narration_binding.FILENAME).write_text(json.dumps(report))
+    (tmp_path / narration_binding.FILENAME).write_text(json.dumps(report), encoding="utf-8")
     assert narration_binding.binding_record(tmp_path) == {
         "path": str((tmp_path / narration_binding.FILENAME).resolve()),
         "identity_status": "BOUND_TO_ADOPTION",
         "tempo_policy": narration_binding.TEMPO_POLICY,
     }
     report[field] = value
-    (tmp_path / narration_binding.FILENAME).write_text(json.dumps(report))
+    (tmp_path / narration_binding.FILENAME).write_text(json.dumps(report), encoding="utf-8")
     assert narration_binding.binding_record(tmp_path) is None
 
 

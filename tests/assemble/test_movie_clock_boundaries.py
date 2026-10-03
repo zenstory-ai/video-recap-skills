@@ -89,7 +89,7 @@ def explicit_case(tmp_path):
         'format': {'sample_rate': 48000, 'channels': 2, 'total_samples': 96000,
                    'codec': 'pcm_f32le'},
         'outputs': identities,
-    }))
+    }), encoding="utf-8")
     voice = _wav(tmp_path / 'voice.wav', 997)
     segment = tts_segment(
         index=0, start=0.25, end=1.0, narration='bound voice',
@@ -98,7 +98,7 @@ def explicit_case(tmp_path):
         tts_rate_offset=0.0,
     )
     meta = tmp_path / 'tts_meta.json'
-    meta.write_text(json.dumps({'segments': [segment]}))
+    meta.write_text(json.dumps({'segments': [segment]}), encoding="utf-8")
     narration = tmp_path / 'narration_adoption.json'
     narration.write_text(json.dumps({
         'artifact': 'narration_adoption', 'schema_version': 1,
@@ -106,7 +106,7 @@ def explicit_case(tmp_path):
             'index': 0, 'spoken_text': 'bound voice',
             'requested_provider': 'offline', 'requested_voice': 'voice-a',
         }], 'tempo_policy': STRICT_TEMPO,
-    }))
+    }), encoding="utf-8")
     adoption = tmp_path / 'audio_mix_adoption.json'
     adoption.write_text(json.dumps({
         'artifact': 'audio_mix_adoption', 'schema_version': 1,
@@ -114,7 +114,7 @@ def explicit_case(tmp_path):
         'format': {'sample_rate': 48000, 'channels': 2, 'total_samples': 96000},
         'segments': [{'index': 0, 'output_start_sample': 12000, 'gain': 0.5}],
         'master_gain_db': 0.75,
-    }))
+    }), encoding="utf-8")
     return picture, work, [segment], meta, narration, adoption
 
 
@@ -211,9 +211,9 @@ def test_explicit_mix_produces_sample_accurate_fractional_movie_clock(
     run('ffmpeg', '-v', 'error', '-y', '-f', 'lavfi', '-i',
         'color=black:size=64x48:rate=24:duration=1.333333333333',
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-an', picture)
-    chosen = json.loads(adoption.read_text())
+    chosen = json.loads(adoption.read_text(encoding="utf-8"))
     receipt = Path(chosen['prepared_receipt']['path'])
-    prepared = json.loads(receipt.read_text())
+    prepared = json.loads(receipt.read_text(encoding="utf-8"))
     for name, old in prepared['outputs'].items():
         path = Path(old['path'])
         trimmed = path.with_name('trimmed_' + name)
@@ -222,9 +222,9 @@ def test_explicit_mix_produces_sample_accurate_fractional_movie_clock(
         trimmed.replace(path)
         prepared['outputs'][name] = source_score._output_facts(path)
     prepared['format']['total_samples'] = 64000
-    receipt.write_text(json.dumps(prepared))
+    receipt.write_text(json.dumps(prepared), encoding="utf-8")
     chosen['format']['total_samples'] = 64000
-    adoption.write_text(json.dumps(chosen))
+    adoption.write_text(json.dumps(chosen), encoding="utf-8")
     output = work / 'output.mp4'
     if drop_timescale:
         original = lib.run_cmd

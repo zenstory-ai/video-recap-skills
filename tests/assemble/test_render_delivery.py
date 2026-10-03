@@ -187,7 +187,7 @@ def _render_cmd(monkeypatch, tmp_path, *, source_format, burn=False):
         start=0.0, end=3.0, actual_place_start=0.0, actual_place_end=1.0,
         narration="交付格式。", audio_path=str(tmp_path / "narr.wav"), audio_duration=1.0,
     )], tmp_path, output)
-    return commands[-1]
+    return next(cmd for cmd in reversed(commands) if "-movflags" in cmd)
 
 
 def _value(cmd, flag):

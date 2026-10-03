@@ -13,6 +13,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"))
 
 import assemble  # noqa: E402
+import codec_peak  # noqa: E402
 import loudness  # noqa: E402
 import media  # noqa: E402
 import narration_audio  # noqa: E402
@@ -103,6 +104,20 @@ def test_second_pass_filter_without_limiter_uses_the_capped_targets():
     assert loudness.final_loudnorm_filter().startswith("loudnorm=I=-14.0:TP=-1.0:LRA=11.0")
 
 
+def test_a_lower_peak_target_moves_every_stage_under_it():
+    """The first render aims CODEC_PEAK_HEADROOM_DB under TP so the AAC encode has room."""
+    target = loudness.first_render_peak_target()
+    assert target == -1.5
+    capped = loudness._linear_loudnorm_targets(_PEAKY, target)
+    assert capped["true_peak"] == -1.5
+    assert capped["integrated"] < loudness._linear_loudnorm_targets(_PEAKY)["integrated"]
+    plan = loudness._peak_limiter_plan(_PEAKY, target)
+    assert plan["ceiling_dbtp"] == -2.5 and plan["required_reduction_db"] == 5.69
+    assert ":TP=-1.5:" in loudness.final_loudnorm_filter(_PEAKY, peak_target=target)
+    assert loudness.final_loudnorm_filter(peak_target=target).startswith(
+        "loudnorm=I=-14.0:TP=-1.5:")
+
+
 # ── true-peak limiter ahead of the linear gain ──────────────────────────────────────
 
 # What a limited pass measures after `_peak_limiter_chain`: peaks at the -2 dBTP ceiling.
@@ -185,6 +200,21 @@ def test_plan_measures_the_limited_signal_and_records_the_real_reduction(monkeyp
     assert limiter["reduction_db"] == 5.19
 
 
+def test_plan_reuses_a_given_first_pass_and_measures_only_the_limited_signal(monkeypatch):
+    calls = []
+
+    def fake_measure(*args, pre_chain=None):
+        calls.append(pre_chain)
+        return _LIMITED
+
+    monkeypatch.setattr(loudness, "_measure_loudness", fake_measure)
+    measured, limiter = loudness.plan_final_loudness(
+        "v", "n", [], [], "[0:a]anull[aout]", ".", peak_target=-2.5, measured=_PEAKY
+    )
+    assert measured == _PEAKY and limiter["ceiling_dbtp"] == -3.5
+    assert calls == [loudness._peak_limiter_chain(limiter)]
+
+
 def test_plan_without_limiter_when_one_gain_fits(monkeypatch):
     fits = {**_PEAKY, "input_tp": "-6.00"}
     (measured, limiter), calls = _plan_with(monkeypatch, fits)
@@ -221,16 +251,22 @@ def test_loudness_mode_without_a_summary_is_predicted():
 # ── assemble records what ffmpeg ran (mocked ffmpeg) ────────────────────────────────
 
 
-def _assemble_with_stderr(monkeypatch, tmp_path, stderr, measured, limiter=None):
+def _assemble_with_stderr(monkeypatch, tmp_path, stderr, measured, limiter=None,
+                          delivered=()):
+    """Assemble with ffmpeg mocked; `delivered` are the encoded file's peak readings."""
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
     output = tmp_path / "output.mp4"
     commands = []
+    readings = iter(delivered)
 
     def fake_run_cmd(cmd):
         commands.append(cmd)
-        output.write_bytes(b"mp4")
+        target = Path(cmd[-1]) if str(cmd[-1]).endswith(".mp4") else output
+        target.write_bytes(b"mp4")
         return CompletedProcess(cmd, 0, stdout="", stderr=stderr)
+
+    monkeypatch.setattr(codec_peak, "delivered_loudness", lambda _path: next(readings, None))
 
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     monkeypatch.setitem(CONFIG, "bgm_path", "")
@@ -288,7 +324,41 @@ def test_assembly_qc_records_the_limiter_and_renders_through_it(monkeypatch, tmp
     assert final_pass["target"]["integrated"] == -14.0
     graph = next(arg for cmd in commands for arg in cmd if "[aoutln]" in str(arg)
                  and "loudnorm" in str(arg))
-    assert f"[aout]{loudness.final_loudnorm_filter(_PEAKY, limiter)}[aoutln]" in graph
+    first_target = loudness.first_render_peak_target()
+    assert f"[aout]{loudness.final_loudnorm_filter(_PEAKY, limiter, first_target)}[aoutln]" \
+        in graph
+    # Without a delivered reading nothing is corrected and nothing blocks.
+    assert final_pass["delivered"] == {"integrated": None, "true_peak": None,
+                                       "peak_target_dbtp": first_target, "corrections": 0}
+    assert qc["verdict"] == "PASS"
+
+
+def test_delivered_peak_over_true_peak_reencodes_only_the_audio(monkeypatch, tmp_path):
+    """The AAC file measures -0.2 dBTP: the audio is rendered again 0.8 + 0.1 dB lower and
+    muxed with the rendered picture copied, and QC records the delivered file."""
+    limiter = {**loudness._peak_limiter_plan(_PEAKY), "reduction_db": 5.19,
+               "measurement": _LIMITED}
+    qc, commands = _assemble_with_stderr(
+        monkeypatch, tmp_path, _SUMMARY.format(kind="Linear"), _PEAKY, limiter,
+        delivered=[{"integrated": -14.0, "true_peak": -0.2},
+                   {"integrated": -14.4, "true_peak": -1.3}],
+    )
+    target = round(loudness.first_render_peak_target() - 0.8 - 0.1, 2)
+    reencode = commands[-1]
+    # Inputs 0 (source) and 1 (narration) feed the graph; the render is appended as 2.
+    assert reencode[reencode.index("-map") + 1] == "2:v:0"
+    assert reencode[reencode.index("-c:v") + 1] == "copy"
+    assert reencode[reencode.index("-c:a") + 1] == "aac"
+    assert Path(reencode[-1]).name == ".output.audio-reencode.mp4"
+    graph = reencode[reencode.index("-filter_complex") + 1]
+    assert graph.endswith(f"[aout]{loudness.final_loudnorm_filter(_PEAKY, limiter, target)}"
+                          "[aoutln]")
+    assert not (tmp_path / ".output.audio-reencode.mp4").exists()
+    final_pass = qc["loudnorm_final_pass"]
+    assert final_pass["delivered"] == {"integrated": -14.4, "true_peak": -1.3,
+                                       "peak_target_dbtp": target, "corrections": 1}
+    assert final_pass["target"]["true_peak"] == target
+    assert qc["verdict"] == "PASS"
 
 
 def test_assembly_qc_without_first_pass_keeps_equivalent_and_reports_dynamic(

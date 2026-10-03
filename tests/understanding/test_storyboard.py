@@ -135,7 +135,7 @@ def test_build_source_storyboard_writes_json_and_tiles(monkeypatch, tmp_path):
     assert result["tiles"], "expected tiles"
     # JSON sidecar lists ALL page paths
     sb_json = json.loads(
-        (tmp_path / "storyboard" / "source_storyboard.json").read_text()
+        (tmp_path / "storyboard" / "source_storyboard.json").read_text(encoding="utf-8")
     )
     assert sb_json["page_images"]
     assert all(not Path(p).is_absolute() for p in sb_json["page_images"])
@@ -387,7 +387,7 @@ def test_font_absent_sheet_still_produced_unlabelled(monkeypatch, tmp_path):
     # JSON sidecar STILL carries the timestamps
     assert all("timestamp" in t and "label" in t for t in result["tiles"])
     sb_json = json.loads(
-        (tmp_path / "storyboard" / "source_storyboard.json").read_text()
+        (tmp_path / "storyboard" / "source_storyboard.json").read_text(encoding="utf-8")
     )
     assert sb_json["labels_burned"] is False
     assert sb_json["tiles"][0]["timestamp"] is not None

@@ -10,6 +10,7 @@ import assemble_constants as constants
 import assembly_contract
 import assembly_settings
 import audio_mix
+import codec_peak
 import adoption.audio_mix_binding as audio_mix_binding
 import adoption.av_clock as av_clock
 import adoption.frozen_audio as frozen_audio
@@ -211,6 +212,8 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     adopted_audio = None
     loudnorm_measurement = None
     peak_limiter = None
+    peak_target = loudness.first_render_peak_target()
+    mix_graph = None  # the mix before the final loudness stage ([aout]); None: no stage
     original_audio_input = []
     bgm_input = []
     filter_complex = None
@@ -231,9 +234,10 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             )
         else:
             filter_complex += ";[source]anull[aout]"
-        final_ln = loudness.final_loudnorm_filter()
-        filter_complex += f";[aout]{final_ln}[aoutln]"
-        lib.log(f"source-mix 音频处理: source volume + {final_ln}")
+        mix_graph = filter_complex
+
+        def plan_loudness(_target, _measured=None):
+            return None, None
     elif explicit_mix is not None:
         audio_map = "1:a:0"
         audio_input_args = ["-i", explicit_mix["runtime"]["master"]["path"]]
@@ -250,7 +254,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             ]
             original_audio_label = "2:a"
             bgm_audio_label = "3:a"
-        filter_complex = audio_mix._build_audio_filter_complex(
+        mix_graph = audio_mix._build_audio_filter_complex(
             tts_segments,
             has_bgm,
             original_audio_label=original_audio_label,
@@ -259,20 +263,22 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         # BGM is input [2:a]; -stream_loop -1 loops it to cover the whole timeline (amix
         # duration=first + -t trim it back to the video length).
         bgm_input = ["-stream_loop", "-1", "-i", str(bgm_path)] if has_bgm else []
-        # 末端整体响度归一：ducking 只管相对平衡，这一步统一成片绝对响度
-        loudnorm_measurement, peak_limiter = loudness.plan_final_loudness(
-            input_video,
-            narration_wav,
-            original_audio_input,
-            bgm_input,
-            filter_complex,
-            work_dir,
-        )
-        final_ln = loudness.final_loudnorm_filter(loudnorm_measurement, peak_limiter)
-        filter_complex += f";[aout]{final_ln}[aoutln]"
-        lib.log(f"成片响度归一: {final_ln}")
+
+        def plan_loudness(target, measured=None):
+            return loudness.plan_final_loudness(
+                input_video, narration_wav, original_audio_input, bgm_input, mix_graph,
+                work_dir, peak_target=target, measured=measured,
+            )
+
         audio_map = "[aoutln]"
         audio_input_args = ["-i", str(narration_wav), *original_audio_input]
+    if mix_graph is not None:
+        # 末端整体响度归一：ducking 只管相对平衡，这一步统一成片绝对响度
+        loudnorm_measurement, peak_limiter = plan_loudness(peak_target)
+        final_ln = loudness.final_loudnorm_filter(loudnorm_measurement, peak_limiter,
+                                                  peak_target)
+        filter_complex = f"{mix_graph};[aout]{final_ln}[aoutln]"
+        lib.log(f"成片响度归一 ({audio_mode}): {final_ln}")
 
     # 对于超长 volume 表达式（多段解说），从脚本文件读取 filter_complex 避免命令行溢出
     if filter_complex is not None:
@@ -397,6 +403,25 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         if video_filter_script is not None:
             video_filter_script.unlink(missing_ok=True)
 
+    loudness_stderr = result.stderr
+    delivered_peak = None
+    if mix_graph is not None and lib.CONFIG["final_loudnorm"]:
+        def reencode_audio(target):
+            measured, limiter = plan_loudness(target, loudnorm_measurement)
+            graph = (f"{mix_graph};[aout]"
+                     f"{loudness.final_loudnorm_filter(measured, limiter, target)}[aoutln]")
+            stderr = codec_peak.reencode_audio_track(
+                output_path, ["-i", str(input_video), *audio_input_args, *bgm_input],
+                graph, audio_map, video_duration, work_dir,
+            )
+            return stderr, measured, limiter
+
+        delivered_peak, corrected = codec_peak.deliver_under_true_peak(
+            output_path, peak_target, reencode_audio
+        )
+        if corrected is not None:
+            loudness_stderr, loudnorm_measurement, peak_limiter = corrected
+            peak_target = delivered_peak["peak_target_dbtp"]
     if audio_mode == "adopted-packet-copy":
         # Either check failing means the file at the final path is unverified: never leave it.
         try:
@@ -439,8 +464,9 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     loudnorm_final = None
     if audio_mode != "adopted-packet-copy" and explicit_mix is None and lib.CONFIG["final_loudnorm"]:
         loudnorm_final = loudness.loudnorm_final_pass(
-            result.stderr, loudnorm_measurement, peak_limiter
+            loudness_stderr, loudnorm_measurement, peak_limiter, peak_target
         )
+        loudnorm_final["delivered"] = delivered_peak
         if loudnorm_measurement and loudnorm_final["normalization_type"] == "dynamic":
             lib.log("  ⚠️ loudnorm 第二遍退回动态模式（测得的响度范围或峰值超出线性条件）")
     loudness_mode = (

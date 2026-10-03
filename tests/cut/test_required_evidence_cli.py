@@ -185,7 +185,7 @@ def test_multi_source_audio_must_come_from_the_declared_source(real_source, tmp_
     manifest.write_text(json.dumps({'sources': [
         {'source_id': 'spoken', 'source_path': str(real_source)},
         {'source_id': 'silent', 'source_path': str(silent)},
-    ]}))
+    ]}), encoding="utf-8")
     raw = {'clips': [{'source_id': 'silent', 'start': 2, 'end': 6}],
            'required_evidence': contract(silent, 'audio')}
     blocked, validated = run_real_cut(real_source, tmp_path / 'multi', raw,

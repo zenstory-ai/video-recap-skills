@@ -14,7 +14,7 @@ description: >
 1. 把各段旁白音频放到视频时间线上。
 2. 在旁白窗口内用固定包络压低原声（盖住原声对白时与落在安静段时各用一档音量），间隙恢复原声。
 3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。不烧录时（关闭或降级），`subtitles.srt` 复制到成片旁，名为 `recap_<stem>.srt`；烧录时删掉旧的同名外挂字幕。
-4. 可选把最终响度标准化到目标 LUFS：两遍 loudnorm，只用一个恒定增益，不做动态压缩；混音的真峰值放不下这么大的增益时，先过 4 倍过采样的真峰值限幅器（最多削 `LOUDNESS_LIMITER_MAX_DB`，默认 6 dB），超出部分才下调目标响度。ffmpeg 实际用的模式与限幅量记在 `assembly_qc.json` 的 `loudness_mode` 与 `loudnorm_final_pass`。
+4. 可选把最终响度标准化到目标 LUFS：两遍 loudnorm，只用一个恒定增益，不做动态压缩；混音的真峰值放不下这么大的增益时，先过 4 倍过采样的真峰值限幅器（最多削 `LOUDNESS_LIMITER_MAX_DB`，默认 6 dB），超出部分才下调目标响度。真峰值目标针对交付的 AAC 文件：AAC 编码会让真峰值比 PCM 混音高 0.3–1.4 dB，所以首次渲染瞄准 TP 下 0.5 dB，渲染后解码成片实测；仍超过 -1 dBTP 时按超出量再降 0.1 dB 只重编码音频（画面流复制），最多两次，仍超出则以 `delivered_true_peak_over_target` 阻断。ffmpeg 实际用的模式、限幅量与成片实测值记在 `assembly_qc.json` 的 `loudness_mode` 与 `loudnorm_final_pass`（`delivered`）。
 5. 成片不带原片的容器元数据（`title`、`comment` 等标签与章节）。
 
 ## 2. 声音收尾契约

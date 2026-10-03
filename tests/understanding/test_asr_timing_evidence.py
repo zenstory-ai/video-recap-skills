@@ -64,7 +64,7 @@ def test_no_key_is_explicit_unavailability_not_silence(monkeypatch, tmp_path):
     monkeypatch.setattr(asr, "run_cmd", lambda *_a, **_k: pytest.fail("no ffmpeg"))
 
     assert asr.transcribe_audio(video, tmp_path) == []
-    assert json.loads((tmp_path / "asr_result.json").read_text()) == []
+    assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == []
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "UNAVAILABLE_NO_KEY"
     assert evidence["source_video"] == file_identity(video)
@@ -205,7 +205,7 @@ def test_missing_or_legacy_sidecar_is_a_miss(tmp_path):
     # reusable either.
     write_asr_timing_evidence(
         tmp_path, video, "EXPLICITLY_SKIPPED",
-        final_segments=json.loads(result_path.read_text()),
+        final_segments=json.loads(result_path.read_text(encoding="utf-8")),
     )
     sidecar = _read_evidence(tmp_path)
     sidecar["status"] = "LEGACY_UNVERIFIED"

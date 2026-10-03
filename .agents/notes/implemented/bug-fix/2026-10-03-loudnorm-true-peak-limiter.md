@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续 [[2026-10-03-aac-delivered-true-peak]]：真峰值目标改为针对交付的 AAC 文件，各级目标随编码前目标下移，下文的 -2 / -1 dBTP 是当时（编码前目标 = TP）的数值。
+
 接续并部分推翻 [[2026-10-03-loudnorm-linear-gain-cap]] 里"峰值余量不足就下调目标响度、不用 limiter"的决定。那篇的线性条件、`loudnorm_final_pass` 记录和下调目标的算法仍在，只在限幅器削到上限后才用。
 
 ## Problem
@@ -12,7 +14,7 @@ Status: implemented
 ## Decision
 
 - 响度代码从 `audio_mix.py` 移到新模块 `skills/video-assemble/scripts/loudness.py`（`audio_mix.py` 只剩 handoff、ducking 和混音图）。
-- `loudness._peak_limiter_plan(measured)`：首遍测量下，若 `measured_TP + (TARGET_LUFS - measured_I) > TP`，规划一个限幅器：上限 `ceiling = TP - LIMITER_HEADROOM_DB`（-2 dBTP），先增益 `pre_gain = min(TARGET_LUFS - measured_I, ceiling + 最大削减 - measured_TP)`。最大削减是 `CONFIG["loudness_limiter_max_db"]`（环境变量 `LOUDNESS_LIMITER_MAX_DB`，默认 6 dB，`0` 关闭限幅）。线性增益已能达标、测量无效、测得 LRA 超出 loudnorm 线性上限（20）时不规划。
+- `loudness._peak_limiter_plan(measured)`：首遍测量下，若 `measured_TP + (TARGET_LUFS - measured_I) > TP`，规划一个限幅器：上限 `ceiling = 编码前真峰值目标 - LIMITER_HEADROOM_DB`（编码前目标默认是 TP 下 0.5 dB，即 -2.5 dBTP；见 [[2026-10-03-aac-delivered-true-peak]]），先增益 `pre_gain = min(TARGET_LUFS - measured_I, ceiling + 最大削减 - measured_TP)`。最大削减是 `CONFIG["loudness_limiter_max_db"]`（环境变量 `LOUDNESS_LIMITER_MAX_DB`，默认 6 dB，`0` 关闭限幅）。线性增益已能达标、测量无效、测得 LRA 超出 loudnorm 线性上限（20）时不规划。
 - `_peak_limiter_chain(plan)` 是 `volume=<pre_gain>dB,aresample=192000,alimiter=limit=<ceiling 线性值>:attack=5:release=100:level=false[:latency=true],aresample=48000`：4 倍过采样让样本峰值逼近真峰值（真实样片限幅后测得 -2.00 dBTP；同类混音不过采样时，样本峰值限到 -2 dBFS 而真峰值为 -1.0 dBTP）。ffmpeg 的 alimiter 有 `latency` 选项（较老的版本没有）时补偿 5 ms 的 lookahead 延迟，`_alimiter_compensates_latency()` 每个进程问一次 `ffmpeg -h filter=alimiter`。
 - `loudness.plan_final_loudness(...)` 返回 `(measured, limiter)`：首遍测量混音；需要限幅时把限幅链接在混音后再测一遍（`_measure_loudness(..., pre_chain=...)`），`limiter` 带上这次测量 `measurement` 和实测削减 `reduction_db = measured_TP + pre_gain - 限幅后 TP`。限幅后测不到或仍无法线性时 `limiter` 为 None，回到上篇的下调目标。
 - `final_loudnorm_filter(measured, limiter)` 在限幅链后接第二遍 loudnorm，`measured_*` 取限幅后的测量，目标仍由 `_linear_loudnorm_targets` 算：-2 dBTP 的上限给线性增益留 1 dB，补回限幅损失的响度（真实样片 0.6–0.9 LU）。损失超过 1 LU 或削减到上限时，余下部分照旧下调目标，记在 `target.gain_capped_db`。

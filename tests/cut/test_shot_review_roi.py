@@ -79,7 +79,7 @@ def test_crop_must_not_silently_clamp_out_of_bounds(make_video, tmp_path, roi):
     output = tmp_path / 'scan.json'
     with pytest.raises(ValueError):
         shot_review.write_scan(video, output, roi=roi)
-    failed = json.loads(output.read_text())
+    failed = json.loads(output.read_text(encoding="utf-8"))
     assert failed['status'] == 'SCAN_FAILED'
     assert failed['scene_roi'] == roi
     assert failed['scene_threshold'] == 0.35
@@ -88,11 +88,11 @@ def test_crop_must_not_silently_clamp_out_of_bounds(make_video, tmp_path, roi):
 @pytest.mark.parametrize('roi', [None, (1, 3, 5, 7)])
 def test_failed_decode_keeps_requested_scan_scope_and_never_leaves_old_success(tmp_path, monkeypatch, roi):
     output = tmp_path / 'failed.json'
-    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}')
+    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}', encoding="utf-8")
     region = list(roi) if roi is not None else None
 
     def fail_decode(*args, **kwargs):
-        scanning = json.loads(output.read_text())
+        scanning = json.loads(output.read_text(encoding="utf-8"))
         assert scanning['status'] == 'SCANNING'
         assert scanning['scene_roi'] == region
         assert scanning['scene_threshold'] == 0.12
@@ -101,7 +101,7 @@ def test_failed_decode_keeps_requested_scan_scope_and_never_leaves_old_success(t
     monkeypatch.setattr(shot_review, 'scan_video', fail_decode)
     with pytest.raises(RuntimeError, match='scene decode failed'):
         shot_review.write_scan(tmp_path / 'video.mp4', output, threshold=0.12, roi=roi)
-    failed = json.loads(output.read_text())
+    failed = json.loads(output.read_text(encoding="utf-8"))
     assert failed['status'] == 'SCAN_FAILED'
     assert failed['normal_speed_review'] == 'NOT_CHECKED'
     assert failed['scene_roi'] == region
@@ -115,7 +115,7 @@ def test_public_cli_records_region_and_preserves_real_frame_indices(make_video, 
                              '--output', str(output), '--roi', *map(str, ROI)],
                             capture_output=True, text=True)
     assert result.returncode == 0, result.stdout + result.stderr
-    report = json.loads(output.read_text())
+    report = json.loads(output.read_text(encoding="utf-8"))
     assert report['scene_roi'] == ROI
     assert [c['frame'] for c in report['candidates']] == CUTS
 

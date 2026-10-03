@@ -7,6 +7,11 @@ dynamic (3-second AGC) normalisation, which pumps. Real mixes often carry a few 
 limited first. The chain then is: constant pre-gain -> oversampled lookahead limiter (sample
 peaks at 4x the rate approximate true peaks) -> second loudnorm pass in linear mode, measured
 on the limited signal, that trims the last fraction of a LU without crossing TP.
+
+Every stage aims at a pre-encode true-peak target (`peak_target`, default TP). The AAC
+encode raises the delivered true peak over it, so `codec_peak.py` renders the first time
+CODEC_PEAK_HEADROOM_DB under TP and lowers the target further when the delivered file
+still measures over TP.
 """
 
 import functools
@@ -29,6 +34,18 @@ LIMITER_HEADROOM_DB = 1.0
 _LIMITER_OVERSAMPLE_RATE = 192000
 _LIMITER_ATTACK_MS = 5
 _LIMITER_RELEASE_MS = 100
+# AAC at 192 kb/s raised the true peak 0.3-1.4 dB over the loudnorm stage's output on real
+# renders (most on heavily limited mixes); the first render aims this far under TP.
+CODEC_PEAK_HEADROOM_DB = 0.5
+
+
+def first_render_peak_target():
+    """The pre-encode true-peak target (dBTP) of the first render: TP minus codec headroom."""
+    return round(float(CONFIG["target_true_peak"]) - CODEC_PEAK_HEADROOM_DB, 2)
+
+
+def _peak_target(peak_target):
+    return float(CONFIG["target_true_peak"]) if peak_target is None else float(peak_target)
 
 
 def _limiter_filter():
@@ -64,19 +81,19 @@ def _measured_values(measured):
     return values
 
 
-def _linear_loudnorm_targets(measured):
+def _linear_loudnorm_targets(measured, peak_target=None):
     """Second-pass targets that keep loudnorm linear, or None when no such targets exist.
 
-    The integrated target is lowered until the gained true peak fits under TP (quieter than
-    TARGET_LUFS instead of compressed), and the LRA target, which linear mode never
-    applies, is raised to the measured range.
+    The integrated target is lowered until the gained true peak fits under `peak_target`
+    (default TP; quieter than TARGET_LUFS instead of compressed), and the LRA target, which
+    linear mode never applies, is raised to the measured range.
     """
     values = _measured_values(measured)
     if values is None:
         return None
     measured_i, measured_tp, measured_lra, _thresh = values
     requested = float(CONFIG["target_lufs"])
-    true_peak = float(CONFIG["target_true_peak"])
+    true_peak = _peak_target(peak_target)
     # 0.01 LU under the exact limit: ffmpeg compares the floating-point sum.
     peak_limited = math.floor((true_peak - measured_tp + measured_i) * 100) / 100 - 0.01
     integrated = round(min(requested, peak_limited), 2)
@@ -91,10 +108,11 @@ def _linear_loudnorm_targets(measured):
     }
 
 
-def _peak_limiter_plan(measured):
+def _peak_limiter_plan(measured, peak_target=None):
     """Pre-gain and ceiling for the true-peak limiter, or None when it is not needed.
 
-    None when one linear gain already reaches TARGET_LUFS under TP, when the measurement is
+    The ceiling sits LIMITER_HEADROOM_DB under `peak_target` (default TP). None when one
+    linear gain already reaches TARGET_LUFS under the target, when the measurement is
     unusable or too wide for linear mode (a limiter does not narrow LRA), or when
     LOUDNESS_LIMITER_MAX_DB is 0. Above that maximum the pre-gain stops where the limiter
     would remove exactly the maximum; the rest of the gain is capped as before.
@@ -107,10 +125,10 @@ def _peak_limiter_plan(measured):
     if max(float(CONFIG["target_lra"]), measured_lra) > _LOUDNORM_MAX_LRA:
         return None
     gain = float(CONFIG["target_lufs"]) - measured_i
-    true_peak = float(CONFIG["target_true_peak"])
+    true_peak = _peak_target(peak_target)
     if measured_tp + gain <= true_peak:
         return None
-    ceiling = true_peak - LIMITER_HEADROOM_DB
+    ceiling = round(true_peak - LIMITER_HEADROOM_DB, 2)
     required = measured_tp + gain - ceiling
     pre_gain = min(gain, ceiling + max_reduction - measured_tp)
     return {
@@ -155,7 +173,7 @@ def _loudness_mode(measured=None, normalization_type=None, limiter=None):
     return "two_pass_linear_peak_limited" if limiter else "two_pass_linear"
 
 
-def final_loudnorm_filter(measured=None, limiter=None):
+def final_loudnorm_filter(measured=None, limiter=None, peak_target=None):
     """Final-mix loudness normalization/limiter filter from CONFIG.
 
     Ducking branches set only relative balance; this single stage owns the
@@ -164,17 +182,17 @@ def final_loudnorm_filter(measured=None, limiter=None):
     pass with the targets from `_linear_loudnorm_targets`, behind the `limiter` chain
     when one was planned (its loudnorm then uses the limited signal's measurement);
     without it we still force the same target and peak limiter as a documented
-    equivalent/fallback path.
+    equivalent/fallback path. Every path aims at `peak_target` (default TP).
     """
     if not CONFIG["final_loudnorm"]:
         return _limiter_filter()
     stage = _loudnorm_stage_measurement(measured, limiter) if measured else None
-    targets = _linear_loudnorm_targets(stage) if stage else None
+    targets = _linear_loudnorm_targets(stage, peak_target) if stage else None
     integrated = targets["integrated"] if targets else CONFIG["target_lufs"]
     lra = targets["lra"] if targets else CONFIG["target_lra"]
     filt = (
         f"loudnorm=I={integrated}"
-        f":TP={CONFIG['target_true_peak']}"
+        f":TP={_peak_target(peak_target)}"
         f":LRA={lra}"
         f":linear=true"
     )
@@ -212,20 +230,21 @@ def _loudnorm_summary_value(text, label):
     return float(matches[-1]) if matches else None
 
 
-def loudnorm_final_pass(stderr, measured=None, limiter=None):
+def loudnorm_final_pass(stderr, measured=None, limiter=None, peak_target=None):
     """What the final render's loudness stage actually did, from its `print_format=summary`.
 
     `normalization_type` is `linear` or `dynamic` (None when ffmpeg printed no summary);
     `target` holds the second-pass targets when a first pass measured the mix, and its
     `gain_capped_db` is how far the delivered target sits under TARGET_LUFS. `peak_limiter`
-    is the limiter that ran before it (None when none did).
+    is the limiter that ran before it (None when none did). `output_true_peak` is the
+    stage's pre-encode output; the AAC file's own peak is `codec_peak`'s `delivered`.
     """
     text = stderr or ""
     kinds = re.findall(r"Normalization Type:\s*(Linear|Dynamic)", text)
     stage = _loudnorm_stage_measurement(measured, limiter) if measured else None
     return {
         "normalization_type": kinds[-1].lower() if kinds else None,
-        "target": _linear_loudnorm_targets(stage) if stage else None,
+        "target": _linear_loudnorm_targets(stage, peak_target) if stage else None,
         "output_integrated": _loudnorm_summary_value(text, "Output Integrated"),
         "output_true_peak": _loudnorm_summary_value(text, "Output True Peak"),
         "peak_limiter": limiter if measured else None,
@@ -275,10 +294,11 @@ def _measure_loudness(input_video, narration_wav, original_audio_input,
 
 
 def plan_final_loudness(input_video, narration_wav, original_audio_input,
-                        bgm_input, filter_complex, work_dir):
-    """Measure the mix and pick the final loudness stage: (measured, limiter).
+                        bgm_input, filter_complex, work_dir, peak_target=None, measured=None):
+    """Measure the mix and pick the final loudness stage for `peak_target`: (measured, limiter).
 
-    `measured` is the first-pass loudnorm JSON (None: single-pass fallback). `limiter` is
+    `measured` is the first-pass loudnorm JSON (None: single-pass fallback); a caller that
+    already has it passes it in and only the limited signal is measured. `limiter` is
     the planned true-peak limiter plus `measurement` (the limited signal's loudnorm JSON)
     and `reduction_db` (measured true peak before minus after it), or None when one linear
     gain fits or the limited signal could not be measured (the gain is then capped).
@@ -287,14 +307,14 @@ def plan_final_loudness(input_video, narration_wav, original_audio_input,
         return None, None
     args = (input_video, narration_wav, original_audio_input, bgm_input, filter_complex,
             work_dir)
-    measured = _measure_loudness(*args)
+    measured = measured or _measure_loudness(*args)
     if not measured:
         log("  ⚠️ loudnorm 首遍测量不可用，降级到单遍目标滤镜+limiter")
         return None, None
-    limiter = _peak_limiter_plan(measured)
+    limiter = _peak_limiter_plan(measured, peak_target)
     if limiter:
         limited = _measure_loudness(*args, pre_chain=_peak_limiter_chain(limiter))
-        if limited and _linear_loudnorm_targets(limited):
+        if limited and _linear_loudnorm_targets(limited, peak_target):
             reduction = (float(measured["input_tp"]) + limiter["pre_gain_db"]
                          - float(limited["input_tp"]))
             limiter = {**limiter, "reduction_db": round(reduction, 2), "measurement": limited}
@@ -304,7 +324,8 @@ def plan_final_loudness(input_video, narration_wav, original_audio_input,
         else:
             log("  ⚠️ 限幅后的混音无法测量或无法线性归一，改为下调目标响度")
             limiter = None
-    targets = _linear_loudnorm_targets(_loudnorm_stage_measurement(measured, limiter))
+    targets = _linear_loudnorm_targets(_loudnorm_stage_measurement(measured, limiter),
+                                       peak_target)
     if targets and targets["gain_capped_db"] > 0:
         log(f"  成片目标响度从 {CONFIG['target_lufs']} 降到 {targets['integrated']} LUFS"
             f"（限幅上限 {CONFIG['loudness_limiter_max_db']} dB），保持线性增益")

@@ -390,10 +390,10 @@ def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     receipt = second[0]["provider_receipt"]
     assert receipt == {"provider": "index-tts", "requested_voice": "voice-a"}
     [sidecar_path] = (tmp_path / "tts_segments" / "cache").glob("*.json")
-    sidecar = json.loads(sidecar_path.read_text())
+    sidecar = json.loads(sidecar_path.read_text(encoding="utf-8"))
     assert sidecar["provider_receipt"] == receipt
 
     sidecar.pop("provider_receipt")
-    sidecar_path.write_text(json.dumps(sidecar))
+    sidecar_path.write_text(json.dumps(sidecar), encoding="utf-8")
     voiceover.synthesize_tts(narration, tmp_path)
     assert len(calls) == 2

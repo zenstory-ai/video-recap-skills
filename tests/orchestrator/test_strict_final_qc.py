@@ -104,7 +104,7 @@ def test_multi_cut_route_strict_failure_exits_before_success(
         video.write_bytes(b"source")
     work = tmp_path / "multi-work"
     work.mkdir()
-    (work / "clip_plan.json").write_text('{"clips":[]}')
+    (work / "clip_plan.json").write_text('{"clips":[]}', encoding="utf-8")
     final = tmp_path / "multi-final.mp4"
     monkeypatch.setattr(
         sys, "argv",
@@ -194,7 +194,7 @@ def test_legacy_dub_without_strict_flag_still_prepares_and_renders(
     ]
     assert "写完后重跑继续" in capsys.readouterr().out
 
-    (work / "dub_script.json").write_text("[]")
+    (work / "dub_script.json").write_text("[]", encoding="utf-8")
     calls.clear()
     recap_runner.main()
     assert calls == [
@@ -252,7 +252,7 @@ def test_real_source_cli_strict_pass_and_exact_final_probe_failure(tmp_path):
     )
     assert passing.returncode == 0, passing.stdout + passing.stderr
     assert "✅ 完成" in passing.stdout
-    assert json.loads((tmp_path / "pass-work/final_qc.json").read_text())["ok"] is True
+    assert json.loads((tmp_path / "pass-work/final_qc.json").read_text(encoding="utf-8"))["ok"] is True
 
     real_ffprobe = shutil.which("ffprobe")
     wrapper_dir = tmp_path / "wrapper-bin"
@@ -269,7 +269,7 @@ if args == expected:
     sys.stderr.write('isolated final QC probe rejection\\n')
     raise SystemExit(73)
 os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
-"""
+""", encoding="utf-8"
     )
     wrapper.chmod(0o755)
 
@@ -294,10 +294,10 @@ os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
     assert failed.returncode != 0
     assert "✅ 完成" not in failed.stdout
     assert strict_target.is_file()
-    assert json.loads((strict_work / "assembly_manifest.json").read_text())
-    final_report = json.loads((strict_work / "final_qc.json").read_text())
+    assert json.loads((strict_work / "assembly_manifest.json").read_text(encoding="utf-8"))
+    final_report = json.loads((strict_work / "final_qc.json").read_text(encoding="utf-8"))
     assert any(item["code"] == "probe_failed" for item in final_report["findings"])
-    exact = [json.loads(line) for line in strict_calls.read_text().splitlines()]
+    exact = [json.loads(line) for line in strict_calls.read_text(encoding="utf-8").splitlines()]
     assert exact.count([
         "-v", "error", "-print_format", "json", "-show_format", "-show_streams",
         str(strict_target),
@@ -313,4 +313,4 @@ os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
     assert advisory.returncode == 0, advisory.stdout + advisory.stderr
     assert "✅ 完成" in advisory.stdout
     assert "仅报告，不阻断" in advisory.stdout
-    assert json.loads((default_work / "final_qc.json").read_text())["ok"] is False
+    assert json.loads((default_work / "final_qc.json").read_text(encoding="utf-8"))["ok"] is False

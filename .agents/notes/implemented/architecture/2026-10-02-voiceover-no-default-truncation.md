@@ -15,7 +15,7 @@ Status: implemented
 ## Decision
 
 - `voiceover.py` 删除截短并重合成的分支。超预算时记日志 `段 N: 超出预算 Xs > Ys，保留原稿，交由 assemble 有界提速或在渲染前阻断`，原稿照常交给 assemble。`--preserve-approved-text`（`enforce_approved_text_policy`）不变，超窗仍在 TTS 阶段抛 `ApprovedTextDurationError`。结果里的 `truncated` / `truncate_reason` 字段保留（assemble 的 QC 读它们），只在合成文本与原稿不一致时为 `True` / `"sentence_boundary"`，默认路径上恒为 `False` / `"none"`；`_synthesize_segment` 里恒定的 `truncated` / `truncate_reason` 局部变量和 TTS 分段缓存 sidecar 里的同名字段（只有复用路径读）一并删除。`lib._truncate_at_sentence` 和只有它在用的 `_text_char_count` 一并删除。
-- `approved_text_policy.LEGACY_TEXT_POLICY` 改名为 `report-over-budget-v2`。策略名是 TTS 分段缓存键的一部分，改名让按旧策略缓存的截短音频失效。
+- `approved_text_policy.LEGACY_TEXT_POLICY` 改名为 `report-over-budget-v2`，记在 `tts_meta.json` 各段的 `authored_text_policy` 里。默认策略名不在 TTS 分段缓存键中（只有严格模式往键里加字段），改名本身不使缓存失效；旧版截短音频不被复用，是因为缓存改为按内容寻址后旧版逐段 sidecar 不再读取（见 [[2026-10-03-tts-content-addressed-cache]]）。
 - `assemble.py` 在 `_apply_source_sentence_handoffs` 之后、`seal_render_inputs` 之前调用 `_block_before_render`：用当前分段构建一次 `_build_assembly_qc`（`delivery_qc.video_encode_passes = 0`、`reencode_reason = ["blocked_before_render"]`），有阻断码就删掉工作目录里旧的 `output.mp4` 和 `timeline.json`、写 `assembly_qc.json`，并抛 `AssemblyBlockedBeforeRender`（`RuntimeError` 子类），消息列出阻断码、段号和 `needed_tempo_factor`；`main` 把它转成 `SystemExit(消息)`，和编码后阻断一样只打印一行，不出 traceback。默认路径、严格路径和显式 adopted full-sound 路径（`audio_mix_binding.render_explicit_mix` 放置完各段、在视频编码前）都走这一步，取代原来只在严格路径上的 `no_safe_fit` 报错。阻断码不变（`no_safe_fit`、`skipped_segments`、`unsafe_source_handoff` 等）。
 - `narration_audio._build_timed_narration` 在 `no_safe_fit` 时把 `needed_tempo_factor` 写回分段，供上面的错误消息使用。
 - 文档：`video-voiceover/SKILL.md` 的能力边界与缓存说明同步更新。

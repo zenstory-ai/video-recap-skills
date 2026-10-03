@@ -53,7 +53,7 @@ def score_only(tmp_path, score):
 
 def prepare(tmp_path, document, name='result'):
     path = tmp_path / 'plan.json'
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
     target = tmp_path / name
     return source_score.prepare_source_score(path, target), target
 

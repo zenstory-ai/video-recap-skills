@@ -7,8 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-# Part of the TTS cache key: renaming it invalidates audio cached under the old default,
-# which re-synthesized truncated text.
+# Recorded per block in tts_meta.json; not part of the TTS cache key (only the strict policy
+# adds fields there), so renaming it invalidates no cached audio.
 LEGACY_TEXT_POLICY = "report-over-budget-v2"
 PRESERVE_APPROVED_TEXT_POLICY = "preserve-approved-text-v1"
 

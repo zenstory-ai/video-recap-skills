@@ -98,7 +98,7 @@ def test_default_policy_keeps_over_budget_text_with_one_tts_call(monkeypatch, tm
     assert result["truncate_reason"] == "none"
 
 
-def test_default_policy_name_is_part_of_the_cache_contract():
+def test_default_policy_name_is_recorded_in_tts_meta():
     assert voiceover.policy_name(False) == "report-over-budget-v2"
 
 

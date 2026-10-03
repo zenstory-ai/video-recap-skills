@@ -189,6 +189,10 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         blocking_codes.append("timeline_audio_mismatch")
     if placed and max(placed) <= 0.0 and not no_safe:
         blocking_codes.append("empty_narration")
+    delivered_peak = ((loudnorm_final_pass or {}).get("delivered") or {}).get("true_peak")
+    if delivered_peak is not None and delivered_peak > float(CONFIG["target_true_peak"]):
+        # The encoded file, not the PCM mix, is what must stay under TP (codec_peak.py).
+        blocking_codes.append("delivered_true_peak_over_target")
     visual_verdict = (
         {"verdict": visual_qc["verdict"], "blocking_codes": list(visual_qc["blocking_codes"])}
         if visual_qc is not None

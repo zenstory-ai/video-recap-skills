@@ -89,7 +89,7 @@ def test_supplied_mapping_requires_matching_render_metadata(tmp_path):
     video = tmp_path / "fake.mp4"
     video.write_bytes(b"current")
     plan = tmp_path / "plan.json"
-    plan.write_text(json.dumps({"clips": [], "total_duration": 10}))
+    plan.write_text(json.dumps({"clips": [], "total_duration": 10}), encoding="utf-8")
     with pytest.raises(ValueError, match="binding"):
         shot_review.load_bound_plan(video, plan)
 
@@ -102,7 +102,7 @@ def bound_fixture(tmp_path):
         {"clip_id": 0, "source_start": 10, "source_end": 15, "output_start": 0, "output_end": 5},
         {"clip_id": 1, "source_start": 20, "source_end": 25, "output_start": 5, "output_end": 10},
     ]}
-    plan.write_text(json.dumps(payload))
+    plan.write_text(json.dumps(payload), encoding="utf-8")
     cut_contract._write_edited_source_meta(video, payload, source)
     return video, source, plan, payload
 
@@ -118,12 +118,12 @@ def test_changed_bound_inputs_fail(tmp_path, changed):
     elif changed == "source":
         path.write_bytes(b"Z" * (path.stat().st_size + 1))
     else:
-        obj = json.loads(path.read_text())
+        obj = json.loads(path.read_text(encoding="utf-8"))
         if changed == "plan":
             obj["clips"][0]["source_start"] = 9
         else:
             obj["render_cache"]["clip_join_audio_fade_ms"] = -1
-        path.write_text(json.dumps(obj))
+        path.write_text(json.dumps(obj), encoding="utf-8")
     with pytest.raises(ValueError, match="binding"):
         shot_review.load_bound_plan(video, plan)
 
@@ -183,7 +183,7 @@ def test_cut_cli_opt_in_reviews_actual_cut_not_plan_only(tmp_path, monkeypatch, 
     video.write_bytes(b"source")
     work = tmp_path / "work"
     work.mkdir()
-    (work / "clip_plan.json").write_text('[{"start":0,"end":4}]')
+    (work / "clip_plan.json").write_text('[{"start":0,"end":4}]', encoding="utf-8")
     monkeypatch.setitem(cut_cli.CONFIG, "scene_cut_snap", False)
     monkeypatch.setitem(cut_cli.CONFIG, "snap_clip_line_end", False)
     monkeypatch.setattr(cut_cli, "get_video_duration", lambda _: 4)
@@ -230,16 +230,16 @@ def test_bad_cut_roi_option_fails_before_loading_source(tmp_path, monkeypatch, o
 
 def test_corrupt_meta_invalidates_verified_old_report_not_unknown_file(tmp_path):
     video, _, plan, _ = bound_fixture(tmp_path)
-    Path(str(video) + ".meta.json").write_text("broken")
+    Path(str(video) + ".meta.json").write_text("broken", encoding="utf-8")
     output = tmp_path / "shot_review.json"
-    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}')
+    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}', encoding="utf-8")
     with pytest.raises(ValueError):
         shot_review.write_scan(video, output, plan_path=plan)
-    assert json.loads(output.read_text())["status"] == "SCAN_FAILED"
-    output.write_text("something important")
+    assert json.loads(output.read_text(encoding="utf-8"))["status"] == "SCAN_FAILED"
+    output.write_text("something important", encoding="utf-8")
     with pytest.raises(ValueError, match="overwrite"):
         shot_review.write_scan(video, output, plan_path=plan)
-    assert output.read_text() == "something important"
+    assert output.read_text(encoding="utf-8") == "something important"
 
 
 def test_stale_plan_and_meta_protect_union_of_declared_sources(tmp_path):
@@ -247,7 +247,7 @@ def test_stale_plan_and_meta_protect_union_of_declared_sources(tmp_path):
     other = tmp_path / "other.mp4"
     other.write_bytes(b"irreplaceable")
     payload["clips"][0]["source_path"] = str(other)
-    plan.write_text(json.dumps(payload))
+    plan.write_text(json.dumps(payload), encoding="utf-8")
     with pytest.raises(ValueError, match="overwrite"):
         shot_review.write_scan(video, other, plan_path=plan)
     assert other.read_bytes() == b"irreplaceable"
