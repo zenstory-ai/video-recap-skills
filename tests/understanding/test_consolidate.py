@@ -368,6 +368,13 @@ def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path
         ("01:20 ~ 01:45", "01:20"),
         ("80秒-95秒", "01:20"),
         ("01:20至01:45", "01:20"),
+        ("00：95", "01:35"),  # full-width colon
+        ("3分20秒", "03:20"),
+        ("3分20", "03:20"),
+        ("3分钟", "03:00"),
+        ("约3分20.5秒", "03:20"),
+        ("1小时2分3秒", "1:02:03"),
+        ("3分20秒-3分45秒", "03:20"),
     ],
 )
 def test_plot_time_is_canonical_mm_ss(raw, expected):
@@ -420,7 +427,8 @@ def test_characters_sharing_a_name_or_alias_merge_deterministically():
     assert normalize_index(out)[0] == out  # idempotent
 
 
-def test_a_later_entry_bridging_two_groups_folds_both():
+def test_a_later_entry_linking_two_groups_is_kept_on_its_own():
+    """An entry whose aliases name two different characters is ambiguous: no bridge merge."""
     from index_normalize import merge_characters
 
     chars, renames = merge_characters([
@@ -428,9 +436,21 @@ def test_a_later_entry_bridging_two_groups_folds_both():
         {"name": "乙", "aliases": ["阿乙"]},
         {"name": "丙", "aliases": ["甲", "乙"]},
     ])
-    assert [c["name"] for c in chars] == ["甲"]
-    assert chars[0]["aliases"] == ["阿甲", "乙", "阿乙", "丙"]
-    assert renames == {"乙": "甲", "丙": "甲"}
+    assert [c["name"] for c in chars] == ["甲", "乙", "丙"]
+    assert renames == {}
+
+
+def test_an_exact_name_match_wins_over_alias_links():
+    from index_normalize import merge_characters
+
+    chars, renames = merge_characters([
+        {"name": "甲", "aliases": ["阿甲"]},
+        {"name": "乙", "aliases": ["阿乙"]},
+        {"name": "乙", "aliases": ["甲"], "description": "乙的第二条"},
+    ])
+    assert [c["name"] for c in chars] == ["甲", "乙"]
+    assert chars[1]["aliases"] == ["阿乙", "甲"]
+    assert renames == {"乙": "乙"}
 
 
 def test_a_shared_alias_alone_does_not_merge_two_characters():
@@ -449,6 +469,26 @@ def test_a_shared_alias_alone_does_not_merge_two_characters():
     assert [c["name"] for c in out["characters"]] == ["王大锤", "李警官"]
     assert out["relationships"] == index["relationships"]
     assert report["merged_characters"] == 0
+
+
+def test_an_extra_named_by_a_shared_alias_does_not_bridge_two_characters():
+    """A later "男子" entry links to both people carrying the alias 男子: keep all three."""
+    from index_normalize import normalize_index
+
+    index = {
+        "characters": [
+            {"name": "王大锤", "aliases": ["男子", "老板"], "description": "老板"},
+            {"name": "李警官", "aliases": ["男子"], "description": "警察"},
+            {"name": "男子", "description": "路人"},
+        ],
+        "relationships": [{"a": "王大锤", "b": "李警官", "relation": "对峙"}],
+        "plot_points": [],
+    }
+    out, report = normalize_index(index)
+    assert out["characters"] == index["characters"]
+    assert out["relationships"] == index["relationships"]
+    assert report["merged_characters"] == 0
+    assert normalize_index(out)[0] == out
 
 
 def test_a_string_alias_is_one_alias_not_its_characters():

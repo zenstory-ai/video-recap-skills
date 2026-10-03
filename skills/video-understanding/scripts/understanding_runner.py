@@ -59,9 +59,12 @@ def _refuse_keyless_overwrite(asr_json):
         return
     if isinstance(existing, list) and existing:
         raise SystemExit(
-            "ASR 缓存与当前视频、设置或文件时间不匹配，且未设置 MIMO_ASR_API_KEY / MIMO_API_KEY，"
-            f"无法重新转写；已保留现有 asr_result.json（{len(existing)} 段），未覆盖。"
-            "请设置 MIMO_ASR_API_KEY 或 MIMO_API_KEY 后重跑，或显式使用 --skip-asr。"
+            "ASR 缓存与当前视频、设置或文件时间不匹配（常见原因：复制 work_dir 或视频时没保留"
+            "修改时间），且未设置 MIMO_ASR_API_KEY / MIMO_API_KEY，无法重新转写；"
+            f"已保留现有 asr_result.json（{len(existing)} 段），未覆盖。"
+            "请用保留时间的方式重新复制（cp -p / cp -Rp / rsync -t），"
+            "或设置 MIMO_ASR_API_KEY 或 MIMO_API_KEY 后重跑（会重新转写）。"
+            "不要用 --skip-asr 绕过：它会把现有转写替换成 []。"
         )
 
 
