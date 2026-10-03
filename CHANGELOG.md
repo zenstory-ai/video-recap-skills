@@ -89,6 +89,7 @@ All notable changes to this project are documented here.
 - **故事索引被截断时不再报 ok。** consolidate 的索引调用此前上限 3000 token，5 分钟的解说素材就会被截断（`finish_reason=length`），解析出空列表后照样写出空的 `understanding_index.json`，`consolidation.status.json` 仍是 `ok`，brief 拿到 0 个角色。现在索引与 ASR 清洗两次调用的上限都是 8000 token，被截断时加倍预算重试一次；仍被截断或返回的不是 JSON 时不写产物，`consolidation.status.json` 记为 `failed` 并写明原因，brief 照常提示。索引 prompt 要求更紧凑的输出（每条描述不超过 40 字、剧情节点最多 20 条等），已有索引会按新 prompt 重建一次。
 - **ASR 读不到音频文件时报错，** 不再当作空转写继续。
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。
+- **cut 输出时间轴上的句末锚点不再落进相邻片段或成片之外。** 句末锚点（停顿结束）比片段出点晚几毫秒、或比入点早几毫秒时，`speech_boundary_anchors_output.json` 把它映射到下一段（多视频时是另一个来源）或上一段的输出时间里，却仍标着本段的来源，旁白校验和原声闪避会把别处的讲话当成这里的句末；首尾片段帧对齐后（如 181.42 → 181.40）还会映射到片头之前或成片结尾之后。现在落在 `[0, 成片时长]` 之外的锚点丢掉（brief 也不再列出），片段接缝处的锚点钉在本段的入点或出点上（另一段本身播放该时刻时只归那一段），`pause_start`、`expected_time` 和讲话/安静区间同样不越出本段；`source_time` 仍记实测的原片时间。单视频与多视频相同。
 - **多视频 cut 的旁白校验不再以 `KeyError` 崩溃。** recap 写的多源 `speech_boundary_anchors_output.json` 现在带 `clip_plan_identity`；源锚点缺 `pause_start` 时与单源一样按 `time − 0.12` 处理。
 - **Windows 上经管道运行 recap 时，阶段脚本不再因中文日志崩溃。** recap 调用各阶段脚本时设置 `PYTHONIOENCODING=utf-8`；此前 stdout 被管道捕获（Agent 宿主、CI）时子进程默认 cp1252，第一行中文日志就抛 `UnicodeEncodeError`。
 - **旧 work_dir 里损坏的 `preflight_qc.json` 不再让 narration 运行在解说评审之后崩溃。** 账本删除后不再读取它。
@@ -103,7 +104,6 @@ All notable changes to this project are documented here.
 - **复制 work_dir 后 brief 的 storyboard 路径指向自己的目录。** `storyboard/*.json` 的 `page_images` 改存相对 work_dir 的 `storyboard/<文件名>`，`edited_video_path` 存 `edited_source.mp4`；旧版本写的绝对路径在缓存命中时改写，不重建拼图。
 - **brief 的时长标签不再取整到分钟。** cut 的目标与剪后时长以前按整分钟显示，90 秒目标写成 `~2min`、101.5 秒的剪辑也是 `~2min`；现在不足一分钟写秒（`45s`），整分钟写 `2min`，其余写分秒（`1m30s`、`1m42s`）。
 - **cut 第二轮 brief 的 Scene timing guide 改用 OUTPUT 时间。** 第二轮要求按 `edited_source.mp4` 的时间写 `narration.json`，结尾却附着整片原片时间的场景表（含剪掉的场景、片尾演职员表，以及按原片场景算的"fully narrated"字数上限）。现在第二轮的这一节标题为 `## Scene timing guide (OUTPUT time)`，只列保留下来的片段，起止、安静窗口、帧动作、ASR 与字数上限都按输出时间计，被拆到多个片段的场景写作 `source scene N part M`；第一轮（写 `clip_plan.json`）仍是原片时间的场景表。
-- **剪后时钟的句末锚点不再落在成片之外。** 原片锚点按片段边界放宽 0.05 秒映射，片段终点被帧对齐（如 181.42 → 181.40）后，句末锚点会映射到成片结尾之后（或片头之前）；单源 brief 与多视频 recap 写出的 `speech_boundary_anchors_output.json` 现在丢掉落在 `[0, 成片时长]` 之外的锚点，brief 也不再列出它们。
 
 ## [0.6.0] - 2026-09-27
 

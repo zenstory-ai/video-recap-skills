@@ -112,7 +112,8 @@ brief 里标 `unverified ±N s`）、`none`（不用）。缺 `boundary_use` 的
 锚点之后又进入已声明的原声讲话区时，`suggested_start` 可为 `null`，Agent 必须移动、缩短或删除该旁白块。
 
 剪辑模式第二阶段会另外生成 `speech_boundary_anchors_output.json`，把锚点、ASR 语音区间和
-安静窗口映射到剪后 OUTPUT 时间轴，避免拿原片时间检查剪后旁白：
+安静窗口映射到剪后 OUTPUT 时间轴，避免拿原片时间检查剪后旁白。输出时钟上的值不越出所属片段：比片段入/出点早/晚不超过
+0.05 秒、又没有别的片段播放的锚点钉在该段的入点或出点上，`source_time` 仍是实测的原片时间：
 
 ```json
 {

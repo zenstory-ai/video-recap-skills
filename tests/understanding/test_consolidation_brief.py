@@ -1038,6 +1038,30 @@ def test_cut_output_anchors_outside_the_output_are_dropped(tmp_path):
     assert [row["source_time"] for row in output["sentence_anchors"]] == [150.0, 181.4]
 
 
+def test_cut_output_anchor_past_a_snapped_clip_edge_stays_on_that_clip(tmp_path):
+    """A pause end 20 ms past a frame-snapped clip end maps to that clip's output end, not into
+    the next clip (a different source range). One within the edge tolerance of two clips maps
+    to each at its edge; one a clip plays itself is not duplicated onto a neighbour's edge."""
+    plan = {"clips": [
+        {"source_start": 10.0, "source_end": 12.48, "output_start": 0.0, "output_end": 2.48},
+        {"source_start": 40.0, "source_end": 43.0, "output_start": 2.48, "output_end": 5.48},
+        {"source_start": 12.51, "source_end": 14.0, "output_start": 5.48, "output_end": 6.97},
+    ]}
+    _write_json(tmp_path / "clip_plan_validated.json", plan)
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(tmp_path / "speech_boundary_anchors.json", {"sentence_anchors": [
+        {"time": 12.5, "pause_start": 12.3, "expected_time": 12.52, "confidence": "high"},
+        {"time": 39.97, "confidence": "high"},
+        {"time": 12.53, "pause_start": 12.52, "confidence": "high"},
+    ]})
+
+    anchors = brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
+
+    rows = [(a["source_time"], a["time"], a["pause_start"]) for a in anchors]
+    assert rows == [(12.5, 2.48, 2.3), (39.97, 2.48, 2.48), (12.5, 5.48, 5.48), (12.53, 5.5, 5.49)]
+    assert anchors[0]["expected_time"] == 2.48
+
+
 def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path):
     _write_json(
         tmp_path / "clip_plan_validated.json",
