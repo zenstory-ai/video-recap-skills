@@ -1,16 +1,40 @@
+"""video-script's review output feeds video-recap's strict pre-TTS gate.
+
+The review runs in-process with a stubbed model call so the gate sees a real
+narration_review.json. video-script's modules (its own `lib` included) are loaded only
+for the duration of each test and then removed, so they never shadow video-recap's
+modules for the rest of the group.
+"""
+
+import importlib
+import json
 import sys
 from pathlib import Path
 
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
-)
-sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
-)
-import json
+import pytest
 
-import review_runner
 import recap_review
+
+SCRIPT_SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts"
+
+
+def _is_script_module(module):
+    origin = getattr(module, "__file__", None)
+    return bool(origin) and Path(origin).resolve().is_relative_to(SCRIPT_SCRIPTS)
+
+
+@pytest.fixture
+def review_runner(monkeypatch):
+    names = {path.stem for path in SCRIPT_SCRIPTS.glob("*.py")}
+    shadowed = {name: sys.modules.pop(name) for name in names if name in sys.modules}
+    monkeypatch.syspath_prepend(str(SCRIPT_SCRIPTS))
+    try:
+        yield importlib.import_module("review_runner")
+    finally:
+        for name, module in list(sys.modules.items()):
+            if _is_script_module(module):
+                del sys.modules[name]
+        sys.modules.update(shadowed)
 
 
 def _seed_work_dir(work_dir):
@@ -21,7 +45,7 @@ def _seed_work_dir(work_dir):
     (work_dir / "asr_result.json").write_text("[]", encoding="utf-8")
 
 
-def _run_review_with_finding(monkeypatch, work_dir, finding):
+def _run_review_with_finding(review_runner, monkeypatch, work_dir, finding):
     _seed_work_dir(work_dir)
     payloads = []
 
@@ -44,15 +68,16 @@ def _run_review_with_finding(monkeypatch, work_dir, finding):
             ]
         }
 
-    monkeypatch.setattr("review_runner.api_call", fake_api)
+    monkeypatch.setattr(review_runner, "api_call", fake_api)
     review_runner.review_narration(work_dir)
     return payloads
 
 
-def test_review_payload_is_deterministic(monkeypatch, tmp_path):
+def test_review_payload_is_deterministic(review_runner, monkeypatch, tmp_path):
     """Q3: re-running review on identical input must be deterministic — the payload
     pins temperature to 0 and carries a fixed integer seed."""
     payloads = _run_review_with_finding(
+        review_runner,
         monkeypatch,
         tmp_path,
         {
@@ -68,10 +93,11 @@ def test_review_payload_is_deterministic(monkeypatch, tmp_path):
     assert isinstance(payload["seed"], int)
 
 
-def test_craft_error_is_clamped_and_does_not_gate(monkeypatch, tmp_path):
+def test_craft_error_is_clamped_and_does_not_gate(review_runner, monkeypatch, tmp_path):
     """Q4: a craft finding (weak_hook) marked error is clamped to warning, so it does
     NOT count as a gating error in recap_review.review_result_status."""
     _run_review_with_finding(
+        review_runner,
         monkeypatch,
         tmp_path,
         {
@@ -93,10 +119,11 @@ def test_craft_error_is_clamped_and_does_not_gate(monkeypatch, tmp_path):
     assert status["ok"] is True
 
 
-def test_hallucination_error_still_gates(monkeypatch, tmp_path):
+def test_hallucination_error_still_gates(review_runner, monkeypatch, tmp_path):
     """Q4 counter-case: a factual finding (hallucination) marked error keeps its
     severity and DOES gate strict mode."""
     _run_review_with_finding(
+        review_runner,
         monkeypatch,
         tmp_path,
         {

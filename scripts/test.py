@@ -3,7 +3,7 @@
 
 Each skill ships its OWN lib.py (the bundle has no shared code), so a single
 `pytest tests/` would import several skills' modules into one process and collide
-on the `lib` (and `narration`) module names. Run one group per subprocess instead.
+on the `lib` module name. Run one group per subprocess instead.
 
 Works on macOS, Linux, and Windows (the bash equivalent is scripts/test.sh).
 
@@ -14,13 +14,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-GROUPS = ["understanding", "cut", "voiceover", "assemble", "script", "orchestrator", "inspect"]
+GROUPS = ["understanding", "cut", "voiceover", "assemble", "script", "orchestrator"]
 
 
 def _require_pytest():
     """Fail with the actual problem instead of reporting every group as a test failure.
 
-    Without this, a missing pytest prints "No module named pytest" seven times and then
+    Without this, a missing pytest prints "No module named pytest" once per group and then
     "FAILED groups: understanding, cut, ..." — indistinguishable from real failures.
     """
     import importlib.util

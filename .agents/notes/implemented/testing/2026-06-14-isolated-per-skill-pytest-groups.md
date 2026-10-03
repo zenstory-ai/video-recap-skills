@@ -11,6 +11,8 @@ Status: implemented
 - `scripts/test.py` 是唯一入口：`GROUPS` 逐组以子进程运行 `python -m pytest tests/<group> -q -rs`；`scripts/test.sh` 只是转调它的兼容壳。CI 在 ubuntu / macOS / windows 上跑 `ruff check skills tests scripts` 与 `python scripts/test.py`，且对每个 PR 都跑（不加路径过滤，避免 docs-only PR 在分支保护下卡死）。
 - 根 `conftest.py` 的 `pytest_cmdline_main` 拒绝无参数、`.`、`tests/` 或跨组的收集（`UsageError` 指向规范命令）；只允许单组或单文件调试。
 - `test_canonical_runner_includes_every_test_group` 断言 `GROUPS` 恰等于 `tests/` 下含 `test_*.py` 的子目录集合：新增测试目录 must 登记，漏跑会红。
+- 分组是 understanding / cut / voiceover / assemble / script / orchestrator 六组。`recap_inspect` 的测试在 `tests/orchestrator`（原 `tests/inspect` 组于 2026-10-02 并入：它测的是 video-recap 的模块，`inspect.py` 改名 `recap_inspect.py` 后已没有遮蔽 stdlib 的问题）。测试归属按被测代码所在的 skill 定，仓库根 `tools/` 的测试（`test_measure_subtitle.py`）也放 orchestrator。
+- 跨 skill 的测试（一个 skill 的产物喂给另一个 skill 的判定）放 orchestrator。需要在进程内跑另一个 skill 的代码时，用 fixture 先把同名模块移出 `sys.modules`、临时把对方的 `scripts/` 放进 `sys.path` 再导入，测试结束删掉对方的模块并放回 video-recap 的（见 `test_review_gating.py`），never 让对方的 `lib` 留在进程里遮蔽本组的 `lib`。
 - 探测环境变量对 `lib.CONFIG` 的影响时，用 `importlib.util.spec_from_file_location` 把 `lib.py` 加载成单独命名的模块实例（video-cut 的 `_load_lib_with_env`、video-assemble 的同名 helper），never `importlib.reload` 活的 `lib` —— 各 skill 的 `lib.py` 都没有重导入保护（video-assemble 的 `_EXISTING_CONFIG_REF` 已于 2026-10-02 删除，见 [[2026-10-02-assemble-drop-qc-mirrors-dead-env-version-stamps]]），reload 会让 `lib.CONFIG` 与其他模块持有的引用分裂。
 - 分层（`tests/README.md`）：纯行为测试、产物测试、契约 / 打包测试；never 通过读源码匹配一句文案来证明行为，声明式契约（SKILL.md、prompt）解析其结构而不是散落短语；精确重复的测试体由架构测试拒绝，语义重复靠评审。ffmpeg 相关单测不依赖真实 ffmpeg，真渲染测试用 `shutil.which` 守卫并以 `-rs` 让跳过可见。
 - `pyproject.toml` 显式声明 ruff 规则集 `E4/E7/E9/F`：CI 不固定 ruff 版本，隐式默认集在 0.16 扩大后会让无关 PR 变红；`tests/**` 忽略 E402，因为测试要先把 skill 的 `scripts/` 放进 `sys.path`。
@@ -26,4 +28,4 @@ Status: implemented
 ## Consequences
 
 - **收益**：没有模块串扰；每组可单独调试；分组登记有门禁。
-- **代价**：全量要起七个解释器进程，比单进程慢；跨组共享 fixture 不方便；每个 skill 的 parity 与自包含约束意味着相同行为只保留一套行为测试、其余靠字节一致与隔离导入证明。
+- **代价**：全量要起六个解释器进程，比单进程慢；跨组共享 fixture 不方便；每个 skill 的 parity 与自包含约束意味着相同行为只保留一套行为测试、其余靠字节一致与隔离导入证明。

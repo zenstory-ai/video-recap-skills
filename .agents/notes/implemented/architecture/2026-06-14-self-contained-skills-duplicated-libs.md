@@ -10,7 +10,7 @@ Status: implemented
 
 - `skills/<name>/scripts/*.py` 只 import 自身目录里的模块；源码与 markdown 都不得出现兄弟 skill 的路径或名字（`test_skill_scripts_do_not_import_other_skill_scripts`、`test_stage_sources_never_point_to_a_sibling_skill_path`）。skill 之间只通过 `work_dir` 里的 JSON / MP4 产物通信，编排器 `video-recap` 以子进程调用各 skill 脚本。
 - 刻意复制的代码 must 保持一致，由 `tests/orchestrator/test_brief_narration_parity.py` 守。复制单位是函数，不是整个模块：video-understanding 与 video-script 只共有五个文本原语（`_recommended_char_budget / _scene_available_seconds / _overlap_seconds / _sentence_pieces / _text_units`），按 AST 比对；每个副本必须在本 skill 内有调用点。改一处必须同批改另一处。
-- 每份 `lib.py` 只声明自己代码读取的 CONFIG 键（`test_no_skill_declares_config_it_never_reads`）；多个 skill 共同声明的音频与 tempo 键取值必须一致（`test_audio_policy_parity.py`）。never 为"方便"把别的 skill 的键加进来。
+- 每份 `lib.py` 只声明自己代码读取的 CONFIG 键（`test_no_skill_declares_config_it_never_reads`，六个 skill 的 `lib.py` 都在 `test_audio_policy_parity.py` 的 `LIBS` 里）；多个 skill 共同声明的音频与 tempo 键取值必须一致（`test_audio_policy_parity.py`）。never 为"方便"把别的 skill 的键加进来。
 - 每个脚本模块 ≤ 800 行，skill 内 import 图无环（`test_test_suite_architecture.py`）。
 - `file_identity`（size/mtime_ns）等在多份 `lib.py` 里各有一份的辅助函数保持同形；内容指纹已于 2026-09-20 整体移除（见 [[2026-09-20-no-content-hashing]]），跨 skill 只比较路径与 size/mtime_ns。
 

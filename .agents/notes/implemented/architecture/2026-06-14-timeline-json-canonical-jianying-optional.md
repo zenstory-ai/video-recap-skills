@@ -10,7 +10,7 @@ Status: implemented
 
 - `video-assemble` 每次渲染都写 `work_dir/timeline.json`（schema v2，秒与增益，无剪映专有单位），ffmpeg 渲染的 `recap_<stem>.mp4` 是最终成片的判定标准。
 - 剪映导出只在 `--export-jianying` / `EXPORT_JIANYING=1` 时由 `jianying/optional.py` 懒加载 `export_jianying`；渲染路径 never import `jianying` 包内任何模块（`test_core_assemble_does_not_import_exporter` 在干净解释器里断言）。导出失败只记日志，never 使已渲染的 mp4 失效。
-- 导出器只依赖 Python stdlib + ffprobe。协议 JSON 模板钉在 duo-video `ef4eb46`（MIT，`references/jianying/SOURCE.md`），builder 本地实现；never vendor 上游可执行代码、资源包或示例凭证。需要官方资源包的能力（音效、贴纸、特效、文字模板、转场、蒙版、LUT）只接受调用方合法提供的离线资源；时间线契约在建草稿前拒绝未知轨道类型（能力清单见 `docs/timeline-and-jianying.md`，不再在代码里另设状态标签）。（这些资源能力与下条的手写扩展字段已于 2026-10-02 删除，见 [[2026-10-02-drop-jianying-timeline-extensions]]。）
+- 导出器只依赖 Python stdlib + ffprobe。协议 JSON 模板钉在 duo-video `ef4eb46`（MIT，`references/jianying/SOURCE.md`；`test_jianying_duo_protocol.py` 直接读这些模板做期望值，并用规范化 JSON 的 sha256 钉住每个文件，测试树里不另存副本），builder 本地实现；never vendor 上游可执行代码、资源包或示例凭证。需要官方资源包的能力（音效、贴纸、特效、文字模板、转场、蒙版、LUT）只接受调用方合法提供的离线资源；时间线契约在建草稿前拒绝未知轨道类型（能力清单见 `docs/timeline-and-jianying.md`，不再在代码里另设状态标签）。（这些资源能力与下条的手写扩展字段已于 2026-10-02 删除，见 [[2026-10-02-drop-jianying-timeline-extensions]]。）
 - 写入安全：`validate_draft_name` 拒绝空名、绝对路径、`..` 与路径分隔符；非空目标目录不覆盖而创建编号兄弟目录；整个草稿先写临时目录再 `os.replace` 原子发布。
 - `jianying_bundle_media` 默认 `True`：视频 / 音频 / 图片复制进 `Resources/local/{video,audio,image}` 并写 `draft_meta_info.json` 索引；`--jianying-no-bundle-media` 只适合剪映能直接访问原路径的环境。
 - v1 时间线在导出边界迁移到 v2，未知 schema 版本直接拒绝；剪映专有字段（变速、倒放、转场、mask、LUT、资源轨）是 timeline 的附加字段，不改变 ffmpeg 路径的语义。（2026-10-02 起导出只接受 v2、v1 被拒，扩展字段被拒，见 [[2026-10-02-drop-jianying-timeline-extensions]]。）
