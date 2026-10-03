@@ -52,6 +52,8 @@ def test_parse_frame_rate_rejects_unknown_and_timebase_rates(text, expected):
     ({"r_frame_rate": "24/1"}, "24/1"),
     # VFR phone clip whose nominal rate is far above its real average: not 60 fps CFR.
     ({"r_frame_rate": "60/1", "avg_frame_rate": "29600/1000"}, "30/1"),
+    # Unusable nominal rate but a usable average: the average's grid, not "unknown".
+    ({"r_frame_rate": "0/0", "avg_frame_rate": "25/1"}, "25/1"),
 ])
 def test_probed_frame_grid_uses_frames_not_fields(stream, expected):
     geometry = media_geometry._geometry_from_stream(
@@ -133,15 +135,16 @@ def test_frame_snap_does_not_shrink_a_clip_off_a_required_evidence_edge(monkeypa
     assert plan["qc"]["required_evidence"]["selection_status"] != "BLOCK"
 
 
-def _snap_with_gate(tmp_path, spans, rate, speech, duration=10.0, origin=0.0):
-    """snap_source_clips (frame pass + gate only) against an ASR transcript of `speech`."""
+def _snap_with_gate(tmp_path, spans, rate, speech, duration=10.0, origin=0.0, all_passes=False):
+    """snap_source_clips against an ASR transcript of `speech`: the frame pass and the gate
+    only, or with `all_passes` the default shot-change and line snapping too."""
     (tmp_path / "asr_clean.json").write_text(json.dumps({"segments": [
         {"start": a, "end": b, "text": "完整的一句台词"} for a, b in speech]}), encoding="utf-8")
     plan = normalize_clip_plan([{"start": a, "end": b} for a, b in spans], duration)
     return sentence_boundaries.snap_source_clips(
         plan, tmp_path / "v.mp4", duration, tmp_path, line_max_extend=0.5, scene_margin=0.5,
-        scene_threshold=0.4, start_max_prepend=0.5, start_max_trim=0.35, do_line_snap=False,
-        do_scene_snap=False, frame_grid=_grid(rate, origin=origin))
+        scene_threshold=0.4, start_max_prepend=0.5, start_max_trim=0.35,
+        do_line_snap=all_passes, do_scene_snap=all_passes, frame_grid=_grid(rate, origin=origin))
 
 
 def _edge_status(plan, edge, clip_id=0):
@@ -170,12 +173,52 @@ def test_nearest_safe_suggestion_survives_frame_snap_and_the_gate(tmp_path, rate
     assert "blocking" not in retried["qc"]
 
 
-def test_a_start_at_the_file_start_stays_a_source_start_when_video_begins_later(tmp_path):
-    """A source whose first video frame is 0.1 s in: a start at 0.0 snaps onto that frame and
-    is still the source start, even though speech covers the opening."""
-    out = _snap_with_gate(tmp_path, [(0.0, 2.5)], 25, [(0.0, 2.0)], origin=0.1)
-    assert out["clips"][0]["source_start"] == 0.1
-    assert _edge_status(out, "start")["reason"] == "source_start"
+def test_nearest_safe_suggestion_is_withheld_when_no_neighbouring_frame_is_safe(tmp_path):
+    """Speech [0, 2] and [2.125, 10] at 25 fps: 2.06 clears both by the gate tolerance, but
+    the frames either side (2.04, 2.08) do not, so suggesting it would block again."""
+    blocked = _snap_with_gate(tmp_path, [(0.0, 1.5)], 25, [(0.0, 2.0), (2.125, 10.0)])
+    assert _edge_status(blocked, "end")["nearest_safe"]["after"] is None
+
+
+@pytest.mark.parametrize("rate", [24, 25, 30])
+def test_nearest_safe_suggestion_survives_shot_change_snapping(tmp_path, monkeypatch, rate):
+    """A hard cut at 1.8 and an ASR gap that is not silent (no pause window): the shot-change
+    pass pulls the suggested end 2.06 back into the sentence, and no pause lets line
+    snapping repair it. Sound outranks the picture, so the move is reverted."""
+    monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes",
+                        lambda _v, a, b, _t, **_k: [c for c in (1.8,) if a <= c <= b])
+    speech = [(0.0, 2.0), (3.0, 10.0)]
+    blocked = _snap_with_gate(tmp_path, [(0.0, 1.5)], rate, speech, all_passes=True)
+    after = _edge_status(blocked, "end")["nearest_safe"]["after"]["time"]
+    retried = _snap_with_gate(tmp_path, [(0.0, after)], rate, speech, all_passes=True)
+    assert _edge_status(retried, "end")["status"] == "safe"
+    assert "blocking" not in retried["qc"]
+    shot = retried["qc"]["boundary_status"]["shot_snaps"][0]
+    assert (shot["end_action"], shot["rejected_end"]) == ("reverted_unsafe", 1.8)
+
+
+def test_a_shot_change_move_off_an_unsafe_plan_edge_is_not_reverted(tmp_path, monkeypatch):
+    """The plan's own end (1.9) is inside speech too: nothing to revert to, the gate blocks."""
+    monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes",
+                        lambda _v, a, b, _t, **_k: [c for c in (1.8,) if a <= c <= b])
+    out = _snap_with_gate(tmp_path, [(0.0, 1.9)], 25, [(0.0, 2.0), (3.0, 10.0)], all_passes=True)
+    assert out["qc"]["boundary_status"]["shot_snaps"][0]["end_action"] == "moved_back"
+    assert _edge_status(out, "end")["status"] == "blocking"
+
+
+@pytest.mark.parametrize("origin,start,status,reason", [
+    (0.1, 0.1, "safe", "source_start"),
+    # A picture starting 1.5 s into the audio is not waived: the start lands mid-sentence.
+    (1.5, 1.5, "blocking", "inside_detected_speech"),
+])
+def test_a_start_at_the_file_start_is_a_source_start_only_when_video_begins_promptly(
+        tmp_path, origin, start, status, reason):
+    """A start at 0.0 snaps onto the first video frame; speech covers the opening. A first
+    frame a few ms in still counts as the source start, a late one does not."""
+    out = _snap_with_gate(tmp_path, [(0.0, 2.5)], 25, [(0.0, 2.0)], origin=origin)
+    assert out["clips"][0]["source_start"] == start
+    assert (_edge_status(out, "start")["status"], _edge_status(out, "start")["reason"]) == (
+        status, reason)
 
 
 def test_output_timeline_follows_cumulative_frames_at_ntsc_rates():
@@ -196,6 +239,48 @@ def test_unknown_source_rate_still_renders_whole_output_frames():
     assert clips[0]["source_start"] == 1.013
     assert events[0]["start_reason"] == "source_frame_rate_unknown"
     assert clips[0]["source_end"] == pytest.approx(1.013 + 25 / 25, abs=1e-3)
+
+
+def test_a_lossless_join_renders_sample_contiguous_audio(monkeypatch, tmp_path):
+    """24 fps: the first clip renders to 2.541667 s but the plan rounds the join to 2.542, so
+    the joined clip must start at the exact render end (no 16-sample jump at 48 kHz)."""
+    import re
+    import cut_render
+    clips, _ = _snap([(1.0, 2.56), (2.56, 4.0)], _grid(24), joined=[False, True])
+    plan = normalize_clip_plan([{"start": 0.0, "end": 1.0}], 100.0)
+    plan["clips"] = clips
+    sentence_boundaries._recompute_clip_timeline(clips)
+    geometry = {"frame_rate": "24", "sources": [{"source_id": None, "path": str(tmp_path / "v.mp4"),
+                                                 "frame_rate": "24/1"}]}
+    frame_grid.record_frame_grid(plan, geometry)
+    plan["qc"]["output_geometry"] = geometry
+    commands = []
+
+    def fake_run_cmd(cmd):
+        commands.append(cmd)
+        if cmd[0] == "ffmpeg":
+            Path(cmd[-1]).write_bytes(b"mp4")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(cut_render, "run_cmd", fake_run_cmd)
+    monkeypatch.setattr(cut_render, "_has_audio_stream", lambda _path: True)
+    monkeypatch.setattr(cut_render, "get_video_duration", lambda _path: 3.0)
+    (tmp_path / "v.mp4").write_bytes(b"v")
+    cut_render.build_edited_source_video(tmp_path / "v.mp4", plan, tmp_path)
+    graph = " ".join(next(cmd for cmd in commands if cmd[0] == "ffmpeg"))
+    atrims = re.findall(r"atrim=start=([0-9.]+):end=([0-9.]+)", graph)
+    assert clips[1]["source_start"] == clips[0]["source_end"] == 2.542
+    assert atrims[0][1] == atrims[1][0] == "2.541667"
+
+
+@pytest.mark.parametrize("probed,warned", [("50\n", False), ("48\n", True), ("", False)])
+def test_a_rendered_frame_count_that_differs_from_the_plan_is_warned_not_blocked(
+        monkeypatch, capsys, tmp_path, probed, warned):
+    import cut_render
+    monkeypatch.setattr(cut_render, "run_cmd", lambda cmd: subprocess.CompletedProcess(
+        cmd, 0, stdout=probed, stderr=""))
+    cut_render._warn_on_frame_count_mismatch(tmp_path / "edited_source.mp4", 50)
+    assert ("渲染出 48 帧" in capsys.readouterr().out) is warned
 
 
 def _gate(plan, windows, speech, duration=10.0):

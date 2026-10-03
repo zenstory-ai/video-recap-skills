@@ -8,7 +8,7 @@ from lib import CONFIG, filter_file_args, get_video_duration, log, run_cmd
 
 from cut_contract import _write_edited_source_meta
 from media_geometry import _has_audio_stream
-from sentence_boundaries import _continuous_source_join
+from sentence_gate import _continuous_source_join
 
 
 def _audio_segment_filter(
@@ -60,6 +60,27 @@ def _video_segment_filter(label_in, label_out, start, end, frames, out_rate, sou
     )
 
 
+def _warn_on_frame_count_mismatch(path, expected):
+    """Log when the encoded video holds a different frame count than qc.frame_grid records.
+
+    The exact count rests on fps/tpad/trim behaviour verified on ffmpeg 8 and 9; an older
+    ffmpeg that behaves differently would otherwise leave a short or VFR file unnoticed.
+    A warning, not a block: final_qc owns blockers.
+    """
+    result = run_cmd([
+        "ffprobe", "-v", "error", "-select_streams", "v:0", "-count_packets",
+        "-show_entries", "stream=nb_read_packets", "-of", "csv=p=0", str(path),
+    ])
+    try:
+        rendered = int(str(result.stdout).strip())
+    except (AttributeError, ValueError):
+        return
+    if rendered != expected:
+        log(f"警告: {path.name} 渲染出 {rendered} 帧，"
+            f"qc.frame_grid.frame_count 记录的是 {expected} 帧；"
+            "当前 ffmpeg 的 fps/tpad/trim 行为可能不同，请检查帧率是否恒定")
+
+
 def build_edited_source_video(input_video, validated_plan, work_dir, output_path=None):
     """Build `edited_source.mp4` by concatenating validated source ranges.
 
@@ -109,12 +130,16 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
         )
     has_audio = len(source_paths) > 1 or all(audio_by_input.values())
     total_frames = 0
+    end = None
     for clip_pos, clip in enumerate(clips):
         idx = clip["clip_id"]
         clip_source = clip.get("source_path", str(input_video))
         input_idx = source_index[clip_source]
-        start = clip["source_start"]
-        frames = frame_count(clip["duration"], out_rate)
+        # A lossless join starts exactly where the previous clip's render ended, not at the
+        # plan's millisecond-rounded copy of it, so the two atrims stay sample-contiguous.
+        joined = clip_pos > 0 and _continuous_source_join(clips[clip_pos - 1], clip)
+        start = end if joined else clip["source_start"]
+        frames = clip.get("frame_count") or frame_count(clip["duration"], out_rate)
         total_frames += frames
         dur = float(frames / out_rate)
         end = start + dur
@@ -204,6 +229,7 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     if result.returncode != 0:
         raise RuntimeError(f"剪辑源视频失败: {result.stderr}")
 
+    _warn_on_frame_count_mismatch(output_path, total_frames)
     _write_edited_source_meta(output_path, validated_plan, input_video)
     duration = get_video_duration(output_path)
     log(f"剪辑源视频: {output_path} ({duration:.1f}s, {len(clips)} clips)")

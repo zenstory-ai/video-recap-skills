@@ -93,7 +93,7 @@ python3 scripts/cut.py <video> --work-dir <work_dir> [--clip-plan <clip_plan.jso
 
 cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.json` 的 `qc.blocking`，每项带 `code`：
 
-- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。被阻断的边界带 `nearest_safe: {"before", "after"}`：前后 5 秒内最近的安全边界 `{time, reason, delta}`（原片秒；`delta` 为相对当前边界的秒数，没有则为 `null`；已按帧对齐复核过，原样写回不会再被阻断），按它改 `clip_plan.json` 的 `start`/`end` 后重跑。入点往前（`before`）是多保留、往后（`after`）是裁掉，出点相反；先确认改动不会切掉必保内容或与相邻片段重叠。两侧都是 `null` 说明附近没有停顿，要换区间而不是微调。
+- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。被阻断的边界带 `nearest_safe: {"before", "after"}`：前后 5 秒内最近的安全边界 `{time, reason, delta}`（原片秒；`delta` 为相对当前边界的秒数，没有则为 `null`；已按帧对齐复核过；重跑时切镜头避让若把它拉回讲话内，这次避让会被撤回，`qc.boundary_status.shot_snaps` 记 `reverted_unsafe`，所以原样写回不会再因句界被阻断），按它改 `clip_plan.json` 的 `start`/`end` 后重跑。入点往前（`before`）是多保留、往后（`after`）是裁掉，出点相反；先确认改动不会切掉必保内容或与相邻片段重叠。两侧都是 `null` 说明附近没有停顿，要换区间而不是微调。
 - `target_duration_drift`：时长偏差超出阻断阈值；明细见 `qc.target_duration`。
 - `REQUIRED_EVIDENCE_INVALID` / `REQUIRED_EVIDENCE_MISSING` / `REQUIRED_EVIDENCE_ORDER` / `REQUIRED_EVIDENCE_AUDIO_UNAVAILABLE`：必保证据声明无效、缺段、错序或源无音轨；明细见 `qc.required_evidence`。
 
@@ -111,7 +111,7 @@ cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.jso
 - 边界不在帧网格上时，concat 会在每个接点丢掉一个帧位（25fps 下画面停顿 80 ms，成片变成可变帧率），所以帧对齐无法关闭。源帧率未知（`r_frame_rate` 为 `0/0` 或大于 120）时入点不动，时长仍对齐到整数输出帧。
 - 默认禁止重叠或重复原片区间；`--allow-overlap` 开启后才允许。
 - 片段起点只能位于源头、可靠句末/静音窗，或与上一片段构成无损同源连续连接；片段终点同理。ASR 判定仍在讲话且无法吸附时写入 `unsafe_clip_sentence_boundary` 并阻断。
-- `SCENE_CUT_SNAP` 默认开启：先按画面把 source start 向后、source end 向前吸附到附近硬切，随后句末吸附再做最终修正，避免视觉修正重新制造半句原声。默认范围为 `SCENE_CUT_SNAP_MARGIN=0.5` 秒，检测阈值为 `SCENE_CUT_DETECT_THRESHOLD=0.4`。
+- `SCENE_CUT_SNAP` 默认开启：先按画面把 source start 向后、source end 向前吸附到附近硬切，随后句末吸附再做最终修正，避免视觉修正重新制造半句原声；附近没有停顿、句末吸附修不回来时，把边界移进讲话的那次避让会被撤回（原位置能过门禁时）。默认范围为 `SCENE_CUT_SNAP_MARGIN=0.5` 秒，检测阈值为 `SCENE_CUT_DETECT_THRESHOLD=0.4`。
 - scene-change score 只提供接点候选，不证明接点自然。先检查短时间窗内是否出现密集候选，再区分来源：原片自带的无关短镜头整段删除；相关但短到像闪帧的镜头通过扩展 IN/OUT 保留完整动作、反应或台词，不用定格/慢放伪造时长；由本次拼接制造的切点则优先移动边界、恢复同源连续运动、合并相邻片段或改用更自然的连接，尽量消除。成片后仍要逐个播放接点前后约 0.5–1 秒；白闪或曝光叠化再结合逐帧亮度定位，不能为了通过视觉检测切断完整台词，也不能用转场遮掩坏接点。
 - 修短残镜时不得仅为压低 scene 分数而对接点附近施加与所属镜头不连续的极端放大或位移；取景复核与修复验证流程见 `references/shot-review.md`。
 - 连续同源片段的无损连接不做句中双侧音频淡出；非连续片段仍在安全停顿内做防爆音淡入淡出。

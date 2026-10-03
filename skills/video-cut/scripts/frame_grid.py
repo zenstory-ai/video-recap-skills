@@ -125,7 +125,8 @@ def snap_edges_to_frames(clips, grid, windows, classify, source_duration, *,
     The start moves to the nearest source frame boundary and the end to the nearest whole
     number of output frames after it, each choosing between the two neighbouring candidates
     the one the sentence-boundary gate `classify(edge, ts) -> (status, reason)` rates safest
-    (safe, then unchecked, then blocking), preferring one strictly inside a pause window. A start that continues the previous clip's source range exactly follows that clip's
+    (safe, then unchecked, then blocking), preferring one strictly inside a pause window.
+    A start that continues the previous clip's source range exactly follows that clip's
     snapped end, so a lossless join stays lossless. Between equally safe candidates the one
     that still covers every `grid["keep_ranges"]` (required-evidence nodes) edge it covered
     wins. Without a usable source rate the start is left alone, but the length is still a

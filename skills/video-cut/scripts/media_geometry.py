@@ -2,7 +2,7 @@
 
 import json
 
-from frame_grid import canvas_frame_rate, output_frame_rate
+from frame_grid import canvas_frame_rate, output_frame_rate, parse_frame_rate
 from lib import run_cmd
 
 
@@ -65,7 +65,8 @@ def _frame_rate_text(stream):
     second); when r_frame_rate is exactly twice avg_frame_rate the average is the grid.
     A variable-rate phone clip can report r_frame_rate well above its real average (60/1
     for ~29.6 frames a second); rendering that at 60 fps CFR would double every frame, so
-    the common rate nearest the average is used instead.
+    the common rate nearest the average is used instead, as it is when r_frame_rate is
+    unusable (`0/0`) but the average is not.
     """
     r_rate = stream.get("r_frame_rate", "0/0")
     avg = stream.get("avg_frame_rate", "0/0")
@@ -74,7 +75,7 @@ def _frame_rate_text(stream):
         ratio = _fps_from_rate(r_rate) / avg_fps
         if abs(ratio - 2) < 0.01:
             return avg
-        if ratio > 1.5:
+        if ratio > 1.5 or parse_frame_rate(r_rate) is None:
             rate = canvas_frame_rate(_fps_bucket(avg_fps))
             return f"{rate.numerator}/{rate.denominator}"
     return r_rate
