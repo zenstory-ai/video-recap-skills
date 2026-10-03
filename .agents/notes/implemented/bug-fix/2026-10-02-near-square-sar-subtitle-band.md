@@ -13,7 +13,7 @@ Status: implemented
 ## Decision
 
 - 三处共用容差 `SUBTITLE_BAND_SAR_TOLERANCE = 0.02`（含边界），`0:1`/`N/A` 按方形；`tests/orchestrator/test_measure_subtitle.py` 用 AST 钉住三份副本同值。
-- `tools/measure_subtitle.py`：`_probe_video` 另读旋转信息；显示画布由解码帧尺寸、SAR 和旋转算出（与 recap、assemble 的画布一致），检测到的像素行按 `显示高度 / 解码帧高度` 换算；写出的 `canvas` 是显示画布。行比例不为 1 时打印说明（预览红框仍按解码帧像素画）。
+- `tools/measure_subtitle.py`：`_probe_video` 另读旋转信息；显示画布由解码帧尺寸、SAR 和旋转算出（与 recap、assemble 的画布一致），检测到的像素行按 `显示高度 / 解码帧高度` 换算；写出的 `canvas` 是显示画布。显示画布与解码帧尺寸不同时，预览先 `scale` 到显示画布再画网格与红框（红框行同样换算），所以网格读数与交互提示要的显示画布行一致；行比例不为 1 时打印说明。
 - recap 预检参数改名 `require_near_square_pixels`，报错写明容差。
 - assemble：`_frame_row(canvas, y)` 把显示画布行换算成解码帧行（帧高取旋转后的存储宽/高，与画布同高时原样返回），源字幕遮罩用它；ASS 侧本来就按 PlayRes 比例映射，不需要换算。
 - 方形、未旋转视频的所有输出与以前逐字节相同。

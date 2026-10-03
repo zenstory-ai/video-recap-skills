@@ -210,12 +210,17 @@ def _extract_gray_frame(video, timestamp, output):
         raise RuntimeError(result.stderr.strip() or f"frame extraction failed at {timestamp:.3f}s")
 
 
-def _write_preview(video, timestamp, output, band):
+def _write_preview(video, timestamp, output, band, canvas=None):
+    """Grid + red band preview. `band` is inclusive rows on the preview image; with `canvas`
+    the frame is first scaled to that display canvas, so the grid reads display pixels — the
+    rows the interactive prompt asks for."""
     top, bottom = band
     filters = (
         "drawgrid=width=100:height=50:thickness=1:color=yellow@0.45,"
         f"drawbox=x=0:y={top}:w=iw:h={bottom - top + 1}:color=red@0.9:t=2"
     )
+    if canvas is not None:
+        filters = f"scale={canvas[0]}:{canvas[1]},setsar=1," + filters
     result = _run([
         "ffmpeg", "-v", "error", "-y", "-ss", f"{timestamp:.3f}", "-i", str(video),
         "-frames:v", "1", "-vf", filters, str(output),
@@ -240,6 +245,13 @@ def _default_output_dir(video):
     video = Path(video).expanduser().resolve()
     source_id = _source_metadata(video)["source_id"]
     return video.parent / ".subtitle_measure" / f"{video.stem}-{source_id}"
+
+
+def _display_rows(band, row_scale, canvas_height):
+    """Inclusive decoded-frame band (top, bottom) -> half-open display rows [top, bot), the
+    recap CLI contract."""
+    top, bottom = band
+    return round(top * row_scale), min(canvas_height, round((bottom + 1) * row_scale))
 
 
 def _write_positions(path, width, height, y_top, y_bot, source=None):
@@ -359,35 +371,44 @@ def main(argv=None):
     try:
         detections = []
         frame_size = None
+        canvas = None
+        row_scale = 1.0
         for index, timestamp in enumerate(_sample_times(duration, args.frames, args.start_sec)):
             pgm = frames_dir / f"frame_{index:03d}_{timestamp:.2f}s.pgm"
             _extract_gray_frame(video, timestamp, pgm)
             frame_w, frame_h, pixels = _read_pgm(pgm)
             if frame_size is None:
                 frame_size = (frame_w, frame_h)
+                # Decoded (auto-rotated) frames keep the pixel rows; the display canvas
+                # stretches them only for a rotated non-square stream. Coordinates and
+                # previews both use the canvas so they match the renderer and each other.
+                canvas = _display_canvas(frame_w, frame_h, sar_ratio, rotation)
+                row_scale = canvas[1] / frame_h
             elif (frame_w, frame_h) != frame_size:
                 raise RuntimeError(f"抽帧尺寸不一致: {(frame_w, frame_h)} != {frame_size}")
             band = _detect_subtitle_band(frame_w, frame_h, pixels)
             pgm.unlink(missing_ok=True)
             if band:
                 preview = preview_dir / f"frame_{index:03d}_{timestamp:.2f}s.png"
-                _write_preview(video, timestamp, preview, band)
+                if canvas == frame_size:
+                    _write_preview(video, timestamp, preview, band)
+                else:
+                    top, bottom = _display_rows(band, row_scale, canvas[1])
+                    _write_preview(video, timestamp, preview, (top, bottom - 1), canvas)
                 detections.append(band)
 
         if not detections:
             raise SystemExit("未检测到可靠字幕带；可增加 --frames 或降低 --start-sec 后重试")
-        # Decoded (auto-rotated) frames keep the pixel rows; the display canvas stretches them
-        # only for a rotated non-square stream. Convert so the coordinates match the renderer.
-        width, height = _display_canvas(*frame_size, sar_ratio, rotation)
-        row_scale = height / frame_size[1]
-        # Detection/preview bands use inclusive pixel rows; the recap CLI uses [top, bot).
-        frame_top = round(median(top for top, _ in detections))
-        frame_bot = round(median(bottom for _, bottom in detections)) + 1
-        suggested_top = round(frame_top * row_scale)
-        suggested_bot = min(height, round(frame_bot * row_scale))
+        width, height = canvas
+        median_band = (
+            round(median(top for top, _ in detections)),
+            round(median(bottom for _, bottom in detections)),
+        )
+        suggested_top, suggested_bot = _display_rows(median_band, row_scale, height)
         print(f"检测到字幕帧 {len(detections)}/{args.frames}，预览: {preview_dir}")
         if row_scale != 1:
-            print(f"预览红框按解码帧像素行绘制；坐标已换算到显示画布（行 ×{row_scale:.4f}）")
+            print(f"预览已缩放到显示画布 {width}x{height}（解码帧行 ×{row_scale:.4f}），"
+                  "网格与红框按显示画布像素读")
         print(f"建议字幕带（半开区间）: y=[{suggested_top}, {suggested_bot})")
         if args.accept_detected:
             y_top, y_bot = suggested_top, suggested_bot

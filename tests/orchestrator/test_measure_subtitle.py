@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -300,6 +301,44 @@ def test_main_measures_near_square_video_in_display_rows(
     positions = json.loads((out / "subtitle_positions.json").read_text(encoding="utf-8"))
     assert positions["canvas"] == canvas
     assert (positions["subtitle_y_top"], positions["subtitle_y_bot"]) == band
+
+
+def test_rotated_near_square_preview_is_drawn_on_the_display_canvas(monkeypatch, tmp_path):
+    """The prompt asks for display rows, so the preview grid and red box must be drawn on the
+    display canvas too: a value read off the grid is then a value the prompt accepts."""
+    video = tmp_path / "near-square.mp4"
+    video.write_bytes(b"video")
+    width, height = 180, 320
+    pixels = bytearray([120] * (width * height))
+    for y in range(250, 262):
+        for x in range(25, 155):
+            pixels[y * width + x] = 20 if y in {250, 261} else 235
+    monkeypatch.setattr(measure, "_probe_video", lambda path: (width, height, 5.0, "101:100", 90))
+    monkeypatch.setattr(measure, "_sample_times", lambda *args: [1.0])
+    monkeypatch.setattr(
+        measure,
+        "_extract_gray_frame",
+        lambda _video, _timestamp, output: output.write_bytes(
+            f"P5\n{width} {height}\n255\n".encode() + pixels
+        ),
+    )
+    filters = []
+
+    def fake_run(command):
+        filters.append(command[command.index("-vf") + 1])
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(measure, "_run", fake_run)
+    out = tmp_path / "measure"
+
+    assert measure.main([str(video), "--out-dir", str(out), "--frames", "1", "--accept-detected"]) == 0
+
+    positions = json.loads((out / "subtitle_positions.json").read_text(encoding="utf-8"))
+    assert (positions["subtitle_y_top"], positions["subtitle_y_bot"]) == (252, 264)
+    assert len(filters) == 1
+    assert filters[0].startswith("scale=180:323,setsar=1,drawgrid=")
+    # Half-open [252, 264) on the canvas is the inclusive box rows 252..263.
+    assert "drawbox=x=0:y=252:w=iw:h=12:" in filters[0]
 
 
 def test_subtitle_band_sar_tolerance_matches_across_measuring_preflight_and_render():
