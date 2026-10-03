@@ -142,7 +142,9 @@ def parse_args(argv=None):
         "--burn-subtitles",
         action=argparse.BooleanOptionalAction,
         default=None,
-        help="burn narration subtitles into the video (default on; --no-burn-subtitles to disable)",
+        help="burn narration subtitles into the video (default on; without libass the default "
+             "delivers a .srt sidecar instead, while an explicit --burn-subtitles fails; "
+             "--no-burn-subtitles to disable)",
     )
     voice.add_argument(
         "--subtitle-y-top",

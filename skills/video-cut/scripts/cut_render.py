@@ -87,13 +87,17 @@ def _warn_on_frame_count_mismatch(path, expected):
             "当前 ffmpeg 的 fps/tpad/trim 行为可能不同，请检查帧率是否恒定")
 
 
-def _edited_source_color_tags(source_paths):
-    """One set of colour tags for the concatenated picture (nothing is converted).
+def _edited_source_color_tags(source_formats, *, rgb_converted_per_clip=False):
+    """One set of colour tags for the concatenated picture, from each source's probe.
 
     Sources that agree keep their shared tags; sources that disagree cannot be described by
     one label, so the picture is labelled BT.709, the same default an untagged source gets.
+    With `rgb_converted_per_clip` the RGB sources were already converted to BT.709 limited
+    yuv420p clip by clip, so their tags lose `from_rgb` and match a BT.709 YUV source.
     """
-    tags = [_output_color_tags(_probe_video_format(path)) for path in source_paths]
+    tags = [_output_color_tags(fmt) for fmt in source_formats]
+    if rgb_converted_per_clip:
+        tags = [{k: v for k, v in item.items() if k != "from_rgb"} for item in tags]
     if all(item == tags[0] for item in tags):
         return tags[0]
     log("剪辑源视频: 各来源色彩标记不一致，成片按 BT.709 标记")
@@ -129,13 +133,14 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
             source_paths.append(source_path)
     source_index = {path: idx for idx, path in enumerate(source_paths)}
     audio_by_input = {path: _has_audio_stream(path) for path in source_paths}
+    format_by_input = {path: _probe_video_format(path) for path in source_paths}
     join_fade_ms = CONFIG["clip_join_audio_fade_ms"]
     qc["join_fade_ms"] = round(join_fade_ms, 3)
 
     parts = []
     concat_inputs = []
     extra_inputs = []
-    vnorm = ""
+    vnorm_by_input = {}
     if len(source_paths) > 1:
         # Distinct sources almost always differ in resolution/SAR/fps/pixel-format (and
         # some may lack audio), which the bare concat filter rejects. Normalize every video
@@ -145,8 +150,19 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
         canvas_w, canvas_h = geometry_qc["width"], geometry_qc["height"]
         vnorm = (
             f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
-            f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,"
+            f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
         )
+        # Each clip becomes yuv420p here, before the shared colour tags are stamped. An RGB
+        # source converts with an explicit BT.709 limited matrix; left to `format=yuv420p`
+        # alone, ffmpeg would pick BT.601 while the file is labelled BT.709.
+        vnorm_by_input = {
+            path: vnorm + (
+                "scale=out_color_matrix=bt709:out_range=tv,format=yuv420p,"
+                if _output_color_tags(fmt).get("from_rgb")
+                else "format=yuv420p,"
+            )
+            for path, fmt in format_by_input.items()
+        }
     has_audio = len(source_paths) > 1 or all(audio_by_input.values())
     total_frames = 0
     end = None
@@ -164,7 +180,7 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
         end = start + dur
         parts.append(_video_segment_filter(
             f"[{input_idx}:v]", f"[v{idx}]", start, end, frames, out_rate,
-            source_rates.get(clip_source), vnorm,
+            source_rates.get(clip_source), vnorm_by_input.get(clip_source, ""),
         ))
         concat_inputs.append(f"[v{idx}]")
         if not has_audio:
@@ -208,7 +224,10 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
             "anullsrc=channel_layout=stereo:sample_rate=48000",
         ]
 
-    color_tags = _edited_source_color_tags(source_paths)
+    color_tags = _edited_source_color_tags(
+        [format_by_input[path] for path in source_paths],
+        rgb_converted_per_clip=len(source_paths) > 1,
+    )
     parts.append(f"[v]{_color_tag_filter(color_tags)}[vtagged]")
     maps[maps.index("[v]")] = "[vtagged]"
     filter_complex = ";".join(parts)

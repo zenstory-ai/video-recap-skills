@@ -302,9 +302,10 @@ def _preflight_burn_subtitles(args):
             f"  自检：{doctor}"
         )
     print(
-        "[video-recap] ⚠ 当前 ffmpeg 不支持 subtitles/libass 滤镜：本次成片不烧录字幕，"
-        "改为在成片旁输出同名 .srt 外挂字幕（final_qc.json 的 metadata.warnings 会记录"
-        " subtitle_burn_degraded）。要烧录字幕请安装带 libass 的 ffmpeg；"
+        "[video-recap] ⚠ 当前 ffmpeg 不支持 subtitles/libass 滤镜：本次成片不烧录字幕。"
+        "有字幕条目时改为在成片旁输出同名 .srt 外挂字幕（final_qc.json 的 metadata.warnings"
+        " 会记录 subtitle_burn_degraded）；没有字幕条目的运行（如 source 音频模式且没有"
+        " user_subtitles.*）不输出 .srt，也不记警告。要烧录字幕请安装带 libass 的 ffmpeg；"
         f"自检：{doctor}",
         flush=True,
     )

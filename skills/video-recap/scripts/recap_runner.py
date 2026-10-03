@@ -103,7 +103,7 @@ def _finish_recap(work_dir, final_output, args):
     if args.require_final_qc:
         _require_final_qc(final_qc_result, work_dir)
     print(f"[video-recap] ✅ 完成: {final_output}")
-    _print_render_warnings(final_qc_result, work_dir)
+    _print_render_warnings(final_qc_result, work_dir, final_output)
     _print_final_qc_pointer(final_qc_result)
 
 

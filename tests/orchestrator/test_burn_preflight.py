@@ -222,14 +222,30 @@ def test_deliver_runs_overlay_preflight_before_tts(tmp_path, monkeypatch):
 def test_finish_prints_degraded_subtitle_warning_and_sidecar(tmp_path, capsys):
     import recap_stage_qc
 
+    final = tmp_path / "recap_x.mp4"
     (tmp_path / "assembly_manifest.json").write_text(
-        json.dumps({"subtitle_sidecar": "/out/recap_x.srt"}), encoding="utf-8"
+        json.dumps({"subtitle_sidecar": "/out/recap_x.srt", "final_output": str(final)}),
+        encoding="utf-8",
     )
     result = {"final_qc": {"ok": True, "blocker_count": 0,
                            "warnings": ["subtitle_burn_degraded"]}}
-    recap_stage_qc._print_render_warnings(result, tmp_path)
+    recap_stage_qc._print_render_warnings(result, tmp_path, final)
     out = capsys.readouterr().out
     assert "libass" in out and "/out/recap_x.srt" in out and "metadata.warnings" in out
+
+
+def test_finish_ignores_sidecar_from_a_stale_manifest(tmp_path, capsys):
+    """A dub run writes no assembly_manifest.json; an earlier run's must not be quoted."""
+    import recap_stage_qc
+
+    (tmp_path / "assembly_manifest.json").write_text(
+        json.dumps({"subtitle_sidecar": "/out/recap_old.srt",
+                    "final_output": str(tmp_path / "recap_old.mp4")}),
+        encoding="utf-8",
+    )
+    result = {"final_qc": {"ok": True, "blocker_count": 0, "warnings": []}}
+    recap_stage_qc._print_render_warnings(result, tmp_path, tmp_path / "dub_new.mp4")
+    assert "recap_old.srt" not in capsys.readouterr().out
 
 
 def test_final_qc_carries_visual_qc_warnings_in_metadata(tmp_path):
@@ -243,7 +259,13 @@ def test_final_qc_carries_visual_qc_warnings_in_metadata(tmp_path):
                     "warnings": [warning]}),
         encoding="utf-8",
     )
+    (tmp_path / "assembly_manifest.json").write_text(
+        json.dumps({"final_output": str(tmp_path / "recap_x.mp4")}), encoding="utf-8"
+    )
     report = final_qc.build_final_qc(tmp_path)
     assert report["metadata"]["warnings"] == [warning]
     assert report["ok"] is False  # missing output still blocks; the warning never does
     assert all(f["code"] != "subtitle_burn_degraded" for f in report["findings"])
+    # A different final output (e.g. dub, which writes no manifest) gets no stale warning.
+    stale = final_qc.build_final_qc(tmp_path, final_output=tmp_path / "dub_x.mp4")
+    assert stale["metadata"]["warnings"] == []

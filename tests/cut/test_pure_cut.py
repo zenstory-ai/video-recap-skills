@@ -1063,10 +1063,18 @@ def test_edited_source_render_labels_the_picture_bt709(monkeypatch, tmp_path):
         id="disagreeing-sources-fall-back-to-bt709",
     ),
 ])
-def test_edited_source_color_tags_across_sources(monkeypatch, formats, expected):
-    by_path = dict(zip(["a.mp4", "b.mp4"], formats))
-    monkeypatch.setattr(cut_render, "_probe_video_format", lambda path: by_path[path])
-    assert cut_render._edited_source_color_tags(["a.mp4", "b.mp4"]) == expected
+def test_edited_source_color_tags_across_sources(formats, expected):
+    assert cut_render._edited_source_color_tags(formats, rgb_converted_per_clip=True) == expected
+
+
+def test_edited_source_color_tags_rgb_converted_per_clip_matches_bt709():
+    """Per-clip converted RGB agrees with an untagged YUV source; a single RGB source
+    still asks the final tag filter to convert."""
+    rgb = {"color_space": "gbr", "color_range": "pc"}
+    bt709 = {"colorspace": "bt709", "color_primaries": "bt709", "color_trc": "bt709",
+             "color_range": "tv"}
+    assert cut_render._edited_source_color_tags([rgb, {}], rgb_converted_per_clip=True) == bt709
+    assert cut_render._edited_source_color_tags([rgb]) == {**bt709, "from_rgb": True}
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
@@ -1128,3 +1136,54 @@ def test_edited_source_real_render_converts_rgb_source(tmp_path):
     luma = len(raw) * 2 // 3
     # Pure red in BT.709 limited range is Y=63 Cb=102 (BT.601 would be 81/90).
     assert abs(raw[0] - 63) <= 2 and abs(raw[luma] - 102) <= 2, (raw[0], raw[luma])
+
+
+@pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
+def test_edited_source_real_multi_source_converts_rgb_clip_beside_yuv(tmp_path):
+    """Mixed RGB + YUV sources: the RGB clip must still use the BT.709 matrix."""
+    import subprocess
+
+    rgb = tmp_path / "rgb.mov"
+    yuv = tmp_path / "yuv.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:size=160x120:rate=12:duration=2,format=rgb24",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest",
+         "-c:v", "png", "-c:a", "aac", str(rgb)],
+        check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc2=size=160x120:rate=12:duration=2",
+         "-f", "lavfi", "-i", "sine=frequency=440:duration=2", "-shortest",
+         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p", str(yuv)],
+        check=True, capture_output=True,
+    )
+    manifest = {"sources": [
+        {"source_id": "a", "source_path": str(rgb), "duration": 2.0},
+        {"source_id": "b", "source_path": str(yuv), "duration": 2.0},
+    ]}
+    plan = cut_contract.normalize_multi_source_clip_plan([
+        {"source_id": "a", "start": 0.0, "end": 1.0},
+        {"source_id": "b", "start": 0.0, "end": 1.0},
+    ], manifest)
+    work = tmp_path / "work"
+    work.mkdir()
+    out = build_edited_source_video(rgb, _with_geometry(plan, [str(rgb), str(yuv)]), work)
+    facts = json.loads(subprocess.run(
+        ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+         "stream=pix_fmt,color_space,color_primaries,color_transfer,color_range",
+         "-of", "json", str(out)],
+        check=True, capture_output=True, text=True,
+    ).stdout)["streams"][0]
+    assert facts == {"pix_fmt": "yuv420p", "color_space": "bt709", "color_primaries": "bt709",
+                     "color_transfer": "bt709", "color_range": "tv"}
+    raw = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", str(out), "-frames:v", "1",
+         "-f", "rawvideo", "-pix_fmt", "yuv420p", "-"],
+        check=True, capture_output=True,
+    ).stdout
+    luma = len(raw) * 2 // 3
+    # Centre pixel of the first (red) clip: BT.709 limited is Y=63 Cb=102 (BT.601 81/90).
+    w, h = 160, 120
+    y = raw[(h // 2) * w + w // 2]
+    cb = raw[luma + (h // 4) * (w // 2) + w // 4]
+    assert abs(y - 63) <= 2 and abs(cb - 102) <= 2, (y, cb)
