@@ -154,6 +154,44 @@ def _remap_frame_facts_for_brief(frame_facts, overlap):
     return out
 
 
+# A time the VLM quoted in its prose: "12.0s" (the frame-tag form), "12秒", "01:05",
+# "1:02:03". Only a value inside the scene's own source range counts as a source timestamp;
+# anything else (a duration, an on-screen clock) is left as written.
+_PROSE_TIME_RE = re.compile(
+    r"(?<![\d.:])(?:(?:(\d+):)?(\d{1,2}):(\d{2}(?:\.\d+)?)(?![\d:])"
+    r"|(\d+(?:\.\d+)?)\s*(?:s|秒)(?![A-Za-z]))"
+)
+_PROSE_TIME_SLACK = 0.25
+_CUT_AWAY_TIME = "[cut-away moment]"
+
+
+def _remap_prose_times_for_brief(text, scene, overlap):
+    """Rewrite source timestamps quoted in VLM prose onto the OUTPUT clock.
+
+    A time inside this part's kept source range becomes its output time ("3.2s"); a time
+    elsewhere in the scene was cut away and is replaced by a marker, so an OUTPUT section
+    never quotes a source-clock time."""
+
+    def replace(match):
+        hours, minutes, secs, bare = match.groups()
+        if bare is not None:
+            when = float(bare)
+        else:
+            when = int(hours or 0) * 3600 + int(minutes) * 60 + float(secs)
+        if not (scene["start"] - _PROSE_TIME_SLACK <= when <= scene["end"] + _PROSE_TIME_SLACK):
+            return match.group(0)
+        if not (
+            overlap["source_start"] - _PROSE_TIME_SLACK
+            <= when
+            <= overlap["source_end"] + _PROSE_TIME_SLACK
+        ):
+            return _CUT_AWAY_TIME
+        out = overlap["output_start"] + (when - overlap["source_start"])
+        return f"{min(max(out, overlap['output_start']), overlap['output_end']):.1f}s"
+
+    return _PROSE_TIME_RE.sub(replace, text) if isinstance(text, str) else text
+
+
 def _remap_scenes_to_output_for_brief(scenes, spans):
     out = []
     for scene in scenes:
@@ -165,6 +203,9 @@ def _remap_scenes_to_output_for_brief(scenes, spans):
             item["frame_facts"] = _remap_frame_facts_for_brief(
                 scene.get("frame_facts", {}), overlap
             )
+            for field in ("description", "depth_analysis"):
+                if field in item:
+                    item[field] = _remap_prose_times_for_brief(item[field], scene, overlap)
             if len(overlaps) > 1:
                 item["scene_id"] = f"{scene['scene_id']}.{part_idx}"
             out.append(item)
@@ -186,6 +227,38 @@ def _remap_segments_to_output_for_brief(segments, spans):
     return out
 
 
+_COVERAGE_SLACK = 0.05
+# No "." inside: the ASR chunker splits sentences on it.
+_PARTIAL_WINDOW_TEXT = "[partial ASR window: only part of it is in the cut, text withheld]"
+
+
+def _remap_asr_to_output_for_brief(segments, spans):
+    """ASR rows on the OUTPUT clock for the brief's writing evidence.
+
+    A coarse window the cut keeps only part of cannot say which of its words survived, so
+    each kept piece shows a partial-window marker instead of the window's text: the
+    brief never quotes dialogue that may not be in the cut. A window the kept clips cover
+    completely (even across a seam) keeps its text. `speech_spans` in
+    speech_boundary_anchors_output.json are remapped separately and keep the raw text."""
+    out = []
+    for seg in segments:
+        overlaps = _source_output_overlaps_for_brief(seg["start"], seg["end"], spans)
+        kept = sum(o["source_end"] - o["source_start"] for o in overlaps)
+        window = seg["end"] - seg["start"]
+        partial = bool(str(seg.get("text") or "").strip()) and kept < window - _COVERAGE_SLACK
+        for overlap in overlaps:
+            item = dict(seg)
+            item["start"] = round(overlap["output_start"], 3)
+            item["end"] = round(overlap["output_end"], 3)
+            if "duration" in item:
+                item["duration"] = round(item["end"] - item["start"], 3)
+            if partial:
+                item["text"] = _PARTIAL_WINDOW_TEXT
+            out.append(item)
+    out.sort(key=lambda x: (x["start"], x["end"]))
+    return out
+
+
 def _remap_brief_evidence_to_output_timeline(
     work_dir, scenes_analysis, asr_result, silence_periods, *, required=False
 ):
@@ -194,7 +267,7 @@ def _remap_brief_evidence_to_output_timeline(
         return scenes_analysis, asr_result, silence_periods
     return (
         _remap_scenes_to_output_for_brief(scenes_analysis, spans),
-        _remap_segments_to_output_for_brief(asr_result, spans),
+        _remap_asr_to_output_for_brief(asr_result, spans),
         _remap_segments_to_output_for_brief(silence_periods, spans),
     )
 

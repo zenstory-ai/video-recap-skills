@@ -157,6 +157,8 @@ output 证据一律 fail closed，不能回退到原片时钟或信任 Agent 写
 ]
 ```
 
+cut 第二轮（已有 `edited_source.mp4`）时本文件与 `asr_writing_chunks.json` 都在 OUTPUT 时间轴上：被拆到多个片段的场景 `scene_id` 写作 `"3.1"`（0 起的原场景号加片段序号）；VLM 文字里落在场景原片区间内的时间改写成输出时间，落在被剪掉部分的写 `[cut-away moment]`；只被剪进一部分的 ASR 窗口文字换成 `[partial ASR window: only part of it is in the cut, text withheld]`。`scene_id` 一律 0 起，brief 里给人看的场景号从 1 数。
+
 ## narration.json
 
 Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated cut 模式（`video-recap --edit-mode cut`）下，第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）；不存在原视频时间→输出时间的旁白映射产物：

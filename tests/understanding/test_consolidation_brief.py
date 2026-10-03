@@ -526,7 +526,11 @@ def test_build_agent_brief_cut_pass2_narrates_output_timeline_sized_to_validated
         (90.0, "1m30s"),
         (101.5, "1m42s"),
         (600.0, "10min"),
-        (7265.0, "121m05s"),
+        (3599.0, "59m59s"),
+        (3599.6, "1h"),
+        (3660.0, "1h01m"),
+        (7265.0, "2h01m05s"),
+        (36005.0, "10h00m05s"),
     ],
 )
 def test_duration_labels_keep_the_seconds(seconds, label):

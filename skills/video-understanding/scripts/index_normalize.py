@@ -9,8 +9,8 @@ Two defects seen in real indexes are repaired here, after the model reply is par
 - The same character split into two `characters` entries where one's name is the other's name
   or alias (a shared alias alone is not enough, and an entry that would bridge two different
   characters is left on its own). Which entries merge does not depend on their order; the
-  first occurrence keeps the name, the others become aliases, and relationships are
-  re-pointed at the surviving name.
+  merged character sits at the first occurrence and keeps the first name any member has, the
+  other names become aliases, and relationships are re-pointed at the surviving name.
 
 Pure functions only: no I/O, no model calls.
 """
@@ -22,7 +22,13 @@ _TIME_RE = re.compile(r"^\s*(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)\s*$")
 _APPROX_RE = re.compile(r"^(?:大约|约)\s*")
 # "01:20左右" / "3分钟前后" / "80秒许": approximation words, dropped wherever they sit.
 _APPROX_WORD_RE = re.compile(r"\s*(?:左右|前后|许)")
-# "第3分钟" / "第95秒": an ordinal prefix on a time reads as that time.
+# "第3分钟" / "第95秒" / "第2小时": an ordinal names the Nth unit, read as its start
+# ((N-1) units, "第1分钟" is 00:00). Only a lone whole unit: "第3分20秒" is the time 03:20.
+_ORDINAL_UNIT_RE = re.compile(
+    r"^第\s*(\d+)\s*(小时|分钟|分|秒)(?=\s*(?:$|[-~～—–至到]))"
+)
+_ORDINAL_UNIT_SECONDS = {"小时": 3600, "分钟": 60, "分": 60, "秒": 1}
+# Any other ordinal prefix on a time ("第01:20", "第3分20秒") reads as that time.
 _ORDINAL_RE = re.compile(r"^第\s*(?=\d)")
 # A range starts with a digit, so a leading "-" (a negative time) is not a range separator.
 _RANGE_RE = re.compile(r"^(\d[\d:.]*?)\s*(?:秒|s|S)?\s*(?:-|~|～|—|–|至|到)\s*\d")
@@ -37,6 +43,11 @@ _CONFIDENCE_RANK = {"high": 3, "medium": 2, "low": 1}
 _LIST_FIELDS = ("aliases", "visual_descriptions", "asr_mentions", "evidence_ids")
 
 
+def _ordinal_unit(match):
+    count, unit = match.groups()
+    return repr(max(int(count) - 1, 0) * _ORDINAL_UNIT_SECONDS[unit])
+
+
 def _cn_time(match):
     hours, minutes, secs = match.groups()
     return repr(int(hours or 0) * 3600 + float(minutes) * 60 + float(secs or 0))
@@ -47,9 +58,10 @@ def _plot_time_text(value):
     trailing 秒/s, a range tail.
 
     A full-width colon ("00：95") is read as ":", minute/second words ("3分20秒", "1.5分")
-    are rewritten as seconds."""
+    are rewritten as seconds, an ordinal unit ("第3分钟") as the start of that unit."""
     text = str(value or "").strip().replace("：", ":")
     text = _APPROX_WORD_RE.sub("", _APPROX_RE.sub("", text))
+    text = _ORDINAL_UNIT_RE.sub(_ordinal_unit, text)
     text = _ORDINAL_RE.sub("", text)
     text = _CN_TIME_RE.sub(_cn_time, text)
     match = _RANGE_RE.match(text)
@@ -63,7 +75,9 @@ def parse_plot_time(value):
 
     Fields are not range-checked: "00:95" is 95 s, "1:75" is 135 s (the model wrote scene
     seconds into the seconds field). "约01:20", "01:20左右", "12.5秒", "00：95", "3分20秒",
-    "1.5分", "第3分钟" (read as 03:00) and the start of a range ("01:20-01:45") are read too.
+    "1.5分", an ordinal unit ("第3分钟" is the third minute, read as its start 02:00; "第1分钟"
+    and "第0分钟" are 00:00; "第95秒" is 94 s; "第2小时" is 1:00:00) and the start of a range
+    ("01:20-01:45") are read too.
     Negative or non-finite values are unreadable."""
     if isinstance(value, bool):
         return None
@@ -246,9 +260,9 @@ def merge_characters(characters):
     the other's alias; a shared alias alone does not merge, and an entry that links two
     characters not linked to each other is kept on its own instead of folding them together.
     The partition does not depend on input order: each merged character sits at its first
-    entry's position and keeps that entry's name, the others' names become aliases. Returns
-    (characters, renames) where renames maps every merged name key to the surviving name.
-    Non-dict entries pass through."""
+    entry's position and keeps the name of its first entry that has one, the others' names
+    become aliases. Returns (characters, renames) where renames maps every merged name key
+    to the surviving name. Non-dict entries pass through."""
     characters = list(characters or [])
     groups = _character_groups(_character_nodes(characters))
     first_of = {group[0]: group for group in groups}
@@ -262,6 +276,13 @@ def merge_characters(characters):
         if group is None:
             continue  # folded into an earlier entry
         entry = dict(item)
+        if not _term_key(entry.get("name")):
+            # A nameless first entry keeps its position but takes the first member name.
+            named = next(
+                (characters[m] for m in group if _term_key(characters[m].get("name"))), None
+            )
+            if named is not None:
+                entry = {"name": named["name"], **{k: v for k, v in entry.items() if k != "name"}}
         for other in group[1:]:
             _merge_into(entry, characters[other])
             name = _term_key(characters[other].get("name"))
