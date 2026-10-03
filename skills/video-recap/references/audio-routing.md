@@ -54,8 +54,10 @@ episodes. Use two existing stages rather than sending an old mix binding into a 
      --sources-manifest SOURCES_JSON
    ```
 
-   A single-source cut omits `--sources-manifest`. For already locked frame decisions,
-   use the picture-plan path instead. Read `clip_plan_validated.json` (or the locked path's
+   `SOURCES_JSON` must be `{"sources": [{"source_id": ..., "source_path": ...}]}`
+   (optional per-source `duration` and `source_work_dir`); recap's
+   `multi_source_manifest.json` already has this shape. A single-source cut omits
+   `--sources-manifest`. For already locked frame decisions, use the picture-plan path instead. Read `clip_plan_validated.json` (or the locked path's
    `picture_map.json`) before placing sound.
 2. Keep the selected WAVs, `tts_meta.json`, and `narration_adoption.json` when the words,
    WAV bytes, and selected voice are unchanged. Do not run voiceover just to move a line.

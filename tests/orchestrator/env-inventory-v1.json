@@ -31,9 +31,6 @@
     "CLIP_JOIN_AUDIO_FADE_MS": {
       "classification": "value"
     },
-    "CLIP_PADDING": {
-      "classification": "value"
-    },
     "CLIP_SNAP_MAX_EXTEND": {
       "classification": "value"
     },

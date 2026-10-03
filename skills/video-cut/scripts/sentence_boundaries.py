@@ -495,9 +495,10 @@ def _load_silence_for_source(work_dir, source_id, source_work_dir=None):
     return json.loads(path.read_text(encoding="utf-8")) if path else []
 
 
-def snap_multi_source_clips(
+def snap_source_clips(
     plan,
-    sources,
+    video,
+    duration,
     work_dir,
     *,
     line_max_extend,
@@ -507,13 +508,43 @@ def snap_multi_source_clips(
     start_max_trim,
     do_line_snap=True,
     do_scene_snap=True,
+    source_id=None,
+    source_work_dir=None,
 ):
-    """Per-source line/shot snapping for a multi-source validated plan.
+    """Snap every clip of ONE source: shot changes first, then quiet starts/ends, then the gate.
+
+    Visual cleanup goes first. Sentence/quiet snapping is the final authority because a
+    clean picture is never allowed to reintroduce a mid-sentence audio cut. source_id None
+    reads the project-level understanding artifacts (single-source layout).
+    """
+    if do_scene_snap:
+        plan = snap_clips_off_shot_changes(
+            plan, video, margin=scene_margin, threshold=scene_threshold
+        )
+    boundaries = _combine_boundary_windows(
+        _load_silence_for_source(work_dir, source_id, source_work_dir),
+        _load_sentence_boundary_windows(work_dir, source_id, source_work_dir),
+    )
+    if do_line_snap:
+        plan = snap_clip_starts_to_lines(
+            plan, boundaries, duration, start_max_prepend, max_trim=start_max_trim
+        )
+        plan = snap_clip_ends_to_lines(plan, boundaries, duration, line_max_extend)
+    return enforce_clip_sentence_boundaries(
+        plan,
+        boundaries,
+        _load_source_speech_spans(work_dir, source_id, source_work_dir),
+        duration,
+    )
+
+
+def snap_multi_source_clips(plan, sources, work_dir, **snap_options):
+    """Per-source snap_source_clips for a multi-source validated plan.
 
     Each clip is snapped using ITS OWN source's silence windows / shot changes and duration
     (a clip in source B never constrains a clip in source A), then the global OUTPUT timeline
     is recomputed once in plan order. Missing silence data leaves a boundary unchanged.
-    Mirrors the single-source snap_clip_ends_to_lines + snap_clips_off_shot_changes.
+    `snap_options` are snap_source_clips' keyword options.
     """
     clips = plan["clips"]
     allow_overlap = plan["allow_overlap"]
@@ -529,29 +560,14 @@ def snap_multi_source_clips(
     blocking_accum = []
     for sid, group in groups.items():
         source = sources[sid]
-        duration = source["duration"]
-        mini = {"clips": [dict(c) for c in group], "allow_overlap": allow_overlap}
-        # Visual cleanup goes first. Sentence/quiet snapping is the final authority because
-        # a clean picture is never allowed to reintroduce a mid-sentence audio cut.
-        if do_scene_snap:
-            mini = snap_clips_off_shot_changes(
-                mini, source["source_path"], margin=scene_margin, threshold=scene_threshold
-            )
-        source_work_dir = source.get("source_work_dir")
-        boundaries = _combine_boundary_windows(
-            _load_silence_for_source(work_dir, sid, source_work_dir),
-            _load_sentence_boundary_windows(work_dir, sid, source_work_dir),
-        )
-        if do_line_snap:
-            mini = snap_clip_starts_to_lines(
-                mini, boundaries, duration, start_max_prepend, max_trim=start_max_trim
-            )
-            mini = snap_clip_ends_to_lines(mini, boundaries, duration, line_max_extend)
-        mini = enforce_clip_sentence_boundaries(
-            mini,
-            boundaries,
-            _load_source_speech_spans(work_dir, sid, source_work_dir),
-            duration,
+        mini = snap_source_clips(
+            {"clips": [dict(c) for c in group], "allow_overlap": allow_overlap},
+            source["source_path"],
+            source["duration"],
+            work_dir,
+            source_id=sid,
+            source_work_dir=source.get("source_work_dir"),
+            **snap_options,
         )
         mini_boundary = mini["qc"]["boundary_status"]
         for key, events in boundary_accum.items():

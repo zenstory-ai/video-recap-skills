@@ -68,18 +68,6 @@ def parse_duration_seconds(value):
     return seconds
 
 
-def _overlaps_authored_range(ranges, start, end):
-    """Whether [start,end) collides with an already-accepted clip, as AUTHORED.
-
-    Overlap is judged on the agent's own in/out points, never on the padded ones.
-    `clip_padding` deliberately widens every clip by the same amount on both ends, so
-    judging padded ranges makes any two back-to-back clips (…, 10) and (10, …) look like
-    duplicate footage and hard-fails a perfectly ordinary plan. Padding is an output
-    nicety; only what the agent actually asked for defines duplication.
-    """
-    return any(start < other_end and end > other_start for other_start, other_end in ranges)
-
-
 def _clip_value(raw, *names):
     for name in names:
         if name in raw:
@@ -151,47 +139,33 @@ def should_reuse_edited_source(output_path, validated_plan, input_video=None):
     )
 
 
-def _manifest_source_entries(sources_manifest):
-    """Return source rows from common multi-source manifest shapes."""
-    if isinstance(sources_manifest, dict):
-        if isinstance(sources_manifest.get("sources"), list):
-            return sources_manifest["sources"]
-        rows = []
-        for source_id, value in sources_manifest.items():
-            if source_id in {"schema_version", "version"}:
-                continue
-            if isinstance(value, dict):
-                row = dict(value)
-                row.setdefault("source_id", source_id)
-                rows.append(row)
-        if rows:
-            return rows
-    elif isinstance(sources_manifest, list):
-        return sources_manifest
-    raise ValueError(
-        "sources manifest must be a list, a {sources:[...]} object, or a source_id map"
-    )
+SOURCES_MANIFEST_SHAPE = (
+    '{"sources": [{"source_id": ..., "source_path": ...'
+    '[, "duration": seconds, "source_work_dir": ...]}]}'
+)
 
 
 def normalize_sources_manifest(sources_manifest):
-    """Normalize source manifest rows to {source_id: {source_path, duration}}."""
+    """Read the one accepted manifest shape into {source_id: {source_path, duration[, source_work_dir]}}.
+
+    The shape is SOURCES_MANIFEST_SHAPE, which is what video-recap writes. A missing
+    duration is probed from the media file.
+    """
+    rows = sources_manifest.get("sources") if isinstance(sources_manifest, dict) else None
+    if not isinstance(rows, list):
+        raise ValueError(f"sources manifest must be {SOURCES_MANIFEST_SHAPE}")
     sources = {}
-    for idx, raw in enumerate(_manifest_source_entries(sources_manifest)):
+    for idx, raw in enumerate(rows):
         if not isinstance(raw, dict):
-            raise ValueError(f"source #{idx + 1} must be an object")
-        source_id = raw.get("source_id", raw.get("id", raw.get("name")))
+            raise ValueError(f"source #{idx + 1} must be an object; expected {SOURCES_MANIFEST_SHAPE}")
+        source_id = raw.get("source_id")
         if source_id in (None, ""):
             raise ValueError(f"source #{idx + 1} is missing source_id")
         source_id = str(source_id)
-        source_path = raw.get(
-            "source_path",
-            raw.get("path", raw.get("video_path", raw.get("video", raw.get("file")))),
-        )
+        source_path = raw.get("source_path")
         if not source_path:
-            raise ValueError(f"source {source_id} is missing source_path/path")
-        duration = raw.get(
-            "duration", raw.get("duration_seconds", raw.get("source_duration"))
-        )
+            raise ValueError(f"source {source_id} is missing source_path")
+        duration = raw.get("duration")
         if duration in (None, ""):
             duration = get_video_duration(source_path)
         try:
@@ -212,11 +186,89 @@ def normalize_sources_manifest(sources_manifest):
     return sources
 
 
+def _normalize_clips(raw_plan, target_duration, min_clip_duration, allow_overlap, resolve_source):
+    """The normalize loop both plan shapes share.
+
+    `resolve_source(raw, idx)` returns (overlap_key, source_duration, clip_fields):
+    overlap is judged per key (None for a single source), the clip is clamped to
+    source_duration, and clip_fields are added right after `clip_id`. Clip order
+    follows the raw plan, so montage ordering is possible.
+    """
+    if isinstance(raw_plan, dict):
+        raw_clips = raw_plan.get("clips", [])
+        plan_target = raw_plan.get("target_duration")
+        if target_duration is None and plan_target not in (None, ""):
+            target_duration = parse_duration_seconds(plan_target)
+    elif isinstance(raw_plan, list):
+        raw_clips = raw_plan
+    else:
+        raise ValueError(
+            "clip_plan.json must be a JSON array or an object with a clips array"
+        )
+
+    if not isinstance(raw_clips, list):
+        raise ValueError("clip_plan.json field `clips` must be an array")
+
+    min_duration = max(0.05, min_clip_duration)
+    clips = []
+    accepted_ranges = {}
+    cursor = 0.0
+
+    for idx, raw in enumerate(raw_clips):
+        if not isinstance(raw, dict):
+            log(f"  跳过无效 clip #{idx + 1}: not an object")
+            continue
+        overlap_key, source_duration, clip_fields = resolve_source(raw, idx)
+        try:
+            raw_start = float(_clip_value(raw, "start", "source_start", "in"))
+            raw_end = float(_clip_value(raw, "end", "source_end", "out"))
+        except (TypeError, ValueError):
+            log(f"  跳过无效 clip #{idx + 1}: missing numeric start/end")
+            continue
+        if raw_end - raw_start < min_duration:
+            log(f"  跳过过短 clip #{idx + 1}: {raw_start:.1f}-{raw_end:.1f}s")
+            continue
+        start = round(max(0.0, min(raw_start, source_duration)), 3)
+        end = round(max(0.0, min(raw_end, source_duration)), 3)
+        if end - start < min_duration:
+            log(f"  跳过过短 clip #{idx + 1}: {start:.1f}-{end:.1f}s")
+            continue
+        ranges = accepted_ranges.setdefault(overlap_key, [])
+        if not allow_overlap and any(raw_start < e and raw_end > s for s, e in ranges):
+            where = "" if overlap_key is None else f" for source_id {overlap_key}"
+            raise ValueError(
+                f"clip #{idx + 1} overlaps an earlier source range{where}; "
+                "split or remove duplicate source footage in the clip plan"
+            )
+        ranges.append((raw_start, raw_end))
+
+        duration = round(end - start, 3)
+        clips.append({
+            "clip_id": len(clips),
+            **clip_fields,
+            "source_start": start,
+            "source_end": end,
+            "output_start": round(cursor, 3),
+            "output_end": round(cursor + duration, 3),
+            "duration": duration,
+            "reason": str(raw.get("reason", raw.get("note", ""))).strip(),
+        })
+        cursor += duration
+
+    if not clips:
+        raise ValueError("clip_plan.json has no valid clips")
+
+    return {
+        "clips": clips,
+        "total_duration": round(sum(c["duration"] for c in clips), 3),
+        "target_duration": round(target_duration, 3) if target_duration else None,
+    }
+
+
 def normalize_multi_source_clip_plan(
     raw_plan,
     sources_manifest,
     target_duration=None,
-    clip_padding=0.0,
     min_clip_duration=0.3,
     allow_overlap=False,
 ):
@@ -225,34 +277,9 @@ def normalize_multi_source_clip_plan(
     Clip order follows the raw plan; overlap validation is isolated per source_id.
     """
     sources = normalize_sources_manifest(sources_manifest)
-    if isinstance(raw_plan, dict):
-        raw_clips = raw_plan.get("clips", [])
-        plan_target = raw_plan.get("target_duration") or raw_plan.get(
-            "target_duration_seconds"
-        )
-        if target_duration is None and plan_target not in (None, ""):
-            target_duration = parse_duration_seconds(plan_target)
-    elif isinstance(raw_plan, list):
-        raw_clips = raw_plan
-    else:
-        raise ValueError(
-            "clip_plan.json must be a JSON array or an object with a clips array"
-        )
 
-    if not isinstance(raw_clips, list):
-        raise ValueError("clip_plan.json field `clips` must be an array")
-
-    padding = max(0.0, clip_padding)
-    min_duration = max(0.05, min_clip_duration)
-    clips = []
-    source_ranges = {}
-    cursor = 0.0
-
-    for idx, raw in enumerate(raw_clips):
-        if not isinstance(raw, dict):
-            log(f"  跳过无效 clip #{idx + 1}: not an object")
-            continue
-        source_id = raw.get("source_id", raw.get("id"))
+    def resolve_source(raw, idx):
+        source_id = raw.get("source_id")
         if source_id in (None, ""):
             raise ValueError(f"clip #{idx + 1} is missing source_id")
         source_id = str(source_id)
@@ -261,66 +288,21 @@ def normalize_multi_source_clip_plan(
             raise ValueError(
                 f"clip #{idx + 1} references unknown source_id: {source_id}"
             )
-        try:
-            raw_start = float(_clip_value(raw, "start", "source_start", "in"))
-            raw_end = float(_clip_value(raw, "end", "source_end", "out"))
-        except (TypeError, ValueError):
-            log(f"  跳过无效 clip #{idx + 1}: missing numeric start/end")
-            continue
-        if raw_end - raw_start < min_duration:
-            log(f"  跳过过短 clip #{idx + 1}: {raw_start:.1f}-{raw_end:.1f}s")
-            continue
-        source_duration = source["duration"]
-        start = round(max(0.0, min(raw_start - padding, source_duration)), 3)
-        end = round(max(0.0, min(raw_end + padding, source_duration)), 3)
-        if end - start < min_duration:
-            log(f"  跳过过短 clip #{idx + 1}: {start:.1f}-{end:.1f}s")
-            continue
-        ranges = source_ranges.setdefault(source_id, [])
-        if not allow_overlap and _overlaps_authored_range(ranges, raw_start, raw_end):
-            raise ValueError(
-                f"clip #{idx + 1} overlaps an earlier source range for source_id {source_id}; "
-                "split or remove duplicate source footage in the clip plan"
-            )
-        ranges.append((raw_start, raw_end))
+        fields = {"source_id": source_id, "source_path": source["source_path"]}
+        return source_id, source["duration"], fields
 
-        duration = round(end - start, 3)
-        clip = {
-            "clip_id": len(clips),
-            "source_id": source_id,
-            "source_path": source["source_path"],
-            "source_start": start,
-            "source_end": end,
-            "output_start": round(cursor, 3),
-            "output_end": round(cursor + duration, 3),
-            "duration": duration,
-            "reason": str(raw.get("reason", raw.get("note", ""))).strip(),
+    plan = _normalize_clips(
+        raw_plan, target_duration, min_clip_duration, allow_overlap, resolve_source
+    )
+    plan["sources"] = {
+        sid: {
+            "source_path": s["source_path"],
+            "duration": round(s["duration"], 3),
+            **({"source_work_dir": s["source_work_dir"]} if s.get("source_work_dir") else {}),
         }
-        clips.append(clip)
-        cursor += duration
-
-    if not clips:
-        raise ValueError("clip_plan.json has no valid clips")
-
-    total_duration = round(sum(c["duration"] for c in clips), 3)
-    plan = {
-        "clips": clips,
-        "total_duration": total_duration,
-        "target_duration": round(target_duration, 3) if target_duration else None,
-        "sources": {
-            sid: {
-                "source_path": s["source_path"],
-                "duration": round(s["duration"], 3),
-                **(
-                    {"source_work_dir": s["source_work_dir"]}
-                    if s.get("source_work_dir")
-                    else {}
-                ),
-            }
-            for sid, s in sources.items()
-        },
-        "allow_overlap": bool(allow_overlap),
+        for sid, s in sources.items()
     }
+    plan["allow_overlap"] = bool(allow_overlap)
     return plan
 
 
@@ -328,85 +310,20 @@ def normalize_clip_plan(
     raw_plan,
     video_duration,
     target_duration=None,
-    clip_padding=0.0,
     min_clip_duration=0.3,
     allow_overlap=False,
 ):
-    """Validate and enrich an agent-authored clip plan.
+    """Validate and enrich an agent-authored single-source clip plan.
 
     Returns a dict with validated `clips`, `total_duration`, and target metadata.
-    Clip order follows the agent-provided order, so montage ordering is possible.
     """
-    if isinstance(raw_plan, dict):
-        raw_clips = raw_plan.get("clips", [])
-        plan_target = raw_plan.get("target_duration") or raw_plan.get(
-            "target_duration_seconds"
-        )
-        if target_duration is None and plan_target not in (None, ""):
-            target_duration = parse_duration_seconds(plan_target)
-    elif isinstance(raw_plan, list):
-        raw_clips = raw_plan
-    else:
-        raise ValueError(
-            "clip_plan.json must be a JSON array or an object with a clips array"
-        )
-
-    if not isinstance(raw_clips, list):
-        raise ValueError("clip_plan.json field `clips` must be an array")
-
-    padding = max(0.0, clip_padding)
-    min_duration = max(0.05, min_clip_duration)
-    clips = []
-    source_ranges = []
-    cursor = 0.0
-
-    for idx, raw in enumerate(raw_clips):
-        if not isinstance(raw, dict):
-            log(f"  跳过无效 clip #{idx + 1}: not an object")
-            continue
-        try:
-            raw_start = float(_clip_value(raw, "start", "source_start", "in"))
-            raw_end = float(_clip_value(raw, "end", "source_end", "out"))
-        except (TypeError, ValueError):
-            log(f"  跳过无效 clip #{idx + 1}: missing numeric start/end")
-            continue
-        if raw_end - raw_start < min_duration:
-            log(f"  跳过过短 clip #{idx + 1}: {raw_start:.1f}-{raw_end:.1f}s")
-            continue
-        start = round(max(0.0, min(raw_start - padding, video_duration)), 3)
-        end = round(max(0.0, min(raw_end + padding, video_duration)), 3)
-        if end - start < min_duration:
-            log(f"  跳过过短 clip #{idx + 1}: {start:.1f}-{end:.1f}s")
-            continue
-        if not allow_overlap and _overlaps_authored_range(source_ranges, raw_start, raw_end):
-            raise ValueError(
-                f"clip #{idx + 1} overlaps an earlier source range; "
-                "split or remove duplicate source footage in the clip plan"
-            )
-        source_ranges.append((raw_start, raw_end))
-
-        duration = round(end - start, 3)
-        clip = {
-            "clip_id": len(clips),
-            "source_start": start,
-            "source_end": end,
-            "output_start": round(cursor, 3),
-            "output_end": round(cursor + duration, 3),
-            "duration": duration,
-            "reason": str(raw.get("reason", raw.get("note", ""))).strip(),
-        }
-        clips.append(clip)
-        cursor += duration
-
-    if not clips:
-        raise ValueError("clip_plan.json has no valid clips")
-
-    total_duration = round(sum(c["duration"] for c in clips), 3)
-    plan = {
-        "clips": clips,
-        "total_duration": total_duration,
-        "target_duration": round(target_duration, 3) if target_duration else None,
-        "source_duration": round(video_duration, 3),
-        "allow_overlap": bool(allow_overlap),
-    }
+    plan = _normalize_clips(
+        raw_plan,
+        target_duration,
+        min_clip_duration,
+        allow_overlap,
+        lambda raw, idx: (None, video_duration, {}),
+    )
+    plan["source_duration"] = round(video_duration, 3)
+    plan["allow_overlap"] = bool(allow_overlap)
     return plan

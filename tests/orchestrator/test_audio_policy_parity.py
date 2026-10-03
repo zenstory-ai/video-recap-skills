@@ -125,9 +125,7 @@ def test_no_skill_declares_config_it_never_reads(libs):
     """The invariant that replaces blanket parity.
 
     A key declared where nothing reads it is dead weight at best and a lie at worst:
-    CLIP_PADDING was declared in five CONFIGs, reported as active through
-    clip_padding_source, and read by none of them — including the one skill that
-    implements padding.
+    a knob once declared in five CONFIGs and reported as active was read by none of them.
     """
     offenders = {}
     for name, path in LIBS.items():

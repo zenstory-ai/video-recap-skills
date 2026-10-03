@@ -30,7 +30,7 @@ python3 scripts/cut.py source.mp4 --work-dir work --review-shots
 
 - `ffprobe` 完整解码收集真实帧 PTS；scene filter 使用整数 PTS 与过滤器 timebase，不用 seek 后的浮点 `pts_time` 反推帧号。
 - 帧号从 0 开始，区间半开 `[start_frame,end_frame)`；首镜、末镜也检查。VFR 同时记录真实 rational PTS 时长，不能用平均 fps 乘秒数。
-- 默认候选规则：镜头不超过 **1 秒**，或 **2 秒内至少 4 个切点**。帧数上限缺省由实测帧钟换算（`round(fps × max_short_seconds)`），不写死某个帧率；需要固定帧数时用 `--max-short-frames` 显式覆盖。参数只控制召回，不是统一剪辑标准。
+- 默认候选规则：镜头不超过 **1 秒**，或 **2 秒内至少 4 个切点**。帧数上限缺省由实测帧钟换算（`round(fps × 1 秒)`），不写死某个帧率；需要固定帧数时用 `--max-short-frames` 显式覆盖。参数只控制召回，不是统一剪辑标准。
 - `0.35` 是默认 scene 起始阈值。加黑边、包装占比大、低反差的画面会系统性少报。**某个阈值下零候选不是没有闪帧的证据。** 用一段已知有坏短镜的窗口校准阈值，保留每一轮的报告，不静默换阈值只报告“通过”。降低阈值也可能增加曝光、运动和动效误报。
 - 未提供计划时来源为 `UNKNOWN`。提供计划时先核对计划 clips、渲染设置与 `edited_source.mp4.meta.json` 一致、源文件 `size`/`mtime_ns` 未变、输出存在非空；失配直接失败，不猜“最新版本”。报告 `plan_binding.path` 只记录所用计划路径。
 - 靠近量化后 EDL 拼接点一帧以内仅标 `EDIT_JOIN_CANDIDATE`。内部候选可以标所在已绑定 clip、估计原片秒数，但仍为 `UNKNOWN`；没有独立源片证据，不能认定是原片自带切镜。

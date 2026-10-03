@@ -11,6 +11,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-cut/scripts'))
 import cut_cli
 import media_geometry
+import sentence_boundaries
 from lib import CONFIG
 
 
@@ -23,7 +24,7 @@ def run_cut(tmp_path, monkeypatch):
         'width': 320, 'height': 240, 'r_frame_rate': '24/1'}))
     monkeypatch.setitem(CONFIG, 'scene_cut_snap', False)
     monkeypatch.setitem(CONFIG, 'snap_clip_line_end', False)
-    monkeypatch.setattr(cut_cli, 'enforce_clip_sentence_boundaries', lambda plan, *a: plan)
+    monkeypatch.setattr(sentence_boundaries, 'enforce_clip_sentence_boundaries', lambda plan, *a: plan)
 
     def run(plan, *options):
         (tmp_path / 'clip_plan.json').write_text(json.dumps(plan), encoding='utf-8')
@@ -77,7 +78,7 @@ def test_valid_moments_use_actual_post_snap_plan(run_cut, monkeypatch):
         return plan
 
     monkeypatch.setitem(CONFIG, 'scene_cut_snap', True)
-    monkeypatch.setattr(cut_cli, 'snap_clips_off_shot_changes', trim_premise)
+    monkeypatch.setattr(sentence_boundaries, 'snap_clips_off_shot_changes', trim_premise)
     with pytest.raises(SystemExit, match='QC blocking'):
         run(raw, '--normalize-only')
 
@@ -136,8 +137,7 @@ def run_real_cut(source, work, raw, *options):
     result = subprocess.run([
         sys.executable, str(Path(cut_cli.__file__).with_name('cut.py')),
         str(source), '--work-dir', str(work), *options,
-    ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0',
-            'CLIP_PADDING': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
     return result, json.loads((work / 'clip_plan_validated.json').read_text(encoding='utf-8'))
 
 
@@ -218,8 +218,7 @@ def test_resumed_cut_keeps_unchanged_validated_plan_identity(real_source, tmp_pa
     resumed = subprocess.run([
         sys.executable, str(Path(cut_cli.__file__).with_name('cut.py')),
         str(real_source), '--work-dir', str(work),
-    ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0',
-            'CLIP_PADDING': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
+    ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr
     assert '复用剪辑源视频' in resumed.stdout + resumed.stderr
     assert identity() == rendered
