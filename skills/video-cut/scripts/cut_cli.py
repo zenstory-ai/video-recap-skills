@@ -74,8 +74,8 @@ def main():
     parser.add_argument(
         "--normalize-only",
         action="store_true",
-        help="only normalize the clip plan -> clip_plan_validated.json (no render); "
-        "lets validate lint the SAME pruned plan the render uses",
+        help="normalize, snap and QC the clip plan, write clip_plan_validated.json, then exit "
+        "without rendering",
     )
     parser.add_argument(
         "--review-shots", action="store_true",

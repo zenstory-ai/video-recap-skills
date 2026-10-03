@@ -17,7 +17,7 @@ Status: implemented
 - 删除 `video-understanding/scripts/brief.py`。`understanding_runner.py` 与 `understanding_brief.py` 改为 `from briefing.builder import build_agent_brief`、`from briefing.context import assess_understanding_substrate`；`PUBLIC_ENTRYPOINTS` 去掉它。
 - `narration_mapping.py` 改名 `cut_qc.py`（`git mv`，内容不变），`cut_cli.py` 随之改导入。`cut_contract.py` 两条重叠报错的结尾改为"split or remove duplicate source footage in the clip plan"，测试匹配的"overlaps an earlier source range"前缀不变。
 - 四处"字节孪生"注释删除或改写为现状：storyboard / runner 只说明会给返回的 brief 文件加 storyboard 头；builder 说明缺 ASR 证据时不能编造可用状态；inputs 说明 `_ASR_SPAN_TOL` 与 `consolidate._ASR_SPAN_TOL` 同值、由 `test_asr_span_tol_matches_across_files` 钉住。
-- 不在本次范围：video-script `review.py` 的门面（另一条线处理）；`briefing/inputs.py` 与 `vlm.py` 的 MiMo 辅助函数去重（行为不等价，见审计 critique，归 Phase 2）；`cut_cli.py` 中 `--normalize-only` 的帮助文案（`validate --mode cut` 仍读 `clip_plan_validated.json`，文案暂时成立，随 Phase 3 删除 `--mode cut` 时一起改）。
+- 不在本次范围：video-script `review.py` 的门面（另一条线处理）；`briefing/inputs.py` 与 `vlm.py` 的 MiMo 辅助函数去重（行为不等价，见审计 critique，归 Phase 2）。`cut_cli.py` 中 `--normalize-only` 的帮助文案后来在 SKILL.md 文档修正时改为只描述自身行为（标准化、吸附、QC、写 `clip_plan_validated.json` 后不渲染退出），不再提并不存在的“剪枝”，也不再绑定 `validate --mode cut`。
 
 ## Alternatives considered
 
