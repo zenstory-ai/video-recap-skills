@@ -267,3 +267,48 @@ def test_only_the_reference_skill_and_its_binding_name_production_reference_in_s
         "production_reference.json is an optional, prose-only input for the writing agent; "
         f"only the reference skill and the library binding may name it: {offenders}"
     )
+
+
+def _text_io_without_encoding(call: ast.Call) -> bool:
+    """`open`/`Path.open`/`read_text`/`write_text` in text mode without an encoding.
+
+    ruff's PLW1514 only sees receivers it can type as Path, so `(tmp_path / "x").read_text()`
+    passes ruff; this reads the call shape instead. Windows' locale codec is not UTF-8."""
+    func = call.func
+    if isinstance(func, ast.Name) and func.id == "open":
+        encoding_pos, mode_pos = 3, 1
+    elif isinstance(func, ast.Attribute) and func.attr == "read_text":
+        encoding_pos, mode_pos = 0, None
+    elif isinstance(func, ast.Attribute) and func.attr == "write_text":
+        encoding_pos, mode_pos = 1, None
+    elif (
+        isinstance(func, ast.Attribute)
+        and func.attr == "open"
+        and isinstance(func.value, (ast.Name, ast.BinOp, ast.Call))
+        and ast.unparse(func.value) not in ("webbrowser", "wave", "Image", "zipfile", "tarfile")
+        and "opener" not in ast.unparse(func.value)
+    ):
+        encoding_pos, mode_pos = 2, 0
+    else:
+        return False
+    if any(kw.arg in ("encoding", None) for kw in call.keywords) or len(call.args) > encoding_pos:
+        return False
+    mode = next((kw.value for kw in call.keywords if kw.arg == "mode"), None)
+    if mode is None and mode_pos is not None and len(call.args) > mode_pos:
+        mode = call.args[mode_pos]
+    return not (isinstance(mode, ast.Constant) and "b" in str(mode.value))
+
+
+def test_text_file_io_names_its_encoding():
+    violations = []
+    for base in ("skills", "tests", "scripts", "tools"):
+        for path in sorted((ROOT / base).rglob("*.py")):
+            if "__pycache__" in path.parts:
+                continue
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            violations.extend(
+                f"{path.relative_to(ROOT)}:{node.lineno}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.Call) and _text_io_without_encoding(node)
+            )
+    assert not violations, "text I/O without encoding=\"utf-8\":\n" + "\n".join(violations)

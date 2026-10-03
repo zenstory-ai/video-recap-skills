@@ -15,7 +15,8 @@ Status: implemented
 - 跨 skill 的测试（一个 skill 的产物喂给另一个 skill 的判定）放 orchestrator。需要在进程内跑另一个 skill 的代码时，用 fixture 先把同名模块移出 `sys.modules`、临时把对方的 `scripts/` 放进 `sys.path` 再导入，测试结束删掉对方的模块并放回 video-recap 的（见 `test_review_gating.py`），never 让对方的 `lib` 留在进程里遮蔽本组的 `lib`。
 - 探测环境变量对 `lib.CONFIG` 的影响时，用 `importlib.util.spec_from_file_location` 把 `lib.py` 加载成单独命名的模块实例（video-cut 的 `_load_lib_with_env`、video-assemble 的同名 helper），never `importlib.reload` 活的 `lib` —— 各 skill 的 `lib.py` 都没有重导入保护（video-assemble 的 `_EXISTING_CONFIG_REF` 已于 2026-10-02 删除，见 [[2026-10-02-assemble-drop-qc-mirrors-dead-env-version-stamps]]），reload 会让 `lib.CONFIG` 与其他模块持有的引用分裂。
 - 分层（`tests/README.md`）：纯行为测试、产物测试、契约 / 打包测试；never 通过读源码匹配一句文案来证明行为，声明式契约（SKILL.md、prompt）解析其结构而不是散落短语；精确重复的测试体由架构测试拒绝，语义重复靠评审。ffmpeg 相关单测不依赖真实 ffmpeg，真渲染测试用 `shutil.which` 守卫并以 `-rs` 让跳过可见。
-- `pyproject.toml` 显式声明 ruff 规则集 `E4/E7/E9/F`：CI 不固定 ruff 版本，隐式默认集在 0.16 扩大后会让无关 PR 变红；`tests/**` 忽略 E402，因为测试要先把 skill 的 `scripts/` 放进 `sys.path`。
+- `pyproject.toml` 显式声明 ruff 规则集 `E4/E7/E9/F`：隐式默认集在 0.16 扩大后会让无关 PR 变红；`tests/**` 忽略 E402，因为测试要先把 skill 的 `scripts/` 放进 `sys.path`。CI 固定 `ruff==0.15.11`。
+- 文本文件读写必须写 `encoding="utf-8"`（Windows runner 默认按区域编码读写，CJK 内容会乱码或崩溃）。`pyproject.toml` 额外选 `PLW1514`（unspecified-encoding）；它在 0.15.11 是 preview 规则，所以同时开 `preview = true` 与 `explicit-preview-rules = true`，其他 preview 规则不生效。ruff 只认得能推断成 `Path` 的接收者，`(tmp_path / "x").read_text()` 这类它看不出来（2026-10-03 全仓 74 处缺失里 ruff 只报出 3 处），所以 `test_test_suite_architecture.py::test_text_file_io_names_its_encoding` 按调用形状再查一遍 `skills/ tests/ scripts/ tools/` 下的 `open`、`.open`、`read_text`、`write_text`（二进制模式豁免）。
 
 来源：080b22b、02e402f (#13)、c7ab23d (#12)、9a2c1c9 (#40)、468182c (#63)、c4da353 (#65)
 

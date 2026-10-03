@@ -36,7 +36,7 @@ def _track(video):
 
 
 def _write_track(work, track):
-    (work / 'subtitle_track.json').write_text(json.dumps(track))
+    (work / 'subtitle_track.json').write_text(json.dumps(track), encoding="utf-8")
 
 
 def test_bound_entries_bypass_legacy_splitting_and_preserve_declared_frames(tmp_path):
@@ -134,7 +134,7 @@ def test_between_frame_cue_is_rejected_instead_of_silently_invisible(tmp_path):
 
 
 def test_deleting_explicit_track_clears_old_manifest_evidence(tmp_path):
-    (tmp_path / binding.VALIDATION).write_text('{"old":true}')
+    (tmp_path / binding.VALIDATION).write_text('{"old":true}', encoding="utf-8")
     assert binding.prepare_subtitle_track('not-read.mp4', tmp_path, 6, audio_mode='narration') is None
     assert not (tmp_path / binding.VALIDATION).exists()
 
@@ -173,7 +173,7 @@ def test_actual_assembly_burn_and_output_clock_are_verified(tmp_path, monkeypatc
     monkeypatch.setitem(CONFIG, 'output_max_height', 0)
     output = work / 'output.mp4'
     assemble_video(video, [], work, output, audio_mode='adopted-packet-copy')
-    report = json.loads((work / binding.VALIDATION).read_text())
+    report = json.loads((work / binding.VALIDATION).read_text(encoding="utf-8"))
     assert report['rendered_picture']['frame_clock_verified'] is True
     assert report['rendered_picture']['frame_count'] == 144
     assert report['binding']['acoustic_alignment'] == 'NOT_CHECKED'
@@ -194,5 +194,5 @@ def test_bound_srt_quantization_does_not_delay_first_frame(tmp_path):
     _media(video)
     _write_track(tmp_path, _track(video))
     binding.prepare_subtitle_track(video, tmp_path, 6, audio_mode='adopted-packet-copy')
-    srt = subtitle_render._generate_srt([], tmp_path, 6).read_text()
+    srt = subtitle_render._generate_srt([], tmp_path, 6).read_text(encoding="utf-8")
     assert '00:00:04,416 --> 00:00:05,833' in srt

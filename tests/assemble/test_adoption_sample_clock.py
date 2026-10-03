@@ -52,7 +52,7 @@ def test_non_narration_mode_does_not_read_stale_narration_binding(
     tmp_path, monkeypatch, audio_mode
 ):
     stale = tmp_path / "narration_input_binding.json"
-    stale.write_text(json.dumps({"artifact": "stale"}))
+    stale.write_text(json.dumps({"artifact": "stale"}), encoding="utf-8")
 
     def forbidden(_work_dir):
         raise AssertionError("non-narration mode read stale narration evidence")

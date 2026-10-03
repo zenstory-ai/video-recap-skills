@@ -79,7 +79,7 @@ def test_source_srt_through_ass_keeps_first_syllable_and_continuous_display(tmp_
     # Same source, continuous speech, but a new picture-shot boundary at output 1s.
     (tmp_path / 'clip_plan_validated.json').write_text(json.dumps({'clips': [
         {'source_start': 10, 'source_end': 11, 'output_start': 0, 'output_end': 1},
-        {'source_start': 11, 'source_end': 13, 'output_start': 1, 'output_end': 3}]}))
+        {'source_start': 11, 'source_end': 13, 'output_start': 1, 'output_end': 3}]}), encoding="utf-8")
     entries = _combined_subtitle_entries([], tmp_path, 3)
     assert len(entries) == 1
     assert entries[0]['start'] == pytest.approx(0.8)

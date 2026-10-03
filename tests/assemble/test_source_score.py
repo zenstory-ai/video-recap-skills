@@ -85,7 +85,7 @@ def plan(tmp_path):
                   "fade_shape": "half_cosine"},
     }
     path = tmp_path / "source_score.json"
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
     return path, document, video, score
 
 
@@ -97,7 +97,7 @@ def test_no_score_keeps_reordered_faded_source_payload_and_writes_zero_score(
         segment["fade_in_samples"] = 1_440
         segment["fade_out_samples"] = 1_440
     document["score"] = {"kind": "none"}
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
 
     output = tmp_path / "none"
     receipt = source_score.prepare_source_score(path, output)
@@ -116,7 +116,7 @@ def test_no_score_keeps_reordered_faded_source_payload_and_writes_zero_score(
 def test_no_score_rejects_unknown_fields(plan, tmp_path):
     path, document, _video, _score = plan
     document["score"] = {"kind": "none", "path": "invented.wav"}
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match="none score requires exactly fields"):
         source_score.prepare_source_score(path, tmp_path / "invalid-none")
 
@@ -131,7 +131,7 @@ def test_decoded_source_must_cover_every_selected_sample(plan, tmp_path):
         "-c:a", "pcm_s16le", video)
     for segment in document["source_segments"]:
         segment.update(path=str(video))
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
     output = tmp_path / "short-source"
     with pytest.raises(ValueError, match="too short"):
         source_score.prepare_source_score(path, output)
@@ -150,7 +150,7 @@ def test_decoded_source_must_cover_every_selected_sample(plan, tmp_path):
 def test_invalid_semantics_never_publish(plan, tmp_path, mutation):
     path, document, _video, _score = plan
     mutation(document)
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
     output = tmp_path / "invalid"
     with pytest.raises((ValueError, RuntimeError)):
         source_score.prepare_source_score(path, output)
@@ -218,7 +218,7 @@ def test_accepts_ntsc_frame_clock_and_rounds_sample_bounds_consistently(tmp_path
          "role": "silence"},
     ]
     path = tmp_path / "ntsc_plan.json"
-    path.write_text(json.dumps(document))
+    path.write_text(json.dumps(document), encoding="utf-8")
 
     loaded = source_score.load_plan(path)
 

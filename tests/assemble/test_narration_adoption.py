@@ -363,7 +363,7 @@ def test_adopted_f32_stereo_input_is_decoded_and_bound_through_final_mix(
 
     magnitudes = _frequency_magnitudes(output)
     assert magnitudes[997] > 100 * magnitudes[330], magnitudes
-    report = json.loads((work / "narration_input_binding.json").read_text())
+    report = json.loads((work / "narration_input_binding.json").read_text(encoding="utf-8"))
     segment_report = report["segments"][0]
     assert report["identity_status"] == "BOUND_TO_ADOPTION"
     assert segment_report["original"]["path"] == str(adopted.resolve())
@@ -396,7 +396,7 @@ def test_strict_adoption_overrides_ambient_speed_without_segment_fit(render_medi
     assert not list(work.glob("*_adj.wav"))
     assert segments[0]["global_narration_speed"] == 1.0
     assert segments[0]["segment_tempo_factor"] == 1.0
-    report = json.loads((work / "narration_input_binding.json").read_text())
+    report = json.loads((work / "narration_input_binding.json").read_text(encoding="utf-8"))
     assert report["adoption"]["tempo_policy"] == STRICT_TEMPO
 
 

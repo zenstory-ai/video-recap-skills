@@ -80,7 +80,7 @@ def adopted_case(tmp_path, monkeypatch):
         'source_silence': [{'output_start_sample': 0, 'output_end_sample': 96000,
                             'role': 'silence'}],
         'score': {'kind': 'frozen', 'path': str(score), 'audio_stream': 0},
-    }))
+    }), encoding="utf-8")
     source_score.prepare_source_score(plan, tmp_path / 'bed')
     prepared = tmp_path / 'bed/prepared_bed_receipt.json'
     # Stereo L/R are intentionally different; a mono fold cannot reconstruct them.
@@ -117,7 +117,7 @@ def adopted_case(tmp_path, monkeypatch):
                      for i, (start, gain) in enumerate(zip(starts, gains))],
         'master_gain_db': -3.0,
     }
-    adoption.write_text(json.dumps(document))
+    adoption.write_text(json.dumps(document), encoding="utf-8")
     return {'picture': picture, 'files': files, 'meta': meta, 'narration': narration,
             'adoption': adoption, 'segments': segments, 'document': document}
 
@@ -142,8 +142,8 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     monkeypatch.setattr(assemble.audio_mix, '_apply_source_sentence_handoffs', forbidden)
     monkeypatch.setattr(assemble.audio_mix, '_build_audio_filter_complex', forbidden)
     output, work, _ = render(adopted_case, tmp_path)
-    binding = json.loads((work / 'narration_input_binding.json').read_text())
-    mix = json.loads((work / 'audio_mix_binding.json').read_text())
+    binding = json.loads((work / 'narration_input_binding.json').read_text(encoding="utf-8"))
+    mix = json.loads((work / 'audio_mix_binding.json').read_text(encoding="utf-8"))
     expected_bus = [0.0]*192000
     for i, item in enumerate(binding['segments']):
         assert item['placed']['pcm']['sample_rate'] == '48000'
@@ -176,7 +176,7 @@ def test_real_native_stereo_anti_phase_and_whole_voice_bus(adopted_case, tmp_pat
     assert max(abs(x) for x in master[:20000]) == 0  # old picture audio never enters mix
     decoded = pcm(output)
     assert max(abs(x) for x in decoded[:18000]) < 1e-5
-    qc = json.loads((work/'assembly_qc.json').read_text())
+    qc = json.loads((work/'assembly_qc.json').read_text(encoding="utf-8"))
     assert qc['audio_operations']['explicit_audio_mix'] is True
     for operation in ['ducking', 'loudness_normalization', 'limiter', 'tempo']:
         assert qc['audio_operations'][operation] is False
@@ -191,7 +191,7 @@ def test_segment_level_blocking_stops_explicit_mix_before_the_video_encode(
         render(adopted_case, tmp_path)
     work = tmp_path / 'render'
     assert not (work / 'output.mp4').exists()
-    qc = json.loads((work / 'assembly_qc.json').read_text())
+    qc = json.loads((work / 'assembly_qc.json').read_text(encoding="utf-8"))
     assert qc['blocking_codes'] == ['timeline_audio_mismatch']
     assert qc['delivery_qc']['video_encode_passes'] == 0
 
@@ -207,7 +207,7 @@ def test_integer_mono_is_converted_to_float_before_equal_power_pan(adopted_case,
     narration, meta = _adoption(tmp_path, adopted_case['segments'])
     adopted_case.update(narration=narration, meta=meta)
     _, work, _ = render(adopted_case, tmp_path)
-    binding = json.loads((work/'narration_input_binding.json').read_text())
+    binding = json.loads((work/'narration_input_binding.json').read_text(encoding="utf-8"))
     converted = pcm(binding['segments'][2]['placed']['path'])
     independent = pcm(integer_voice)
     assert len(converted) == len(independent)
@@ -222,7 +222,7 @@ def test_explicit_mix_allows_requested_reencode_without_changing_frame_clock(
     monkeypatch.setitem(CONFIG, 'output_preset', 'veryfast')
     output, work, _ = render(adopted_case, tmp_path)
     assert output.is_file()
-    mix = json.loads((work/'audio_mix_binding.json').read_text())
+    mix = json.loads((work/'audio_mix_binding.json').read_text(encoding="utf-8"))
     assert mix['output_picture']['frame_count'] == 48
     assert mix['output_picture']['fps'] in ['24', '24/1']
     assert mix['output_picture']['packet_identity'] == 'REENCODED_CLOCK_MATCH'
@@ -267,7 +267,7 @@ def test_load_adoption_binds_picture_receipt_narration_and_segments(adopted_case
 def test_missing_top_level_field_fails_before_snapshot(adopted_case, tmp_path, field):
     document = copy.deepcopy(adopted_case['document'])
     del document[field]
-    adopted_case['adoption'].write_text(json.dumps(document))
+    adopted_case['adoption'].write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises(ValueError, match='(?i)(field|adoption)'):
         render(adopted_case, tmp_path)
     work = tmp_path/'render'
@@ -299,7 +299,7 @@ def test_isolated_copied_skill_cli_publishes_new_alias_and_manifest(adopted_case
                             text=True, encoding='utf-8', errors='replace', timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
     alias = delivery / 'recap_strict.mp4'
-    manifest = json.loads((work / 'assembly_manifest.json').read_text())
+    manifest = json.loads((work / 'assembly_manifest.json').read_text(encoding="utf-8"))
     assert alias.is_file()
     assert manifest['audio_mix_binding']['status'] == 'FINALIZED'
     assert manifest['assembly_settings']['audio']['path'] == 'explicit_adopted_full_sound'
@@ -318,7 +318,7 @@ def test_isolated_copied_skill_cli_publishes_new_alias_and_manifest(adopted_case
 def test_bad_adopted_receipt_or_sample_window_never_publishes(adopted_case, tmp_path, mutation):
     document = copy.deepcopy(adopted_case['document'])
     mutation(document)
-    adopted_case['adoption'].write_text(json.dumps(document))
+    adopted_case['adoption'].write_text(json.dumps(document), encoding="utf-8")
     with pytest.raises((ValueError, RuntimeError)):
         render(adopted_case, tmp_path)
     work = tmp_path/'render'

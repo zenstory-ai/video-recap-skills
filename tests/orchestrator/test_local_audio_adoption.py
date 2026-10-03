@@ -59,12 +59,12 @@ def _finish_stubs(monkeypatch, work, calls):
                 "tts_meta": {"path": str(values["--tts-meta"])},
             },
             "final_output": final_identity,
-        }))
+        }), encoding="utf-8")
         (work / "audio_mix_binding.json").write_text(json.dumps({
             "adoption": {"path": str(values["--audio-mix-adoption"])},
             "picture": {"path": str(args[0])},
             "final_output": final_identity,
-        }))
+        }), encoding="utf-8")
 
     monkeypatch.setattr(recap_runner, "_run", fake_run)
     monkeypatch.setattr(recap_runner, "_preflight_burn_subtitles", lambda _args: None)
