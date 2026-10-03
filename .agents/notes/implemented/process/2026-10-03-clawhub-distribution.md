@@ -27,6 +27,8 @@ Status: implemented
 
 ## Verification
 
-本次以 `actionlint` 验证两个 caller 的 YAML 与表达式；另用本地清单审计核对完整目录覆盖、固定 SHA、semver、权利锚点、依赖版本、包内无 symlink 与 38 个候选总数。中央引用已固定为经独立审查、通过 20 项回归测试的 `d77b6785e1d04f608577219aeed6dfdcd93e24b1`；uses 与 control_ref 相同，guard 只匹配 YAML 值，不会匹配自己的命令字符串。真实 GitHub CI 与首次公开分发由组织集成线留证。
+本次以 `actionlint` 验证两个 caller 的 YAML 与表达式；另用本地清单审计核对完整目录覆盖、固定 SHA、semver、权利锚点、依赖版本、包内无 symlink 与 38 个候选总数。中央引用已固定为经独立审查、通过 30 项回归测试的 `7f9ee0e3994037893dc0e829e95ba5f83c526fed`；uses 与 control_ref 相同，guard 只匹配 YAML 值，不会匹配自己的命令字符串。真实 GitHub CI 与首次公开分发由组织集成线留证。
 
 `ruff check skills tests scripts` 通过。`python3 -B scripts/test.py` 的 understanding、cut、voiceover、script、reference 等组通过；本机 ffmpeg 不含 subtitles/libass，assemble 与 orchestrator 的真实烧录用例按其 fail-fast 契约失败，因此不把全套测试记为通过。该环境缺口不影响本次仅新增的清单、caller 与 README，但仍作为验证缺口保留。
+
+首轮包装验证发现 cut/assemble 的本地测试缓存混入包；中央现在排除 Python bytecode，二者明确提升到 1.0.1，并从固定 bootstrap SHA 的干净 Git 导出重新锁包。原 1.0.0 提交未删除或覆盖；recap 的两个精确依赖同步为 1.0.1，仍保留真实伴随安装阻断。此包装修复不表示渠道扫描已放行。
