@@ -177,7 +177,7 @@ def _source_sentence_entry_issue(index, start, anchors, speech_owned):
         anchor_confidence=suggested["confidence"] if suggested else None,
         anchor_boundary_use=(
             suggested.get("boundary_use")
-            or ("verified" if suggested["confidence"] in {"high", "medium"} else "none")
+            or ("unverified" if suggested["confidence"] in {"high", "medium"} else "none")
         )
         if suggested
         else None,

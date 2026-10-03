@@ -35,9 +35,10 @@ def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=No
     payload = json.loads(path.read_text(encoding="utf-8"))
     windows = []
     for anchor in payload["sentence_anchors"]:
-        # Schema-1 artifacts predate `boundary_use`; their high/medium labels were the old rule.
+        # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+        # labels there are usable but unverified.
         use = anchor.get("boundary_use") or (
-            "verified" if anchor["confidence"] in {"high", "medium"} else "none"
+            "unverified" if anchor["confidence"] in {"high", "medium"} else "none"
         )
         if use == "none":
             continue
@@ -52,7 +53,8 @@ def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=No
 
 
 # Interjections and common ASR artifacts on screams/music. A window whose text is only these
-# is not dialogue for the cut gate; real short lines such as "救我！" still are.
+# is not dialogue at a clip edge or narration entry; real short lines such as "救我！" still are.
+# Same copy in video-cut, video-script and video-assemble (parity-tested by function).
 _NON_DIALOGUE_TOKENS = frozenset(
     "啊 嗯 哼 哦 呃 唉 嘿 呦 哈 呀 hi yeah ok okay oh uh ah hmm".split()
 )
@@ -70,29 +72,21 @@ def _interjection_only(text):
     )
 
 
-def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
-    """Merged ASR dialogue spans (asr_clean.json wins over asr_result.json).
+def _dialogue_speech_spans(rows):
+    """Merged dialogue spans from timed ASR rows.
 
-    Only used to decide whether an unsafe edge blocks; a missing transcript means unchecked.
-    A window holding only interjections ("啊！", "Hi.") is not dialogue, except a
-    `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue window.
+    A row holding only interjections ("啊！", "Hi.") is not dialogue, except a
+    `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue row. A row
+    without text is timing-only evidence and counts as dialogue.
     """
-    rows = []
-    for filename in ("asr_clean.json", "asr_result.json"):
-        path = _find_source_artifact(work_dir, filename, source_id, source_work_dir)
-        if path is not None:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            rows = payload["segments"] if filename == "asr_clean.json" else payload
-            break
     rows = sorted(
         (
             {
                 "start": row["start"],
                 "end": row["end"],
-                "dialogue": not _interjection_only(row["text"]),
+                "dialogue": not _interjection_only(row.get("text", "")),
             }
             for row in rows
-            if row["text"].strip()
         ),
         key=lambda row: (row["start"], row["end"]),
     )
@@ -117,6 +111,21 @@ def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
         else:
             merged.append(span)
     return merged
+
+
+def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
+    """Merged ASR dialogue spans (asr_clean.json wins over asr_result.json).
+
+    Only used to decide whether an unsafe edge blocks; a missing transcript means unchecked.
+    """
+    rows = []
+    for filename in ("asr_clean.json", "asr_result.json"):
+        path = _find_source_artifact(work_dir, filename, source_id, source_work_dir)
+        if path is not None:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            rows = payload["segments"] if filename == "asr_clean.json" else payload
+            break
+    return _dialogue_speech_spans(row for row in rows if row["text"].strip())
 
 
 def _unverified_window(row):

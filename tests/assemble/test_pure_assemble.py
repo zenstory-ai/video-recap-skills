@@ -1898,7 +1898,8 @@ def test_source_handoff_restores_only_at_next_sentence_anchor(monkeypatch, tmp_p
 
     report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 30.0)
 
-    assert report[0]["status"] == "sentence_boundary"
+    # Schema-1 anchors (no boundary_use) came from the old coarse estimator.
+    assert report[0]["status"] == "sentence_boundary_unverified"
     assert seg["source_duck_end"] == pytest.approx(13.74)
     assert seg["source_restore_at"] == pytest.approx(14.34)
     assert seg.get("source_handoff_blocking") is not True
@@ -2020,10 +2021,12 @@ def test_source_handoff_prefers_verified_anchor_evidence_over_time_order(monkeyp
         [
             {"time": 5.81, "pause_start": 5.22, "confidence": "low",
              "boundary_use": "unverified"},
-            {"time": 5.9, "pause_start": 5.5, "confidence": "high"},
+            {"time": 5.9, "pause_start": 5.5, "confidence": "high",
+             "boundary_use": "verified"},
             {"time": 12.5, "pause_start": 12.2, "confidence": "low",
              "boundary_use": "unverified"},
-            {"time": 13.5, "pause_start": 13.3, "confidence": "high"},
+            {"time": 13.5, "pause_start": 13.3, "confidence": "high",
+             "boundary_use": "verified"},
         ],
     )
     monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
@@ -2064,7 +2067,8 @@ def test_source_handoff_blocks_unsafe_entry_and_missing_anchors_with_speech(tmp_
 _CUT_OUTPUT_HANDOFF_CASES = [
     pytest.param(
         {
-            "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
+            "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high",
+                                  "boundary_use": "verified"}],
             "speech_spans": [{"start": 0.0, "end": 10.0}],
             "quiet_windows": [{"start": 3.8, "end": 4.1}],
         },
@@ -2076,7 +2080,8 @@ _CUT_OUTPUT_HANDOFF_CASES = [
     ),
     pytest.param(
         {
-            "sentence_anchors": [{"time": 1.0, "pause_start": 0.95, "confidence": "high"}],
+            "sentence_anchors": [{"time": 1.0, "pause_start": 0.95, "confidence": "high",
+                                  "boundary_use": "verified"}],
             "speech_spans": [{"start": 0.0, "end": 1.0}],
             "quiet_windows": [{"start": 1.0, "end": 10.0}],
         },
@@ -2087,7 +2092,8 @@ _CUT_OUTPUT_HANDOFF_CASES = [
     ),
     pytest.param(
         {
-            "sentence_anchors": [{"time": 6.0, "pause_start": 5.8, "confidence": "high"}],
+            "sentence_anchors": [{"time": 6.0, "pause_start": 5.8, "confidence": "high",
+                                  "boundary_use": "verified"}],
             "speech_spans": [{"start": 3.0, "end": 10.0}],
             "quiet_windows": [{"start": 0.0, "end": 3.0}],
         },
@@ -2098,7 +2104,8 @@ _CUT_OUTPUT_HANDOFF_CASES = [
     ),
     pytest.param(
         {
-            "sentence_anchors": [{"time": 10.0, "pause_start": 9.8, "confidence": "high"}],
+            "sentence_anchors": [{"time": 10.0, "pause_start": 9.8, "confidence": "high",
+                                  "boundary_use": "verified"}],
             "speech_spans": [{"start": 8.5, "end": 10.0}],
             "quiet_windows": [{"start": 0.0, "end": 8.5}],
         },
@@ -2117,7 +2124,8 @@ _CUT_OUTPUT_HANDOFF_CASES = [
     ),
     pytest.param(
         {
-            "sentence_anchors": [{"time": 10.0, "pause_start": 9.8, "confidence": "high"}],
+            "sentence_anchors": [{"time": 10.0, "pause_start": 9.8, "confidence": "high",
+                                  "boundary_use": "verified"}],
             "speech_spans": [],
             "quiet_windows": [{"start": 0.0, "end": 4.0}, {"start": 0.0, "end": 4.0}],
         },
@@ -2125,6 +2133,32 @@ _CUT_OUTPUT_HANDOFF_CASES = [
         {"overlaps_speech": True},
         {"status": "sentence_boundary"},
         id="overlapping-quiet-evidence-not-double-counted",
+    ),
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 9.0, "pause_start": 8.8, "confidence": "low",
+                                  "boundary_use": "unverified"}],
+            "speech_spans": [{"start": 0.0, "end": 3.0, "text": "真实对白。"},
+                             {"start": 3.0, "end": 10.0, "text": "啊！"}],
+            "quiet_windows": [],
+        },
+        {"actual_place_start": 4.0, "actual_place_end": 6.0, "overlaps_speech": True},
+        {"source_handoff_blocking": None, "source_entry_status": "quiet_source"},
+        {},
+        id="interjection-only-window-beyond-guard-is-not-an-unsafe-entry",
+    ),
+    pytest.param(
+        {
+            "sentence_anchors": [{"time": 9.0, "pause_start": 8.8, "confidence": "low",
+                                  "boundary_use": "unverified"}],
+            "speech_spans": [{"start": 0.0, "end": 3.0, "text": "真实对白。"},
+                             {"start": 3.0, "end": 10.0, "text": "啊！"}],
+            "quiet_windows": [],
+        },
+        {"actual_place_start": 3.5, "actual_place_end": 6.0, "overlaps_speech": True},
+        {"source_handoff_blocking": True, "source_entry_status": "unsafe_entry"},
+        {},
+        id="interjection-guard-next-to-dialogue-still-blocks",
     ),
 ]
 

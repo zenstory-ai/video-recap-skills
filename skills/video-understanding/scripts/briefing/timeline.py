@@ -273,9 +273,10 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
 
 
 def _anchor_boundary_use(anchor):
-    # Schema-1 artifacts predate `boundary_use`; their high/medium labels were the old rule.
+    # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+    # labels there are usable but unverified.
     return anchor.get("boundary_use") or (
-        "verified" if anchor["confidence"] in {"high", "medium"} else "none"
+        "unverified" if anchor["confidence"] in {"high", "medium"} else "none"
     )
 
 
@@ -307,7 +308,12 @@ def _format_sentence_entry_anchors_for_brief(work_dir, edit_mode):
         if _anchor_boundary_use(anchor) == "verified":
             label = anchor["confidence"]
         else:
-            label = f"unverified ±{float(anchor.get('timing_bound_seconds', 0.0)):.1f}s"
+            # Schema-1 anchors carry no error bound to print.
+            label = (
+                f"unverified ±{float(anchor['timing_bound_seconds']):.1f}s"
+                if "timing_bound_seconds" in anchor
+                else "unverified"
+            )
         lines.append(
             f"- {anchor['time']:.2f}s [{label}]{source_suffix} {text_tail}".rstrip()
         )

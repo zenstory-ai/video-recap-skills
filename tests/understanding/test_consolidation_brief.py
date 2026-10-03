@@ -864,7 +864,7 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
     assert fusion[0]["narration_slots"][0]["start"] == pytest.approx(6.0)
     assert "ASR chunk 1: 1.0-5.0s" in text
     assert "ASR chunk 1: 101.0-105.0s" not in text
-    assert "4.00s [high] (SOURCE 104.00s)" in text
+    assert "4.00s [unverified] (SOURCE 104.00s)" in text  # schema-1 anchor
     output_anchors = json.loads(
         (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
     )

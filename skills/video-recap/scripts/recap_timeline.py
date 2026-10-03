@@ -471,9 +471,10 @@ def _write_multi_source_output_brief(work_dir, source_records, validated_plan_pa
         )
     anchors = []
     for row in speech_evidence["sentence_anchors"]:
-        # Schema-1 anchors predate `boundary_use`; their high/medium labels were the old rule.
+        # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+        # labels there are usable but unverified.
         use = row.get("boundary_use") or (
-            "verified" if row["confidence"] in {"high", "medium"} else "none"
+            "unverified" if row["confidence"] in {"high", "medium"} else "none"
         )
         if use != "none":
             anchors.append((row, use))
@@ -486,11 +487,12 @@ def _write_multi_source_output_brief(work_dir, source_records, validated_plan_pa
             "但不保证原声句子已说完（误差上限见 `±`）；门禁照常生效。",
         ]
         for row, use in anchors:
-            label = (
-                row["confidence"]
-                if use == "verified"
-                else f"unverified ±{float(row.get('timing_bound_seconds', 0.0)):.1f}s"
-            )
+            if use == "verified":
+                label = row["confidence"]
+            elif "timing_bound_seconds" in row:
+                label = f"unverified ±{float(row['timing_bound_seconds']):.1f}s"
+            else:  # schema-1 anchors carry no error bound
+                label = "unverified"
             lines.append(f"- {row['time']:.3f}s [{label}] ({row['source_id']})")
     lines += ["", "## Source work dirs"]
     for s in source_records:

@@ -130,6 +130,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             explicit_mix, binding, tts_segments, work_dir
         )
         narration_wav = Path(explicit_runtime["voice_bus"]["path"])
+        _block_before_render(tts_segments, video_duration, work_dir, output_path, audio_mode)
     elif audio_mode == "narration":
         if binding["tempo_policy"]:
             narration_audio._apply_narration_speed(

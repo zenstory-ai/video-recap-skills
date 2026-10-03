@@ -438,7 +438,8 @@ def test_snap_recomputes_output_timeline_for_all_clips():
 
 
 def test_sentence_anchor_pause_window_snaps_both_clip_edges(tmp_path):
-    """Reliable sentence anchors are first-class cut boundaries even when long-silence is empty."""
+    """Schema-1 high/medium anchors are cut boundaries (labeled unverified) even when
+    long-silence is empty."""
     (tmp_path / "speech_boundary_anchors.json").write_text(json.dumps({"sentence_anchors": [
         {"time": 8.4, "pause_start": 8.2, "confidence": "high"},
         {"time": 14.3, "pause_start": 14.0, "confidence": "medium"},
@@ -447,9 +448,9 @@ def test_sentence_anchor_pause_window_snaps_both_clip_edges(tmp_path):
     boundaries = sentence_boundaries._load_sentence_boundary_windows(tmp_path)
     assert boundaries == [
         {"start": 8.2, "end": 8.4, "kind": "sentence_anchor", "confidence": "high",
-         "boundary_use": "verified"},
+         "boundary_use": "unverified"},
         {"start": 14.0, "end": 14.3, "kind": "sentence_anchor", "confidence": "medium",
-         "boundary_use": "verified"},
+         "boundary_use": "unverified"},
     ]
     plan = _make_plan([(10.0, 13.5)], video_duration=30.0)
     plan = sentence_boundaries.snap_clip_starts_to_lines(plan, boundaries, 30.0, max_prepend=1.8)

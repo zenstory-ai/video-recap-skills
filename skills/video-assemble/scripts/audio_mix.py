@@ -145,9 +145,10 @@ def _load_sentence_handoff_anchors(work_dir):
         payload = {**payload, "require_measured": True}
     anchors = {}
     for item in payload["sentence_anchors"]:
-        # Schema-1 artifacts predate `boundary_use`; their high/medium labels were the old rule.
+        # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
+        # labels there are usable but unverified.
         use = item.get("boundary_use") or (
-            "verified" if item["confidence"] in {"high", "medium"} else "none"
+            "unverified" if item["confidence"] in {"high", "medium"} else "none"
         )
         if use == "none":
             continue
@@ -183,17 +184,78 @@ def _asr_segments(work_dir):
     return _load_work_json(work_dir, "asr_result.json") or []
 
 
+# Interjections and common ASR artifacts on screams/music. A window whose text is only these
+# is not dialogue at a clip edge or narration entry; real short lines such as "救我！" still are.
+# Same copy in video-cut, video-script and video-assemble (parity-tested by function).
+_NON_DIALOGUE_TOKENS = frozenset(
+    "啊 嗯 哼 哦 呃 唉 嘿 呦 哈 呀 hi yeah ok okay oh uh ah hmm".split()
+)
+_NON_DIALOGUE_CJK = frozenset("啊嗯哼哦呃唉嘿呦哈呀")
+# Lines cross 15s ASR window edges (a line may run 13.2–15.4 while its window ends at 15.0),
+# so an interjection-only window next to real dialogue keeps this much of its shared edge.
+_INTERJECTION_GUARD_SECONDS = 1.0
+
+
+def _interjection_only(text):
+    tokens = [token for token in re.split(r"[\W_]+", text.lower()) if token]
+    # Punctuation-only rows ("……", "？") are often ASR for unintelligible speech: keep them.
+    return bool(tokens) and all(
+        token in _NON_DIALOGUE_TOKENS or set(token) <= _NON_DIALOGUE_CJK for token in tokens
+    )
+
+
+def _dialogue_speech_spans(rows):
+    """Merged dialogue spans from timed ASR rows.
+
+    A row holding only interjections ("啊！", "Hi.") is not dialogue, except a
+    `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue row. A row
+    without text is timing-only evidence and counts as dialogue.
+    """
+    rows = sorted(
+        (
+            {
+                "start": row["start"],
+                "end": row["end"],
+                "dialogue": not _interjection_only(row.get("text", "")),
+            }
+            for row in rows
+        ),
+        key=lambda row: (row["start"], row["end"]),
+    )
+    spans = []
+    for idx, row in enumerate(rows):
+        if row["dialogue"]:
+            spans.append({"start": row["start"], "end": row["end"]})
+            continue
+        before = rows[idx - 1] if idx > 0 else None
+        after = rows[idx + 1] if idx + 1 < len(rows) else None
+        if before and before["dialogue"] and row["start"] - before["end"] <= 0.05:
+            end = min(row["end"], row["start"] + _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": row["start"], "end": end})
+        if after and after["dialogue"] and after["start"] - row["end"] <= 0.05:
+            start = max(row["start"], row["end"] - _INTERJECTION_GUARD_SECONDS)
+            spans.append({"start": start, "end": row["end"]})
+    spans.sort(key=lambda row: (row["start"], row["end"]))
+    merged = []
+    for span in spans:
+        if merged and span["start"] <= merged[-1]["end"] + 0.05:
+            merged[-1]["end"] = max(merged[-1]["end"], span["end"])
+        else:
+            merged.append(span)
+    return merged
+
+
 def _handoff_speech_evidence(work_dir, payload):
-    speech = _timed_rows(payload.get("speech_spans", []))
+    """(speech, quiet, dialogue) rows; `dialogue` drops interjection-only windows and
+    decides only whether a narration entry interrupts source speech."""
+    rows = payload.get("speech_spans", [])
     quiet = _timed_rows(payload.get("quiet_windows", []))
-    if payload.get("require_measured"):
-        return speech, quiet
-    if not speech:
-        speech = _timed_rows(_asr_segments(work_dir))
-    if not quiet:
-        silence = _load_work_json(work_dir, "silence_periods.json") or []
-        quiet = _timed_rows(row for row in silence if not row["has_speech"])
-    return speech, quiet
+    if not payload.get("require_measured"):
+        rows = rows or _asr_segments(work_dir)
+        if not quiet:
+            silence = _load_work_json(work_dir, "silence_periods.json") or []
+            quiet = _timed_rows(row for row in silence if not row["has_speech"])
+    return _timed_rows(rows), quiet, _timed_rows(_dialogue_speech_spans(rows))
 
 
 def _merged_handoff_intervals(start, end, rows):
@@ -241,11 +303,11 @@ def _measured_speech_owned(
 
 
 def _entry_speech_owned(
-    start, speech, quiet, anchors, authored, require_measured=False, tolerance=0.05
+    start, speech, dialogue, quiet, anchors, authored, require_measured=False, tolerance=0.05
 ):
     if any(row["start"] - tolerance <= start <= row["end"] + tolerance for row in quiet):
         return False
-    if any(row["start"] - tolerance <= start < row["end"] - tolerance for row in speech):
+    if any(row["start"] - tolerance <= start < row["end"] - tolerance for row in dialogue):
         return True
     if speech:
         return False
@@ -270,7 +332,9 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
     fade = CONFIG["duck_fade_seconds"]
     bridge = CONFIG["duck_bridge_seconds"]
     anchors, artifact, evidence_payload = _load_sentence_handoff_anchors(work_dir)
-    speech_spans, quiet_windows = _handoff_speech_evidence(work_dir, evidence_payload)
+    speech_spans, quiet_windows, dialogue_spans = _handoff_speech_evidence(
+        work_dir, evidence_payload
+    )
     require_measured = evidence_payload.get("require_measured", False)
     placed = []
     for seg in tts_segments:
@@ -310,6 +374,7 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
         entry_owned = _entry_speech_owned(
             run["start"],
             speech_spans,
+            dialogue_spans,
             quiet_windows,
             anchors,
             first["overlaps_speech"],
