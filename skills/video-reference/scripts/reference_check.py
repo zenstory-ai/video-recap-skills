@@ -323,19 +323,28 @@ def _strings(node):
             yield from _strings(value)
 
 
+def _string_items(values):
+    """The string entries of a JSON list; a non-list or a non-string entry contributes nothing."""
+    return [value for value in values if isinstance(value, str)] if isinstance(values, list) else []
+
+
 def _research_names(research):
-    """Character names and aliases, short cultural-note items, and short quoted terms."""
+    """Character names and aliases, short cultural-note items, and short quoted terms.
+
+    background_research.json is agent-written: a name or alias that is not a string (a nested
+    object, a list) is ignored rather than fed to the name set."""
     names = set()
+    if not isinstance(research, dict):
+        return names
     characters = research.get("characters")
     if isinstance(characters, dict):
         names.update(characters)
     elif isinstance(characters, list):
-        names.update(c.get("name") for c in characters if isinstance(c, dict))
+        names.update(_string_items([c.get("name") for c in characters if isinstance(c, dict)]))
     details = research.get("character_details")
     for name, info in details.items() if isinstance(details, dict) else []:
         names.add(name)
-        aliases = info.get("aliases") if isinstance(info, dict) else None
-        names.update(aliases if isinstance(aliases, list) else [])
+        names.update(_string_items(info.get("aliases") if isinstance(info, dict) else None))
     notes = research.get("cultural_notes")
     for note in notes if isinstance(notes, list) else []:
         item = note.get("item") if isinstance(note, dict) else None
@@ -363,7 +372,8 @@ def leak_corpus(facts, asr_segments, asr_evidence, research, index=None):
     research = research if isinstance(research, dict) else {}
     asr_evidence = asr_evidence if isinstance(asr_evidence, dict) else {}
     names.update(_research_names(research))
-    names.update((asr_evidence.get("glossary") or {}).get("names") or [])
+    glossary = asr_evidence.get("glossary")
+    names.update(_string_items(glossary.get("names") if isinstance(glossary, dict) else None))
     windows = sorted((s for s in asr_segments or [] if isinstance(s, dict)),
                      key=lambda s: float(s.get("start") or 0))
     texts = [str(s.get("text") or "") for s in windows]
@@ -413,7 +423,7 @@ def _warnings(breakdown, methods, asr_segments, asr_status, research, *, index, 
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
-    if has_cjk and not ((_research_names(research or {}) | _index_names(index)) - {None, ""}):
+    if has_cjk and not ((_research_names(research) | _index_names(index)) - {None, ""}):
         warnings.append("ASR 有中文对白，但 background_research.json 与 understanding_index.json 都没有给出名字："
                         "泄漏扫描只认 fact entities 里写到的名字，台词里其他人名、地名、组织名会漏网")
     asr_video = (asr_evidence if isinstance(asr_evidence, dict) else {}).get("source_video")

@@ -392,6 +392,11 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             )
         return cache[source_id]
 
+    spans_by_source = {}
+    for clip in plan["clips"]:
+        spans_by_source.setdefault(clip["source_id"], []).append(
+            (float(clip["source_start"]), float(clip["source_end"])))
+
     mapped_anchors, mapped_speech, mapped_quiet = [], [], []
     output_duration = max(float(clip["output_end"]) for clip in plan["clips"])
     for clip in plan["clips"]:
@@ -399,15 +404,27 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         source_start = float(clip["source_start"])
         source_end = float(clip["source_end"])
         output_start = float(clip["output_start"])
+        output_end = float(clip["output_end"])
+
+        def to_output(when):
+            # A source time on this clip's OUTPUT clock, never past its own span: the next
+            # clip on the output timeline plays a different range (or source).
+            when = min(max(when, source_start), source_end)
+            return round(min(output_start + when - source_start, output_end), 3)
+
         anchors, speech_rows, quiet_rows = load_source(source_id)
         for anchor in anchors:
             when = float(anchor["time"])
             if not (source_start - 0.05 <= when <= source_end + 0.05):
                 continue
-            output_time = round(output_start + when - source_start, 3)
             # The 0.05 s source slack can carry an anchor past the output's ends (a clip
             # end frame-snapped 181.42 -> 181.40): narration cannot start there.
-            if not 0 <= output_time <= output_duration:
+            if not 0 <= round(output_start + when - source_start, 3) <= output_duration:
+                continue
+            # A pause end just past a frame-snapped edge belongs to this clip at that edge,
+            # unless another clip of the same source plays that instant itself.
+            if not source_start <= when <= source_end and any(
+                    start <= when <= end for start, end in spans_by_source[source_id]):
                 continue
             # Same default as the single-source remap in video-understanding's timeline brief.
             pause = max(source_start, min(float(anchor.get("pause_start", when - 0.12)), when))
@@ -415,9 +432,9 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             item.update(
                 source_id=source_id,
                 source_time=round(when, 3),
-                time=output_time,
-                source_pause_start=round(pause, 3),
-                pause_start=round(output_start + pause - source_start, 3),
+                time=to_output(when),
+                source_pause_start=round(min(pause, source_end), 3),
+                pause_start=to_output(pause),
                 # `time` IS the pause end; keep the source value apart (one clock per field).
                 source_pause_end=round(float(anchor.get("pause_end", when)), 3),
             )
@@ -425,7 +442,7 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             if "expected_time" in anchor:
                 expected = float(anchor["expected_time"])
                 item["source_expected_time"] = round(expected, 3)
-                item["expected_time"] = round(output_start + expected - source_start, 3)
+                item["expected_time"] = to_output(expected)
             mapped_anchors.append(item)
         for rows, destination, require_text in (
             (speech_rows, mapped_speech, True),
@@ -445,8 +462,8 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
                     source_id=source_id,
                     source_start=round(start, 3),
                     source_end=round(end, 3),
-                    start=round(output_start + start - source_start, 3),
-                    end=round(output_start + end - source_start, 3),
+                    start=to_output(start),
+                    end=to_output(end),
                 )
                 destination.append(item)
 

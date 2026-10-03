@@ -1614,6 +1614,55 @@ def _seed_multi_source_speech(work, record):
     )
 
 
+def test_multi_source_anchors_stay_inside_their_own_clip_on_the_output_clock(tmp_path):
+    """A pause end a few ms past a clip's frame-snapped source edge still belongs to that clip:
+    mapped naively it lands inside the NEXT clip (another source) labelled with this one."""
+    work = tmp_path / "project"
+    records = []
+    for source_id, anchors in (
+        ("src_a", [{"time": 12.5, "pause_start": 12.3, "expected_time": 12.52,
+                    "text_tail": "甲的句末。", "confidence": "high"},
+                   {"time": 12.53, "pause_start": 12.52, "text_tail": "甲接续段。", "confidence": "high"}]),
+        ("src_b", [{"time": 29.97, "text_tail": "乙开场前。", "confidence": "high"}]),
+    ):
+        source_dir = work / "sources" / source_id
+        source_dir.mkdir(parents=True)
+        (source_dir / "speech_boundary_anchors.json").write_text(
+            json.dumps({"sentence_anchors": anchors}, ensure_ascii=False), encoding="utf-8")
+        records.append({"source_id": source_id, "source_work_dir": f"sources/{source_id}"})
+    plan = {"clips": [
+        {"source_id": "src_a", "source_start": 10.0, "source_end": 12.48,
+         "output_start": 0.0, "output_end": 2.48},
+        {"source_id": "src_b", "source_start": 30.0, "source_end": 33.0,
+         "output_start": 2.48, "output_end": 5.48},
+        # The same source again from just after the first clip's end.
+        {"source_id": "src_a", "source_start": 12.51, "source_end": 14.0,
+         "output_start": 5.48, "output_end": 6.97},
+    ]}
+    (work / "clip_plan_validated.json").write_text(json.dumps(plan), encoding="utf-8")
+
+    recap_timeline._write_multi_source_output_speech_evidence(work, records, plan)
+
+    anchors = json.loads(
+        (work / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )["sentence_anchors"]
+    by_tail = {}
+    for anchor in anchors:
+        by_tail.setdefault(anchor["text_tail"], []).append(anchor)
+    clip_of = {"src_a": [(0.0, 2.48), (5.48, 6.97)], "src_b": [(2.48, 5.48)]}
+    for anchor in anchors:
+        assert any(lo <= anchor["time"] <= hi for lo, hi in clip_of[anchor["source_id"]]), anchor
+        assert any(lo <= anchor["pause_start"] <= hi for lo, hi in clip_of[anchor["source_id"]]), anchor
+    # 12.5 also sits within the third clip's start tolerance: mapped there at its start edge.
+    assert [a["time"] for a in by_tail["甲的句末。"]] == [2.48, 5.48]
+    end_a = by_tail["甲的句末。"][0]
+    assert (end_a["time"], end_a["pause_start"], end_a["expected_time"]) == (2.48, 2.3, 2.48)
+    assert (end_a["source_time"], end_a["source_expected_time"]) == (12.5, 12.52)
+    assert by_tail["乙开场前。"][0]["time"] == 2.48
+    # 12.53 is within the first clip's edge tolerance but the third clip plays it: one anchor.
+    assert [a["time"] for a in by_tail["甲接续段。"]] == [5.5]
+
+
 def _multi_cut_through_real_validation(work, clip):
     """Pass 2 stubs cut.py's render; pass 3 models cut.py reusing edited_source.mp4, which
     leaves an unchanged clip_plan_validated.json untouched (pinned by the video-cut group).

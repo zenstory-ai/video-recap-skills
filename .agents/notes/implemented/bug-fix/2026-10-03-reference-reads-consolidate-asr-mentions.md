@@ -13,7 +13,8 @@ Status: implemented
 ## Decision
 
 - `reference_check._mention_names` 规定一个 `aliases` / `asr_mentions` 条目贡献哪些名字：字符串原样；字典取 `matched_aliases` 里的字符串（`text` 是 ASR 窗口原文，已经在台词 n-gram 语料里，不当作名字）；其他类型忽略。`name` 也只收字符串。
-- 测试：`tests/reference/test_reference_check.py` 用生产方形状（字符串、带 `matched_aliases` 的字典、缺 `matched_aliases` 的字典、数字、`null` 混排）跑 `run_check`，R6 照常点名；`tests/orchestrator/test_understanding_index_reference_contract.py` 在两个子进程里分别跑 understanding 的 fallback 写出索引、再用 reference 的 `leak_corpus` 读它，钉住跨技能契约。
+- 同一类 `set.update` 还在另外两个入口：`_research_names` 读 `background_research.json` 的 `characters[*].name` 与 `character_details[*].aliases`，`leak_corpus` 读 `asr_timing_evidence.json` 的 `glossary.names`。两处文档形状都是字符串列表，由 Agent 手写，现在只收字符串（`_string_items`），对象、列表、数字忽略；`glossary` 不是对象、调研文件不是对象时不贡献名字。
+- 测试：`tests/reference/test_reference_check.py` 用生产方形状（字符串、带 `matched_aliases` 的字典、缺 `matched_aliases` 的字典、数字、`null` 混排）跑 `run_check`，R6 照常点名；`tests/orchestrator/test_understanding_index_reference_contract.py` 在两个子进程里分别跑 understanding 的 fallback 写出索引、再用 reference 的 `leak_corpus` 读它，钉住跨技能契约；另用对象、列表混入的畸形调研与词表跑 `run_check` 和 `export`，只断言不崩、字符串名字照收。
 
 ## Alternatives considered
 

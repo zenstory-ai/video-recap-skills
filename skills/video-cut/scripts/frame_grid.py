@@ -95,15 +95,35 @@ def _drops_kept_edge(edge, original, ts, keep_ranges):
     return any(ts < end <= original for _, end in keep_ranges)
 
 
-def _pick(edge, original, candidates, windows, classify, keep_ranges):
+# How far a detected shot change may sit from a frame boundary and still count as on it
+# (ffmpeg pts times and clip edges are both rounded to the millisecond).
+_CUT_EPSILON = 0.002
+
+
+def _straddles_cut(edge, ts, candidates, scene_cuts):
+    """Whether choosing `ts` keeps a sliver of the other shot across a source hard cut.
+
+    A start before a cut that lies up to the later candidate opens on the old shot (a flash
+    frame before the cut); an end after a cut that lies from the earlier candidate on closes on
+    the next shot. The candidate at or past the cut (start) or before it (end) does not.
+    """
+    if edge == "start":
+        last = max(candidates)
+        return any(ts + _CUT_EPSILON < cut <= last + _CUT_EPSILON for cut in scene_cuts)
+    first = min(candidates)
+    return any(first - _CUT_EPSILON <= cut < ts - _CUT_EPSILON for cut in scene_cuts)
+
+
+def _pick(edge, original, candidates, windows, classify, keep_ranges, scene_cuts=()):
     """The candidate the gate likes best (then one strictly inside a pause window), then one
-    that keeps required ranges, then the nearest, then the earlier (a deterministic
-    tie-break)."""
+    that keeps required ranges, then one that does not straddle a detected source hard cut
+    (no flash frame), then the nearest, then the earlier (a deterministic tie-break)."""
     return min(
         candidates,
         key=lambda t: (
             *_rank(edge, t, windows, classify),
             _drops_kept_edge(edge, original, t, keep_ranges),
+            _straddles_cut(edge, t, candidates, scene_cuts),
             abs(t - original),
             t,
         ),
@@ -129,12 +149,15 @@ def snap_edges_to_frames(clips, grid, windows, classify, source_duration, *,
     A start that continues the previous clip's source range exactly follows that clip's
     snapped end, so a lossless join stays lossless. Between equally safe candidates the one
     that still covers every `grid["keep_ranges"]` (required-evidence nodes) edge it covered
-    wins. Without a usable source rate the start is left alone, but the length is still a
-    whole number of output frames.
+    wins, then the one that does not straddle a `grid["scene_cuts"]` source hard cut (a start
+    at or after the cut, an end at or before it, so no frame of the other shot flashes).
+    Without a usable source rate the start is left alone, but the length is still a whole
+    number of output frames.
     """
     clips = [dict(c) for c in clips]
     rate, origin, out_rate = grid["source_rate"], grid["origin"], grid["output_rate"]
     keep_ranges = grid.get("keep_ranges", ())
+    scene_cuts = grid.get("scene_cuts", ())
     events = []
     for idx, clip in enumerate(clips):
         start, end = clip["source_start"], clip["source_end"]
@@ -149,7 +172,7 @@ def snap_edges_to_frames(clips, grid, windows, classify, source_duration, *,
             safe = [t for t in options if t >= start or allow_overlap
                     or not _overlaps(clips, idx, t, end)]
             new_start = _pick("start", start, safe or [max(options)], windows, classify,
-                              keep_ranges)
+                              keep_ranges, scene_cuts)
             start_reason = "frame_grid"
         span = (end - new_start) * out_rate
         counts = sorted({max(1, math.floor(span)), max(1, math.ceil(span))})
@@ -159,7 +182,8 @@ def snap_edges_to_frames(clips, grid, windows, classify, source_duration, *,
         ] or [(counts[0], round(new_start + float(counts[0] / out_rate), 3))]
         safe = [(n, t) for n, t in options if t <= end or allow_overlap
                 or not _overlaps(clips, idx, new_start, t)] or options[:1]
-        new_end = _pick("end", end, [t for _, t in safe], windows, classify, keep_ranges)
+        new_end = _pick("end", end, [t for _, t in safe], windows, classify, keep_ranges,
+                        scene_cuts)
         frames = next(n for n, t in safe if t == new_end)
         clip["source_start"], clip["source_end"] = new_start, new_end
         events.append({

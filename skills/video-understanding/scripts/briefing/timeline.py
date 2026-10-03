@@ -204,6 +204,13 @@ def _read_json(path, default):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
+def _source_to_span_output(source_time, span):
+    """`source_time` on one clip span's OUTPUT clock, clamped to that span: the next span on
+    the output timeline plays a different source range."""
+    when = min(max(source_time, span["source_start"]), span["source_end"])
+    return round(min(span["output_start"] + when - span["source_start"], span["output_end"]), 3)
+
+
 def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
     """Load sentence anchors and remap them to cut OUTPUT time when needed."""
     work_dir = Path(work_dir)
@@ -221,38 +228,37 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
     remapped = []
     for anchor in anchors:
         source_time = anchor["time"]
-        for span in spans:
-            if span["source_start"] - 0.05 <= source_time <= span["source_end"] + 0.05:
-                output_time = round(
-                    span["output_start"] + source_time - span["source_start"], 3
-                )
-                # The 0.05 s match slack can carry an anchor past the output's ends (a clip
-                # end frame-snapped 181.42 -> 181.40): narration cannot start there.
-                if not 0 <= output_time <= output_duration:
-                    continue
-                item = dict(anchor)
-                item["source_time"] = round(source_time, 3)
-                item["time"] = output_time
-                # Preserve the measured safe pause in OUTPUT time too, so cut-mode lint
-                # compares one clock.
-                source_pause_start = max(
-                    span["source_start"], min(anchor.get("pause_start", source_time - 0.12), source_time)
-                )
-                item["source_pause_start"] = round(source_pause_start, 3)
-                item["pause_start"] = round(
-                    span["output_start"] + source_pause_start - span["source_start"], 3
-                )
-                # `time` IS the pause end; keep the source value apart so the artifact
-                # never mixes clocks.
-                item["source_pause_end"] = round(anchor.get("pause_end", source_time), 3)
-                item["pause_end"] = item["time"]
-                if "expected_time" in anchor:
-                    expected = float(anchor["expected_time"])
-                    item["source_expected_time"] = round(expected, 3)
-                    item["expected_time"] = round(
-                        span["output_start"] + expected - span["source_start"], 3
-                    )
-                remapped.append(item)
+        # A pause end a few ms past a frame-snapped clip edge belongs to that clip, at the
+        # edge; only when no clip plays the instant itself.
+        owners = [span for span in spans
+                  if span["source_start"] <= source_time <= span["source_end"]] or [
+            span for span in spans
+            if span["source_start"] - 0.05 <= source_time <= span["source_end"] + 0.05]
+        for span in owners:
+            # The 0.05 s match slack can carry an anchor past the output's ends (a clip
+            # end frame-snapped 181.42 -> 181.40): narration cannot start there.
+            unclamped = round(span["output_start"] + source_time - span["source_start"], 3)
+            if not 0 <= unclamped <= output_duration:
+                continue
+            item = dict(anchor)
+            item["source_time"] = round(source_time, 3)
+            item["time"] = _source_to_span_output(source_time, span)
+            # Preserve the measured safe pause in OUTPUT time too, so cut-mode lint
+            # compares one clock.
+            source_pause_start = max(
+                span["source_start"], min(anchor.get("pause_start", source_time - 0.12), source_time)
+            )
+            item["source_pause_start"] = round(min(source_pause_start, span["source_end"]), 3)
+            item["pause_start"] = _source_to_span_output(source_pause_start, span)
+            # `time` IS the pause end; keep the source value apart so the artifact
+            # never mixes clocks.
+            item["source_pause_end"] = round(anchor.get("pause_end", source_time), 3)
+            item["pause_end"] = item["time"]
+            if "expected_time" in anchor:
+                expected = float(anchor["expected_time"])
+                item["source_expected_time"] = round(expected, 3)
+                item["expected_time"] = _source_to_span_output(expected, span)
+            remapped.append(item)
 
     speech_rows = [
         row for row in _read_json(work_dir / "asr_result.json", []) if row["text"]

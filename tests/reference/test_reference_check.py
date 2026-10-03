@@ -270,6 +270,39 @@ def test_consolidate_asr_mention_dicts_feed_the_name_scan_instead_of_crashing(wo
     assert not any(n in corpus_names for n in ("没有别名的条目", "老滕快走"))
 
 
+@pytest.mark.parametrize("malformed", [
+    {"characters": [{"name": {"zh": "庆帝"}}, {"name": ["庆帝"]}, {"name": "林婉儿"}, "庆帝", 3]},
+    {"characters": {"庆帝": "皇帝"},
+     "character_details": {"林婉儿": {"aliases": [{"text": "郡主"}, ["郡主"], None, "婉儿"]},
+                           "五竹": ["蒙眼护卫"], "滕梓荆": None}},
+    ["林婉儿"],
+])
+def test_malformed_research_names_are_ignored_instead_of_crashing(work_dir, breakdown, malformed, tmp_path):
+    # background_research.json is agent-written; a nested object or list where a name or alias
+    # belongs used to reach `set.update` and kill check/export with TypeError.
+    root = work_dir(breakdown, malformed)
+    (root / "asr_timing_evidence.json").write_text(json.dumps(
+        {"status": "AVAILABLE_COARSE", "glossary": {"names": ["范闲", {"name": "庆帝"}, ["庆帝"]]}},
+        ensure_ascii=False), encoding="utf-8")
+
+    report = run_check(root)
+    assert reference.main(["export", "--work-dir", str(root),
+                           "--out", str(tmp_path / "out" / "production_reference.json")]) == 0
+
+    assert not report["errors"], report["errors"]
+    names = leak_corpus([], [], json.loads((root / "asr_timing_evidence.json").read_text(encoding="utf-8")),
+                        malformed)["names"]
+    assert "范闲" in names and all(isinstance(n, str) for n in names)
+    if isinstance(malformed, dict):
+        assert "林婉儿" in names
+    if "character_details" in malformed:
+        assert "婉儿" in names and "郡主" not in names
+
+
+def test_a_glossary_that_is_not_an_object_contributes_no_names():
+    assert leak_corpus([], [], {"glossary": ["范闲"]}, {})["names"] == []
+
+
 def test_warns_without_a_name_source_even_when_facts_list_names(breakdown, measurements, asr_segments):
     evidence = {"status": "AVAILABLE_COARSE"}
     empty_index = {"characters": [], "entities": []}
