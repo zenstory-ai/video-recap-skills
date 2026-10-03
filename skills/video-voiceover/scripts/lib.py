@@ -137,6 +137,8 @@ CONFIG = {
     "tts_segment_tempo_max": 1.20,  # 兼容旧段内 atempo 上限；实际会被累计预算收紧
     "tts_workers": env_int("TTS_WORKERS", 4, minimum=1),  # TTS 并行合成线程数
     "tts_retries": env_int("TTS_RETRIES", 3, minimum=1),  # 单段 TTS 失败重试次数
+    # 段音频时长合理性下限语速（字/秒，拉丁词按 1.5）：比它还慢说明 TTS 多读了内容，按失败重试；0 关闭
+    "tts_min_speech_rate": env_float("TTS_MIN_SPEECH_RATE", 2.5, minimum=0.0),
     "allow_partial_tts": env_bool("ALLOW_PARTIAL_TTS", False),
     "tts_segment_normalize": True,  # 单段 TTS RMS 归一，降低段间忽大忽小
     "tts_segment_target_rms_dbfs": -20.0,
