@@ -276,7 +276,7 @@ The case went through four revision rounds, each written into [`revision-log.jso
 },
 ```
 
-The mechanical pre-delivery checks are in [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json) (loudness, subtitle overflow, release gate) and [`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json):
+The mechanical pre-delivery checks are in [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json) (loudness, per-segment narration integrity, `verdict` / `blocking_codes`) and [`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json):
 
 ```json
 "checks": {

@@ -13,7 +13,9 @@ from extract import (
     parse_frame_number,
 )
 from lib import CONFIG
-from lib import log, api_call, load_prompt, mimo_video_api_call, run_cmd, file_identity
+from lib import (
+    log, api_call, load_prompt, mimo_video_api_call, run_cmd, file_identity, is_moderation_refusal,
+)
 
 # ── Step 4: VLM 视觉分析 ─────────────────────────────────────────────
 
@@ -229,8 +231,14 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
         if not raw_response.strip():
             raise RuntimeError("VLM 连续 3 次返回空内容")
 
+        refused = is_moderation_refusal(raw_response)
+        if refused:
+            # A moderation refusal is not a scene description; record the scene as unreadable.
+            log(f"  场景 {i+1} 被 MiMo 内容审核拒绝，记为无法识别")
         # 解析 【描述】、【帧标签】和【深层分析】
-        description, depth_analysis, frame_facts = _parse_vlm_depth_response(raw_response)
+        description, depth_analysis, frame_facts = _parse_vlm_depth_response(
+            "" if refused else raw_response
+        )
 
         result = {
             "scene_id": i,
@@ -241,6 +249,8 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
         }
         if frame_facts:
             result["frame_facts"] = frame_facts
+        if refused:
+            result["analysis_status"] = "moderation_refused"
 
         return i, result
 

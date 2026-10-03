@@ -18,7 +18,7 @@ Status: implemented
 - video-voiceover `lib.CONFIG` 删去 `tts_dynamic_params`，`tts_settings_payload` 不再带这个键。MiMo 与 Fish 段落总是走 `_compute_tts_params`（按位置与标点给语速/音高），index-tts 仍用 provider 默认值。
 - `voiceover.py` 只从 `tts_audio` 导入自己调用的 `_maybe_normalize_tts_wav`，不再转导出；归一化测试直接从 `tts_audio` 取 `_normalize_tts_wav_rms`。
 - 测试：删掉 `test_build_audio_filter_complex_explicit_modes`，去掉各处对 `ducking_mode` / `tts_dynamic_params` 的 `setitem`；唯一写死 `"+0%"` 期望的用例改为按 `_compute_tts_params` 算期望值；新增 `test_mimo_preparation_always_derives_rate_and_pitch_from_content` 断言三段的具体语速/音高，并断言设置载荷里没有该键。`test_audio_policy_parity.py` 的 `MIX_KEYS` 去掉七个键。
-- `examples/guohuo-60s/assembly_manifest.json` 是历史运行的产物，不改。
+- `examples/guohuo-60s/assembly_manifest.json` 是历史运行的产物，不改。后来改为删掉这些不再写入的键、数值不动，见 [[2026-10-02-guohuo-example-snapshots-follow-current-schema]]。
 
 ## Alternatives considered
 

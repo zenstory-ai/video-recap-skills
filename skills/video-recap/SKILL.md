@@ -101,6 +101,7 @@ TTS 供应商由 `--tts-provider mimo-tts|fish-audio|index-tts`（或 `TTS_PROVI
 
 若能识别影片、剧集或主题，先按 video-understanding 技能的调研指南 `research-guide.md` 调研并写入
 `work_dir/background_research.json`。视频理解会把人物名和剧情背景折入 VLM 上下文，避免只得到“黑衣男子”一类模糊描述。无法识别来源时可跳过。
+多视频运行同样写在项目 `work_dir` 下：recap 在每个来源理解前把它复制到 `sources/<source_id>/`（来源目录里没有、或比项目文件旧时才复制，所以某一集需要单独的调研时，在项目文件之后写入该来源目录即可）。
 
 ### 4.2 分析并暂停创作
 
