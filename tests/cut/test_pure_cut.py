@@ -263,7 +263,7 @@ def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
     joined = " ".join(ffmpeg_cmd)
     # Trim points sit half a source frame early; each segment is cut to exact whole frames.
     assert "[0:v]trim=start=0.000000:end=0.983333" in joined
-    assert "fps=30,tpad=stop_mode=clone:stop=1,trim=end_frame=30" in joined
+    assert "fps=30,tpad=stop_mode=clone:stop=-1,trim=end_frame=30" in joined
     assert "atrim=start=0.000000:end=1.000000" in joined
     assert "concat=n=2" in joined
     assert ffmpeg_cmd[ffmpeg_cmd.index("-pix_fmt") + 1] == "yuv420p"

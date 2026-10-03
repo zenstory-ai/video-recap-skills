@@ -32,8 +32,9 @@ def _grid(source_rate, output_rate=None, origin=0.0):
 
 def _snap(spans, grid, windows=(), speech=(), duration=100.0, allow_overlap=False, joined=None):
     clips = normalize_clip_plan([{"start": s, "end": e} for s, e in spans], duration)["clips"]
+    classify = sentence_boundaries._edge_classifier(list(windows), list(speech), duration, 0.05)
     return frame_grid.snap_edges_to_frames(
-        clips, grid, list(windows), list(speech), duration, allow_overlap=allow_overlap,
+        clips, grid, list(windows), classify, duration, allow_overlap=allow_overlap,
         joined_to_previous=joined or [False] * len(clips))
 
 
@@ -49,11 +50,15 @@ def test_parse_frame_rate_rejects_unknown_and_timebase_rates(text, expected):
     ({"r_frame_rate": "50/1", "avg_frame_rate": "25/1"}, "25/1"),  # interlaced: field rate
     ({"r_frame_rate": "30000/1001", "avg_frame_rate": "29876/1000"}, "30000/1001"),  # phone VFR
     ({"r_frame_rate": "24/1"}, "24/1"),
+    # VFR phone clip whose nominal rate is far above its real average: not 60 fps CFR.
+    ({"r_frame_rate": "60/1", "avg_frame_rate": "29600/1000"}, "30/1"),
 ])
 def test_probed_frame_grid_uses_frames_not_fields(stream, expected):
     geometry = media_geometry._geometry_from_stream(
         {"width": 320, "height": 240, "start_time": "1.5", **stream}, format_start="1.4")
     assert geometry.facts["frame_rate"] == expected
+    # The canvas fps bucket follows the same grid, not the field or nominal rate.
+    assert geometry[2] == pytest.approx(float(Fraction(expected)), abs=1e-3)
     assert geometry.facts["video_start_offset"] == pytest.approx(0.1)
 
 
@@ -126,6 +131,64 @@ def test_frame_snap_does_not_shrink_a_clip_off_a_required_evidence_edge(monkeypa
     cut_cli.main()
     plan = json.loads((tmp_path / "clip_plan_validated.json").read_text(encoding="utf-8"))
     assert plan["qc"]["required_evidence"]["selection_status"] != "BLOCK"
+
+
+def _snap_with_gate(tmp_path, spans, rate, speech, duration=10.0, origin=0.0):
+    """snap_source_clips (frame pass + gate only) against an ASR transcript of `speech`."""
+    (tmp_path / "asr_clean.json").write_text(json.dumps({"segments": [
+        {"start": a, "end": b, "text": "完整的一句台词"} for a, b in speech]}), encoding="utf-8")
+    plan = normalize_clip_plan([{"start": a, "end": b} for a, b in spans], duration)
+    return sentence_boundaries.snap_source_clips(
+        plan, tmp_path / "v.mp4", duration, tmp_path, line_max_extend=0.5, scene_margin=0.5,
+        scene_threshold=0.4, start_max_prepend=0.5, start_max_trim=0.35, do_line_snap=False,
+        do_scene_snap=False, frame_grid=_grid(rate, origin=origin))
+
+
+def _edge_status(plan, edge, clip_id=0):
+    return next(c for c in plan["qc"]["boundary_status"]["sentence_checks"]
+                if c["edge"] == edge and c["clip_id"] == clip_id)
+
+
+@pytest.mark.parametrize("rate", [24, 25, 30])
+def test_frame_snap_never_turns_a_gate_safe_edge_into_a_blocked_one(tmp_path, rate):
+    """2.055 clears speech [0, 2] by more than the gate's 50 ms; the nearest frame (2.04 at
+    25 fps) does not, so the frame pass must pick the frame on the safe side."""
+    out = _snap_with_gate(tmp_path, [(0.0, 2.055)], rate, [(0.0, 2.0), (3.0, 10.0)])
+    assert out["clips"][0]["source_end"] > 2.05
+    assert _edge_status(out, "end")["status"] == "safe"
+    assert "blocking" not in out["qc"]
+
+
+@pytest.mark.parametrize("rate", [24, 25, 29.97, 30, 50])
+def test_nearest_safe_suggestion_survives_frame_snap_and_the_gate(tmp_path, rate):
+    rate = frame_grid.canvas_frame_rate(rate)
+    speech = [(0.0, 2.0), (3.0, 10.0)]
+    blocked = _snap_with_gate(tmp_path, [(0.0, 1.5)], rate, speech)
+    after = _edge_status(blocked, "end")["nearest_safe"]["after"]["time"]
+    retried = _snap_with_gate(tmp_path, [(0.0, after)], rate, speech)
+    assert _edge_status(retried, "end")["status"] == "safe"
+    assert "blocking" not in retried["qc"]
+
+
+def test_a_start_at_the_file_start_stays_a_source_start_when_video_begins_later(tmp_path):
+    """A source whose first video frame is 0.1 s in: a start at 0.0 snaps onto that frame and
+    is still the source start, even though speech covers the opening."""
+    out = _snap_with_gate(tmp_path, [(0.0, 2.5)], 25, [(0.0, 2.0)], origin=0.1)
+    assert out["clips"][0]["source_start"] == 0.1
+    assert _edge_status(out, "start")["reason"] == "source_start"
+
+
+def test_output_timeline_follows_cumulative_frames_at_ntsc_rates():
+    plan = normalize_clip_plan([{"start": i * 10.0, "end": i * 10.0 + 1.0} for i in range(30)],
+                               400.0)
+    frame_grid.record_frame_grid(plan, {"frame_rate": "30000/1001", "sources": []})
+    rate = Fraction(30000, 1001)
+    frames = 0
+    for clip in plan["clips"]:
+        assert clip["output_start"] == round(float(frames / rate), 3)
+        frames += clip["frame_count"]
+    assert plan["total_duration"] == plan["qc"]["frame_grid"]["duration"]
+    assert plan["clips"][-1]["output_end"] == plan["total_duration"]
 
 
 def test_unknown_source_rate_still_renders_whole_output_frames():
@@ -230,12 +293,14 @@ def test_cut_main_records_frame_aligned_clips_and_frame_grid(monkeypatch, tmp_pa
     assert len(plan["qc"]["boundary_status"]["frame_snaps"]) == 2
 
 
-def _make_source(path, size, rate, duration, audio=True):
+def _make_source(path, size, rate, duration, audio=True, audio_duration=None):
+    """Synthetic source; `audio_duration` longer than `duration` leaves the video stream short."""
     cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi",
            "-i", f"testsrc=size={size}:rate={rate}:duration={duration}"]
     if audio:
-        cmd += ["-f", "lavfi", "-i", f"sine=frequency=440:sample_rate=48000:duration={duration}",
-                "-shortest"]
+        cmd += ["-f", "lavfi", "-i",
+                f"sine=frequency=440:sample_rate=48000:duration={audio_duration or duration}"]
+        cmd += [] if audio_duration else ["-shortest"]
     subprocess.run(cmd + ["-pix_fmt", "yuv420p", str(path)], check=True, capture_output=True)
 
 
@@ -286,3 +351,26 @@ def test_off_grid_plan_renders_constant_frame_rate_with_exact_frame_count(
     assert len(times) == round(plan["total_duration"] * rate) == plan["qc"]["frame_grid"]["frame_count"]
     deltas = {round(b - a, 4) for a, b in zip(times, times[1:])}
     assert deltas == {round(float(1 / rate), 4)}
+
+
+@_REAL_FFMPEG
+def test_clip_past_the_end_of_a_short_video_stream_still_renders_every_frame(
+        monkeypatch, tmp_path):
+    """Real ffmpeg: 9.8 s of video under 10 s of audio. The clip ending at the container end
+    used to render four frames short (a 0.2 s hole mid-stream when it played first)."""
+    if not _HAVE_FFMPEG:
+        pytest.fail("RECAP_REQUIRE_FFMPEG is set but ffmpeg/ffprobe is not installed")
+    work = tmp_path / "work"
+    work.mkdir()
+    source = tmp_path / "a.mp4"
+    _make_source(source, "320x240", 25, 9.8, audio_duration=10)
+    (work / "clip_plan.json").write_text(json.dumps(
+        {"clips": [{"start": 8.0, "end": 10.0}, {"start": 1.0, "end": 3.0}]}), encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["cut.py", str(source), "--work-dir", str(work)])
+
+    cut_cli.main()
+
+    plan = json.loads((work / "clip_plan_validated.json").read_text(encoding="utf-8"))
+    times = _video_packet_times(work / "edited_source.mp4")
+    assert len(times) == plan["qc"]["frame_grid"]["frame_count"] == 100
+    assert {round(b - a, 4) for a, b in zip(times, times[1:])} == {0.04}

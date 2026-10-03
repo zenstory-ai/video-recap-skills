@@ -2,7 +2,7 @@
 
 import json
 
-from frame_grid import output_frame_rate
+from frame_grid import canvas_frame_rate, output_frame_rate
 from lib import run_cmd
 
 
@@ -63,11 +63,20 @@ def _frame_rate_text(stream):
 
     Interlaced streams often report the field rate as r_frame_rate (50/1 for 25 frames a
     second); when r_frame_rate is exactly twice avg_frame_rate the average is the grid.
+    A variable-rate phone clip can report r_frame_rate well above its real average (60/1
+    for ~29.6 frames a second); rendering that at 60 fps CFR would double every frame, so
+    the common rate nearest the average is used instead.
     """
     r_rate = stream.get("r_frame_rate", "0/0")
     avg = stream.get("avg_frame_rate", "0/0")
-    if _fps_from_rate(avg) > 0 and abs(_fps_from_rate(r_rate) / _fps_from_rate(avg) - 2) < 0.01:
-        return avg
+    avg_fps = _fps_from_rate(avg)
+    if 0 < avg_fps <= 120:
+        ratio = _fps_from_rate(r_rate) / avg_fps
+        if abs(ratio - 2) < 0.01:
+            return avg
+        if ratio > 1.5:
+            rate = canvas_frame_rate(_fps_bucket(avg_fps))
+            return f"{rate.numerator}/{rate.denominator}"
     return r_rate
 
 
@@ -102,9 +111,9 @@ def _geometry_from_stream(stream, format_start=0.0):
         display_width, display_height = display_height, display_width
 
     width, height = _clamp_even_geometry(round(display_width), round(display_height))
-    fps = _fps_from_rate(stream["r_frame_rate"]) or _fps_from_rate(
-        stream.get("avg_frame_rate", "0/0")
-    )
+    frame_rate = _frame_rate_text(stream)
+    # The canvas fps bucket follows the same frame grid (not an interlaced field rate).
+    fps = _fps_from_rate(frame_rate) or _fps_from_rate(stream.get("avg_frame_rate", "0/0"))
     if not 0 < fps <= 120:
         fps = 30.0
     facts = {
@@ -114,7 +123,7 @@ def _geometry_from_stream(stream, format_start=0.0):
         "height": height,
         "fps": round(fps, 3),
         # Exact rate and first-frame time: the grid video-cut snaps clip edges onto.
-        "frame_rate": _frame_rate_text(stream),
+        "frame_rate": frame_rate,
         "video_start_offset": _video_start_offset(stream, format_start),
         "sample_aspect_ratio": stream.get("sample_aspect_ratio", "1:1"),
         "sample_aspect_ratio_float": round(sar, 6),

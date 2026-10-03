@@ -47,14 +47,15 @@ def _video_segment_filter(label_in, label_out, start, end, frames, out_rate, sou
 
     The trim points sit half a source frame early so the frame ON a grid edge is selected
     despite millisecond rounding or container pts jitter. fps resamples onto the output
-    grid, one cloned tail frame covers a resampled segment that came up a frame short, and
-    the final trim cuts to the exact count, so every segment advances the concat by whole
-    frames and edited_source.mp4 stays constant frame rate.
+    grid; tpad clones the last frame without limit, covering a segment that came up short
+    (one frame from resampling, or many when the clip runs past the end of a video stream
+    shorter than its audio); and the final trim cuts to the exact count, so every segment
+    advances the concat by whole frames and edited_source.mp4 stays constant frame rate.
     """
     half = 0.5 / source_rate if source_rate else 0.0
     return (
         f"{label_in}trim=start={max(0.0, start - half):.6f}:end={end - half:.6f},"
-        f"setpts=PTS-STARTPTS,{norm}fps={out_rate},tpad=stop_mode=clone:stop=1,"
+        f"setpts=PTS-STARTPTS,{norm}fps={out_rate},tpad=stop_mode=clone:stop=-1,"
         f"trim=end_frame={frames},setpts=PTS-STARTPTS{label_out}"
     )
 

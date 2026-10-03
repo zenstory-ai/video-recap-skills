@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from frame_grid import snap_edges_to_frames
+from frame_grid import edge_frame_snapper, snap_edges_to_frames
 from lib import log
 
 
@@ -173,10 +173,17 @@ def _continuous_source_join(left, right, tolerance=0.05):
 
 # How far either side of a blocked edge the gate looks for a safe edge to suggest.
 _SAFE_EDGE_SEARCH_SECONDS = 5.0
+# How close to a pause window or speech span an edge counts as on it.
+_GATE_TOLERANCE = 0.05
 
 
-def _edge_classifier(boundary_windows, speech_spans, video_duration, tolerance):
-    """classify(edge, ts, contiguous) -> (status, reason) under the sentence-boundary gate."""
+def _edge_classifier(boundary_windows, speech_spans, video_duration, tolerance,
+                     video_start=0.0):
+    """classify(edge, ts, contiguous) -> (status, reason) under the sentence-boundary gate.
+
+    `video_start` is the source's first video frame (seconds after the file start): a clip
+    cannot start any earlier on the picture, so a start up to it is the source start.
+    """
     verified_windows = [row for row in boundary_windows if not _unverified_window(row)]
     unverified_windows = [row for row in boundary_windows if _unverified_window(row)]
 
@@ -184,7 +191,7 @@ def _edge_classifier(boundary_windows, speech_spans, video_duration, tolerance):
         return any(row["start"] - tolerance <= ts <= row["end"] + tolerance for row in rows)
 
     def classify(edge, ts, contiguous=False):
-        if edge == "start" and ts <= tolerance:
+        if edge == "start" and ts <= video_start + tolerance:
             return "safe", "source_start"
         if edge == "end" and ts >= video_duration - tolerance:
             return "safe", "source_end"
@@ -205,12 +212,14 @@ def _edge_classifier(boundary_windows, speech_spans, video_duration, tolerance):
 
 
 def _nearest_safe_edges(classify, edge, clip, boundary_windows, speech_spans, video_duration,
-                        tolerance):
+                        tolerance, frame_snap=None):
     """The closest safe edge times before and after a blocked edge, within the search span.
 
     Candidates are pause-window bounds, the first instants clear of a speech span (past the
     gate tolerance), and the source start/end; each is re-checked with the gate itself and
-    must leave the clip a positive length.
+    must leave the clip a positive length. With `frame_snap(edge, clip, ts)` (where the
+    frame-grid pass would move that edge) a candidate is reported only when its
+    frame-aligned landing is safe too, so sending it back cannot be blocked again.
     """
     ts = clip["source_start"] if edge == "start" else clip["source_end"]
 
@@ -232,6 +241,8 @@ def _nearest_safe_edges(classify, edge, clip, boundary_windows, speech_spans, vi
         status, reason = classify(edge, when)
         if status != "safe":
             continue
+        if frame_snap is not None and classify(edge, frame_snap(edge, clip, when))[0] != "safe":
+            continue
         if when < ts:
             found["before"] = {"time": when, "reason": reason, "delta": round(when - ts, 3)}
         elif when > ts and found["after"] is None:
@@ -240,19 +251,22 @@ def _nearest_safe_edges(classify, edge, clip, boundary_windows, speech_spans, vi
 
 
 def enforce_clip_sentence_boundaries(
-    plan, boundary_windows, speech_spans, video_duration, tolerance=0.05
+    plan, boundary_windows, speech_spans, video_duration, tolerance=_GATE_TOLERANCE,
+    video_start=0.0, frame_snap=None,
 ):
     """Block any audible clip edge that falls inside detected source speech.
 
-    Safe edges are: source start/end, a sentence/quiet pause (`unverified_sentence_boundary`
-    when only a coarse-ASR sentence estimate covers it), or a truly contiguous same-source
-    join (no media is removed). Missing ASR timing degrades to `unchecked` rather than
-    inventing speech. Once ASR says an edge is speech-owned, failure to snap is blocking,
-    and the check names the nearest safe edge times on either side (`nearest_safe`).
+    Safe edges are: source start (up to the first video frame, `video_start`) and end, a
+    sentence/quiet pause (`unverified_sentence_boundary` when only a coarse-ASR sentence
+    estimate covers it), or a truly contiguous same-source join (no media is removed).
+    Missing ASR timing degrades to `unchecked` rather than inventing speech. Once ASR says
+    an edge is speech-owned, failure to snap is blocking, and the check names the nearest
+    safe edge times on either side (`nearest_safe`, frame-checked through `frame_snap`).
     """
     clips = plan["clips"]
     checks, new_blockers = [], []
-    classify = _edge_classifier(boundary_windows, speech_spans, video_duration, tolerance)
+    classify = _edge_classifier(boundary_windows, speech_spans, video_duration, tolerance,
+                                video_start)
 
     for idx, clip in enumerate(clips):
         for edge, ts in (("start", clip["source_start"]), ("end", clip["source_end"])):
@@ -277,7 +291,7 @@ def enforce_clip_sentence_boundaries(
             if status == "blocking":
                 check["nearest_safe"] = _nearest_safe_edges(
                     classify, edge, clip, boundary_windows, speech_spans, video_duration,
-                    tolerance,
+                    tolerance, frame_snap,
                 )
             checks.append(check)
             if status == "blocking":
@@ -675,16 +689,24 @@ def snap_source_clips(
         )
         plan = snap_clip_ends_to_lines(plan, boundaries, duration, line_max_extend)
     speech_spans = _load_source_speech_spans(work_dir, source_id, source_work_dir)
-    if frame_grid is not None:
-        clips = plan["clips"]
-        joined = [idx > 0 and _continuous_source_join(clips[idx - 1], clip)
-                  for idx, clip in enumerate(clips)]
-        clips, events = snap_edges_to_frames(
-            clips, frame_grid, boundaries, speech_spans, duration,
-            allow_overlap=plan["allow_overlap"], joined_to_previous=joined,
-        )
-        plan = _plan_with_snapped_clips(plan, clips, "frame_snaps", events)
-    return enforce_clip_sentence_boundaries(plan, boundaries, speech_spans, duration)
+    if frame_grid is None:
+        return enforce_clip_sentence_boundaries(plan, boundaries, speech_spans, duration)
+    video_start = frame_grid["origin"]
+    classify = _edge_classifier(boundaries, speech_spans, duration, _GATE_TOLERANCE,
+                                video_start)
+
+    clips = plan["clips"]
+    joined = [idx > 0 and _continuous_source_join(clips[idx - 1], clip)
+              for idx, clip in enumerate(clips)]
+    clips, events = snap_edges_to_frames(
+        clips, frame_grid, boundaries, classify, duration,
+        allow_overlap=plan["allow_overlap"], joined_to_previous=joined,
+    )
+    plan = _plan_with_snapped_clips(plan, clips, "frame_snaps", events)
+    return enforce_clip_sentence_boundaries(
+        plan, boundaries, speech_spans, duration, video_start=video_start,
+        frame_snap=edge_frame_snapper(frame_grid, boundaries, classify, duration),
+    )
 
 
 def snap_multi_source_clips(plan, sources, work_dir, frame_grids=None, **snap_options):

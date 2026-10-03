@@ -14,7 +14,7 @@ description: >
 
 1. 校验并补全 `clip_plan.json`，写出带 `clip_id`、原片/输出时间与时长的 `clip_plan_validated.json`。
 2. 先避开原片硬切附近的闪帧风险，再把边界吸附到可靠句末/自然停顿；声音完整性拥有最终优先级。
-3. 把每个入点对齐到源视频帧网格、每段时长对齐到整数个输出帧（不足一帧的移动，优先选仍在停顿内的一侧），句界门禁检查的是对齐后的边界。
+3. 把每个入点对齐到源视频帧网格、每段时长对齐到整数个输出帧（不足一帧的移动，优先选句界门禁仍判为安全、仍在停顿内的一侧），句界门禁检查的是对齐后的边界。
 4. 拼接选定区间，输出恒定帧率的 `edited_source.mp4`，帧数与 `clip_plan_validated.json` 记录的一致。
 5. 到此停止，由 Agent 按真实输出时间线写 `narration.json`；本工具不读取旁白，也不做原片→输出映射。
 
@@ -93,7 +93,7 @@ python3 scripts/cut.py <video> --work-dir <work_dir> [--clip-plan <clip_plan.jso
 
 cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.json` 的 `qc.blocking`，每项带 `code`：
 
-- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。被阻断的边界带 `nearest_safe: {"before", "after"}`：前后 5 秒内最近的安全边界 `{time, reason, delta}`（原片秒；`delta` 为相对当前边界的秒数，没有则为 `null`），按它改 `clip_plan.json` 的 `start`/`end` 后重跑。入点往前（`before`）是多保留、往后（`after`）是裁掉，出点相反；先确认改动不会切掉必保内容或与相邻片段重叠。两侧都是 `null` 说明附近没有停顿，要换区间而不是微调。
+- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。被阻断的边界带 `nearest_safe: {"before", "after"}`：前后 5 秒内最近的安全边界 `{time, reason, delta}`（原片秒；`delta` 为相对当前边界的秒数，没有则为 `null`；已按帧对齐复核过，原样写回不会再被阻断），按它改 `clip_plan.json` 的 `start`/`end` 后重跑。入点往前（`before`）是多保留、往后（`after`）是裁掉，出点相反；先确认改动不会切掉必保内容或与相邻片段重叠。两侧都是 `null` 说明附近没有停顿，要换区间而不是微调。
 - `target_duration_drift`：时长偏差超出阻断阈值；明细见 `qc.target_duration`。
 - `REQUIRED_EVIDENCE_INVALID` / `REQUIRED_EVIDENCE_MISSING` / `REQUIRED_EVIDENCE_ORDER` / `REQUIRED_EVIDENCE_AUDIO_UNAVAILABLE`：必保证据声明无效、缺段、错序或源无音轨；明细见 `qc.required_evidence`。
 

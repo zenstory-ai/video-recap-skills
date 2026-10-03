@@ -9,7 +9,7 @@ cut 门禁阻断 `unsafe_clip_sentence_boundary` 时只写出边界时间、`sta
 ## Decision
 
 - `enforce_clip_sentence_boundaries` 的判定抽成 `_edge_classifier`，同一个函数既判定边界，也复核建议。
-- 被阻断的边界在 `qc.boundary_status.sentence_checks`（以及 `qc.blocking` 的同一项）里带 `nearest_safe: {"before", "after"}`。候选是停顿窗（静音窗与句末锚点）的两端、每个讲话区间外侧刚好超出门禁容差的时刻（±0.06 s）、源头和源尾；逐个用门禁复核为 `safe` 的才算，取 `_SAFE_EDGE_SEARCH_SECONDS = 5.0` 秒内离当前边界最近的前后各一个，写 `{time, reason, delta}`，没有则为 `null`。
+- 被阻断的边界在 `qc.boundary_status.sentence_checks`（以及 `qc.blocking` 的同一项）里带 `nearest_safe: {"before", "after"}`。候选是停顿窗（静音窗与句末锚点）的两端、每个讲话区间外侧刚好超出门禁容差的时刻（±0.06 s）、源头和源尾；逐个用门禁复核为 `safe` 的才算；有帧网格时（cut 的正常路径），还要用 `frame_grid.edge_frame_snapper` 把候选按帧对齐的同一套规则移一次、再过门禁，对齐后仍 `safe` 才报告（24/25fps 下讲话尾 +0.06 s 的候选会被对齐到容差内，不复核就会"按建议改了又被阻断"），取 `_SAFE_EDGE_SEARCH_SECONDS = 5.0` 秒内离当前边界最近的前后各一个，写 `{time, reason, delta}`，没有则为 `null`。
 - 建议只看声音安全，不考虑片段重叠、最短时长和必保证据；这些由重跑时的既有校验负责。`video-cut/SKILL.md` 说明怎么用，`data-schema.md` 给出形状。
 
 ## Alternatives considered
@@ -20,4 +20,4 @@ cut 门禁阻断 `unsafe_clip_sentence_boundary` 时只写出边界时间、`sta
 ## Consequences
 
 - **收益**：被阻断的边界一次给出可用的修改目标，`before`/`after` 都为 `null` 时直接说明附近没有停顿，要换区间。
-- **代价**：`sentence_checks` 的阻断项变长；候选数与停顿窗、讲话区间数量成正比，每个阻断边界一次线性扫描。
+- **代价**：`sentence_checks` 的阻断项变长；候选数与停顿窗、讲话区间数量成正比，每个阻断边界一次线性扫描，有帧网格时每个门禁放行的候选再做一次单片段帧对齐。

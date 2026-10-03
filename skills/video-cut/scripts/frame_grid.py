@@ -69,13 +69,19 @@ def source_frame_grids(geometry_qc):
     }
 
 
-def _rank(ts, windows, speech_spans):
-    """0 inside a sentence/quiet window, 1 outside detected speech, 2 inside speech."""
-    if any(w["start"] - _INSIDE_EPSILON <= ts <= w["end"] + _INSIDE_EPSILON for w in windows):
-        return 0
-    if not any(s["start"] < ts < s["end"] for s in speech_spans):
-        return 1
-    return 2
+# Gate statuses from sentence_boundaries' edge classifier, safest first.
+_GATE_ORDER = {"safe": 0, "unchecked": 1, "blocking": 2}
+
+
+def _rank(edge, ts, windows, classify):
+    """(gate status, 0 strictly inside a sentence/quiet window else 1).
+
+    `classify(edge, ts)` is the sentence-boundary gate itself, so a sub-frame move never
+    turns an edge the gate passes into one it blocks.
+    """
+    strict = any(w["start"] - _INSIDE_EPSILON <= ts <= w["end"] + _INSIDE_EPSILON
+                 for w in windows)
+    return _GATE_ORDER[classify(edge, ts)[0]], 0 if strict else 1
 
 
 def _drops_kept_edge(edge, original, ts, keep_ranges):
@@ -89,13 +95,14 @@ def _drops_kept_edge(edge, original, ts, keep_ranges):
     return any(ts < end <= original for _, end in keep_ranges)
 
 
-def _pick(edge, original, candidates, windows, speech_spans, keep_ranges):
-    """The safest candidate, then one that keeps required ranges, then the nearest, then the
-    earlier (a deterministic tie-break)."""
+def _pick(edge, original, candidates, windows, classify, keep_ranges):
+    """The candidate the gate likes best (then one strictly inside a pause window), then one
+    that keeps required ranges, then the nearest, then the earlier (a deterministic
+    tie-break)."""
     return min(
         candidates,
         key=lambda t: (
-            _rank(t, windows, speech_spans),
+            *_rank(edge, t, windows, classify),
             _drops_kept_edge(edge, original, t, keep_ranges),
             abs(t - original),
             t,
@@ -111,14 +118,14 @@ def _overlaps(clips, idx, start, end):
     )
 
 
-def snap_edges_to_frames(clips, grid, windows, speech_spans, source_duration, *,
+def snap_edges_to_frames(clips, grid, windows, classify, source_duration, *,
                          allow_overlap, joined_to_previous):
     """Snap every clip of ONE source onto the frame grid; returns (clips, events).
 
     The start moves to the nearest source frame boundary and the end to the nearest whole
     number of output frames after it, each choosing between the two neighbouring candidates
-    the one that stays inside a pause window (or outside detected speech) when the original
-    did. A start that continues the previous clip's source range exactly follows that clip's
+    the one the sentence-boundary gate `classify(edge, ts) -> (status, reason)` rates safest
+    (safe, then unchecked, then blocking), preferring one strictly inside a pause window. A start that continues the previous clip's source range exactly follows that clip's
     snapped end, so a lossless join stays lossless. Between equally safe candidates the one
     that still covers every `grid["keep_ranges"]` (required-evidence nodes) edge it covered
     wins. Without a usable source rate the start is left alone, but the length is still a
@@ -140,7 +147,7 @@ def snap_edges_to_frames(clips, grid, windows, speech_spans, source_duration, *,
             options = [round(origin + float(k / rate), 3) for k in sorted(ks)]
             safe = [t for t in options if t >= start or allow_overlap
                     or not _overlaps(clips, idx, t, end)]
-            new_start = _pick("start", start, safe or [max(options)], windows, speech_spans,
+            new_start = _pick("start", start, safe or [max(options)], windows, classify,
                               keep_ranges)
             start_reason = "frame_grid"
         span = (end - new_start) * out_rate
@@ -151,7 +158,7 @@ def snap_edges_to_frames(clips, grid, windows, speech_spans, source_duration, *,
         ] or [(counts[0], round(new_start + float(counts[0] / out_rate), 3))]
         safe = [(n, t) for n, t in options if t <= end or allow_overlap
                 or not _overlaps(clips, idx, new_start, t)] or options[:1]
-        new_end = _pick("end", end, [t for _, t in safe], windows, speech_spans, keep_ranges)
+        new_end = _pick("end", end, [t for _, t in safe], windows, classify, keep_ranges)
         frames = next(n for n, t in safe if t == new_end)
         clip["source_start"], clip["source_end"] = new_start, new_end
         events.append({
@@ -167,13 +174,38 @@ def snap_edges_to_frames(clips, grid, windows, speech_spans, source_duration, *,
     return clips, events
 
 
+def edge_frame_snapper(grid, windows, classify, source_duration):
+    """frame_snap(edge, clip, ts): where snap_edges_to_frames puts `clip`'s edge moved to ts.
+
+    The gate uses it to check a suggested edge time after frame alignment, not before.
+    """
+    def frame_snap(edge, clip, when):
+        key = "source_start" if edge == "start" else "source_end"
+        moved = {**clip, key: when}
+        if moved["source_end"] <= moved["source_start"]:
+            return when
+        snapped, _ = snap_edges_to_frames([moved], grid, windows, classify, source_duration,
+                                          allow_overlap=True, joined_to_previous=[False])
+        return snapped[0][key]
+
+    return frame_snap
+
+
 def record_frame_grid(plan, geometry_qc):
-    """Stamp each clip's frame_count and qc.frame_grid; the render draws exactly these frames."""
+    """Stamp each clip's frame_count and qc.frame_grid; the render draws exactly these frames.
+
+    The output timeline (output_start/output_end, total_duration) is rewritten from the
+    cumulative frame count, so it matches the render instead of drifting by the per-clip
+    millisecond rounding (a 29.97 fps frame is 33.367 ms).
+    """
     out_rate = Fraction(geometry_qc["frame_rate"])
     total = 0
     for clip in plan["clips"]:
         clip["frame_count"] = frame_count(clip["duration"], out_rate)
+        clip["output_start"] = round(float(total / out_rate), 3)
         total += clip["frame_count"]
+        clip["output_end"] = round(float(total / out_rate), 3)
+    plan["total_duration"] = round(float(total / out_rate), 3)
     plan.setdefault("qc", {})["frame_grid"] = {
         "output_frame_rate": geometry_qc["frame_rate"],
         "frame_count": total,
