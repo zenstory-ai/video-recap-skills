@@ -139,15 +139,25 @@ def _generate_source_storyboard(
     return result
 
 
-def _multi_source_frame_sets(work_dir, plan_sources):
+def _multi_source_frame_sets(work_dir, plan_sources, clips=None):
     """{source_id: {paths, numbers, fps, source_path}} for a multi-source validated plan.
 
     Each source's frames live in its own work_dir (`sources.<id>.source_work_dir`, relative to
     the project work_dir) at the fps recorded in that source's frames manifest — sources of
-    different lengths are extracted at different fps. A source without frames is left out.
+    different lengths are extracted at different fps. A source without frames is left out, and
+    so is one no clip in `clips` uses (when given): it would not appear on the sheet, yet it
+    would enter the cache key.
     """
+    used = None if clips is None else {
+        clip.get("source_id") for clip in clips if isinstance(clip, dict)
+    }
     frame_sets = {}
     for source_id, source in plan_sources.items():
+        if used is not None and source_id not in used:
+            continue
+        if not isinstance(source, dict):
+            log(f"storyboard edited：来源 {source_id} 不是对象，跳过")
+            continue
         rel = source.get("source_work_dir")
         if not rel:
             log(f"storyboard edited：来源 {source_id} 未登记 source_work_dir，跳过")
@@ -196,9 +206,13 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
         return None
     plan_sources = clip_plan_validated.get("sources")
     if isinstance(plan_sources, dict) and plan_sources:
-        frame_sets = _multi_source_frame_sets(work_dir, plan_sources)
+        clips = clip_plan_validated.get("clips")
+        if not isinstance(clips, list) or not clips:
+            log("storyboard 跳过 edited：clip_plan_validated 无 clips")
+            return None
+        frame_sets = _multi_source_frame_sets(work_dir, plan_sources, clips)
         if not frame_sets:
-            log("storyboard 跳过 edited：所有来源的 frames/ 都缺失")
+            log("storyboard 跳过 edited：剪辑用到的来源都没有 frames/")
             return None
         meta = _multi_source_edited_storyboard_meta(clip_plan_validated_json, frame_sets)
     else:

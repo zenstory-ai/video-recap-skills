@@ -417,12 +417,16 @@ def _source_to_output(source_time, clip):
 
 
 def _multi_source_tile_size(frame_sets):
-    """One tile size for a multi-source sheet: the first source's frame size (640x360 when no
-    frame can be probed). Every multi-source tile is re-encoded into it — see _prepared_frame."""
+    """One tile size for a multi-source sheet: the first source's frame size rounded down to
+    even numbers (640x360 when no frame can be probed). Every multi-source tile is re-encoded
+    into it — see _prepared_frame. Odd sizes are real (frames keep storage resolution, e.g.
+    853x480) and ffmpeg's scale rounds a 4:2:0 frame up to even, so an odd pad target would
+    be smaller than its input and every tile would fail."""
     for entry in frame_sets.values():
         size = _frame_size(entry["paths"][0])
         if size:
-            return size
+            width, height = size
+            return max(2, width - width % 2), max(2, height - height % 2)
     return 640, 360
 
 
@@ -452,9 +456,18 @@ def build_edited_storyboard(
             frame_sets = {None: {"paths": paths, "numbers": numbers, "fps": fps}}
             tile_size = None
         else:
-            frame_sets = {sid: entry for sid, entry in source_frames.items() if entry["paths"]}
+            # Only sources a clip uses: an unused one must not take an S<n> label, be listed
+            # under `sources`, or set the tile size.
+            used = {
+                clip.get("source_id") for clip in clip_plan_validated["clips"]
+                if isinstance(clip, dict)
+            }
+            frame_sets = {
+                sid: entry for sid, entry in source_frames.items()
+                if entry["paths"] and sid in used
+            }
             if not frame_sets:
-                log("storyboard 跳过 edited：所有来源的 frames/ 为空或缺失")
+                log("storyboard 跳过 edited：剪辑用到的来源都没有 frames/")
                 return None
             tile_size = _multi_source_tile_size(frame_sets)
         short_labels = {sid: f"S{n}" for n, sid in enumerate(frame_sets, start=1)}
@@ -543,6 +556,7 @@ def build_edited_storyboard(
             "tiles": tiles,
         }
         if source_frames is not None:
+            on_sheet = {tile.get("source_id") for tile in tiles}
             payload["sources"] = [
                 {
                     "label": short_labels[sid],
@@ -550,6 +564,7 @@ def build_edited_storyboard(
                     "source_path": frame_sets[sid].get("source_path"),
                 }
                 for sid in frame_sets
+                if sid in on_sheet
             ]
         json_path = work_dir / "storyboard" / "edited_storyboard.json"
         json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

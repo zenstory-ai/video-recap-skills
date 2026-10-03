@@ -5,6 +5,7 @@ produced when no font is available, and any failure degrades to None without blo
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 from subprocess import CompletedProcess
@@ -488,6 +489,16 @@ def test_brief_header_cut_mode_lists_both_timelines(tmp_path):
 # ── optional real-ffmpeg tile smoke test (skipped when ffmpeg absent) ─────────
 
 
+def _ffmpeg_still(out, size, *, color="white", pix_fmt=None):
+    """Write one solid-colour still with real ffmpeg (argument list: no shell quoting)."""
+    cmd = ["ffmpeg", "-v", "error", "-y", "-f", "lavfi", "-i", f"color=c={color}:s={size}:d=1"]
+    if pix_fmt:
+        cmd += ["-pix_fmt", pix_fmt]
+    cmd += ["-frames:v", "1", str(out)]
+    result = subprocess.run(cmd, capture_output=True)
+    return result.returncode == 0 and Path(out).exists()
+
+
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_real_ffmpeg_tile_smoke(tmp_path):
     # Make 4 real tiny jpgs via ffmpeg, then tile them through the real path.
@@ -496,10 +507,7 @@ def test_real_ffmpeg_tile_smoke(tmp_path):
     nums = [0, 2, 4, 6]
     for n in nums:
         out = frames_dir / f"frame_{n:05d}.jpg"
-        rc = shutil.os.system(
-            f"ffmpeg -y -f lavfi -i color=c=blue:s=64x64:d=1 -frames:v 1 '{out}' >/dev/null 2>&1"
-        )
-        if rc != 0 or not out.exists():
+        if not _ffmpeg_still(out, "64x64", color="blue"):
             pytest.skip("ffmpeg could not synthesize test frames")
     (frames_dir / "frames_manifest.json").write_text("{}", encoding="utf-8")
     scenes = [{"start": 0.0, "end": 3.0}]
@@ -647,22 +655,31 @@ def test_storyboard_brief_header_replaces_the_pre_relative_paths_heading(tmp_pat
     assert text.endswith("# Brief\n\nbody\n")
 
 
+def _fill_real_frames(work_dir, specs):
+    """Replace each source's empty fixture frames with one real still (sid, size, pix_fmt)."""
+    for sid, size, pix_fmt in specs:
+        sample = work_dir / f"{sid}.jpg"
+        if not _ffmpeg_still(sample, size, pix_fmt=pix_fmt):
+            pytest.skip("ffmpeg could not synthesize test frames")
+        for frame in (work_dir / "sources" / sid / "frames").glob("frame_*.jpg"):
+            shutil.copyfile(sample, frame)
+
+
+def _probe_size(path):
+    probe = storyboard.run_cmd([
+        "ffprobe", "-v", "error", "-show_entries", "stream=width,height",
+        "-of", "csv=p=0:s=x", str(path),
+    ])
+    return probe.stdout.strip()
+
+
 @pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
 def test_real_ffmpeg_multi_source_sheet_letterboxes_mixed_frame_sizes(monkeypatch, tmp_path):
     """Real render: a 4:4:4 landscape source next to a 4:2:0 portrait one comes out as one
     grid of the first source's tile size with every tile present (a size or pixel-format
     change mid-sequence used to reset the tile filter and leave the first tiles black)."""
     plan = _multi_source_project(tmp_path)
-    for sid, size, pix_fmt in (("src_a", "64x36", "yuvj444p"), ("src_b", "36x64", "yuvj420p")):
-        sample = tmp_path / f"{sid}.jpg"
-        rc = shutil.os.system(
-            f"ffmpeg -v error -y -f lavfi -i color=c=white:s={size}:d=1 "
-            f"-pix_fmt {pix_fmt} -frames:v 1 '{sample}' >/dev/null 2>&1"
-        )
-        if rc != 0 or not sample.exists():
-            pytest.skip("ffmpeg could not synthesize test frames")
-        for frame in (tmp_path / "sources" / sid / "frames").glob("frame_*.jpg"):
-            shutil.copyfile(sample, frame)
+    _fill_real_frames(tmp_path, (("src_a", "64x36", "yuvj444p"), ("src_b", "36x64", "yuvj420p")))
     monkeypatch.setitem(CONFIG, "storyboard_columns", 6)
     _no_font(monkeypatch)
     frame_sets = understanding_storyboard._multi_source_frame_sets(tmp_path, plan["sources"])
@@ -673,11 +690,7 @@ def test_real_ffmpeg_multi_source_sheet_letterboxes_mixed_frame_sizes(monkeypatc
 
     assert result is not None
     page = str(tmp_path / result["page_images"][0])  # work_dir-relative
-    probe = storyboard.run_cmd([
-        "ffprobe", "-v", "error", "-show_entries", "stream=width,height",
-        "-of", "csv=p=0:s=x", page,
-    ])
-    assert probe.stdout.strip() == f"{64 * 6}x36"
+    assert _probe_size(page) == f"{64 * 6}x36"
     gray = tmp_path / "page.gray"
     storyboard.run_cmd([
         "ffmpeg", "-v", "error", "-y", "-i", page, "-f", "rawvideo", "-pix_fmt", "gray",
@@ -686,3 +699,66 @@ def test_real_ffmpeg_multi_source_sheet_letterboxes_mixed_frame_sizes(monkeypatc
     pixels = gray.read_bytes()
     tile_centres = [pixels[18 * 64 * 6 + 64 * i + 32] for i in range(6)]
     assert all(value > 200 for value in tile_centres), tile_centres
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_real_ffmpeg_multi_source_sheet_survives_an_odd_sized_first_source(
+    monkeypatch, tmp_path
+):
+    """Frames keep storage resolution (853x480 is real). An odd tile size made pad smaller
+    than ffmpeg's even-rounded scale output, so every tile failed and the sheet vanished."""
+    plan = _multi_source_project(tmp_path)
+    _fill_real_frames(tmp_path, (("src_a", "853x481", None), ("src_b", "36x64", "yuvj420p")))
+    monkeypatch.setitem(CONFIG, "storyboard_columns", 6)
+    _no_font(monkeypatch)
+    frame_sets = understanding_storyboard._multi_source_frame_sets(
+        tmp_path, plan["sources"], plan["clips"]
+    )
+
+    result = storyboard.build_edited_storyboard(
+        tmp_path, "a.mp4", plan, 2.0, source_frames=frame_sets
+    )
+
+    assert result is not None
+    assert _probe_size(tmp_path / result["page_images"][0]) == f"{852 * 6}x480"
+
+
+def test_multi_source_tile_size_rounds_odd_frames_down_to_even(monkeypatch):
+    monkeypatch.setattr("storyboard._frame_size", lambda path: (853, 481))
+    assert storyboard._multi_source_tile_size({"s": {"paths": ["x.jpg"]}}) == (852, 480)
+    monkeypatch.setattr("storyboard._frame_size", lambda path: (1, 1))
+    assert storyboard._multi_source_tile_size({"s": {"paths": ["x.jpg"]}}) == (2, 2)
+
+
+def test_multi_source_storyboard_ignores_sources_no_clip_uses(monkeypatch, tmp_path):
+    """A registered source no clip uses takes no S<n> label, is not listed, and does not set
+    the tile size, even when it comes first in plan['sources']."""
+    plan = _multi_source_project(tmp_path)
+    _stage_frames(tmp_path / "sources" / "src_unused", list(range(1, 11)), fps=1.0)
+    plan["sources"] = {
+        "src_unused": {"source_path": "/m/u.mp4", "duration": 10.0,
+                       "source_work_dir": "sources/src_unused"},
+        **plan["sources"],
+    }
+    (tmp_path / "clip_plan_validated.json").write_text(json.dumps(plan), encoding="utf-8")
+    monkeypatch.setitem(CONFIG, "storyboard", True)
+    calls = _mock_run_cmd_makes_output(monkeypatch)
+    _with_font(monkeypatch)
+    sizes = {"src_unused": (320, 240), "src_a": (1920, 1080), "src_b": (1080, 1920)}
+    monkeypatch.setattr(
+        "storyboard._frame_size", lambda path: sizes[Path(path).parent.parent.name]
+    )
+
+    result = understanding_storyboard._generate_edited_storyboard(tmp_path, "a.mp4")
+
+    assert result is not None
+    assert result["sources"] == [
+        {"label": "S1", "source_id": "src_a", "source_path": "/m/a.mp4"},
+        {"label": "S2", "source_id": "src_b", "source_path": "/m/b.mp4"},
+    ]
+    frame_cmds = [c for c in calls if c[:3] == ["ffmpeg", "-y", "-i"] and "frames" in c[3]]
+    assert frame_cmds and all("scale=1920:1080:" in c[5] for c in frame_cmds)
+    meta = understanding_storyboard._multi_source_frame_sets(
+        tmp_path, plan["sources"], plan["clips"]
+    )
+    assert list(meta) == ["src_a", "src_b"]
