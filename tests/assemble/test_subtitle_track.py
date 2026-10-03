@@ -151,18 +151,16 @@ def test_track_edit_plan_requires_independent_caller_edit_plan():
         _load(expected_picture_identity={"path": PICTURE_PATH})
 
 
-def test_legacy_digest_keys_in_bindings_are_ignored():
+@pytest.mark.parametrize(
+    ("binding", "digest_key"),
+    [("picture", "sha256"), ("picture", "edit_sha256"), ("audio", "sha256")],
+)
+def test_digest_keys_in_bindings_are_unknown_fields(binding, digest_key):
     track = _track()
-    track["bindings"]["picture"].update(sha256="1" * 64, edit_sha256="2" * 64)
-    track["bindings"]["audio"]["sha256"] = "3" * 64
+    track["bindings"][binding][digest_key] = "1" * 64
 
-    loaded = _load(track)
-
-    assert loaded["metadata"]["bindings"] == {
-        "picture": {"path": str(Path(PICTURE_PATH).resolve()),
-                    "edit_plan": str(Path(EDIT_PLAN).resolve())},
-        "audio": dict(AUDIO_FACTS),
-    }
+    with pytest.raises(subtitle_track.SubtitleTrackError, match=f"unknown field.*{digest_key}"):
+        _load(track)
 
 
 @pytest.mark.parametrize("schema_version", [0, 2, "1", 1.0, True])

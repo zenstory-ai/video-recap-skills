@@ -17,8 +17,6 @@ from subtitles.track import load_subtitle_track
 
 TRACK = 'subtitle_track.json'
 VALIDATION = 'subtitle_track_validation.json'
-VALIDATION_SCHEMA = 1
-PROJECTOR_VERSION = 1
 
 
 def current_bindings(video, selected_audio_stream=0, *, edit_plan_path=None):
@@ -113,8 +111,6 @@ def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
                      start=float(Fraction(start['pts'])), end=float(Fraction(end['pts'])))
         entry['frame_projection'] = {'requested_ticks': [cue['start_tick'], cue['end_tick']],
                                      'start': start, 'end': end}
-    loaded['validation_schema'] = VALIDATION_SCHEMA
-    loaded['projector_version'] = PROJECTOR_VERSION
     loaded['binding'] = {
         'input_video': str(Path(input_video).resolve()), 'identities': bindings,
         'inputs': {'track': file_identity(path), 'video': file_identity(input_video),
@@ -129,14 +125,11 @@ def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
 
 
 def _load_validation(work):
+    """The record prepare_subtitle_track rewrote earlier in this same assemble run."""
     path = Path(work) / VALIDATION
     if not path.exists():
         raise ValueError('Explicit subtitle track must be prepared against current media before use')
-    loaded = json.loads(path.read_text(encoding='utf-8'))
-    if (type(loaded.get('validation_schema')) is not int or loaded['validation_schema'] != VALIDATION_SCHEMA
-            or type(loaded.get('projector_version')) is not int or loaded['projector_version'] != PROJECTOR_VERSION):
-        raise ValueError('Subtitle validation/projector version changed; prepare again')
-    return loaded
+    return json.loads(path.read_text(encoding='utf-8'))
 
 
 def bound_subtitle_entries(work_dir, video_duration):

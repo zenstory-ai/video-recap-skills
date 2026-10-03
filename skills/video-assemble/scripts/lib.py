@@ -8,8 +8,6 @@ import tempfile
 
 
 # ── 配置 ──────────────────────────────────────────────────────────────
-_EXISTING_CONFIG_REF = globals().get("CONFIG")
-
 
 def env_int(name, default, *, minimum=None):
     """Read an integer env var; an unset/empty value yields `default`, a malformed one is an error."""
@@ -66,8 +64,7 @@ CONFIG = {
     "duck_fade_seconds": env_float("DUCK_FADE_SECONDS", 0.3, minimum=0.0),  # 解说块/原声块切换的淡入淡出(秒)，略放宽到 0.3 让满音量↔压低的过渡更顺
     "duck_bridge_seconds": env_float("DUCK_BRIDGE_SECONDS", 1.5, minimum=0.0),  # 仅把间隔小于此值的相邻解说窗口并成一段压低；超过则视为作者特意留的"原声块"，原声放回满音量。默认 1.5s：解说块内部连续压低，块与块之间的留白放出满音量原声。该值只控制短间隔合并，不设定旁白/原声配额。调大→更连续铺底、原声块更少；调小→更碎
     "bgm_path": os.environ.get("BGM_PATH", "").strip(),  # 背景音乐文件(可选)，留空则不加 BGM
-    "source_video": os.environ.get("SOURCE_VIDEO", "").strip(),  # 剪辑模式下的原始视频(可选)，用于时间线/剪映导出引用原片片段
-    "source_video_explicit": False,  # 仅 assemble.py --source-video 显式传入时为 True；环境变量 SOURCE_VIDEO 不算显式
+    "source_video": "",  # 剪辑模式下的原始视频，只由 assemble.py --source-video 设置；用于时间线/剪映导出引用原片片段
     "export_jianying": env_bool("EXPORT_JIANYING", False),  # 渲染后可选导出剪映草稿(默认关；与核心解耦)
     "jianying_draft_dir": os.environ.get("JIANYING_DRAFT_DIR", "").strip(),  # 剪映草稿输出父目录(留空=work_dir)
     "jianying_bundle_media": env_bool("JIANYING_BUNDLE_MEDIA", True),  # 默认开：macOS 剪映沙箱读不到外部路径，须把素材拷进草稿目录
@@ -128,10 +125,6 @@ CONFIG = {
     "subtitle_play_res_x": env_int("SUBTITLE_PLAY_RES_X", 1280, minimum=1),
     "subtitle_play_res_y": env_int("SUBTITLE_PLAY_RES_Y", 720, minimum=1),
 }
-if isinstance(_EXISTING_CONFIG_REF, dict):
-    _EXISTING_CONFIG_REF.clear()
-    _EXISTING_CONFIG_REF.update(CONFIG)
-    CONFIG = _EXISTING_CONFIG_REF
 
 def narration_tempo_budget(tts_rate_offset=0.0):
     """Return the canonical tempo budget shared by voiceover and assemble.

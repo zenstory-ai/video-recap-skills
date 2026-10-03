@@ -139,19 +139,6 @@ def test_deleting_explicit_track_clears_old_manifest_evidence(tmp_path):
     assert not (tmp_path / binding.VALIDATION).exists()
 
 
-def test_old_projector_version_is_not_reusable(tmp_path):
-    video = tmp_path / 'input.mp4'
-    _media(video)
-    _write_track(tmp_path, _track(video))
-    binding.prepare_subtitle_track(video, tmp_path, 6, audio_mode='adopted-packet-copy')
-    path = tmp_path / binding.VALIDATION
-    record = json.loads(path.read_text())
-    record['projector_version'] = -1
-    path.write_text(json.dumps(record))
-    with pytest.raises(ValueError, match='version'):
-        source_subtitles._combined_subtitle_entries([], tmp_path, 6)
-
-
 def test_unaligned_ticks_record_resolved_frame_and_share_consumer_times(tmp_path):
     video = tmp_path / 'input.mp4'
     _media(video)

@@ -76,7 +76,7 @@ else:
     assert manifest["audio_mode"] == audio_mode
     assert manifest["tts_segments"] == 0
     assert manifest["tts_meta"] is None
-    assert manifest["qc_verdict"] == "PASS"
+    assert json.loads((work / "assembly_qc.json").read_text())["verdict"] == "PASS"
     output = Path(manifest["final_output"])
     assert output.is_file()
     subprocess.run(["ffmpeg", "-v", "error", "-xerror", "-i", str(output), "-f", "null", "-"],

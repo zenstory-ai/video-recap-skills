@@ -491,17 +491,9 @@ def main():
         # chose a different opacity through the existing environment override.
         if "SUBTITLE_MASK_OPACITY" not in os.environ:
             lib.CONFIG["subtitle_mask_opacity"] = 1.0
-    if args.source_video:
-        if not os.path.exists(args.source_video):
-            ap.error(f"--source-video does not exist: {args.source_video}")
-        lib.CONFIG["source_video"] = args.source_video
-        lib.CONFIG["source_video_explicit"] = True
-    else:
-        # SOURCE_VIDEO is an ambient env var in lib.CONFIG. Do not let a stale
-        # shell value silently bind full-mode/direct timeline.json or JianYing
-        # exports to an unrelated original; cut mode must pass --source-video.
-        lib.CONFIG["source_video"] = ""
-        lib.CONFIG["source_video_explicit"] = False
+    if args.source_video and not os.path.exists(args.source_video):
+        ap.error(f"--source-video does not exist: {args.source_video}")
+    lib.CONFIG["source_video"] = args.source_video or ""
     if args.export_jianying:
         lib.CONFIG["export_jianying"] = True
     if args.jianying_bundle_media is not None:

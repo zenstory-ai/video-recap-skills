@@ -8,7 +8,7 @@ sys.path.insert(
     0,
     str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"),
 )
-import importlib
+import importlib.util
 import json
 import wave
 import pytest
@@ -25,10 +25,7 @@ import visual_render
 from assemble import assemble_video
 from tts_fixtures import tts_segment
 
-_FAKE_QC = {
-    "verdict": "PASS", "blocking": False, "blocking_codes": [], "loudness_mode": None,
-    "loudnorm_measurement": None, "audio_operations": {}, "adopted_audio": None,
-}
+_FAKE_QC = {"verdict": "PASS", "blocking": False, "blocking_codes": []}
 _DELIVERY = {
     "video_encode_passes": 0, "reencode_reason": [], "audio_sample_rate": 48000,
     "final_compat_notes": ["video_copy", "aac_48000", "faststart"],
@@ -253,7 +250,6 @@ def test_build_video_clips_prefers_newer_validated_cut_plan(
         encoding="utf-8",
     )
     monkeypatch.setitem(CONFIG, "source_video", str(original))
-    monkeypatch.setitem(CONFIG, "source_video_explicit", True)
 
     clips = _build_video_clips(edited, tmp_path, duration_s=15.0)
 
@@ -277,36 +273,6 @@ def test_build_video_clips_prefers_newer_validated_cut_plan(
     ]
 
 
-def test_build_video_clips_ignores_ambient_source_video_without_explicit_opt_in(
-    monkeypatch, tmp_path
-):
-    original = tmp_path / "ambient_original.mp4"
-    edited = tmp_path / "edited_source.mp4"
-    original.write_bytes(b"orig")
-    edited.write_bytes(b"edited")
-    (tmp_path / "clip_plan.json").write_text(
-        json.dumps({"clips": [{"start": 10.0, "end": 20.0}]}), encoding="utf-8"
-    )
-    monkeypatch.setitem(CONFIG, "source_video", str(original))
-    monkeypatch.setitem(CONFIG, "source_video_explicit", False)
-    (tmp_path / "assembly_qc.json").write_text(json.dumps(_FAKE_QC), encoding="utf-8")
-
-    clips = _build_video_clips(edited, tmp_path, duration_s=15.0)
-    manifest = _assembly_manifest_payload(edited, [], tmp_path, tmp_path / "output.mp4")
-
-    assert clips == [
-        {
-            "source_path": str(edited),
-            "source_start": 0.0,
-            "source_end": 15.0,
-            "timeline_start": 0.0,
-            "timeline_end": 15.0,
-        }
-    ]
-    assert manifest["source_video"] is None
-    assert manifest["source_video_identity"] is None
-
-
 def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_path):
     import os
 
@@ -325,7 +291,6 @@ def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_pat
     os.utime(tmp_path / "clip_plan_validated.json", (1_000, 1_000))
     os.utime(tmp_path / "clip_plan.json", (1_001, 1_001))
     monkeypatch.setitem(CONFIG, "source_video", str(original))
-    monkeypatch.setitem(CONFIG, "source_video_explicit", True)
 
     clips = _build_video_clips(edited, tmp_path, duration_s=5.0)
 
@@ -344,9 +309,7 @@ def test_build_video_clips_ignores_stale_validated_cut_plan(monkeypatch, tmp_pat
 def test_assemble_main_creates_missing_output_dir(monkeypatch, tmp_path):
     video = tmp_path / "input.mp4"
     video.write_bytes(b"video")
-    stale_source = tmp_path / "stale_source.mp4"
-    stale_source.write_bytes(b"stale")
-    monkeypatch.setitem(CONFIG, "source_video", str(stale_source))
+    monkeypatch.setitem(CONFIG, "source_video", str(tmp_path / "earlier_run_source.mp4"))
     work = tmp_path / "work"
     work.mkdir()
     (work / "tts_meta.json").write_text(json.dumps({"segments": []}), encoding="utf-8")
@@ -1642,36 +1605,45 @@ def test_subtitle_entries_never_drops_a_sub_threshold_chunk():
     assert joined == "第一句子比较长一点点第二句子也比较长第三"
 
 
+def _load_lib_with_env(monkeypatch, **env):
+    """Evaluate video-assemble's lib.py under an environment as a separately named module.
+
+    Not importlib.reload(lib): a reload rebinds lib.CONFIG while every other module keeps
+    the original dict, so later tests would patch a different object than the code reads.
+    ``None`` unsets a variable.
+    """
+    for name, value in env.items():
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    path = Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts" / "lib.py"
+    spec = importlib.util.spec_from_file_location("_assemble_lib_env_probe", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_output_compression_knobs_default_and_override(monkeypatch):
     """OUTPUT_CRF / OUTPUT_PRESET / OUTPUT_MAX_HEIGHT drive the re-encode; defaults keep the prior
     visually-lossless behaviour (crf 18, veryfast, no scaling)."""
-    import lib as _lib
+    probed = _load_lib_with_env(
+        monkeypatch, OUTPUT_CRF=None, OUTPUT_PRESET=None, OUTPUT_MAX_HEIGHT=None
+    )
+    assert probed.CONFIG["output_crf"] == 18
+    assert probed.CONFIG["output_preset"] == "veryfast"
+    assert probed.CONFIG["output_max_height"] == 0  # 0 → no downscale
 
-    try:
-        for var in ("OUTPUT_CRF", "OUTPUT_PRESET", "OUTPUT_MAX_HEIGHT"):
-            monkeypatch.delenv(var, raising=False)
-        importlib.reload(_lib)
-        assert _lib.CONFIG["output_crf"] == 18
-        assert _lib.CONFIG["output_preset"] == "veryfast"
-        assert _lib.CONFIG["output_max_height"] == 0  # 0 → no downscale
+    probed = _load_lib_with_env(
+        monkeypatch, OUTPUT_CRF="24", OUTPUT_PRESET="slow", OUTPUT_MAX_HEIGHT="720"
+    )
+    assert probed.CONFIG["output_crf"] == 24
+    assert probed.CONFIG["output_preset"] == "slow"
+    assert probed.CONFIG["output_max_height"] == 720
 
-        monkeypatch.setenv("OUTPUT_CRF", "24")
-        monkeypatch.setenv("OUTPUT_PRESET", "slow")
-        monkeypatch.setenv("OUTPUT_MAX_HEIGHT", "720")
-        importlib.reload(_lib)
-        assert _lib.CONFIG["output_crf"] == 24
-        assert _lib.CONFIG["output_preset"] == "slow"
-        assert _lib.CONFIG["output_max_height"] == 720
-
-        monkeypatch.setenv(
-            "OUTPUT_CRF", "0"
-        )  # lossless is a valid CRF, must not be coerced away
-        importlib.reload(_lib)
-        assert _lib.CONFIG["output_crf"] == 0
-    finally:
-        for var in ("OUTPUT_CRF", "OUTPUT_PRESET", "OUTPUT_MAX_HEIGHT"):
-            monkeypatch.delenv(var, raising=False)
-        importlib.reload(_lib)
+    # lossless is a valid CRF, must not be coerced away
+    probed = _load_lib_with_env(monkeypatch, OUTPUT_CRF="0")
+    assert probed.CONFIG["output_crf"] == 0
 
 
 def test_output_downscale_filter_forces_even_height():
@@ -1700,32 +1672,16 @@ def test_foreign_source_audio_near_mutes_original_under_narration(monkeypatch):
     """FOREIGN_SOURCE_AUDIO near-mutes the original UNDER narration so a foreign-language
     soundtrack (e.g. Japanese) doesn't bleed under Chinese narration as 怪音. Gaps stay full
     (idle_orig_volume), and an explicit SPEECH_DUCKING_VOLUME still overrides the foreign default."""
-    import lib as _lib
+    probed = _load_lib_with_env(
+        monkeypatch, FOREIGN_SOURCE_AUDIO="1", SPEECH_DUCKING_VOLUME=None, ZONE_DUCKING_VOLUME=None
+    )
+    assert probed.CONFIG["foreign_source_audio"] is True
+    assert probed.CONFIG["speech_ducking_volume"] == 0.05  # under-narration original near-silent
+    assert probed.CONFIG["zone_ducking_volume"] == 0.05
+    assert probed.CONFIG["idle_orig_volume"] == 1.0  # gap/original blocks stay full volume
 
-    try:
-        monkeypatch.setenv("FOREIGN_SOURCE_AUDIO", "1")
-        monkeypatch.delenv("SPEECH_DUCKING_VOLUME", raising=False)
-        monkeypatch.delenv("ZONE_DUCKING_VOLUME", raising=False)
-        importlib.reload(_lib)
-        assert _lib.CONFIG["foreign_source_audio"] is True
-        assert (
-            _lib.CONFIG["speech_ducking_volume"] == 0.05
-        )  # under-narration original near-silent
-        assert _lib.CONFIG["zone_ducking_volume"] == 0.05
-        assert (
-            _lib.CONFIG["idle_orig_volume"] == 1.0
-        )  # gap/original blocks stay full volume
-
-        monkeypatch.setenv("SPEECH_DUCKING_VOLUME", "0.15")
-        importlib.reload(_lib)
-        assert (
-            _lib.CONFIG["speech_ducking_volume"] == 0.15
-        )  # explicit override wins over foreign default
-    finally:
-        monkeypatch.delenv("FOREIGN_SOURCE_AUDIO", raising=False)
-        monkeypatch.delenv("SPEECH_DUCKING_VOLUME", raising=False)
-        monkeypatch.delenv("ZONE_DUCKING_VOLUME", raising=False)
-        importlib.reload(_lib)  # restore default CONFIG for any later tests
+    probed = _load_lib_with_env(monkeypatch, SPEECH_DUCKING_VOLUME="0.15")
+    assert probed.CONFIG["speech_ducking_volume"] == 0.15  # explicit override wins over foreign default
 
 
 def test_p0_adjust_tts_speed_respects_cumulative_tempo_cap(monkeypatch, tmp_path):
@@ -2265,37 +2221,17 @@ def test_p0_subtitles_use_spoken_text_not_authored_narration(tmp_path):
     assert "实际说出的第一句" in ass
 
 
-def test_p0_manifest_references_audio_qc_artifact(tmp_path):
+def test_p0_manifest_references_audio_qc_artifact_without_copying_it(tmp_path):
     video = tmp_path / "input.mp4"
     output = tmp_path / "out.mp4"
     video.write_bytes(b"v")
     output.write_bytes(b"o")
-    qc = tmp_path / "assembly_qc.json"
-    qc.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "verdict": "FAIL",
-                "blocking_codes": ["no_safe_fit"],
-                "loudness_mode": "two_pass_linear",
-                "loudnorm_measurement": {"input_i": "-18.0", "target_offset": "0.1"},
-                "audio_operations": {},
-                "adopted_audio": None,
-            }
-        ),
-        encoding="utf-8",
-    )
 
     manifest = _assembly_manifest_payload(video, [], tmp_path, output)
 
     assert manifest["qc_path"].endswith("assembly_qc.json")
-    assert manifest["qc_verdict"] == "FAIL"
-    assert manifest["qc_blocking_codes"] == ["no_safe_fit"]
-    assert manifest["qc_loudness_mode"] == "two_pass_linear"
-    assert manifest["qc_loudnorm_measurement"] == {
-        "input_i": "-18.0",
-        "target_offset": "0.1",
-    }
+    assert {key for key in manifest if key.startswith("qc_")} == {"qc_path"}
+    assert "audio_operations" not in manifest and "adopted_audio" not in manifest
     assert manifest["assembly_settings"]["audio_mix"]["loudness_mode"] in {
         "two_pass_linear",
         "equivalent",
@@ -2362,7 +2298,6 @@ def test_assembly_qc_blocks_unsafe_narration(
     )
 
     assert qc["verdict"] == "FAIL"
-    assert qc["release_gate"]["audio_qc"] == "FAIL"
     assert expected_codes <= set(qc["blocking_codes"])
     for key, value in expected_summary.items():
         assert qc["summary"][key] == value
@@ -2453,14 +2388,20 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
     assert filters and all("drawtext=" in f for f in filters)
 
 
-def test_assembly_qc_rolls_up_visual_and_delivery_facts_without_polluting_visual():
-    """assembly_qc.json is the release-gate rollup: it consumes visual_qc plus
-    delivery facts while preserving visual_qc as a pure visual artifact."""
+@pytest.mark.parametrize(
+    ("visual_verdict", "visual_codes"),
+    [("PASS", []), ("FAIL", ["subtitle_overflow"])],
+    ids=("visual-pass", "visual-blocking"),
+)
+def test_assembly_qc_gates_on_visual_verdict_and_keeps_visual_facts_out(visual_verdict, visual_codes):
+    """assembly_qc.json is the release gate: it carries visual_qc's verdict and blocking
+    codes (the facts stay in visual_qc.json) plus delivery facts, and never writes
+    delivery facts into visual_qc."""
     visual_qc = {
         "artifact": "visual_qc.json",
-        "verdict": "PASS",
-        "blocking": False,
-        "blocking_codes": [],
+        "verdict": visual_verdict,
+        "blocking": bool(visual_codes),
+        "blocking_codes": visual_codes,
         "geometry": {"canvas": {"width": 1080, "height": 1920}, "rotation": 90},
         "subtitles": {
             "overflow": False,
@@ -2507,12 +2448,10 @@ def test_assembly_qc_rolls_up_visual_and_delivery_facts_without_polluting_visual
         render_delivery=delivery_qc,
     )
 
-    assert qc["visual_qc"]["geometry"] == visual_qc["geometry"]
-    assert qc["visual_qc"]["subtitles"]["overflow"] is False
-    assert qc["visual_qc"]["mask"] == visual_qc["mask"]
+    assert qc["visual_qc"] == {"verdict": visual_verdict, "blocking_codes": visual_codes}
+    assert ("visual_qc_failed" in qc["blocking_codes"]) is bool(visual_codes)
     assert qc["delivery_qc"]["audio_sample_rate"] == 48000
     assert qc["delivery_qc"]["reencode_reason"] == "burn_subtitles"
-    assert qc["release_gate"]["visual_qc"] == "PASS"
     assert not (_VISUAL_QC_FORBIDDEN_DELIVERY_KEYS & set(_flatten_keys(visual_qc)))
 
 
@@ -2749,22 +2688,18 @@ def test_measured_subtitle_qc_contains_normal_line_above_anchored_bottom(
 
 
 def test_legacy_mask_env_without_explicit_policy_is_blocking(monkeypatch):
-    import lib as assemble_lib
+    probed = _load_lib_with_env(
+        monkeypatch, MASK_SOURCE_SUBTITLES="1", SOURCE_SUBTITLE_MASK_POLICY=None
+    )
+    assert probed.CONFIG["mask_source_subtitles"] is True
+    assert probed.CONFIG["source_subtitle_mask_policy"] == "off"
+    assert probed.CONFIG["source_subtitle_mask_policy_declared"] is False
+    for key in ("mask_source_subtitles", "source_subtitle_mask_policy",
+                "source_subtitle_mask_policy_declared"):
+        monkeypatch.setitem(CONFIG, key, probed.CONFIG[key])
 
-    snapshot = dict(CONFIG)
-    try:
-        monkeypatch.setenv("MASK_SOURCE_SUBTITLES", "1")
-        monkeypatch.delenv("SOURCE_SUBTITLE_MASK_POLICY", raising=False)
-        importlib.reload(assemble_lib)
+    policy = source_subtitles._source_subtitle_mask_policy()
 
-        policy = source_subtitles._source_subtitle_mask_policy()
-
-        assert CONFIG["mask_source_subtitles"] is True
-        assert CONFIG["source_subtitle_mask_policy"] == "off"
-        assert CONFIG["source_subtitle_mask_policy_declared"] is False
-        assert policy["policy"] == "legacy_implicit"
-        assert policy["declared"] is False
-        assert policy["blocking"] is True
-    finally:
-        CONFIG.clear()
-        CONFIG.update(snapshot)
+    assert policy["policy"] == "legacy_implicit"
+    assert policy["declared"] is False
+    assert policy["blocking"] is True

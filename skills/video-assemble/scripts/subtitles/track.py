@@ -16,8 +16,6 @@ from pathlib import Path
 
 SCHEMA_VERSION = 1
 
-# Digest keys older tracks declared; they are ignored, never a reason to fail.
-_LEGACY_BINDING_KEYS = frozenset({"sha256", "edit_sha256"})
 _EVIDENCE_KINDS = frozenset(
     {
         "human_verified",
@@ -112,7 +110,7 @@ def _load_document(path_or_mapping):
 
 def _validate_picture_binding(binding, expected):
     binding = _strict_fields(
-        binding, required={"path"}, optional={"edit_plan"} | _LEGACY_BINDING_KEYS,
+        binding, required={"path"}, optional={"edit_plan"},
         path="bindings.picture",
     )
     expected = _mapping(expected, "expected_picture_identity")
@@ -137,8 +135,7 @@ _AUDIO_BINDING_FACTS = ("selected_stream", "sample_rate", "packet_count")
 
 def _validate_audio_binding(binding, expected):
     binding = _strict_fields(
-        binding, required=set(_AUDIO_BINDING_FACTS), optional=_LEGACY_BINDING_KEYS,
-        path="bindings.audio",
+        binding, required=set(_AUDIO_BINDING_FACTS), path="bindings.audio",
     )
     expected = _mapping(expected, "expected_audio_identity")
     result = {}

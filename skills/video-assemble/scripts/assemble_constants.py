@@ -7,7 +7,6 @@ ASSEMBLY_MANIFEST = "assembly_manifest.json"
 ASSEMBLY_QC = "assembly_qc.json"
 VISUAL_QC = "visual_qc.json"
 VISUAL_OVERLAYS = "visual_overlays.json"
-SEGMENT_AUDIO_SCHEMA_VERSION = 1
 
 # The picture codecs every packet/frame clock proof in this skill accepts.
 SUPPORTED_PICTURE_CODECS = frozenset({"h264", "hevc"})

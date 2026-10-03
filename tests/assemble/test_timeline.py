@@ -443,7 +443,6 @@ def test_build_video_clips_prefers_per_clip_source_path_without_explicit_source_
         ),
         encoding="utf-8",
     )
-    monkeypatch.setitem(CONFIG, "source_video_explicit", False)
     monkeypatch.setitem(CONFIG, "source_video", "")
 
     clips = media._build_video_clips(rendered, work, 3.0)
@@ -488,7 +487,6 @@ def test_build_video_clips_degrades_only_missing_clip_keeps_present_provenance(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setitem(CONFIG, "source_video_explicit", False)
     monkeypatch.setitem(CONFIG, "source_video", "")
 
     clips = media._build_video_clips(rendered, work, 3.0)
@@ -526,7 +524,6 @@ def test_emit_timeline_marks_degraded_multi_source_fallback(monkeypatch, tmp_pat
         ),
         encoding="utf-8",
     )
-    monkeypatch.setitem(CONFIG, "source_video_explicit", False)
     monkeypatch.setitem(CONFIG, "source_video", "")
     monkeypatch.setattr(timeline_emit, "_combined_subtitle_entries", lambda *_args: [])
 
