@@ -596,7 +596,7 @@ def _keyed_run_then_offline(monkeypatch, tmp_path):
         "choices": [{"message": {"content": INDEX_REPLY}, "finish_reason": "stop"}]
     })
     _run_main(monkeypatch, video, tmp_path)
-    assert json.loads((tmp_path / "consolidation.status.json").read_text())["status"] == "ok"
+    assert json.loads((tmp_path / "consolidation.status.json").read_text(encoding="utf-8"))["status"] == "ok"
 
     def no_request(*_a, **_k):
         pytest.fail("offline rerun must not call the provider")
@@ -621,12 +621,12 @@ def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch,
     _run_main(monkeypatch, video, tmp_path)
 
     assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == TRANSCRIPT
-    status = json.loads((tmp_path / "consolidation.status.json").read_text())
+    status = json.loads((tmp_path / "consolidation.status.json").read_text(encoding="utf-8"))
     assert status["status"] == "ok"  # the fresh index is reused without a request
 
     (tmp_path / "understanding_index.json").unlink()
     _run_main(monkeypatch, video, tmp_path)
-    status = json.loads((tmp_path / "consolidation.status.json").read_text())
+    status = json.loads((tmp_path / "consolidation.status.json").read_text(encoding="utf-8"))
     assert status["status"] == "skipped_no_key"
     assert "MIMO_API_KEY" in status["message"]
     assert not (tmp_path / "understanding_index.json").exists()
