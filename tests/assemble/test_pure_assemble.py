@@ -2143,7 +2143,7 @@ _CUT_OUTPUT_HANDOFF_CASES = [
             "quiet_windows": [],
         },
         {"actual_place_start": 4.0, "actual_place_end": 6.0, "overlaps_speech": True},
-        {"source_handoff_blocking": None, "source_entry_status": "quiet_source"},
+        {"source_handoff_blocking": None, "source_entry_status": "non_dialogue_source"},
         {},
         id="interjection-only-window-beyond-guard-is-not-an-unsafe-entry",
     ),
@@ -2200,6 +2200,62 @@ def test_source_handoff_rejects_stale_cut_output_evidence(tmp_path):
     assert segment["source_handoff_blocking"] is True
     assert segment["source_entry_status"] == "anchors_unavailable"
     assert report[0]["anchor_artifact"] is None
+
+
+def test_source_handoff_asr_fallback_ignores_empty_text_rows(tmp_path):
+    """Full mode reads ASR rows; a window with no recognized text is not dialogue."""
+    _write_legacy_anchors(tmp_path, [{"time": 9.0, "pause_start": 8.8, "confidence": "high"}])
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([
+            {"start": 0.0, "end": 3.0, "text": "真实对白。"},
+            {"start": 3.0, "end": 10.0, "text": "  "},
+        ]),
+        encoding="utf-8",
+    )
+    seg = {"index": 0, "actual_place_start": 5.0, "actual_place_end": 6.0,
+           "overlaps_speech": True}
+
+    audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 30.0)
+
+    assert seg.get("source_handoff_blocking") is not True
+    assert seg["source_entry_status"] == "quiet_source"
+
+
+def test_source_handoff_records_entry_status_for_unducked_run(tmp_path):
+    """A run that never ducks still says why: its entry landed on quiet or non-dialogue."""
+    _write_cut_output_anchors(
+        tmp_path,
+        {
+            "sentence_anchors": [{"time": 9.0, "pause_start": 8.8, "confidence": "high",
+                                  "boundary_use": "verified"}],
+            "speech_spans": [{"start": 0.0, "end": 3.0, "text": "真实对白。"},
+                             {"start": 3.0, "end": 10.0, "text": "Hi."}],
+            "quiet_windows": [{"start": 5.0, "end": 6.0}],
+        },
+    )
+    seg = {"actual_place_start": 5.2, "actual_place_end": 5.8, "overlaps_speech": True}
+
+    report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 10.0)
+
+    assert report[0]["status"] == "quiet_source"
+    assert seg["source_entry_status"] == "quiet_source"
+
+
+@pytest.mark.parametrize(
+    ("dialogue", "quiet", "expected"),
+    [
+        pytest.param([], [], 1.8, id="no-dialogue-pulls-fully"),
+        pytest.param([{"start": 1.0, "end": 2.5}], [], 2.5, id="stops-after-dialogue"),
+        pytest.param([{"start": 2.0, "end": 3.5}], [], 3.0, id="dialogue-at-written-start"),
+        pytest.param([{"start": 1.0, "end": 2.5}], [{"start": 2.0, "end": 2.6}], 2.0,
+                     id="measured-quiet-is-not-dialogue"),
+        pytest.param([{"start": 1.0, "end": 1.83}], [], 1.8, id="sub-tolerance-sliver-ignored"),
+    ],
+)
+def test_dialogue_free_pull_start(dialogue, quiet, expected):
+    assert audio_mix._dialogue_free_pull_start(1.8, 3.0, dialogue, quiet) == pytest.approx(
+        expected
+    )
 
 
 def test_source_handoff_blocks_entry_after_anchor_pause_has_ended(tmp_path):

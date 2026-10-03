@@ -1,5 +1,6 @@
 """Regression tests for assemble.py graceful-degradation fixes (bugs 6 & 7)."""
 
+import json
 import shutil
 import sys
 import wave
@@ -186,3 +187,49 @@ def test_run_tightening_drift_cap_keeps_narration_near_picture(monkeypatch, tmp_
     assert segments[4]["actual_place_start"] >= 5.0 * 4 - 2.0 - 0.01      # within max_pull of authored 20s
     # The good segment was actually placed (non-zero-width window).
     assert segments[0]["actual_place_end"] - segments[0]["actual_place_start"] > 0.1
+
+
+@pytest.mark.parametrize(
+    ("asr", "silence", "expected_start", "expected_status"),
+    [
+        pytest.param(None, None, 1.8, "paragraph_tightened", id="no-evidence-pulls-to-drift-cap"),
+        pytest.param([{"start": 1.0, "end": 2.5, "text": "他来了。"}], None, 2.5,
+                     "paragraph_tightened", id="pull-stops-after-source-dialogue"),
+        pytest.param([{"start": 2.0, "end": 3.5, "text": "他来了。"}], None, 3.0, None,
+                     id="dialogue-through-written-start-blocks-the-pull"),
+        pytest.param([{"start": 1.0, "end": 2.5, "text": "啊！"}], None, 1.8,
+                     "paragraph_tightened", id="interjection-only-window-is-not-dialogue"),
+        pytest.param([{"start": 1.0, "end": 2.5, "text": " "}], None, 1.8,
+                     "paragraph_tightened", id="empty-asr-text-is-not-dialogue"),
+        pytest.param([{"start": 1.0, "end": 2.5, "text": "他来了。"}],
+                     [{"start": 2.0, "end": 2.6, "has_speech": False}], 2.0,
+                     "paragraph_tightened", id="measured-quiet-inside-asr-window"),
+    ],
+)
+def test_paragraph_pull_never_enters_unchecked_source_dialogue(
+    monkeypatch, tmp_path, asr, silence, expected_start, expected_status
+):
+    """Lint checked only the written start; the pulled stretch before it must hold no dialogue,
+    and a pulled block records that it moved."""
+    monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
+    monkeypatch.setitem(CONFIG, "narration_run_gap_seconds", 1.6)
+    monkeypatch.setitem(CONFIG, "narration_max_pull_seconds", 1.2)
+    monkeypatch.setitem(CONFIG, "fade_ms", 0)
+    if asr is not None:
+        (tmp_path / "asr_result.json").write_text(json.dumps(asr), encoding="utf-8")
+    if silence is not None:
+        (tmp_path / "silence_periods.json").write_text(json.dumps(silence), encoding="utf-8")
+    w = _write_wav(tmp_path / "a.wav", duration=0.8)
+    segments = [
+        tts_segment(index=0, start=0.0, end=2.0, narration="句0。",
+                    audio_path=str(w), audio_duration=0.8),
+        tts_segment(index=1, start=3.0, end=5.0, narration="句1。",
+                    audio_path=str(w), audio_duration=0.8),
+    ]
+
+    narration_audio._build_timed_narration(segments, tmp_path / "out.wav", 8.0, tmp_path)
+
+    assert segments[1]["actual_place_start"] == pytest.approx(expected_start, abs=1e-3)
+    assert segments[1].get("source_entry_status") == expected_status
+    assert segments[1].get("written_start") == (3.0 if expected_status else None)
+    assert "source_entry_status" not in segments[0]

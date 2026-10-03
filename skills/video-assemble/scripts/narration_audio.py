@@ -4,6 +4,7 @@ import os
 import wave
 from pathlib import Path
 
+from audio_mix import _dialogue_free_pull_start, _paragraph_pull_evidence
 from lib import CONFIG, get_video_duration, log, narration_tempo_budget, run_cmd
 
 def _apply_narration_speed(
@@ -199,6 +200,7 @@ def _build_timed_narration(
     tight_pause_samples = int(CONFIG["narration_tight_pause_seconds"] * sample_rate)
     # 漂移上限：收紧时一句最多比作者标注的时间提前 max_pull 秒，避免整段解说被全部压到前面、与画面脱节
     max_pull_samples = int(CONFIG["narration_max_pull_seconds"] * sample_rate)
+    pull_evidence = None  # (dialogue, quiet)，第一次真的要提前时才读
 
     for seg in tts_segments:
         wav_path = seg["audio_path"]
@@ -241,8 +243,16 @@ def _build_timed_narration(
             # 但不早于"作者标注起始 - max_pull"，防止整段被压到前面与画面脱节。
             drift_floor = int(cur_authored_start * sample_rate) - max_pull_samples
             actual_start = max(last_written_end + tight_pause_samples, drift_floor)
+            if actual_start < start_sample:
+                # 校验只检查过写的 start；提前的这一段不能进入原声对白，否则停在最后一段对白结束处
+                if pull_evidence is None:
+                    pull_evidence = _paragraph_pull_evidence(work_dir)
+                safe_start = _dialogue_free_pull_start(
+                    actual_start / sample_rate, cur_authored_start, *pull_evidence
+                )
+                actual_start = min(start_sample, max(actual_start, int(round(safe_start * sample_rate))))
         else:
-            # 段落起点：严格采用作者标注的起始，让画面/原声先立住
+            # 段落起点：采用作者标注的起始，让画面/原声先立住；上一块超时则顺延到它结尾 + pause_after_ms
             actual_start = max(start_sample, min_start_with_pause)
         actual_start = min(actual_start, end_boundary)  # 不超出 slot 边界
 
@@ -387,6 +397,11 @@ def _build_timed_narration(
         buffer[actual_start * 2: actual_start * 2 + write_samples * 2] = wf_data
         seg["actual_place_start"] = actual_start / sample_rate
         seg["actual_place_end"] = (actual_start + write_samples) / sample_rate
+        if actual_start < start_sample:
+            # 段落收紧把这一块提前到写的 start 之前；若它成为新压低段的首块，
+            # 原声交接会用自己的入口判定覆盖这个状态
+            seg["source_entry_status"] = "paragraph_tightened"
+            seg["written_start"] = cur_authored_start
         seg["placed_audio_duration"] = write_samples / sample_rate
         last_written_end = actual_start + write_samples
         prev_pause_samples = pause_samples

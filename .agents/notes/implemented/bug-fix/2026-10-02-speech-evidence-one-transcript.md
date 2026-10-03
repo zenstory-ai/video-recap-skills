@@ -15,7 +15,7 @@ Status: implemented
 - 三份 `_dialogue_speech_spans`（video-cut `sentence_boundaries.py`、video-script `speech_ownership.py`、video-assemble `audio_mix.py`）同时改：文本为空或只有空白的行是只有时间的证据，直接跳过，不算对白，也不给相邻对白留 1 秒保护；没有 `text` 字段的行仍按对白处理（词未知，不能当作没人说话）。规则放在 helper 里，调用方过滤与否结果相同；`test_interjection_rule_stays_identical_across_cut_script_assemble` 继续按 AST 校验三份一致。
 - video-script 新增 `_source_asr_rows(work_dir)`：有 `asr_clean.json` 就用它的 `segments`，否则读 `asr_result.json`，并去掉空白文本行；full 模式的 `speech_spans`（整段归属）和 `dialogue_spans`（入口）都从这里来。存在即采用，不做新鲜度或来源校验，与 cut、assemble 完全一致。
 - `review_grounding._preferred_asr` 让单视频和多视频评审都优先 `asr_clean.json`。
-- assemble 调用方（`_handoff_speech_evidence` 回退读 ASR 时的整段 `speech` 行）留给 audio lane 处理；helper 改动已经让它的入口判定不再把空白行当对白。
+- assemble 调用方 `_handoff_speech_evidence` 回退读 ASR 时也先去掉空白文本行，整段 `speech` 行（压低与否、`quiet_source` 判定）同样不含它们；helper 改动单独已经让入口判定不再把空白行当对白。
 - 文档：`video-recap/references/data-schema.md` 入口规则一段、video-script SKILL.md 读取清单同步。
 
 ## Alternatives considered
