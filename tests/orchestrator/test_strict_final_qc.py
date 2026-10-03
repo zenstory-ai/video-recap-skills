@@ -146,7 +146,7 @@ def test_continuation_preserves_strict_flag_without_analysis_settings_change(
         sys, "argv", ["recap.py", "input.mp4", "--require-final-qc"]
     )
     _parser, strict = recap_cli.parse_args()
-    command = recap_timeline._continuation_command("input.mp4", "work", strict)
+    command = recap_timeline._continuation_command("work", strict)
     assert "--require-final-qc" in command
     baseline = Namespace(**vars(strict))
     baseline.require_final_qc = False

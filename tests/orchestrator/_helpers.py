@@ -58,6 +58,7 @@ def manifest_args(**overrides):
         "narration_adoption": None,
         "audio_mix_adoption": None,
         "_explicit_options": frozenset(),
+        "_argv": [],
     }
     values.update(overrides)
     return Namespace(**values)

@@ -381,7 +381,7 @@ def _run_multi_cut(videos, work_dir, args):
         _pause_for_agent(
             work_dir,
             f"{clip_plan_json}（多视频剪辑计划；每个 clip 必须带 source_id）",
-            _continuation_command(videos, work_dir, args),
+            _continuation_command(work_dir, args),
             inspect_hint=f"python3 {inspect_py} --work-dir {work_dir} state",
         )
         return
@@ -403,7 +403,7 @@ def _run_multi_cut(videos, work_dir, args):
             _pause_for_agent(
                 work_dir,
                 f"{narration_json}（用成片 OUTPUT 时间轴写解说，对着 {edited_source}）",
-                _continuation_command(videos, work_dir, args),
+                _continuation_command(work_dir, args),
                 inspect_hint=(
                     f"python3 {inspect_py} --work-dir {work_dir} "
                     "clip-map --output-start <s> --output-end <e>"
@@ -574,7 +574,7 @@ def _run_dub(video, work_dir, args):
     if not dub_script.exists():
         _run("video-voiceover", "dub.py", "--stage", "prepare", *dub_args)
         _write_run_manifest(work_dir, video, args)
-        cont = _continuation_command(video, work_dir, args)
+        cont = _continuation_command(work_dir, args)
         print("=" * 50)
         print(
             f"[video-recap] ⏸  按 {work_dir / 'dub_brief.md'} 的要求翻译英文原声，写入 {dub_script}"
@@ -604,7 +604,7 @@ def _run_single(video, work_dir, args):
         _pause_for_agent(
             work_dir,
             need_text,
-            _continuation_command(video, work_dir, args),
+            _continuation_command(work_dir, args),
             inspect_hint=inspect_hint,
         )
 

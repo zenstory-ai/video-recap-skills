@@ -9,13 +9,13 @@ from pathlib import Path
 from lib import load_json
 from lib import file_identity
 from recap_runtime import (
-    _coerce_videos,
     _entry,
     _load_run_manifest,
     _multi_run_manifest_payload,
+    _resume_argv,
     _run_manifest_payload,
 )
-from recap_source import audio_binding, uses_narration
+from recap_source import audio_binding
 
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 
@@ -220,82 +220,9 @@ def _cut_narration_is_stale(ledger, current_clip_plan_identity):
     return ledger is not None and ledger["clip_plan_identity"] != current_clip_plan_identity
 
 
-def _continuation_command(video, work_dir, args):
-    # Values a project binding filled in are re-derived from --project on resume.
-    bound = getattr(args, "_bound_from_project", frozenset())
-    parts = [
-        sys.executable,
-        str(_entry("video-recap", "recap.py")),
-        *[str(v) for v in _coerce_videos(video)],
-        "--work-dir",
-        str(work_dir),
-    ]
-    if args.context:
-        parts += ["--context", args.context]
-    if args.scene_threshold is not None:
-        parts += ["--scene-threshold", str(args.scene_threshold)]
-    if args.style != "纪录片":
-        parts += ["--style", args.style]
-    if args.edit_mode != "full":
-        parts += ["--edit-mode", args.edit_mode]
-    if args.audio_mode != "narration":
-        parts += ["--audio-mode", args.audio_mode]
-    if args.audio_stream_index != 0:
-        parts += ["--audio-stream-index", str(args.audio_stream_index)]
-    if args.target_duration:
-        parts += ["--target-duration", args.target_duration]
-    if args.allow_duration_drift:
-        parts.append("--allow-duration-drift")
-    if args.skip_asr:
-        parts.append("--skip-asr")
-    if args.mimo_video_overview:
-        parts.append("--mimo-video-overview")
-    if not args.consolidate:  # default is ON; only the opt-out needs to round-trip
-        parts.append("--no-consolidate")
-    if args.consolidate_asr:
-        parts.append("--consolidate-asr")
-    if uses_narration(args):
-        if args.mimo_tts_voice and "mimo_tts_voice" not in bound:
-            parts += ["--mimo-tts-voice", args.mimo_tts_voice]
-        if args.tts_provider != "auto" and "tts_provider" not in bound:
-            parts += ["--tts-provider", args.tts_provider]
-        if args.voice_ref and "voice_ref" not in bound:
-            parts += ["--voice-ref", args.voice_ref]
-        if args.allow_partial_tts:
-            parts.append("--allow-partial-tts")
-        if args.preserve_approved_text:
-            parts.append("--preserve-approved-text")
-    if args.burn_subtitles is not None:
-        parts.append("--burn-subtitles" if args.burn_subtitles else "--no-burn-subtitles")
-    if args.subtitle_y_top is not None:
-        parts += ["--subtitle-y-top", str(args.subtitle_y_top)]
-    if args.subtitle_y_bot is not None:
-        parts += ["--subtitle-y-bot", str(args.subtitle_y_bot)]
-    if args.output_dir:
-        parts += ["--output-dir", args.output_dir]
-    if args.export_jianying:
-        parts.append("--export-jianying")
-    if args.jianying_bundle_media:
-        parts.append("--jianying-bundle-media")
-    if args.jianying_no_bundle_media:
-        parts.append("--jianying-no-bundle-media")
-    if uses_narration(args):
-        if args.review_narration is not None:
-            parts.append(
-                "--review-narration" if args.review_narration else "--no-review-narration"
-            )
-        if args.require_narration_review:
-            parts.append("--require-narration-review")
-    if args.material_library_dir and "material_library_dir" not in bound:
-        parts += ["--material-library-dir", args.material_library_dir]
-    if getattr(args, "project", None):
-        parts += ["--project", args.project]
-    if args.use_materials:
-        parts.append("--use-materials")
-    if args.save_materials:
-        parts.append("--save-materials")
-    if args.require_final_qc:
-        parts.append("--require-final-qc")
+def _continuation_command(work_dir, args):
+    """Shell command that resumes this run: the original argv, replayable from any cwd."""
+    parts = [sys.executable, str(_entry("video-recap", "recap.py")), *_resume_argv(work_dir, args)]
     return " ".join(shlex.quote(part) for part in parts)
 
 

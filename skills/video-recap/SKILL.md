@@ -17,6 +17,7 @@ video-understanding ─▶ Agent 按 video-script 制定方案并写稿 ─▶ [
 
 流程支持断点续跑：写好 `narration.json` 后重复同一条命令即可继续。第二阶段会比对
 `recap_run_manifest.json` 记录的源视频路径、文件大小/修改时间与运行参数，拒绝复用来自其他源视频或其他参数的旧工作目录；视频理解产物也只在来源一致时复用。
+暂停时打印的续跑命令就是原命令：保留原来的写法，视频与路径参数转成绝对路径，补上 `--work-dir` 和来自环境变量的设置，从任何目录都能直接运行；同一份参数写在 manifest 的 `argv`。
 
 画面流程 `--edit-mode full|cut|dub` 与声音策略 `--audio-mode` 是两个独立开关；
 `narration` 保留上述解说流程，`source-mix` 不做配音，`adopted-packet-copy` 冻结当前输入的已采用 AAC 音轨。

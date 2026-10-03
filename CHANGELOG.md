@@ -14,6 +14,7 @@ All notable changes to this project are documented here.
 
 - **理解与写稿技能不再整文件复制旁白 lint 链。** video-understanding 去掉从不执行的 `narration_lint` / `speech_ownership` / `deslop_qc`，video-script 去掉 `timeline_fusion` 和 brief 分块代码，两个技能的脚本合计少约 1,440 行；一致性测试改为只比对两边真正共用的五个文本预算函数及其预算配置默认值。产物、命令与默认值不变。
 - **video-recap 的 dashboard 与资源库模块归入子包。** `dashboard_{data,io,runs,templates}.py` 移到 `scripts/dashboard/`，`project_binding.py`、`resource_lock.py` 移到 `scripts/resources/{project_binding,lock}.py`；文件身份与 id 函数从 `materials.py`、ffmpeg 字幕滤镜探测从 `doctor.py` 移进 `lib.py`，`TTS_PROVIDERS` 只剩一份。入口脚本（`recap.py`、`dashboard_server.py`、`library.py`、`doctor.py` 等）、产物与默认值不变。
+- **暂停时的续跑命令改为回显原命令。** 不再由 `recap_timeline` 按 flag 逐个手写重组（漏写的 flag 续跑时会被悄悄丢掉），而是回显用户输入的参数：保留原写法（如 `--style=悬疑`、`--project` 写的是目录），视频与 `--work-dir` / `--output-dir` / `--voice-ref` / `--material-library-dir` / `--project` 等路径转为绝对路径，补上 `--work-dir` 与来自 `EDIT_MODE` / `TARGET_DURATION` / `TTS_PROVIDER` / `VOICE_REF` / `SUBTITLE_Y_*` 的设置。`recap_run_manifest.json` 新增 `argv`，记录这条续跑参数。此前相对的 `--output-dir` / `--material-library-dir` 原样写进续跑命令，换目录续跑会指向别处；现在从任何目录都能用。
 
 ### Removed
 
