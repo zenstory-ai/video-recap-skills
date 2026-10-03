@@ -5,7 +5,16 @@ import re
 import subprocess
 from pathlib import Path
 
+from frame_grid import edge_frame_snapper, snap_edges_to_frames
 from lib import log
+from sentence_gate import (
+    _GATE_TOLERANCE,
+    _continuous_source_join,
+    _edge_classifier,
+    _edge_joined,
+    _unverified_window,
+    enforce_clip_sentence_boundaries,
+)
 
 
 def _find_source_artifact(work_dir, filename, source_id=None, source_work_dir=None):
@@ -128,10 +137,6 @@ def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
     return _dialogue_speech_spans(row for row in rows if row["text"].strip())
 
 
-def _unverified_window(row):
-    return row.get("boundary_use") == "unverified"
-
-
 def _combine_boundary_windows(*groups):
     """Dedupe windows by span; a span backed by any verified/quiet row counts as verified."""
     unique = {}
@@ -147,101 +152,6 @@ def _combine_boundary_windows(*groups):
             item["boundary_use"] = "unverified"
         combined.append(item)
     return combined
-
-
-def _same_source(left, right):
-    # Single-source normalized plans omit source identity; both sides then read as None.
-    return left.get("source_id") == right.get("source_id") and left.get(
-        "source_path"
-    ) == right.get("source_path")
-
-
-def _continuous_source_join(left, right, tolerance=0.05):
-    return (
-        _same_source(left, right)
-        and abs(left["source_end"] - right["source_start"]) <= tolerance
-        and abs(left["output_end"] - right["output_start"]) <= tolerance
-    )
-
-
-def enforce_clip_sentence_boundaries(
-    plan, boundary_windows, speech_spans, video_duration, tolerance=0.05
-):
-    """Block any audible clip edge that falls inside detected source speech.
-
-    Safe edges are: source start/end, a sentence/quiet pause (`unverified_sentence_boundary`
-    when only a coarse-ASR sentence estimate covers it), or a truly contiguous same-source
-    join (no media is removed). Missing ASR timing degrades to `unchecked` rather than
-    inventing speech. Once ASR says an edge is speech-owned, failure to snap is blocking.
-    """
-    clips = plan["clips"]
-    checks, new_blockers = [], []
-    verified_windows = [row for row in boundary_windows if not _unverified_window(row)]
-    unverified_windows = [row for row in boundary_windows if _unverified_window(row)]
-
-    def inside(rows, ts):
-        return any(row["start"] - tolerance <= ts <= row["end"] + tolerance for row in rows)
-
-    for idx, clip in enumerate(clips):
-        for edge, ts in (("start", clip["source_start"]), ("end", clip["source_end"])):
-            contiguous = (
-                edge == "start"
-                and idx > 0
-                and _continuous_source_join(clips[idx - 1], clip, tolerance)
-            ) or (
-                edge == "end"
-                and idx + 1 < len(clips)
-                and _continuous_source_join(clip, clips[idx + 1], tolerance)
-            )
-            if edge == "start" and ts <= tolerance:
-                status, reason = "safe", "source_start"
-            elif edge == "end" and ts >= video_duration - tolerance:
-                status, reason = "safe", "source_end"
-            elif contiguous:
-                status, reason = "safe", "continuous_source_join"
-            elif inside(verified_windows, ts):
-                status, reason = "safe", "sentence_or_quiet_boundary"
-            elif inside(unverified_windows, ts) and (
-                not speech_spans or inside(speech_spans, ts)
-            ):
-                # Word-safe pause, but the sentence end is only a coarse-ASR estimate.
-                status, reason = "safe", "unverified_sentence_boundary"
-            elif not speech_spans:
-                status, reason = "unchecked", "speech_timing_unavailable"
-            elif not inside(speech_spans, ts):
-                status, reason = "safe", "outside_detected_speech"
-            else:
-                status, reason = "blocking", "inside_detected_speech"
-            check = {
-                "clip_id": clip["clip_id"],
-                "source_id": clip.get("source_id"),
-                "edge": edge,
-                "time": round(ts, 3),
-                "status": status,
-                "reason": reason,
-            }
-            checks.append(check)
-            if status == "blocking":
-                new_blockers.append(
-                    {
-                        "code": "unsafe_clip_sentence_boundary",
-                        **check,
-                        "message": "剪辑边界仍落在原声讲话区间内，必须移动到句末锚点，不能截断原声句子。",
-                    }
-                )
-
-    qc = plan.setdefault("qc", {})
-    qc.setdefault("boundary_status", {})["sentence_checks"] = checks
-    existing = [
-        row
-        for row in qc.get("blocking", [])
-        if row["code"] != "unsafe_clip_sentence_boundary"
-    ]
-    if existing or new_blockers:
-        qc["blocking"] = existing + new_blockers
-    else:
-        qc.pop("blocking", None)
-    return plan
 
 
 def _recompute_clip_timeline(clips):
@@ -569,6 +479,47 @@ def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5):
     return _plan_with_snapped_clips(plan, clips, "shot_snaps", events)
 
 
+def _revert_unsafe_shot_snaps(plan, before, classify):
+    """Undo a shot-change move that left an edge in speech where the plan's own edge was safe.
+
+    Sound outranks picture cleanup. Line snapping can pull a moved edge back out of speech
+    only next to a pause window, so an end the shot-change pass pulled back up to
+    `scene_margin` into a sentence (the plan ended it in an ASR gap that is music, not
+    silence) would block, and the nearest safe edge the gate suggests would be pulled back
+    again on the next run. Such an edge returns to `before` (the clips before the shot-change
+    pass) and its shot_snaps event reads `reverted_unsafe`, unless that would overlap
+    another clip's source range.
+    """
+    events = plan.get("qc", {}).get("boundary_status", {}).get("shot_snaps", [])
+    if len(events) != len(before):
+        return plan
+    clips = [dict(c) for c in plan["clips"]]
+    events = [dict(e) for e in events]
+    reverted = 0
+    for idx, (clip, old, event) in enumerate(zip(clips, before, events)):
+        for edge, key, moved in (("start", "source_start", "moved_forward"),
+                                 ("end", "source_end", "moved_back")):
+            if event[f"{edge}_action"] != moved:
+                continue
+            status, reason = classify(edge, clip[key], _edge_joined(clips, idx, edge))
+            if status != "blocking" or classify(
+                    edge, old[key], _edge_joined(before, idx, edge))[0] != "safe":
+                continue
+            span = {**clip, key: old[key]}
+            if not plan["allow_overlap"] and _candidate_overlaps(
+                    clips, idx, span["source_start"], span["source_end"]):
+                continue
+            clip[key] = old[key]
+            event[f"{edge}_action"] = "reverted_unsafe"
+            event[f"rejected_{edge}"] = event.pop(f"new_{edge}")
+            event[f"{edge}_revert_reason"] = reason
+            reverted += 1
+    if not reverted:
+        return plan
+    log(f"切镜头避让会截断原声，已撤回 {reverted} 处边界")
+    return _plan_with_snapped_clips(plan, clips, "shot_snaps", events)
+
+
 def _load_silence_for_source(work_dir, source_id, source_work_dir=None):
     """Read a source's silence_periods.json (project layout when source_id is None); [] when absent."""
     path = _find_source_artifact(work_dir, "silence_periods.json", source_id, source_work_dir)
@@ -590,13 +541,19 @@ def snap_source_clips(
     do_scene_snap=True,
     source_id=None,
     source_work_dir=None,
+    frame_grid=None,
 ):
-    """Snap every clip of ONE source: shot changes first, then quiet starts/ends, then the gate.
+    """Snap every clip of ONE source: shot changes, quiet starts/ends, frame grid, then the gate.
 
-    Visual cleanup goes first. Sentence/quiet snapping is the final authority because a
-    clean picture is never allowed to reintroduce a mid-sentence audio cut. source_id None
-    reads the project-level understanding artifacts (single-source layout).
+    Visual cleanup goes first. Sentence/quiet snapping is the sound authority because a
+    clean picture is never allowed to reintroduce a mid-sentence audio cut (a shot-change
+    move line snapping cannot repair is reverted when the plan's own edge was gate-safe);
+    the frame-grid pass only moves an edge by under a frame and prefers the side that keeps
+    it safe, and the gate judges the final, frame-aligned edges. source_id None reads the
+    project-level understanding artifacts (single-source layout). frame_grid is a
+    frame_grid.source_frame_grids() entry; None leaves edges off the grid.
     """
+    before_shot_snap = [dict(c) for c in plan["clips"]]
     if do_scene_snap:
         plan = snap_clips_off_shot_changes(
             plan, video, margin=scene_margin, threshold=scene_threshold
@@ -610,21 +567,37 @@ def snap_source_clips(
             plan, boundaries, duration, start_max_prepend, max_trim=start_max_trim
         )
         plan = snap_clip_ends_to_lines(plan, boundaries, duration, line_max_extend)
+    speech_spans = _load_source_speech_spans(work_dir, source_id, source_work_dir)
+    video_start = frame_grid["origin"] if frame_grid is not None else 0.0
+    classify = _edge_classifier(boundaries, speech_spans, duration, _GATE_TOLERANCE,
+                                video_start)
+    if do_scene_snap:
+        plan = _revert_unsafe_shot_snaps(plan, before_shot_snap, classify)
+    if frame_grid is None:
+        return enforce_clip_sentence_boundaries(plan, boundaries, speech_spans, duration)
+
+    clips = plan["clips"]
+    joined = [idx > 0 and _continuous_source_join(clips[idx - 1], clip)
+              for idx, clip in enumerate(clips)]
+    clips, events = snap_edges_to_frames(
+        clips, frame_grid, boundaries, classify, duration,
+        allow_overlap=plan["allow_overlap"], joined_to_previous=joined,
+    )
+    plan = _plan_with_snapped_clips(plan, clips, "frame_snaps", events)
     return enforce_clip_sentence_boundaries(
-        plan,
-        boundaries,
-        _load_source_speech_spans(work_dir, source_id, source_work_dir),
-        duration,
+        plan, boundaries, speech_spans, duration, video_start=video_start,
+        frame_snap=edge_frame_snapper(frame_grid, boundaries, classify, duration),
     )
 
 
-def snap_multi_source_clips(plan, sources, work_dir, **snap_options):
+def snap_multi_source_clips(plan, sources, work_dir, frame_grids=None, **snap_options):
     """Per-source snap_source_clips for a multi-source validated plan.
 
-    Each clip is snapped using ITS OWN source's silence windows / shot changes and duration
-    (a clip in source B never constrains a clip in source A), then the global OUTPUT timeline
-    is recomputed once in plan order. Missing silence data leaves a boundary unchanged.
-    `snap_options` are snap_source_clips' keyword options.
+    Each clip is snapped using ITS OWN source's silence windows / shot changes, frame grid
+    and duration (a clip in source B never constrains a clip in source A), then the global
+    OUTPUT timeline is recomputed once in plan order. Missing silence data leaves a boundary
+    unchanged. `frame_grids` maps source_id to its frame grid; `snap_options` are
+    snap_source_clips' keyword options.
     """
     clips = plan["clips"]
     allow_overlap = plan["allow_overlap"]
@@ -635,6 +608,7 @@ def snap_multi_source_clips(plan, sources, work_dir, **snap_options):
         "start_snaps": [],
         "end_snaps": [],
         "shot_snaps": [],
+        "frame_snaps": [],
         "sentence_checks": [],
     }
     blocking_accum = []
@@ -647,6 +621,7 @@ def snap_multi_source_clips(plan, sources, work_dir, **snap_options):
             work_dir,
             source_id=sid,
             source_work_dir=source.get("source_work_dir"),
+            frame_grid=(frame_grids or {}).get(sid),
             **snap_options,
         )
         mini_boundary = mini["qc"]["boundary_status"]

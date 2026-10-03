@@ -13,9 +13,10 @@ description: >
 本技能只执行 Agent 已经做出的剪辑决定：
 
 1. 校验并补全 `clip_plan.json`，写出带 `clip_id`、原片/输出时间与时长的 `clip_plan_validated.json`。
-2. 先避开原片硬切附近的闪帧风险，最后把边界吸附到可靠句末/自然停顿；声音完整性拥有最终优先级。
-3. 拼接选定区间，输出 `edited_source.mp4`。
-4. 到此停止，由 Agent 按真实输出时间线写 `narration.json`；本工具不读取旁白，也不做原片→输出映射。
+2. 先避开原片硬切附近的闪帧风险，再把边界吸附到可靠句末/自然停顿；声音完整性拥有最终优先级。
+3. 把每个入点对齐到源视频帧网格、每段时长对齐到整数个输出帧（不足一帧的移动，优先选句界门禁仍判为安全、仍在停顿内的一侧），句界门禁检查的是对齐后的边界。
+4. 拼接选定区间，输出恒定帧率的 `edited_source.mp4`，帧数与 `clip_plan_validated.json` 记录的一致。
+5. 到此停止，由 Agent 按真实输出时间线写 `narration.json`；本工具不读取旁白，也不做原片→输出映射。
 
 相同输入会得到相同输出。`edited_source.mp4.meta.json` 记录标准化 clips、渲染设置和每个源文件的 `size`/`mtime_ns`；三者与当前一致且 `edited_source.mp4` 存在非空才复用，任一不同即重渲染。只有 sidecar 而没有媒体文件不复用。
 
@@ -92,24 +93,25 @@ python3 scripts/cut.py <video> --work-dir <work_dir> [--clip-plan <clip_plan.jso
 
 cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.json` 的 `qc.blocking`，每项带 `code`：
 
-- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。
+- `unsafe_clip_sentence_boundary`：片段边界仍在原声讲话内；逐边界判定见 `qc.boundary_status.sentence_checks`。被阻断的边界带 `nearest_safe: {"before", "after"}`：前后 5 秒内最近的安全边界 `{time, reason, delta}`（原片秒；`delta` 为相对当前边界的秒数，没有则为 `null`；已按帧对齐复核过；重跑时切镜头避让若把它拉回讲话内，这次避让会被撤回，`qc.boundary_status.shot_snaps` 记 `reverted_unsafe`，所以原样写回不会再因句界被阻断），按它改 `clip_plan.json` 的 `start`/`end` 后重跑。入点往前（`before`）是多保留、往后（`after`）是裁掉，出点相反；先确认改动不会切掉必保内容或与相邻片段重叠。两侧都是 `null` 说明附近没有停顿，要换区间而不是微调。
 - `target_duration_drift`：时长偏差超出阻断阈值；明细见 `qc.target_duration`。
 - `REQUIRED_EVIDENCE_INVALID` / `REQUIRED_EVIDENCE_MISSING` / `REQUIRED_EVIDENCE_ORDER` / `REQUIRED_EVIDENCE_AUDIO_UNAVAILABLE`：必保证据声明无效、缺段、错序或源无音轨；明细见 `qc.required_evidence`。
 
 ## 5. 输出契约
 
-- `clip_plan_validated.json`：标准化片段，包含 `clip_id`、`source_start/end`、`output_start/end` 与 `duration`。
-- `edited_source.mp4`：按计划拼接后的短视频。
+- `clip_plan_validated.json`：标准化片段，包含 `clip_id`、`source_start/end`、`output_start/end`、`duration` 与 `frame_count`（该片段渲染的帧数）。`qc.frame_grid` 记录输出帧率 `output_frame_rate`（单源沿用源帧率，多源用画布帧率，NTSC 写成 `30000/1001`）、总帧数与各源帧率；每次帧对齐的前后时间写在 `qc.boundary_status.frame_snaps`。
+- `edited_source.mp4`：按计划拼接后的恒定帧率短视频，帧数等于 `qc.frame_grid.frame_count`。
 - `shot_review.json`：仅 `--review-shots` 开启后生成的实际视频短镜/密集切镜候选；不会更改计划。
 
 下游把 `edited_source.mp4` 当作视频，把 Agent 按输出时间写的 `narration.json` 当作旁白。
 
 ## 6. 边界与时间线规则
 
-- `clip_plan.json` 使用原片时间；`narration.json` 直接使用剪后输出时间，不存在原片 → 输出的旁白映射。
+- `clip_plan.json` 使用原片时间；`narration.json` 直接使用剪后输出时间，不存在原片 → 输出的旁白映射。输出时间以 `clip_plan_validated.json` 为准：帧对齐会把边界移动不到一帧（25fps 下不超过 40 ms），写旁白前读 validated 计划，不要用自己写的原始区间推算。
+- 边界不在帧网格上时，concat 会在每个接点丢掉一个帧位（25fps 下画面停顿 80 ms，成片变成可变帧率），所以帧对齐无法关闭。源帧率未知（`r_frame_rate` 为 `0/0` 或大于 120）时入点不动，时长仍对齐到整数输出帧。
 - 默认禁止重叠或重复原片区间；`--allow-overlap` 开启后才允许。
 - 片段起点只能位于源头、可靠句末/静音窗，或与上一片段构成无损同源连续连接；片段终点同理。ASR 判定仍在讲话且无法吸附时写入 `unsafe_clip_sentence_boundary` 并阻断。
-- `SCENE_CUT_SNAP` 默认开启：先按画面把 source start 向后、source end 向前吸附到附近硬切，随后句末吸附再做最终修正，避免视觉修正重新制造半句原声。默认范围为 `SCENE_CUT_SNAP_MARGIN=0.5` 秒，检测阈值为 `SCENE_CUT_DETECT_THRESHOLD=0.4`。
+- `SCENE_CUT_SNAP` 默认开启：先按画面把 source start 向后、source end 向前吸附到附近硬切，随后句末吸附再做最终修正，避免视觉修正重新制造半句原声；附近没有停顿、句末吸附修不回来时，把边界移进讲话的那次避让会被撤回（原位置能过门禁时）。默认范围为 `SCENE_CUT_SNAP_MARGIN=0.5` 秒，检测阈值为 `SCENE_CUT_DETECT_THRESHOLD=0.4`。
 - scene-change score 只提供接点候选，不证明接点自然。先检查短时间窗内是否出现密集候选，再区分来源：原片自带的无关短镜头整段删除；相关但短到像闪帧的镜头通过扩展 IN/OUT 保留完整动作、反应或台词，不用定格/慢放伪造时长；由本次拼接制造的切点则优先移动边界、恢复同源连续运动、合并相邻片段或改用更自然的连接，尽量消除。成片后仍要逐个播放接点前后约 0.5–1 秒；白闪或曝光叠化再结合逐帧亮度定位，不能为了通过视觉检测切断完整台词，也不能用转场遮掩坏接点。
 - 修短残镜时不得仅为压低 scene 分数而对接点附近施加与所属镜头不连续的极端放大或位移；取景复核与修复验证流程见 `references/shot-review.md`。
 - 连续同源片段的无损连接不做句中双侧音频淡出；非连续片段仍在安全停顿内做防爆音淡入淡出。

@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "4c0d86075a37085f8b06217e53ef4c72d52ced91e5eef7e80ea409d537ffba17",
+      "packageDigest": "3e268519ff762a38ea77a3d005022c5c432f13bcc79ced2139290d33cb7b6d28",
       "path": "skills/video-cut",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -78,7 +78,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.1"
+      "version": "1.0.2"
     },
     {
       "categories": [
@@ -105,7 +105,7 @@
         "bin:ffmpeg",
         "bin:ffprobe",
         "skill:worldwonderer/video-understanding@1.0.2",
-        "skill:worldwonderer/video-cut@1.0.1",
+        "skill:worldwonderer/video-cut@1.0.2",
         "skill:worldwonderer/video-script@1.0.1",
         "skill:worldwonderer/video-voiceover@1.0.1",
         "skill:worldwonderer/video-assemble@1.0.1"
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.1"
+      "version": "1.0.2"
     },
     {
       "catalogMigration": true,

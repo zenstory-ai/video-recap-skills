@@ -14,6 +14,7 @@ import cut
 import cut_contract
 import cut_qc
 import cut_render
+import frame_grid
 import lib
 import media_geometry
 import sentence_boundaries
@@ -260,7 +261,10 @@ def test_build_edited_source_video_uses_ffmpeg_concat(monkeypatch, tmp_path):
     assert output.exists()
     ffmpeg_cmd = [cmd for cmd in commands if cmd[0] == "ffmpeg"][0]
     joined = " ".join(ffmpeg_cmd)
-    assert "trim=start=0.000:end=1.000" in joined
+    # Trim points sit half a source frame early; each segment is cut to exact whole frames.
+    assert "[0:v]trim=start=0.000000:end=0.983333" in joined
+    assert "fps=30,tpad=stop_mode=clone:stop=-1,trim=end_frame=30" in joined
+    assert "atrim=start=0.000000:end=1.000000" in joined
     assert "concat=n=2" in joined
     assert ffmpeg_cmd[ffmpeg_cmd.index("-pix_fmt") + 1] == "yuv420p"
     assert ffmpeg_cmd[ffmpeg_cmd.index("-ar") + 1] == "48000"
@@ -305,6 +309,9 @@ def _seed_cached_cut(tmp_path):
     raw_plan = [{"start": 10.0, "end": 20.0}]
     (work / "clip_plan.json").write_text(json.dumps(raw_plan), encoding="utf-8")
     validated = cut_contract.normalize_clip_plan(raw_plan, video_duration=100.0)
+    # cut_cli stamps each clip's frame count; the render cache binds to that too.
+    geometry = media_geometry._select_output_geometry([str(video)], validated["clips"])[3]
+    frame_grid.record_frame_grid(validated, geometry)
     edited = work / "edited_source.mp4"
     edited.write_bytes(b"cached-edited")
     cut_contract._write_edited_source_meta(edited, validated, video)
@@ -694,9 +701,9 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
     assert ffmpeg_cmd.count("-i") == 2
     joined = " ".join(ffmpeg_cmd)
     assert f"-i {a}" in joined and f"-i {b}" in joined
-    assert "[0:v]trim=start=0.000:end=1.000" in joined
-    assert "[1:v]trim=start=2.000:end=3.000" in joined
-    assert "[0:v]trim=start=4.000:end=5.000" in joined
+    assert "[0:v]trim=start=0.000000:end=0.983333" in joined
+    assert "[1:v]trim=start=1.983333:end=2.983333" in joined
+    assert "[0:v]trim=start=3.983333:end=4.983333" in joined
     # Heterogeneous sources are normalized to one canvas before concat; each clip gets audio.
     assert "scale=1280:720" in joined and "setsar=1" in joined and "format=yuv420p" in joined
     assert "anullsrc=r=48000:cl=stereo" in joined
@@ -914,7 +921,8 @@ def test_select_output_geometry_qc_exposes_rotation_sar_dar_facts(monkeypatch):
         "/rotated.mp4": media_geometry.VideoGeometry(1080, 1920, 30.0, {
             "coded_width": 1920, "coded_height": 1080, "display_width": 1080, "display_height": 1920,
             "rotation": 90, "rotation_swaps_axes": True, "sample_aspect_ratio": "1:1",
-            "sample_aspect_ratio_float": 1.0, "display_aspect_ratio": "16:9"}),
+            "sample_aspect_ratio_float": 1.0, "display_aspect_ratio": "16:9",
+            "frame_rate": "30/1", "video_start_offset": 0.0}),
         "/landscape.mp4": _geometry(1280, 720, 30.0),
     }
     monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])

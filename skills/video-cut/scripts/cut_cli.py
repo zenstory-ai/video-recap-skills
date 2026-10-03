@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 
 
 from pathlib import Path
@@ -19,6 +20,7 @@ from cut_contract import (
     should_reuse_edited_source,
 )
 from cut_render import build_edited_source_video
+from frame_grid import record_frame_grid, source_frame_grids
 from media_geometry import _has_audio_stream, _select_output_geometry
 from narrative_selection import check_required_evidence
 from cut_qc import update_cut_qc
@@ -37,6 +39,26 @@ def _write_validated_plan(path, plan, raw_plan_paths):
         if all(not raw.exists() or raw.stat().st_mtime_ns <= written for raw in raw_plan_paths):
             return
     path.write_text(text, encoding="utf-8")
+
+
+def _required_ranges_by_source(raw_plan, source_paths):
+    """{plan source path: [(start, end)]} of declared required-evidence nodes.
+
+    Only a hint for frame snapping; check_required_evidence validates the contract itself.
+    """
+    nodes = raw_plan.get("required_evidence") if isinstance(raw_plan, dict) else None
+    nodes = nodes.get("nodes") if isinstance(nodes, dict) else None
+    by_realpath = {os.path.realpath(path): path for path in source_paths}
+    ranges = {}
+    for node in nodes if isinstance(nodes, list) else []:
+        try:
+            path = by_realpath.get(os.path.realpath(node["source"]))
+            start, end = float(node["start"]), float(node["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if path is not None:
+            ranges.setdefault(path, []).append((start, end))
+    return ranges
 
 
 def main():
@@ -139,24 +161,16 @@ def main():
             target_duration=target_seconds,
             allow_overlap=args.allow_overlap,
         )
-        validated_plan = snap_source_clips(
-            validated_plan, args.video, video_duration, work_dir, **snap_options
-        )
     else:
-        # Each clip snaps against ITS OWN source's pauses and shot changes.
         validated_plan = normalize_multi_source_clip_plan(
             raw_plan,
             sources_manifest,
             target_duration=target_seconds,
             allow_overlap=args.allow_overlap,
         )
-        validated_plan = snap_multi_source_clips(
-            validated_plan, validated_plan["sources"], work_dir, **snap_options
-        )
-
-    validated_plan.setdefault("qc", {})["join_fade_ms"] = round(
-        CONFIG["clip_join_audio_fade_ms"], 3
-    )
+    # The canvas (and so the output frame rate) is chosen before snapping because the
+    # frame-grid pass snaps clip lengths to whole output frames; the same geometry is
+    # recorded in clip_plan_validated.json and used for the render.
     # Single-source clips carry no source_path; the CLI video is the only input.
     source_paths = list(
         dict.fromkeys(
@@ -164,8 +178,32 @@ def main():
         )
     ) or [str(args.video)]
     _, _, _, geometry_qc = _select_output_geometry(source_paths, validated_plan["clips"])
+    frame_grids = source_frame_grids(geometry_qc)
+    for path, ranges in _required_ranges_by_source(raw_plan, source_paths).items():
+        frame_grids[path]["keep_ranges"] = ranges
+    if sources_manifest is None:
+        validated_plan = snap_source_clips(
+            validated_plan, args.video, video_duration, work_dir,
+            frame_grid=frame_grids[str(args.video)], **snap_options,
+        )
+    else:
+        # Each clip snaps against ITS OWN source's pauses, shot changes and frame grid.
+        validated_plan = snap_multi_source_clips(
+            validated_plan, validated_plan["sources"], work_dir,
+            frame_grids={
+                sid: frame_grids[source["source_path"]]
+                for sid, source in validated_plan["sources"].items()
+                if source["source_path"] in frame_grids
+            },
+            **snap_options,
+        )
+
+    validated_plan.setdefault("qc", {})["join_fade_ms"] = round(
+        CONFIG["clip_join_audio_fade_ms"], 3
+    )
     validated_plan["qc"]["output_geometry"] = geometry_qc
     validated_plan["qc"]["output_geometry_reason"] = geometry_qc["reason"]
+    record_frame_grid(validated_plan, geometry_qc)
     update_cut_qc(
         validated_plan,
         allow_duration_drift=bool(args.allow_duration_drift),

@@ -24,7 +24,7 @@ def run_cut(tmp_path, monkeypatch):
         'width': 320, 'height': 240, 'r_frame_rate': '24/1'}))
     monkeypatch.setitem(CONFIG, 'scene_cut_snap', False)
     monkeypatch.setitem(CONFIG, 'snap_clip_line_end', False)
-    monkeypatch.setattr(sentence_boundaries, 'enforce_clip_sentence_boundaries', lambda plan, *a: plan)
+    monkeypatch.setattr(sentence_boundaries, 'enforce_clip_sentence_boundaries', lambda plan, *a, **k: plan)
 
     def run(plan, *options):
         (tmp_path / 'clip_plan.json').write_text(json.dumps(plan), encoding='utf-8')
