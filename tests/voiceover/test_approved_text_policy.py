@@ -67,7 +67,7 @@ def test_preserve_approved_text_fails_closed_without_resynthesis(monkeypatch, tm
     assert not (tts_dir / "narr_003.wav.cache.json").exists()
 
 
-def test_legacy_default_still_truncates_and_resynthesizes(monkeypatch, tmp_path):
+def test_default_policy_keeps_over_budget_text_with_one_tts_call(monkeypatch, tmp_path):
     _configure_offline_tts(monkeypatch)
     monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
     calls = []
@@ -89,11 +89,17 @@ def test_legacy_default_still_truncates_and_resynthesizes(monkeypatch, tmp_path)
 
     result = voiceover._synthesize_segment(0, seg, [seg], tts_dir, "mimo-tts")
 
-    assert len(calls) == 2
-    assert calls[0] == text
-    assert calls[1] != text
+    # Over budget (raw 9.6s > 3.8s slot): the authored text is kept; assemble fits it with
+    # bounded tempo or blocks it as no_safe_fit before the encode.
+    assert calls == [text]
+    assert result["spoken_text"] == text
     assert result["narration"] == text
-    assert result["truncated"] is True
+    assert result["truncated"] is False
+    assert result["truncate_reason"] == "none"
+
+
+def test_default_policy_name_is_part_of_the_cache_contract():
+    assert voiceover.policy_name(False) == "report-over-budget-v2"
 
 
 def test_approved_text_policy_is_part_of_segment_cache_inputs(monkeypatch, tmp_path):

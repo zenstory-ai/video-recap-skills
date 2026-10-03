@@ -364,7 +364,7 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(understanding_brief, "detect_speech_boundary_anchors", lambda *_a: [])
+    monkeypatch.setattr(understanding_brief, "ensure_speech_boundary_anchors", lambda *_a: None)
     monkeypatch.setattr(understanding_brief, "_generate_source_storyboard", lambda *_a, **_k: None)
     monkeypatch.setattr(understanding_brief, "_generate_edited_storyboard", lambda *_a, **_k: None)
     monkeypatch.setattr(understanding_brief, "_prepend_storyboard_brief_header", lambda *_a, **_k: None)

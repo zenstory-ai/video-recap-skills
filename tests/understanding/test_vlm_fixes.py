@@ -86,6 +86,41 @@ def test_null_content_falls_back_to_reasoning(monkeypatch, tmp_path):
     assert analyses[0]["description"] == "男子拿起茶壶"
 
 
+def test_moderation_refusal_is_recorded_as_unreadable_not_as_a_description(monkeypatch, tmp_path):
+    frames = _scene_setup(monkeypatch, tmp_path)
+    monkeypatch.setattr(
+        "vlm.api_call",
+        lambda payload: _reply("The request was rejected because it was considered high risk"),
+    )
+
+    analyses = analyze_scenes(ONE_SCENE, frames, tmp_path)
+
+    assert analyses[0]["analysis_status"] == "moderation_refused"
+    assert "high risk" not in json.dumps(analyses, ensure_ascii=False)
+    assert analyses[0]["description"] == _parse_vlm_depth_response("")[0]
+
+
+def test_asr_moderation_refusal_is_stored_as_no_text(monkeypatch, tmp_path):
+    import asr
+
+    wav = tmp_path / "seg.wav"
+    wav.write_bytes(b"RIFF0000WAVE")
+    monkeypatch.setattr(
+        asr, "mimo_asr_api_call",
+        lambda payload: _reply("The request was rejected because it was considered high risk"),
+    )
+    assert asr._run_asr(wav) == ""
+
+    # Real dialogue that merely mentions rules or risk is kept.
+    monkeypatch.setattr(asr, "mimo_asr_api_call", lambda payload: _reply("这事违规，风险太高了"))
+    assert asr._run_asr(wav) == "这事违规，风险太高了"
+
+    # English dialogue that happens to contain one marker is a transcript, not a refusal.
+    line = "My request was rejected by the board, so we start over tomorrow."
+    monkeypatch.setattr(asr, "mimo_asr_api_call", lambda payload: _reply(line))
+    assert asr._run_asr(wav) == line
+
+
 def test_analyze_scenes_sends_the_editorial_evidence_prompt_to_vlm(monkeypatch, tmp_path):
     frames = _scene_setup(monkeypatch, tmp_path)
     captured = {}

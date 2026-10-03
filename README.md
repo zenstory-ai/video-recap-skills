@@ -272,7 +272,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 },
 ```
 
-交付前的机械检查写在 [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json)（响度、字幕溢出、发布门禁）和 [`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json)：
+交付前的机械检查写在 [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json)（响度、逐段旁白完整性、`verdict` / `blocking_codes`）和 [`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json)：
 
 ```json
 "checks": {

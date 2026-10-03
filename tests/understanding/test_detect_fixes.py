@@ -3,6 +3,8 @@ import sys
 from pathlib import Path
 from subprocess import CompletedProcess
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
 
 import detect  # noqa: E402
@@ -177,8 +179,141 @@ def test_detect_speech_boundary_anchors_aligns_sentence_punctuation_to_short_pau
 
     assert [round(item["time"], 2) for item in report["sentence_anchors"]] == [5.81, 14.34]
     assert all(item["punctuation"] == "。" for item in report["sentence_anchors"])
-    assert all(item["confidence"] in {"high", "medium"} for item in report["sentence_anchors"])
+    # A 15s ASR window cannot place a sentence end: the snap is close, the label is honest.
+    assert all(item["confidence"] == "low" for item in report["sentence_anchors"])
+    assert all(item["boundary_use"] == "unverified" for item in report["sentence_anchors"])
+    assert all(item["timing_bound_seconds"] >= 7.5 for item in report["sentence_anchors"])
+    assert report["schema_version"] == 2
     assert (tmp_path / "speech_boundary_anchors.json").exists()
+
+
+def _one_anchor(monkeypatch, tmp_path, pause, segment):
+    (tmp_path / "audio.wav").write_bytes(b"RIFF")
+    stderr = f"silence_start: {pause[0]}\nsilence_end: {pause[1]}"
+    monkeypatch.setattr("detect.run_cmd", lambda cmd, **kw: _ok(stderr=stderr))
+    report = detect_speech_boundary_anchors(tmp_path, [segment])
+    assert len(report["sentence_anchors"]) == 1
+    return report["sentence_anchors"][0]
+
+
+def test_speech_boundary_anchor_in_wide_window_is_unverified(monkeypatch, tmp_path):
+    # "...。" at the window end: expected 15.0, pause midpoint 15.01 -> alignment_error 0.01.
+    anchor = _one_anchor(
+        monkeypatch, tmp_path, (14.92, 15.1), {"start": 0, "end": 15, "text": "一句完整的话。"}
+    )
+    assert anchor["alignment_error"] <= 0.02
+    assert anchor["confidence"] == "low"
+    assert anchor["boundary_use"] == "unverified"
+    assert anchor["timing_basis"] == "asr_window"
+    assert anchor["timing_bound_seconds"] >= 7.5
+
+
+def test_speech_boundary_anchor_in_narrow_window_stays_verified(monkeypatch, tmp_path):
+    anchor = _one_anchor(
+        monkeypatch, tmp_path, (10.5, 10.9), {"start": 10.0, "end": 11.0, "text": "好。"}
+    )
+    assert anchor["confidence"] == "high"
+    assert anchor["boundary_use"] == "verified"
+    assert anchor["timing_bound_seconds"] <= 0.6
+
+
+def test_speech_boundary_anchor_beyond_alignment_limit_is_unusable(monkeypatch, tmp_path):
+    # expected 15.0, pause midpoint 13.7 -> alignment_error 1.3 (> 1.2, within the 2.1 snap limit).
+    anchor = _one_anchor(
+        monkeypatch, tmp_path, (13.6, 13.8), {"start": 0, "end": 15, "text": "一句完整的话。"}
+    )
+    assert anchor["alignment_error"] == 1.3
+    assert anchor["boundary_use"] == "none"
+
+
+def test_anchors_current_regenerates_only_stale_schema(tmp_path):
+    import json
+
+    path = tmp_path / "speech_boundary_anchors.json"
+    assert detect.anchors_current(tmp_path) is False
+    path.write_text(json.dumps({"schema_version": 1, "sentence_anchors": []}), encoding="utf-8")
+    assert detect.anchors_current(tmp_path) is False
+    path.write_text(json.dumps({"schema_version": 2, "sentence_anchors": []}), encoding="utf-8")
+    assert detect.anchors_current(tmp_path) is True
+
+
+_V1_ASR = [{"start": 0.0, "end": 15.0, "text": "一句完整的话。"}]
+_V1_ANCHOR = {
+    "time": 15.1, "pause_start": 14.92, "pause_end": 15.1, "expected_time": 15.0,
+    "alignment_error": 0.01, "confidence": "high", "punctuation": "。",
+    "text_tail": "一句完整的话。", "asr_segment_index": 0,
+}
+
+
+def _write_v1_restore(tmp_path, anchors=None):
+    import json
+
+    (tmp_path / "asr_result.json").write_text(json.dumps(_V1_ASR, ensure_ascii=False), encoding="utf-8")
+    (tmp_path / "speech_boundary_anchors.json").write_text(
+        json.dumps({"schema_version": 1, "status": "completed",
+                    "sentence_anchors": anchors if anchors is not None else [_V1_ANCHOR]},
+                   ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+def _brief_only(monkeypatch, tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    import understanding_brief
+
+    monkeypatch.setattr(understanding_brief, "_finish_brief", lambda *_a, **_k: None)
+    understanding_brief._write_brief_from_existing_artifacts(
+        tmp_path / "video.mp4", tmp_path, SimpleNamespace(style="纪录片"), 15.0
+    )
+    return json.loads((tmp_path / "speech_boundary_anchors.json").read_text(encoding="utf-8"))
+
+
+def test_brief_only_upgrades_restored_v1_anchors_in_place_without_audio(monkeypatch, tmp_path):
+    # A material-library restore copies the anchors but never audio.wav: the detector must not
+    # run (it would write an empty `unavailable` file and every gate would lose its anchors).
+    _write_v1_restore(tmp_path)
+    monkeypatch.setattr("detect.run_cmd", lambda *a, **k: pytest.fail("no audio: must not detect"))
+
+    payload = _brief_only(monkeypatch, tmp_path)
+
+    assert payload["schema_version"] == 2
+    assert payload["status"] == "completed"
+    [anchor] = payload["sentence_anchors"]
+    assert (anchor["time"], anchor["pause_start"], anchor["pause_end"]) == (15.1, 14.92, 15.1)
+    assert anchor["confidence"] == "low"
+    assert anchor["boundary_use"] == "unverified"
+    assert anchor["timing_basis"] == "asr_window"
+    assert anchor["timing_bound_seconds"] == 14.92
+
+
+def test_brief_only_leaves_unmappable_v1_anchors_untouched_without_audio(monkeypatch, tmp_path):
+    import json
+
+    _write_v1_restore(tmp_path, [{**_V1_ANCHOR, "asr_segment_index": 7}])
+    before = (tmp_path / "speech_boundary_anchors.json").read_text(encoding="utf-8")
+    monkeypatch.setattr("detect.run_cmd", lambda *a, **k: pytest.fail("no audio: must not detect"))
+
+    payload = _brief_only(monkeypatch, tmp_path)
+
+    assert payload == json.loads(before)
+
+
+def test_brief_only_redetects_v1_anchors_when_audio_is_present(monkeypatch, tmp_path):
+    _write_v1_restore(tmp_path)
+    (tmp_path / "audio.wav").write_bytes(b"RIFF")
+    monkeypatch.setattr(
+        "detect.run_cmd", lambda cmd, **kw: _ok(stderr="silence_start: 14.92\nsilence_end: 15.1")
+    )
+
+    payload = _brief_only(monkeypatch, tmp_path)
+
+    assert payload["schema_version"] == 2
+    assert "upgraded_from_schema" not in payload
+    assert payload["acoustic_pauses"]
+    [anchor] = payload["sentence_anchors"]
+    assert anchor["boundary_use"] == "unverified"
 
 
 def test_detect_silence_reextracts_audio_when_source_video_changes(monkeypatch, tmp_path):

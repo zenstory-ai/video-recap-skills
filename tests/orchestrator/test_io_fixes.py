@@ -1068,6 +1068,56 @@ def test_recap_multi_video_phase_a_writes_manifest_and_pauses(
     assert "--material-library-dir" in out and "--save-materials" in out
 
 
+def test_recap_multi_video_understanding_reads_the_project_background_research(
+    monkeypatch, tmp_path, capsys
+):
+    """video-understanding reads research only from its own sources/<id>/ work_dir, while
+    the Agent writes it once at the project level (video-recap SKILL.md §4.1)."""
+    v1 = tmp_path / "a.mp4"
+    v2 = tmp_path / "b.mp4"
+    v1.write_bytes(b"a source")
+    v2.write_bytes(b"b source")
+    work = tmp_path / "project"
+    work.mkdir()
+    research = '{"characters": {"范闲": "主角"}}'
+    (work / "background_research.json").write_text(research, encoding="utf-8")
+    seen = []
+
+    def understand(cli):
+        wd = Path(cli[cli.index("--work-dir") + 1])
+        seen.append((wd / "background_research.json").read_text(encoding="utf-8"))
+        _understand_writes_phase_a(cli)
+
+    monkeypatch.setattr(
+        "recap_runner._run", stub_child_run(work, calls=[], understand=understand)
+    )
+    _argv(monkeypatch, v1, v2, "--work-dir", work, "--edit-mode", "cut")
+
+    recap.main()
+
+    assert seen == [research, research]
+
+
+def test_project_background_research_does_not_replace_a_newer_per_source_file(tmp_path):
+    project = tmp_path / "project"
+    source = project / "sources" / "src_a"
+    source.mkdir(parents=True)
+    shared = project / "background_research.json"
+    shared.write_text('{"synopsis": "project"}', encoding="utf-8")
+    own = source / "background_research.json"
+    own.write_text('{"synopsis": "per-source"}', encoding="utf-8")
+    os.utime(shared, ns=(1_000_000_000, 1_000_000_000))
+    os.utime(own, ns=(2_000_000_000, 2_000_000_000))
+
+    recap._share_project_background_research(project, source)
+    assert own.read_text(encoding="utf-8") == '{"synopsis": "per-source"}'
+
+    os.utime(shared, ns=(3_000_000_000, 3_000_000_000))  # the project file was edited later
+    recap._share_project_background_research(project, source)
+    assert own.read_text(encoding="utf-8") == '{"synopsis": "project"}'
+    assert own.stat().st_mtime_ns == shared.stat().st_mtime_ns
+
+
 def test_recap_multi_video_phase_b_invokes_cut_with_sources_manifest(
     monkeypatch, tmp_path
 ):
@@ -1266,6 +1316,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
                     {
                         "time": 2.0,
                         "pause_start": 1.8,
+                        "expected_time": 1.9,
                         "text_tail": "来源句子。",
                         "confidence": "high",
                     },
@@ -1374,6 +1425,11 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     assert output_evidence["timeline"] == "cut_output"
     assert output_evidence["sentence_anchors"][0]["time"] == 1.0
     assert output_evidence["sentence_anchors"][0]["pause_start"] == 0.8
+    # Output-clock pause_end; the source value is kept under its own name.
+    assert output_evidence["sentence_anchors"][0]["pause_end"] == 1.0
+    assert output_evidence["sentence_anchors"][0]["source_pause_end"] == 2.0
+    assert output_evidence["sentence_anchors"][0]["expected_time"] == 0.9
+    assert output_evidence["sentence_anchors"][0]["source_expected_time"] == 1.9
     assert output_evidence["sentence_anchors"][1]["time"] == 1.5
     assert output_evidence["sentence_anchors"][1]["pause_start"] == 1.5
     assert output_evidence["speech_spans"][0]["start"] == 0.0

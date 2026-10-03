@@ -5,8 +5,6 @@
   "tts_meta": "MEDIA_NOT_DISTRIBUTED/tts_meta.json",
   "tts_segments": 7,
   "assembly_settings": {
-    "version": 8,
-    "subtitle_text_normalize": 1,
     "user_subtitles": false,
     "burn_subtitles": false,
     "force_video_reencode": false,
@@ -38,7 +36,6 @@
       "tts_segment_tempo_max": 1.2
     },
     "audio_mix": {
-      "ducking_mode": "fixed",
       "duck_fade_seconds": 0.3,
       "duck_bridge_seconds": 1.5,
       "ducking_narr_weight": 2.4,
@@ -46,12 +43,6 @@
       "idle_orig_volume": 1.0,
       "speech_ducking_volume": 0.2,
       "zone_ducking_volume": 0.12,
-      "ducking_threshold": 0.15,
-      "ducking_ratio": 3,
-      "ducking_attack": 10,
-      "ducking_release": 300,
-      "ducking_level_sc": 2.0,
-      "ducking_makeup": 1.2,
       "final_loudnorm": "loudnorm=I=-14.0:TP=-1.0:LRA=11.0:linear=true:print_format=summary,alimiter=limit=0.98:level=false",
       "loudness_mode": "equivalent",
       "bgm_path": "",
@@ -60,27 +51,10 @@
     }
   },
   "output_path": "MEDIA_NOT_DISTRIBUTED/output.mp4",
-  "segment_audio_schema_version": 1,
   "qc_path": "MEDIA_NOT_DISTRIBUTED/assembly_qc.json",
-  "qc_verdict": "PASS",
-  "qc_blocking_codes": [],
-  "qc_loudness_mode": "two_pass_linear",
-  "qc_loudnorm_measurement": {
-    "input_i": "-12.93",
-    "input_tp": "-0.76",
-    "input_lra": "5.00",
-    "input_thresh": "-23.57",
-    "output_i": "-14.18",
-    "output_tp": "-2.18",
-    "output_lra": "3.80",
-    "output_thresh": "-24.82",
-    "normalization_type": "dynamic",
-    "target_offset": "0.18"
-  },
   "audio_segments": [
     {
       "index": 0,
-      "segment_audio_schema_version": 1,
       "narration": "谁懂啊，死了三年的白月光回来了，还挽着亲哥，等你当众喊大嫂。",
       "spoken_text": "谁懂啊，死了三年的白月光回来了，还挽着亲哥，等你当众喊大嫂。",
       "truncated": false,
@@ -105,7 +79,6 @@
     },
     {
       "index": 1,
-      "segment_audio_schema_version": 1,
       "narration": "她改名方牧兰，嘴上装作不认识，一个眼神就把三年前的旧情全招了。",
       "spoken_text": "她改名方牧兰，嘴上装作不认识，一个眼神就把三年前的旧情全招了。",
       "truncated": false,
@@ -130,7 +103,6 @@
     },
     {
       "index": 2,
-      "segment_audio_schema_version": 1,
       "narration": "天呐，狠话还没落地，下一秒两个人直接亲上了。",
       "spoken_text": "天呐，狠话还没落地，下一秒两个人直接亲上了。",
       "truncated": false,
@@ -155,7 +127,6 @@
     },
     {
       "index": 3,
-      "segment_audio_schema_version": 1,
       "narration": "前脚还装陌生人，看他挨打，她想都没想就冲过去挡下。",
       "spoken_text": "前脚还装陌生人，看他挨打，她想都没想就冲过去挡下。",
       "truncated": false,
@@ -180,7 +151,6 @@
     },
     {
       "index": 4,
-      "segment_audio_schema_version": 1,
       "narration": "嘴上装不认识，见他挨打却下意识冲去护着，这一下伪装露馅，男主全懂了。",
       "spoken_text": "嘴上装不认识，见他挨打却下意识冲去护着，这一下伪装露馅，男主全懂了。",
       "truncated": false,
@@ -205,7 +175,6 @@
     },
     {
       "index": 5,
-      "segment_audio_schema_version": 1,
       "narration": "偏偏再见面，她已经穿上婚服，要嫁给他哥。",
       "spoken_text": "偏偏再见面，她已经穿上婚服，要嫁给他哥。",
       "truncated": false,
@@ -230,7 +199,6 @@
     },
     {
       "index": 6,
-      "segment_audio_schema_version": 1,
       "narration": "她忙着复仇，他追着真相。前任变大嫂，家人们，这瓜谁能不迷糊？",
       "spoken_text": "她忙着复仇，他追着真相。前任变大嫂，家人们，这瓜谁能不迷糊？",
       "truncated": false,

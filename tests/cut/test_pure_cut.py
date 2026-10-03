@@ -438,7 +438,8 @@ def test_snap_recomputes_output_timeline_for_all_clips():
 
 
 def test_sentence_anchor_pause_window_snaps_both_clip_edges(tmp_path):
-    """Reliable sentence anchors are first-class cut boundaries even when long-silence is empty."""
+    """Schema-1 high/medium anchors are cut boundaries (labeled unverified) even when
+    long-silence is empty."""
     (tmp_path / "speech_boundary_anchors.json").write_text(json.dumps({"sentence_anchors": [
         {"time": 8.4, "pause_start": 8.2, "confidence": "high"},
         {"time": 14.3, "pause_start": 14.0, "confidence": "medium"},
@@ -446,14 +447,97 @@ def test_sentence_anchor_pause_window_snaps_both_clip_edges(tmp_path):
     ]}), encoding="utf-8")
     boundaries = sentence_boundaries._load_sentence_boundary_windows(tmp_path)
     assert boundaries == [
-        {"start": 8.2, "end": 8.4, "kind": "sentence_anchor", "confidence": "high"},
-        {"start": 14.0, "end": 14.3, "kind": "sentence_anchor", "confidence": "medium"},
+        {"start": 8.2, "end": 8.4, "kind": "sentence_anchor", "confidence": "high",
+         "boundary_use": "unverified"},
+        {"start": 14.0, "end": 14.3, "kind": "sentence_anchor", "confidence": "medium",
+         "boundary_use": "unverified"},
     ]
     plan = _make_plan([(10.0, 13.5)], video_duration=30.0)
     plan = sentence_boundaries.snap_clip_starts_to_lines(plan, boundaries, 30.0, max_prepend=1.8)
     plan = sentence_boundaries.snap_clip_ends_to_lines(plan, boundaries, 30.0, max_extend=2.0)
     assert plan["clips"][0]["source_start"] == 8.4
     assert plan["clips"][0]["source_end"] == 14.0
+
+
+def test_sentence_boundary_gate_labels_edges_on_unverified_anchors(tmp_path):
+    (tmp_path / "speech_boundary_anchors.json").write_text(json.dumps({
+        "schema_version": 2,
+        "sentence_anchors": [
+            {"time": 3.2, "pause_start": 3.0, "confidence": "low", "boundary_use": "unverified"},
+            {"time": 7.2, "pause_start": 7.0, "confidence": "low", "boundary_use": "none"},
+        ],
+    }), encoding="utf-8")
+    boundaries = sentence_boundaries._combine_boundary_windows(
+        [], sentence_boundaries._load_sentence_boundary_windows(tmp_path)
+    )
+    assert boundaries == [{"start": 3.0, "end": 3.2, "kind": "sentence_anchor",
+                           "boundary_use": "unverified"}]
+    plan = _make_plan([(3.1, 7.1)], video_duration=10.0)
+    out = sentence_boundaries.enforce_clip_sentence_boundaries(
+        plan, boundary_windows=boundaries,
+        speech_spans=[{"start": 0.0, "end": 10.0}], video_duration=10.0)
+    checks = {row["edge"]: row for row in out["qc"]["boundary_status"]["sentence_checks"]}
+    assert (checks["start"]["status"], checks["start"]["reason"]) == (
+        "safe", "unverified_sentence_boundary")
+    # A `none` anchor is not a boundary: the end edge still blocks.
+    assert checks["end"]["status"] == "blocking"
+
+
+def _write_asr_windows(work_dir, rows):
+    (work_dir / "asr_result.json").write_text(json.dumps(
+        [{"start": start, "end": end, "text": text} for start, end, text in rows],
+        ensure_ascii=False,
+    ), encoding="utf-8")
+
+
+def test_interjection_only_asr_windows_keep_only_guards_next_to_dialogue(tmp_path):
+    _write_asr_windows(tmp_path, [
+        (0.0, 15.0, "大地守护圣铠。"),
+        (15.0, 30.0, "Hi."),
+        (30.0, 45.0, "啊！"),
+        (45.0, 60.0, "我得不到，你也别想得到！"),
+        (60.0, 75.0, "啊啊……"),
+    ])
+    spans = sentence_boundaries._load_source_speech_spans(tmp_path)
+    assert [(row["start"], row["end"]) for row in spans] == [
+        (0.0, 16.0), (44.0, 61.0),
+    ]
+    plan = _make_plan([(22.0, 37.0)], video_duration=90.0)
+    out = sentence_boundaries.enforce_clip_sentence_boundaries(
+        plan, boundary_windows=[], speech_spans=spans, video_duration=90.0)
+    checks = out["qc"]["boundary_status"]["sentence_checks"]
+    assert {(row["status"], row["reason"]) for row in checks} == {
+        ("safe", "outside_detected_speech")}
+    # The guard next to real dialogue still blocks: lines cross window edges.
+    guarded = sentence_boundaries.enforce_clip_sentence_boundaries(
+        _make_plan([(15.5, 37.0)], video_duration=90.0),
+        boundary_windows=[], speech_spans=spans, video_duration=90.0)
+    assert guarded["qc"]["blocking"][0]["edge"] == "start"
+
+
+def test_short_real_dialogue_window_still_blocks_cut_edges(tmp_path):
+    _write_asr_windows(tmp_path, [(10.0, 15.0, "救我！")])
+    spans = sentence_boundaries._load_source_speech_spans(tmp_path)
+    assert [(row["start"], row["end"]) for row in spans] == [(10.0, 15.0)]
+    out = sentence_boundaries.enforce_clip_sentence_boundaries(
+        _make_plan([(12.0, 20.0)], video_duration=30.0),
+        boundary_windows=[], speech_spans=spans, video_duration=30.0)
+    assert out["qc"]["blocking"][0]["reason"] == "inside_detected_speech"
+
+
+def test_punctuation_only_asr_window_stays_dialogue(tmp_path):
+    # ASR writes "……" for unintelligible mumbling, which can be real speech.
+    _write_asr_windows(tmp_path, [(10.0, 15.0, "……"), (20.0, 25.0, "♪♪")])
+    spans = sentence_boundaries._load_source_speech_spans(tmp_path)
+    assert [(row["start"], row["end"]) for row in spans] == [(10.0, 15.0), (20.0, 25.0)]
+
+
+def test_quiet_window_outranks_an_unverified_anchor_on_the_same_span():
+    combined = sentence_boundaries._combine_boundary_windows(
+        [{"start": 3.0, "end": 3.2, "kind": "sentence_anchor", "boundary_use": "unverified"}],
+        [{"start": 3.0, "end": 3.2}],
+    )
+    assert combined == [{"start": 3.0, "end": 3.2, "kind": "quiet_window"}]
 
 
 def test_sentence_boundary_gate_blocks_unsnapped_speech_edges():

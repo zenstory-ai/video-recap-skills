@@ -267,6 +267,8 @@ def _build_timed_narration(
                 "blocking": fit_meta["blocking"],
             })
             if fit_meta["fit_status"] == "no_safe_fit":
+                if "needed_tempo_factor" in fit_meta:
+                    seg["needed_tempo_factor"] = round(fit_meta["needed_tempo_factor"], 4)
                 _unplaced(seg, actual_start / sample_rate, "no_safe_fit",
                           fit_meta["truncate_reason"], blocking=True)
                 prev_pause_samples = pause_samples

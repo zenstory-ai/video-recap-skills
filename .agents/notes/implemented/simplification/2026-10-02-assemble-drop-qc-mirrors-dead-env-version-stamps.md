@@ -35,7 +35,7 @@ Status: implemented
 - 收益：assemble 脚本净少约 100 行，`assembly_qc.json` 少约 25 个字段、manifest 少 7 个顶层字段和每段 1 个字段，配置表少一个环境变量和一个内部标记，`lib.py` 不再为测试便利改写模块全局。
 - 代价：外部脚本若从 `assembly_manifest.json` 读 `qc_*`、从 `assembly_qc.json` 读 `release_gate` 或视觉细节，需要改读 `assembly_qc.json` / `visual_qc.json`；仓库内没有这样的读者。shell 里设 `SOURCE_VIDEO` 的人不会再看到任何效果（之前也没有）。手写的 `subtitle_track.json` 若带 `sha256` / `edit_sha256` 会报 unknown field。
 - 是否在默认路径：渲染结果、QC 判定、缓存行为都不变；`assembly_settings` 未改，不触发任何缓存失效。
-- `examples/guohuo-60s/assembly_qc.json` 是历史运行产物，保留旧形状，不改。
+- `examples/guohuo-60s/assembly_qc.json` 是历史运行产物，保留旧形状，不改。后来改为删掉这些不再写入的键、数值不动，见 [[2026-10-02-guohuo-example-snapshots-follow-current-schema]]。
 
 ## Verification
 

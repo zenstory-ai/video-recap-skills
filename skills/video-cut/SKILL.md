@@ -30,7 +30,7 @@ description: >
 - `start` / `end` 是原片秒数；也接受 `source_start` / `source_end` 或 `in` / `out`。
 - 顶层可选 `target_duration`，例如 `"10m"`。
 - 多视频项目的每个片段还必须填写 `source_id`（不接受 `id` 代替），并用 `--sources-manifest` 传入来源清单（形状见下）。
-- `speech_boundary_anchors.json` 与 ASR 时间段由理解阶段提供；Agent 先写大致区间，工具会尝试吸附并把仍在讲话区间内的入/出点作为 blocker 返回。
+- `speech_boundary_anchors.json` 与 ASR 时间段由理解阶段提供；Agent 先写大致区间，工具会尝试吸附并把仍在讲话区间内的入/出点作为 blocker 返回。只含语气词或 ASR 杂音的窗口（"啊！"、"Hi."）不算讲话区间，只在紧挨真实对白的一侧保留 1 秒保护。只有标点的窗口（"……"）仍算讲话。
 
 多视频来源清单只接受一种形状，其他形状直接报错并写明期望形状：
 
@@ -76,15 +76,19 @@ beat_id | function | change | POV | preferred moment | 入点 reason | 出点 re
 ## 4. 运行命令
 
 ```bash
-python3 scripts/cut.py <video> --work-dir <work_dir> \
+python3 scripts/cut.py <video> --work-dir <work_dir> [--clip-plan <clip_plan.json>] \
   [--sources-manifest <sources.json>] [--target-duration 10m] [--allow-overlap] \
-  [--allow-duration-drift] [--normalize-only]
+  [--allow-duration-drift] [--normalize-only] \
+  [--review-shots [--shot-scene-threshold 0.35] [--shot-roi X Y W H]]
 ```
+
+- `--clip-plan`：剪辑计划路径，默认 `<work_dir>/clip_plan.json`。
 
 - `--sources-manifest`：多源剪辑的来源清单 `{"sources": [{"source_id", "source_path"[, "duration", "source_work_dir"]}]}`；片段用 `source_id` 指明来源，并按自己的来源吸附句界与画面切点。
 - `--target-duration`：目标时长。实际时长与目标之比在 0.85–1.15 之外记 warning，在 0.60–1.40 之外阻断。
 - `--allow-duration-drift`：只放行时长偏差阻断（记为 `allowed: true` 的 warning），不放行句界或必保证据阻断。
 - `--normalize-only`：只标准化、吸附并检查计划，写出 `clip_plan_validated.json` 后退出，不渲染。
+- `--review-shots`：在渲染或复用的 `edited_source.mp4` 上召回短镜与密集切点候选，只报告、不修复；`--shot-scene-threshold` 是召回阈值（默认 0.35，不是验收标准），`--shot-roi` 只扫描该像素矩形（有黑边或包装时用），不裁画面。
 
 cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.json` 的 `qc.blocking`，每项带 `code`：
 
