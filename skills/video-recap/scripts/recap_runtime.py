@@ -2,6 +2,7 @@
 
 import json
 import math
+import os
 import shlex
 import shutil
 import subprocess
@@ -23,7 +24,9 @@ MULTI_SOURCE_MANIFEST = "multi_source_manifest.json"
 def _run(skill, script, *cli_args):
     cmd = [sys.executable, str(_entry(skill, script)), *map(str, cli_args)]
     print(f"[video-recap] ▶ {skill}/{script}", flush=True)
-    res = subprocess.run(cmd)
+    # Stage scripts log Chinese; on Windows a piped stdout defaults to cp1252 and the
+    # first log line would crash the child with UnicodeEncodeError.
+    res = subprocess.run(cmd, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if res.returncode != 0:
         raise SystemExit(f"{skill}/{script} 失败 (exit {res.returncode})")
 

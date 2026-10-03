@@ -14,6 +14,7 @@ All notable changes to this project are documented here.
 
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。
 - **多视频 cut 的旁白校验不再以 `KeyError` 崩溃。** recap 写的多源 `speech_boundary_anchors_output.json` 现在带 `clip_plan_identity`；源锚点缺 `pause_start` 时与单源一样按 `time − 0.12` 处理。
+- **Windows 上经管道运行 recap 时，阶段脚本不再因中文日志崩溃。** recap 调用各阶段脚本时设置 `PYTHONIOENCODING=utf-8`；此前 stdout 被管道捕获（Agent 宿主、CI）时子进程默认 cp1252，第一行中文日志就抛 `UnicodeEncodeError`。
 - **素材库保存并恢复 `consolidation.status.json`。** 从素材库恢复的 work_dir 重建 brief 时，仍会提示 consolidate 失败或缺索引。
 
 ## [0.6.0] - 2026-09-27
