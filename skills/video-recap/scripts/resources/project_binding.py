@@ -291,7 +291,8 @@ def _sync_bound_file(work_dir, name, payload) -> None:
         if path.exists() and _ours(_read_json(path)):
             path.unlink()
         return
-    path.write_text(json.dumps({"written_by": _WRITTEN_BY, **payload}, ensure_ascii=False, indent=2),
+    # The marker goes last so a payload key of the same name can never unmark our copy.
+    path.write_text(json.dumps({**payload, "written_by": _WRITTEN_BY}, ensure_ascii=False, indent=2),
                     encoding="utf-8")
 
 
@@ -316,13 +317,16 @@ def sync_packaging_layers(work_dir, resolved) -> None:
 def sync_production_reference(work_dir, resolved) -> None:
     """Hand the bound reference to the writing agent before its first pause; no script reads it.
 
-    A caller's own copy that differs from the binding is a conflict, like any other setting.
+    A caller's own copy is never rewritten: identical to the binding it is left as is, different
+    from it is a conflict, like any other setting.
     """
     bound = (resolved or {}).get("production_reference")
     path = Path(work_dir) / REFERENCE_COPY
     if bound and path.exists():
         current = _read_json(path)
-        if not _ours(current) and current != bound["payload"]:
+        if not _ours(current):
+            if current == bound["payload"]:
+                return
             template = bound["template"]
             raise BindingError(f"{path} 不是 --project 写的，与绑定的 {template['id']}@v{template['version']} "
                                "不同；删掉其中一处")
@@ -330,10 +334,14 @@ def sync_production_reference(work_dir, resolved) -> None:
                      bound and {**bound["payload"], "template": bound["template"]})
 
 
-def bound_reference_note(work_dir) -> str | None:
-    """The pause-banner line for a reference this module wrote; None otherwise."""
+def bound_reference_note(work_dir, resolved=None) -> str | None:
+    """The pause-banner line for the bound reference in work_dir (our copy or the caller's identical one)."""
     data = _read_json(Path(work_dir) / REFERENCE_COPY)
-    if not _ours(data):
+    bound = (resolved or {}).get("production_reference")
+    if _ours(data):
+        template = data.get("template") or {}
+    elif bound and data == bound["payload"]:
+        template = bound["template"]
+    else:
         return None
-    template = data.get("template") or {}
     return f"本轮带制作参考 {template.get('id')}@v{template.get('version')}（可选，取舍写入 reference_methods）"

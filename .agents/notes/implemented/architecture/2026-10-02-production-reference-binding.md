@@ -17,18 +17,19 @@ Part 1 只能手工把 `production_reference.json` 复制进下一次运行的 `
     指针文件必须在版本目录内（符号链接指出版本目录按缺失处理），不超过 2MB。
   - `_check_production_reference` 是独立的形状检查，不 import 参考技能的代码：`schema` 必须是 `video-reference.production.v1`，
     `methods` 非空，每条 method 的 `dimension` 在五维枚举内、`rule` 非空；任何层级出现 `source_facts`、`labels`、`evidence`、
-    `entities`、`statement` 键即报错。所有问题都记在 `template.json` 上，所以绑定的 `require_valid` 会拒绝指针文件坏掉的模板。
+    `entities`、`statement`、`from`、`path` 键即报错（与参考技能导出复扫的 `BANNED_EXPORT_KEYS` 同一组，各自维护）。所有问题都记在 `template.json` 上，所以绑定的 `require_valid` 会拒绝指针文件坏掉的模板。
   - `canvas` 仍必填，从导出物复制，仅作信息。
 - **绑定**（`skills/video-recap/scripts/resources/project_binding.py`）：
   - `BINDING_KINDS` 含 `production_reference`，走 `template()` 解析，只接受 adopted；以 role `production_reference` 记入
     `used_templates`，`resource_lock.json` 因此记录 `id@vN`。
-  - `check_canvas` 只检查 `GEOMETRY_ROLES = {"subtitle_style", "packaging"}`。
+  - `check_canvas` 只检查 `GEOMETRY_ROLES = {"subtitle_style", "packaging"}`；`_deliver` 只在绑定了这两种角色之一时才探测成片画布，
+    只绑参考的运行不探测。
   - `sync_packaging_layers` 与新的 `sync_production_reference` 共用 `_sync_bound_file(work_dir, name, payload)`：写带
-    `written_by: "video-recap --project"` 的副本，或在绑定移除时只删自己写的副本。参考副本是导出物原样加 `written_by` 与
+    `written_by: "video-recap --project"` 的副本（marker 写在 payload 之后，payload 里同名键盖不掉它），或在绑定移除时只删自己写的副本。参考副本是导出物原样加 `written_by` 与
     `template: {id, version}`。`work_dir` 已有不带 marker 且内容与绑定导出物不同的文件时抛 `BindingError` 终止；与导出物完全相同
-    （手工复制的同一份）时改写成带 marker 的副本。包装图层的写入行为不变。
+    （手工复制的同一份）时原样保留、不加 marker，所以解绑后也不会被删。包装图层的写入行为不变。
 - **runner**：`_run_single` 与 `_run_multi_cut` 一开始就调用 `sync_production_reference`，所以副本在第一次暂停前就位，续跑时随绑定
-  更新或撤回。`recap_timeline._pause_for_agent` 只在带 marker 的副本存在时多打印一行
+  更新或撤回。`recap_timeline._pause_for_agent` 在带 marker 的副本存在、或调用方的文件与当前绑定导出物相同时多打印一行
   "本轮带制作参考 <id>@vN（可选，取舍写入 reference_methods）"，文件名留在 `project_binding.bound_reference_note` 里。
 - **文档与示例**：`references/resource-library.md` 加"参考模板 `production_reference`"一节（登记步骤）与绑定表一行；示例库加
   `templates/production_reference/demo-pacing/v1/`，`production_reference.json` 由参考技能对合成数据真实 export 得到，状态 draft。

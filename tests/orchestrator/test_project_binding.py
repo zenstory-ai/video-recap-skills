@@ -249,10 +249,10 @@ def test_equivalent_ambient_settings_are_not_conflicts(tmp_path, clean_env, monk
 
 
 REFERENCE_DIR = "templates/production_reference/demo-pacing/v1"
-FACT_KEYS = {"source_facts", "labels", "evidence", "entities", "statement"}
+FACT_KEYS = {"source_facts", "labels", "evidence", "entities", "statement", "from", "path"}
 
 
-def _reference_project(tmp_path, *, canvas=None):
+def _reference_project(tmp_path, *, canvas=None, subtitle=True):
     lib = tmp_path / "lib"
     shutil.copytree(EXAMPLE, lib)
     template = lib / REFERENCE_DIR / "template.json"
@@ -262,8 +262,10 @@ def _reference_project(tmp_path, *, canvas=None):
     if canvas:
         data["canvas"] = canvas
     template.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
-    path, _ = _project(tmp_path, {"production_reference": "demo-pacing@v1", "subtitle_style": "clean-white@v1"},
-                       library=lib)
+    bindings = {"production_reference": "demo-pacing@v1"}
+    if subtitle:
+        bindings["subtitle_style"] = "clean-white@v1"
+    path, _ = _project(tmp_path, bindings, library=lib)
     export = json.loads((lib / REFERENCE_DIR / "production_reference.json").read_text(encoding="utf-8"))
     return path, export
 
@@ -280,8 +282,7 @@ def test_bound_reference_is_a_marked_copy_with_no_canvas_check_and_retires_when_
     project_binding.sync_production_reference(work, resolved)
 
     copy = json.loads((work / "production_reference.json").read_text(encoding="utf-8"))
-    assert copy == {"written_by": "video-recap --project", **export,
-                    "template": {"id": "demo-pacing", "version": 1}}
+    assert copy == {**export, "template": {"id": "demo-pacing", "version": 1}, "written_by": "video-recap --project"}
     assert not FACT_KEYS & {k for node in (copy, *copy["methods"]) for k in node}
     assert project_binding.bound_reference_note(work).startswith("本轮带制作参考 demo-pacing@v1")
 
@@ -306,7 +307,27 @@ def test_caller_reference_is_kept_unless_it_disagrees_with_the_binding(tmp_path,
 
     own.write_text(json.dumps(export), encoding="utf-8")  # the same export copied by hand is no conflict
     project_binding.sync_production_reference(work, resolved)
-    assert json.loads(own.read_text(encoding="utf-8"))["written_by"] == "video-recap --project"
+    assert json.loads(own.read_text(encoding="utf-8")) == export  # left as the caller wrote it
+    assert project_binding.bound_reference_note(work) is None  # without the binding it is just a file
+    assert project_binding.bound_reference_note(work, resolved).startswith("本轮带制作参考 demo-pacing@v1")
+    project_binding.sync_production_reference(work, None)
+    assert json.loads(own.read_text(encoding="utf-8")) == export  # still the caller's, so unbinding keeps it
+
+
+def test_payload_written_by_cannot_unmark_the_bound_copy(tmp_path, clean_env):
+    path, export = _reference_project(tmp_path)
+    resolved = project_binding.resolve_project(path, _args())
+    resolved["production_reference"]["payload"] = {**export, "written_by": "someone else"}
+    work = tmp_path / "work"
+    work.mkdir()
+
+    project_binding.sync_production_reference(work, resolved)
+    project_binding.sync_production_reference(work, resolved)  # a resume is no conflict with our own copy
+
+    copy = json.loads((work / "production_reference.json").read_text(encoding="utf-8"))
+    assert copy["written_by"] == "video-recap --project"
+    project_binding.sync_production_reference(work, None)
+    assert not (work / "production_reference.json").exists()
 
 
 def test_reference_reaches_work_dir_before_the_first_pause_and_lands_in_the_lock(monkeypatch, tmp_path, clean_env,
@@ -337,3 +358,23 @@ def test_reference_reaches_work_dir_before_the_first_pause_and_lands_in_the_lock
     lock = json.loads((work / "resource_lock.json").read_text(encoding="utf-8"))
     assert [(t["role"], t["id"], t["version"]) for t in lock["templates"]] == [
         ("subtitle_style", "clean-white", 1), ("production_reference", "demo-pacing", 1)]
+
+
+def test_reference_only_binding_does_not_probe_the_canvas(monkeypatch, tmp_path, clean_env):
+    path, _ = _reference_project(tmp_path, subtitle=False)
+    video, work = seed_full_work(tmp_path)
+
+    def assemble(cli):
+        (work / "assembly_manifest.json").write_text(json.dumps({"final_output": "x.mp4"}), encoding="utf-8")
+
+    def probe(*a, **k):
+        raise AssertionError("a reference carries no geometry; nothing to probe")
+
+    monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, assemble=assemble))
+    monkeypatch.setattr(recap_runner, "_probe_display_size_or_raise", probe)
+    monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work),
+                                      "--project", str(path)])
+
+    recap_runner.main()
+
+    assert (work / "assembly_manifest.json").exists()

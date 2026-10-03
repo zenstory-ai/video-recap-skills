@@ -45,7 +45,8 @@ TEMPLATE_KINDS = ("subtitle_style", "packaging", "production_reference")
 REFERENCE_FILE = "production_reference.json"
 REFERENCE_SCHEMA = "video-reference.production.v1"
 REFERENCE_DIMENSIONS = ("narrative_structure", "pacing", "shots_editing", "narration_subtitles", "audio_visual")
-REFERENCE_FACT_KEYS = {"source_facts", "labels", "evidence", "entities", "statement"}
+# Same banned keys as the reference export's own re-scan: source facts plus the measurement pointers.
+REFERENCE_FACT_KEYS = {"source_facts", "labels", "evidence", "entities", "statement", "from", "path"}
 LICENSE_STATUSES = ("unknown", "owned", "licensed", "restricted")
 CONSENT_STATUSES = ("unknown", "granted", "denied")
 TEMPLATE_STATUSES = ("draft", "adopted", "retired")

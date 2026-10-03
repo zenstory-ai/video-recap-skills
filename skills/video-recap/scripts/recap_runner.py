@@ -284,7 +284,7 @@ def _narrate(work_dir, args, timeline):
 def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assemble_args=()):
     """Shared tail of every full/cut run: narration (if owned) -> assemble -> final QC."""
     project = getattr(args, "resolved_project", None)
-    if project and project["templates"]:
+    if project and any(t["role"] in project_binding.GEOMETRY_ROLES for t in project["templates"]):
         project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
     project_binding.sync_packaging_layers(work_dir, project)
     review_ran = _narrate(work_dir, args, timeline) if uses_narration(args) else None
@@ -350,6 +350,7 @@ def _run_multi_cut(videos, work_dir, args):
             f"{clip_plan_json}（多视频剪辑计划；每个 clip 必须带 source_id）",
             _continuation_command(work_dir, args),
             inspect_hint=f"python3 {inspect_py} --work-dir {work_dir} state",
+            project=getattr(args, "resolved_project", None),
         )
         return
 
@@ -373,6 +374,7 @@ def _run_multi_cut(videos, work_dir, args):
                     f"python3 {inspect_py} --work-dir {work_dir} "
                     "clip-map --output-start <s> --output-end <e>"
                 ),
+                project=getattr(args, "resolved_project", None),
             )
             return
         _write_phase_ledger(work_dir, cp_identity)
@@ -566,6 +568,7 @@ def _run_single(video, work_dir, args):
             need_text,
             _continuation_command(work_dir, args),
             inspect_hint=inspect_hint,
+            project=getattr(args, "resolved_project", None),
         )
 
     def _reject_stale_manifest():

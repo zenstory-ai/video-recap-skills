@@ -119,6 +119,10 @@ def _link_reference_outside_its_version(root):
         pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d.update(source_facts=[])), "source_facts", id="source_facts"),
         pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d["methods"][0].update(evidence=["f1"])),
                      "source_facts", id="nested_evidence"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d["methods"][0]["targets"]["narration_cuts_per_min"]
+                                        .update({"from": "profile.cuts_per_min"})), "source_facts", id="nested_from"),
+        pytest.param(lambda root: _edit(root, REFERENCE_FILE, lambda d: d.update(path="/videos/source.mp4")),
+                     "source_facts", id="path"),
     ],
 )
 def test_invalid_production_reference_is_reported_on_its_template(tmp_path, change, code):
