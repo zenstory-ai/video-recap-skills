@@ -106,7 +106,7 @@ brief 里标 `unverified ±N s`）、`none`（不用）。缺 `boundary_use` 的
 `speech_boundary_anchors_output.json` 里 `time` / `pause_start` / `pause_end` / `expected_time` 都是输出时钟，原片值在 `source_*` 字段。
 
 当 `overlaps_speech=true` 且旁白不是从 0 秒冷开场时，`narration` lint 要求 `start`
-贴近 `boundary_use` 不为 `none` 的锚点。入口是否落在原声讲话里，与 cut 门禁用同一条语气词规则：只有语气词的 ASR 窗口（"啊！"、"Hi."）不算讲话，只在紧挨真实对白的一侧保留 1 秒；assemble 的入口检查同样如此。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回
+贴近 `boundary_use` 不为 `none` 的锚点。入口是否落在原声讲话里，与 cut 门禁用同一条语气词规则：只有语气词的 ASR 窗口（"啊！"、"Hi."）不算讲话，只在紧挨真实对白的一侧保留 1 秒；文本为空或只有空白的 ASR 行只是时间证据，不算讲话也不留保护；有 `asr_clean.json` 时三处都以它为准，否则读 `asr_result.json`；assemble 的入口检查同样如此。否则在 TTS 前用 `interrupts_source_sentence` 阻断，并返回
 `suggested_start` 与 `source_text_tail` 给 Agent 调整。常规块使用
 `source_entry_policy: "sentence_boundary"`；原声语句完整性没有抢断 override。最后一个可靠
 锚点之后又进入已声明的原声讲话区时，`suggested_start` 可为 `null`，Agent 必须移动、缩短或删除该旁白块。

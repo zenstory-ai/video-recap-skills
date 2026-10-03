@@ -42,7 +42,9 @@ def _dialogue_speech_spans(rows):
 
     A row holding only interjections ("啊！", "Hi.") is not dialogue, except a
     `_INTERJECTION_GUARD_SECONDS` guard on an edge it shares with a dialogue row. A row
-    without text is timing-only evidence and counts as dialogue.
+    whose text is empty or whitespace (ASR heard no words) is timing-only evidence: it is
+    skipped here and guards nothing. A row with no `text` field is measured timing whose
+    words are unknown and counts as dialogue.
     """
     rows = sorted(
         (
@@ -52,6 +54,7 @@ def _dialogue_speech_spans(rows):
                 "dialogue": not _interjection_only(row.get("text", "")),
             }
             for row in rows
+            if "text" not in row or row["text"].strip()
         ),
         key=lambda row: (row["start"], row["end"]),
     )
@@ -83,6 +86,18 @@ def _read_json(path):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
 
 
+def _source_asr_rows(work_dir):
+    """Cleaned ASR segments (asr_clean.json) when present, else raw asr_result.json.
+
+    Same precedence as video-cut's edge gate and video-assemble's entry check, so one
+    transcript decides lint, cut and assemble verdicts. Blank-text rows are timing-only
+    evidence (ASR heard no words) and are not source speech.
+    """
+    clean = _read_json(work_dir / "asr_clean.json")
+    rows = clean["segments"] if clean is not None else _read_json(work_dir / "asr_result.json")
+    return [row for row in rows or [] if row["text"].strip()]
+
+
 def _output_payload_is_current(payload, work_dir):
     plan_path = Path(work_dir) / "clip_plan_validated.json"
     return (
@@ -101,9 +116,7 @@ def load_source_sentence_evidence(work_dir, mode="full"):
         payload = _read_json(work_dir / "speech_boundary_anchors.json") or {
             "sentence_anchors": []
         }
-        speech_spans = [
-            row for row in _read_json(work_dir / "asr_result.json") or [] if row["text"]
-        ]
+        speech_spans = _source_asr_rows(work_dir)
         quiet_windows = [
             row
             for row in _read_json(work_dir / "silence_periods.json") or []
