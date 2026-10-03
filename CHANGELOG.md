@@ -74,7 +74,7 @@ All notable changes to this project are documented here.
 - **SKILL.md 补漏。** video-cut §4 的命令块补上 `--clip-plan`、`--review-shots`、`--shot-scene-threshold`、`--shot-roi`；video-script 与 video-assemble 写明段落内相隔不到 1.6 秒的旁白块会紧接上一块播放、最多比写的 `start` 提前 1.2 秒，这一提前发生在校验之后。
 - **段落收紧提前的旁白块不再闯进没校验过的原声对白。** 段落内与上一块相隔不到 1.6 秒的块会紧接上一块播放、最多比写的 `start` 提前 1.2 秒，但旁白校验只检查过写的 `start`。assemble 现在只让它提前到不含原声对白的位置（ASR 对白区间减去实测安静窗口），有对白时停在最后一段对白结束处；真的提前了的块在 `assembly_manifest.json` 记 `source_entry_status: "paragraph_tightened"` 和新字段 `written_start`，此前这里是 `null`，看不出它被挪过。
 - **旁白入口落在只有语气词的窗口里时记 `non_dialogue_source`。** 此前尖叫或 "Hi." 上的入口也记 `quiet_source`，像是原声安静；判定与是否阻断都不变。整段都不压低原声的块现在也记入口状态（此前为 `null`）。
-- **assemble 退回读 ASR 时不再把空文本行当作对白。** full 模式下 assemble 从 `asr_clean.json` / `asr_result.json` 取原声讲话区间，此前没识别出文字的窗口也算讲话和对白，旁白从那里切入会被当成打断原声；现在与 cut、script 一样先去掉空文本行。
+- **assemble 退回读 ASR 时，空文本行也不再算作原声讲话。** 上面的空白行规则只管入口是否打断对白；full 模式下 assemble 从 `asr_clean.json` / `asr_result.json` 取的整段讲话区间此前仍包含没识别出文字的窗口，只落在这种窗口上的旁白也会压低原声并做句末交接。现在与 cut、script 一样先去掉空文本行。
 - **故事索引被截断时不再报 ok。** consolidate 的索引调用此前上限 3000 token，5 分钟的解说素材就会被截断（`finish_reason=length`），解析出空列表后照样写出空的 `understanding_index.json`，`consolidation.status.json` 仍是 `ok`，brief 拿到 0 个角色。现在索引与 ASR 清洗两次调用的上限都是 8000 token，被截断时加倍预算重试一次；仍被截断或返回的不是 JSON 时不写产物，`consolidation.status.json` 记为 `failed` 并写明原因，brief 照常提示。索引 prompt 要求更紧凑的输出（每条描述不超过 40 字、剧情节点最多 20 条等），已有索引会按新 prompt 重建一次。
 - **ASR 读不到音频文件时报错，** 不再当作空转写继续。
 - **cut 续跑不再让剪后输出证据失效。** `cut.py` 复用 `edited_source.mp4` 时会重写内容不变的 `clip_plan_validated.json`，绑定其 `{size, mtime_ns}` 的 `speech_boundary_anchors_output.json` 因此过期，第三遍续跑的 `validate --mode cut_output` 对冷开场以外的旁白一律报 `source_sentence_anchors_unavailable`，assemble 的原声闪避也只能退回保守模式。现在计划未改动时不重写，`clip_plan.json` 被重新保存时照常重写。
