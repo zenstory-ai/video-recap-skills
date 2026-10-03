@@ -108,7 +108,8 @@ def _validate(args):
         # ownership from the mapped output evidence and persist that measured flag for
         # voiceover/assemble instead of trusting JSON.
         report = validate_narration_or_raise(
-            narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir
+            narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir,
+            output_duration=args.output_duration,
         )
         narration = measure_narration_speech_ownership(
             narration, work_dir, mode="cut_output"

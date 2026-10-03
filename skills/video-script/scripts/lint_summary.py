@@ -81,7 +81,7 @@ def _interrupts(e):
     if e.get("suggested_start") is None:
         shift = e.get("max_shift_seconds")
         within = f"前后 {shift:g} 秒内" if isinstance(shift, (int, float)) else "附近"
-        return text + f"，{within}没有能整块挪过去、又不与其他块重叠或相接的句尾锚点"
+        return text + f"，{within}没有能整块挪过去、留在前后两块之间又不与其他块重叠或相接的句尾锚点"
     tail = e.get("source_text_tail")
     tail = f"，句尾「{tail}」" if tail else ""
     target = _seconds(e["suggested_start"])

@@ -225,17 +225,117 @@ def _block(start, end, overlaps_speech=False):
 
 
 def test_interrupt_suggestion_skips_an_anchor_on_another_blocks_start(tmp_path):
-    """The next anchor (14 s) is where block 2 starts: moving there would overlap it."""
+    """The later of two equally near anchors (14 s) is where block 2 starts: moving there
+    would overlap it, so the earlier one wins."""
     issue = _interrupt_issue(
         tmp_path,
-        [_anchor(14.0, "第二块入点。"), _anchor(17.5, "安全入点。")],
+        [_anchor(14.0, "第二块入点。"), _anchor(6.0, "安全入点。")],
         [_block(10.0, 13.0, overlaps_speech=True), _block(14.0, 16.0)],
         0,
     )
 
-    assert issue["suggested_start"] == 17.5
-    assert issue["suggested_end"] == 20.5
+    assert issue["suggested_start"] == 6.0
+    assert issue["suggested_end"] == 9.0
     assert "安全入点" in issue["source_text_tail"]
+
+
+@pytest.mark.parametrize(
+    ("anchors", "expected_start"),
+    [
+        pytest.param([_anchor(16.0, "第二块之后。")], None, id="only_anchor_past_next_block"),
+        pytest.param(
+            [_anchor(16.0, "第二块之后。"), _anchor(3.0, "更早的句尾。")],
+            3.0,
+            id="farther_in_gap_anchor_beats_a_nearer_jump",
+        ),
+    ],
+)
+def test_interrupt_suggestion_never_jumps_over_the_next_block(tmp_path, anchors, expected_start):
+    """16 s clears both blocks' current spans but would put block 1 after block 2: the
+    applied hint would fail out_of_order, or swap the story beats if reordered."""
+    narration = [_block(10.0, 12.0, overlaps_speech=True), _block(13.0, 15.0, overlaps_speech=True)]
+    _write_source_anchors(tmp_path, anchors)
+    errors = lint_narration(narration, work_dir=tmp_path)["errors"]
+    first, second = (
+        next(e for e in errors if e["code"] == "interrupts_source_sentence" and e["index"] == i)
+        for i in (0, 1)
+    )
+
+    assert first["suggested_start"] == expected_start
+    assert (second["suggested_start"], second["suggested_end"]) == (16.0, 18.0)
+
+
+def test_consecutive_interrupting_blocks_get_suggestions_that_stay_apart(tmp_path):
+    """Block 2's suggestion keeps clear of block 1's suggested window as well as its authored
+    one: 13.1 clears 12.0 but would leave 0.1 s after block 1 moved to 11-13."""
+    narration = [_block(10.0, 12.0, overlaps_speech=True), _block(14.0, 16.0, overlaps_speech=True)]
+    _write_source_anchors(
+        tmp_path, [_anchor(11.0, "第一句。"), _anchor(13.1, "第二句。"), _anchor(17.0, "第三句。")]
+    )
+    errors = lint_narration(narration, work_dir=tmp_path)["errors"]
+    first, second = (
+        next(e for e in errors if e["code"] == "interrupts_source_sentence" and e["index"] == i)
+        for i in (0, 1)
+    )
+
+    assert (first["suggested_start"], first["suggested_end"]) == (11.0, 13.0)
+    assert (second["suggested_start"], second["suggested_end"]) == (17.0, 19.0)
+    assert second["suggested_start"] - first["suggested_end"] > 0.15
+
+
+def test_interrupt_suggestion_skips_the_next_anchor_when_it_would_abut(tmp_path):
+    """The next anchor after the entry (11.9) would end 0.1 s before block 2, a
+    back-to-back handoff; the farther earlier anchor is the clear one."""
+    issue = _interrupt_issue(
+        tmp_path,
+        [_anchor(11.9, "紧贴后块。"), _anchor(7.5, "留出间隔。")],
+        [_block(10.0, 12.0, overlaps_speech=True), _block(14.0, 16.0)],
+        0,
+    )
+
+    assert issue["suggested_start"] == 7.5
+
+
+def test_cut_interrupt_suggestion_stays_inside_the_blocks_clip(tmp_path):
+    """11.5-13.5 would leave the 0-13 clip; the clip edge is the end of usable footage."""
+    _write_json(
+        tmp_path / "speech_boundary_anchors_output.json",
+        {
+            "sentence_anchors": [_anchor(11.5, "片段尾。"), _anchor(7.0, "片段内。")],
+            "speech_spans": [],
+            "quiet_windows": [],
+        },
+    )
+    report = lint_narration(
+        [_block(10.0, 12.0, overlaps_speech=True)],
+        clip_plan={"clips": [{"clip_id": 1, "start": 0.0, "end": 13.0}]},
+        mode="cut",
+        work_dir=tmp_path,
+    )
+    issue = next(e for e in report["errors"] if e["code"] == "interrupts_source_sentence")
+
+    assert (issue["suggested_start"], issue["suggested_end"]) == (7.0, 9.0)
+
+
+def test_cut_output_interrupt_suggestion_stays_inside_the_output_duration(
+    tmp_path, monkeypatch
+):
+    """validate passes --output-duration to lint: 11.5-13.5 would run past the 13 s output."""
+    _write_output_evidence(
+        tmp_path,
+        {"clips": [{"source_start": 100.0, "source_end": 113.0, "output_start": 0.0, "output_end": 13.0}]},
+        sentence_anchors=[_anchor(11.5, "输出末尾。"), _anchor(7.0, "输出中段。")],
+        speech_spans=[{"start": 0.0, "end": 13.0, "text": "一整段对白一直在说。"}],
+        quiet_windows=[],
+    )
+    _write_json(tmp_path / "narration.json", [_block(10.0, 12.0)])
+
+    with pytest.raises(SystemExit):
+        _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "13.0")
+    report = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
+    issue = next(e for e in report["errors"] if e["code"] == "interrupts_source_sentence")
+
+    assert (issue["suggested_start"], issue["suggested_end"]) == (7.0, 9.0)
 
 
 def test_interrupt_suggestion_never_abuts_a_neighbouring_block(tmp_path):
@@ -265,7 +365,7 @@ def test_interrupt_without_a_clear_anchor_in_range_suggests_nothing(tmp_path):
     ))
     assert (
         "- 段 1 interrupts_source_sentence：入点 10.00s 落在原声句子中间，前后 10 秒内没有"
-        "能整块挪过去、又不与其他块重叠或相接的句尾锚点"
+        "能整块挪过去、留在前后两块之间又不与其他块重叠或相接的句尾锚点"
     ) in summary
 
 
