@@ -1,0 +1,33 @@
+# Agent Note: cut 边界对齐帧网格，edited_source.mp4 恒定帧率
+
+Status: implemented
+
+## Problem
+
+cut 把吸附后的原片秒（毫秒精度）直接写进 `trim` / `atrim`。边界落在两帧之间时，一段的视频帧数是 `[start, end)` 内的网格点数，音频却是 `end - start`；当网格点数取到下整（入点刚过一帧、出点刚过一帧之前）时音频比视频长不到一帧，concat 按较长的流推进，下一段就从网格外开始。mp4 按 VFR 写入，编码后每个这样的接点少一个帧位：25fps 下一帧停 80 ms。替身国货片的成片就是这样（`avg_frame_rate` 不再是 25/1），final_qc 只看容器与时长，看不出来。
+
+本地复现（ffmpeg 8，25fps 源，片段 1.01–3.03 / 4.51–6.53 / 7.01–9.0）：151 帧应有，实得 150 帧，帧间隔出现 0.08 s，`avg_frame_rate=3750/151`。多源时 `fps` 滤镜把每段重采样到画布帧率，但段长不是整数个画布帧时同样会让下一段偏离网格。
+
+## Decision
+
+- **帧网格事实随画布一起探测**（`media_geometry.py`）：ffprobe 多取视频流 `start_time` 与容器 `start_time`，`facts` / `output_geometry.sources[]` 记录精确的 `frame_rate`（`r_frame_rate` 原串；它恰好是 `avg_frame_rate` 两倍时是隔行素材报的场频，改用 `avg_frame_rate`，否则 50i 会被 `fps` 滤镜逐帧复制成 50fps）和 `video_start_offset`（首帧相对 ffmpeg 输入零点的秒数）。`output_geometry.frame_rate` 是成片帧率：单源沿用源的精确帧率，多源用画布帧率桶，NTSC 桶映射为 `24000/1001` / `30000/1001` / `60000/1001`（以前多源写 `fps=29.97`，即 2997/100）。
+- **画布在吸附前选定**（`cut_cli.py`）：帧对齐要知道输出帧率，所以 `_select_output_geometry` 改在 normalize 之后、吸附之前调用一次，同一份几何写入 `clip_plan_validated.json` 并用于渲染。多源的方向与帧率桶按吸附前的片段时长加权。
+- **帧对齐是吸附的最后一步**（`frame_grid.snap_edges_to_frames`，由 `sentence_boundaries.snap_source_clips` 在句界吸附之后、门禁之前调用）：入点取源网格上相邻的两个帧边界，出点取 `入点 + n / 输出帧率` 的相邻两个 `n`。候选排序依次是：严格落在停顿窗内（不带门禁的 50 ms 容差）→ 不在 ASR 讲话区间内 → 不切掉必保证据节点的边缘（`required_evidence.nodes` 按源路径传入的 `keep_ranges`；证据覆盖是精确比较）→ 距离最近 → 更早。不允许重叠时，向外扩的候选不得进入其他片段的原片区间。与上一段同源无损连续的入点直接取上一段对齐后的出点，接缝仍然无损。源帧率未知（`0/0`、大于 120 的时基）时入点不动，时长仍对齐到整数输出帧。门禁 `enforce_clip_sentence_boundaries` 判定的是对齐后的边界，每次对齐写进 `qc.boundary_status.frame_snaps`。
+- **记录**：每个 clip 多 `frame_count`，`qc.frame_grid` 记录 `output_frame_rate`、总帧数、对应时长与各源帧率 / `start_snapped`。`frame_count` 在 clip 里，渲染缓存 sidecar 比较的 `plan` 随之变化，旧的 VFR 成片会自动重渲染一次。
+- **渲染精确出帧**（`cut_render.py`）：单源与多源走同一个循环。每段视频是 `trim`（起止各提前半个源帧，毫秒取整和容器时间戳抖动都选不错帧）→ `setpts` →（多源：缩放 / 补边 / setsar / format）→ `fps=输出帧率` → `tpad` 克隆 1 帧 → `trim=end_frame=frame_count`；音频裁 `frame_count / 输出帧率` 秒。每段都按整帧推进 concat，成片 CFR，帧数等于 `qc.frame_grid.frame_count`。单源也经过 `fps` 滤镜，所以可变帧率的手机素材也会输出 CFR。
+- 旁白不受影响：cut 在第二遍写稿之前完成，输出时间轴（`output_start/end`）由对齐后的区间重算，写稿 Agent 读的就是它，渲染出的每段时长与之相差不超过毫秒取整。
+
+## Alternatives considered
+
+- **只在输出加 `-fps_mode cfr` / `-r`**：一行改动就能得到 CFR 文件。没采用：它靠复制或丢帧把时间戳拉回网格，正是要消除的那一帧停顿，只是换成编码器替我们丢；源区间与 `clip_plan_validated.json` 的时间也对不上。
+- **渲染时用 `start_frame` / `end_frame` 按帧号裁剪**：不需要改计划时间。没采用：帧号从流开头数起，可变帧率源、首帧不在 0 的源都会选错帧；计划里的原片秒和实际画面也不再一一对应。
+- **把帧对齐放在门禁之后**：门禁逻辑完全不动。没采用：门禁就会检查一个不会被渲染的边界；半帧的移动可能把停在停顿起点的出点拉回到最后一个字上，而门禁的 50 ms 容差察觉不到。
+- **多源时入点也对齐到画布网格而不是源网格**：所有数字都在一个网格上。没采用：源帧率与画布不同时，入点会落在两源帧之间，`fps` 滤镜的取帧位置就取决于舍入；入点放在源网格、长度用输出网格，配合末尾 `tpad` + `trim=end_frame`，每段帧数都精确。
+- **吸附后重新选一次画布**：画布按最终时长加权，与以前一致。没采用：帧率可能因此翻转，帧对齐就得重跑；加权只在接近持平时受不到一秒的时长变化影响，不值得引入循环。
+
+## Consequences
+
+- **收益**：每个接点都整帧推进，成片 CFR 且帧数可预知；真实 ffmpeg 测试覆盖单源 25fps 与多源 30+24fps（一个无音轨），断言帧数等于 `round(duration × fps)` 且帧间隔恒定。多源 29.97 不再被近似成 2997/100。
+- **代价**：边界最多移动一帧（25fps 下 40 ms），输出时间轴与以前相差不到一帧；`clip_plan_validated.json` 多 `frame_count`、`qc.frame_grid`、`frame_snaps`；旧缓存重渲染一次；每段多 `fps` / `tpad` / `trim` 三个廉价滤镜。片段末端落在源尾时如果音轨比视频长，最后一段可能多一帧克隆画面。
+- final_qc 仍不检查帧率是否恒定；cut 产出的 edited_source 现在按构造是 CFR，assemble 之后的检查不在本次范围内。
+- 相关：[[2026-06-16-cut-first-narrate-second]]（cut 先于写稿，旁白读 validated 计划的输出时间）。

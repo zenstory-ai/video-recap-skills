@@ -327,6 +327,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
       "output_start": 0.0,
       "output_end": 26.0,
       "duration": 26.0,
+      "frame_count": 650,
       "reason": "b01 | hook | knowledge: unknown→threat | POV=主角 | 保留倾听反应 | 入点=问题已问出 | 出点=沉默落地"
     }
   ],
@@ -337,8 +338,28 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 `qc.boundary_status.sentence_checks` 逐项记录每个片段 start/end 是 `safe`、`unchecked`
 还是 `blocking`（落在 `unverified` 句末锚点上的边界为 `safe`，`reason` 记 `unverified_sentence_boundary`）。理解阶段已有 ASR 讲话时间时，任何未落到源头/源尾、句末锚点/静音窗，且
-不是同源无损连续连接的边界都会写入 `qc.blocking[].code=unsafe_clip_sentence_boundary`。
-切镜吸附先执行，句末吸附最后执行，保证视觉边界不会覆盖声音安全边界。
+不是同源无损连续连接（计划里相邻、`clip_id` 连续的同源片段）的边界都会写入 `qc.blocking[].code=unsafe_clip_sentence_boundary`。
+被阻断的边界额外带 `nearest_safe`，给出前后 5 秒内最近的安全边界（原片秒），没有则为 `null`：
+
+```json
+{"clip_id": 0, "edge": "start", "time": 3.0, "status": "blocking", "reason": "inside_detected_speech",
+ "nearest_safe": {"before": {"time": 0.0, "reason": "source_start", "delta": -3.0},
+                  "after": {"time": 4.8, "reason": "sentence_or_quiet_boundary", "delta": 1.8}}}
+```
+
+切镜吸附先执行，句末吸附随后执行，保证视觉边界不会覆盖声音安全边界；最后把入点对齐到源帧网格、
+时长对齐到整数输出帧（只移动不到一帧，优先选仍在停顿内的一侧，也不会因此丢掉必保证据的边缘），
+门禁检查对齐后的边界。每段的 `frame_count` 是它渲染的帧数，`edited_source.mp4` 因此是恒定帧率；
+对齐前后的时间写在 `qc.boundary_status.frame_snaps`，汇总写在 `qc.frame_grid`：
+
+```json
+{"output_frame_rate": "25", "frame_count": 650, "duration": 26.0,
+ "sources": [{"source_id": null, "path": "/abs/source.mp4", "frame_rate": "25/1",
+              "video_start_offset": 0.0, "start_snapped": true}]}
+```
+
+单源时 `output_frame_rate` 沿用源的 `r_frame_rate`，多源时是画布帧率（NTSC 写成 `30000/1001`）。
+`start_snapped: false` 表示该源帧率未知（`0/0` 或大于 120），入点不动，时长仍对齐到整数输出帧。
 
 多视频 validated clip 会额外保留来源字段，供 pass2 brief、timeline 和剪映导出追溯原素材：
 
@@ -354,6 +375,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
       "output_start": 0.0,
       "output_end": 26.0,
       "duration": 26.0,
+      "frame_count": 780,
       "reason": "b01 | hook | knowledge: unknown→threat | POV=主角 | 保留倾听反应 | 入点=问题已问出 | 出点=沉默落地"
     }
   ]

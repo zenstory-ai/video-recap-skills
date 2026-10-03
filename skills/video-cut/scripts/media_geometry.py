@@ -2,6 +2,7 @@
 
 import json
 
+from frame_grid import output_frame_rate
 from lib import run_cmd
 
 
@@ -57,7 +58,28 @@ def _fps_from_rate(rate):
     return float(num) / float(den) if float(den) > 0 else 0.0
 
 
-def _geometry_from_stream(stream):
+def _frame_rate_text(stream):
+    """The stream's real frame grid as an 'N/D' string.
+
+    Interlaced streams often report the field rate as r_frame_rate (50/1 for 25 frames a
+    second); when r_frame_rate is exactly twice avg_frame_rate the average is the grid.
+    """
+    r_rate = stream.get("r_frame_rate", "0/0")
+    avg = stream.get("avg_frame_rate", "0/0")
+    if _fps_from_rate(avg) > 0 and abs(_fps_from_rate(r_rate) / _fps_from_rate(avg) - 2) < 0.01:
+        return avg
+    return r_rate
+
+
+def _video_start_offset(stream, format_start):
+    """Seconds from the file start (ffmpeg's input zero) to the first video frame."""
+    try:
+        return round(max(0.0, float(stream.get("start_time")) - float(format_start or 0.0)), 6)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _geometry_from_stream(stream, format_start=0.0):
     coded_width, coded_height = stream["width"], stream["height"]
     parsed_sar = _parse_ratio(stream.get("sample_aspect_ratio"))
     dar = _parse_ratio(stream.get("display_aspect_ratio"))
@@ -91,6 +113,9 @@ def _geometry_from_stream(stream):
         "width": width,
         "height": height,
         "fps": round(fps, 3),
+        # Exact rate and first-frame time: the grid video-cut snaps clip edges onto.
+        "frame_rate": _frame_rate_text(stream),
+        "video_start_offset": _video_start_offset(stream, format_start),
         "sample_aspect_ratio": stream.get("sample_aspect_ratio", "1:1"),
         "sample_aspect_ratio_float": round(sar, 6),
         "display_aspect_ratio": stream.get("display_aspect_ratio"),
@@ -118,7 +143,8 @@ def _probe_video_geometry(video_path):
         "-select_streams",
         "v:0",
         "-show_entries",
-        "stream=width,height,r_frame_rate,avg_frame_rate,sample_aspect_ratio,display_aspect_ratio:stream_tags=rotate:stream_side_data=rotation",
+        "stream=width,height,r_frame_rate,avg_frame_rate,start_time,sample_aspect_ratio,"
+        "display_aspect_ratio:stream_tags=rotate:stream_side_data=rotation:format=start_time",
         "-of",
         "json",
         str(video_path),
@@ -126,10 +152,11 @@ def _probe_video_geometry(video_path):
     result = run_cmd(cmd)
     if result.returncode != 0:
         raise RuntimeError(f"ffprobe 无法读取视频几何信息: {video_path}: {result.stderr.strip()}")
-    streams = json.loads(result.stdout).get("streams", [])
+    payload = json.loads(result.stdout)
+    streams = payload.get("streams", [])
     if not streams:
         raise RuntimeError(f"没有视频流: {video_path}")
-    return _geometry_from_stream(streams[0])
+    return _geometry_from_stream(streams[0], payload.get("format", {}).get("start_time"))
 
 
 def _orientation(width, height):
@@ -179,6 +206,8 @@ def _select_output_geometry(source_paths, clips):
                 "display_height": facts["display_height"],
                 "area": width * height,
                 "fps": fps,
+                "frame_rate": facts["frame_rate"],
+                "video_start_offset": facts["video_start_offset"],
                 "fps_bucket": _fps_bucket(fps),
                 "orientation": _orientation(width, height),
                 "rotation": facts["rotation"],
@@ -220,6 +249,8 @@ def _select_output_geometry(source_paths, clips):
         "width": width,
         "height": height,
         "fps": round(fps, 3),
+        # The exact rate edited_source.mp4 is rendered at (one source keeps its own rate).
+        "frame_rate": str(output_frame_rate(rows, fps)),
         "reason": "weighted_orientation_area_fps",
         "source_id": selected["source_id"],
         "source_path": selected["path"],

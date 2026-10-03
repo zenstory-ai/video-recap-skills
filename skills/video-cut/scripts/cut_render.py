@@ -1,7 +1,9 @@
 """Render edited source media."""
 
+from fractions import Fraction
 from pathlib import Path
 
+from frame_grid import frame_count, parse_frame_rate
 from lib import CONFIG, filter_file_args, get_video_duration, log, run_cmd
 
 from cut_contract import _write_edited_source_meta
@@ -15,7 +17,7 @@ def _audio_segment_filter(
     max_fade = duration / 2
     fade_in = max(0.0, min(fade_in_ms / 1000.0, max_fade))
     fade_out = max(0.0, min(fade_out_ms / 1000.0, max_fade))
-    base = f"{label_in}atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS"
+    base = f"{label_in}atrim=start={start:.6f}:end={end:.6f},asetpts=PTS-STARTPTS"
     if fade_in > 0:
         base += f",afade=t=in:st=0:d={fade_in:.3f}"
     if fade_out > 0:
@@ -40,12 +42,30 @@ def _clip_audio_edge_fades(clips, idx, fade_ms):
     return fade_in, fade_out
 
 
+def _video_segment_filter(label_in, label_out, start, end, frames, out_rate, source_rate, norm=""):
+    """Exactly `frames` frames at `out_rate` from source [start, end).
+
+    The trim points sit half a source frame early so the frame ON a grid edge is selected
+    despite millisecond rounding or container pts jitter. fps resamples onto the output
+    grid, one cloned tail frame covers a resampled segment that came up a frame short, and
+    the final trim cuts to the exact count, so every segment advances the concat by whole
+    frames and edited_source.mp4 stays constant frame rate.
+    """
+    half = 0.5 / source_rate if source_rate else 0.0
+    return (
+        f"{label_in}trim=start={max(0.0, start - half):.6f}:end={end - half:.6f},"
+        f"setpts=PTS-STARTPTS,{norm}fps={out_rate},tpad=stop_mode=clone:stop=1,"
+        f"trim=end_frame={frames},setpts=PTS-STARTPTS{label_out}"
+    )
+
+
 def build_edited_source_video(input_video, validated_plan, work_dir, output_path=None):
     """Build `edited_source.mp4` by concatenating validated source ranges.
 
     `validated_plan["qc"]["output_geometry"]` is required: the caller (cut_cli, or any
     public user of this API) selects the canvas with `_select_output_geometry` first, so the
-    same geometry is recorded in clip_plan_validated.json and used for the render."""
+    same geometry is recorded in clip_plan_validated.json and used for the render. Each clip
+    renders `frame_count(duration, output frame_rate)` frames and exactly that much audio."""
     work_dir = Path(work_dir)
     output_path = Path(output_path or work_dir / "edited_source.mp4")
     clips = validated_plan["clips"]
@@ -55,6 +75,11 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
             "validated_plan['qc']['output_geometry'] is required: select the canvas with "
             "media_geometry._select_output_geometry before build_edited_source_video"
         )
+    geometry_qc = qc["output_geometry"]
+    out_rate = Fraction(geometry_qc["frame_rate"])
+    source_rates = {
+        row["path"]: parse_frame_rate(row.get("frame_rate")) for row in geometry_qc["sources"]
+    }
 
     source_paths = []
     for clip in clips:
@@ -69,99 +94,74 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     parts = []
     concat_inputs = []
     extra_inputs = []
+    vnorm = ""
     if len(source_paths) > 1:
         # Distinct sources almost always differ in resolution/SAR/fps/pixel-format (and
         # some may lack audio), which the bare concat filter rejects. Normalize every video
         # segment to one canvas and give every clip an audio segment (real or synthesized
         # silence) so concat always succeeds with a continuous track and no source's audio
         # is dropped just because a sibling source is silent.
-        geometry_qc = qc["output_geometry"]
-        canvas_w, canvas_h, canvas_fps = (
-            geometry_qc["width"],
-            geometry_qc["height"],
-            geometry_qc["fps"],
-        )
+        canvas_w, canvas_h = geometry_qc["width"], geometry_qc["height"]
         vnorm = (
             f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
-            f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,"
-            f"fps={canvas_fps},format=yuv420p"
+            f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2,setsar=1,format=yuv420p,"
         )
-        for clip_pos, clip in enumerate(clips):
-            idx = clip["clip_id"]
-            clip_source = clip.get("source_path", str(input_video))
-            input_idx = source_index[clip_source]
-            start = clip["source_start"]
-            end = clip["source_end"]
-            dur = end - start
+    has_audio = len(source_paths) > 1 or all(audio_by_input.values())
+    total_frames = 0
+    for clip_pos, clip in enumerate(clips):
+        idx = clip["clip_id"]
+        clip_source = clip.get("source_path", str(input_video))
+        input_idx = source_index[clip_source]
+        start = clip["source_start"]
+        frames = frame_count(clip["duration"], out_rate)
+        total_frames += frames
+        dur = float(frames / out_rate)
+        end = start + dur
+        parts.append(_video_segment_filter(
+            f"[{input_idx}:v]", f"[v{idx}]", start, end, frames, out_rate,
+            source_rates.get(clip_source), vnorm,
+        ))
+        concat_inputs.append(f"[v{idx}]")
+        if not has_audio:
+            continue
+        if audio_by_input[clip_source]:
             fade_in_ms, fade_out_ms = _clip_audio_edge_fades(clips, clip_pos, join_fade_ms)
             parts.append(
-                f"[{input_idx}:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,{vnorm}[v{idx}]"
+                _audio_segment_filter(
+                    f"[{input_idx}:a]",
+                    f"[a{idx}]",
+                    start,
+                    end,
+                    dur,
+                    fade_in_ms,
+                    fade_out_ms,
+                    extra_filters=(
+                        "aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo"
+                        if len(source_paths) > 1 else ""
+                    ),
+                )
             )
-            if audio_by_input[clip_source]:
-                parts.append(
-                    _audio_segment_filter(
-                        f"[{input_idx}:a]",
-                        f"[a{idx}]",
-                        start,
-                        end,
-                        dur,
-                        fade_in_ms,
-                        fade_out_ms,
-                        extra_filters="aresample=48000,aformat=sample_rates=48000:channel_layouts=stereo",
-                    )
-                )
-            else:
-                parts.append(
-                    f"anullsrc=r=48000:cl=stereo,atrim=duration={dur:.3f},asetpts=PTS-STARTPTS,"
-                    f"aformat=sample_rates=48000:channel_layouts=stereo[a{idx}]"
-                )
-            concat_inputs.append(f"[v{idx}][a{idx}]")
+        else:
+            parts.append(
+                f"anullsrc=r=48000:cl=stereo,atrim=duration={dur:.6f},asetpts=PTS-STARTPTS,"
+                f"aformat=sample_rates=48000:channel_layouts=stereo[a{idx}]"
+            )
+        concat_inputs.append(f"[a{idx}]")
+
+    if has_audio:
         parts.append("".join(concat_inputs) + f"concat=n={len(clips)}:v=1:a=1[v][a]")
         maps = ["-map", "[v]", "-map", "[a]"]
     else:
-        has_audio = all(audio_by_input.values())
-        for clip_pos, clip in enumerate(clips):
-            idx = clip["clip_id"]
-            input_idx = source_index[clip.get("source_path", str(input_video))]
-            start = clip["source_start"]
-            end = clip["source_end"]
-            parts.append(
-                f"[{input_idx}:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS[v{idx}]"
-            )
-            concat_inputs.append(f"[v{idx}]")
-            if has_audio:
-                fade_in_ms, fade_out_ms = _clip_audio_edge_fades(
-                    clips, clip_pos, join_fade_ms
-                )
-                parts.append(
-                    _audio_segment_filter(
-                        f"[{input_idx}:a]",
-                        f"[a{idx}]",
-                        start,
-                        end,
-                        end - start,
-                        fade_in_ms,
-                        fade_out_ms,
-                    )
-                )
-                concat_inputs.append(f"[a{idx}]")
-
-        if has_audio:
-            parts.append(
-                "".join(concat_inputs) + f"concat=n={len(clips)}:v=1:a=1[v][a]"
-            )
-            maps = ["-map", "[v]", "-map", "[a]"]
-        else:
-            parts.append("".join(concat_inputs) + f"concat=n={len(clips)}:v=1:a=0[v]")
-            maps = ["-map", "[v]", "-map", f"{len(source_paths)}:a", "-shortest"]
-            extra_inputs = [
-                "-f",
-                "lavfi",
-                "-t",
-                f"{validated_plan['total_duration']:.3f}",
-                "-i",
-                "anullsrc=channel_layout=stereo:sample_rate=48000",
-            ]
+        parts.append("".join(concat_inputs) + f"concat=n={len(clips)}:v=1:a=0[v]")
+        maps = ["-map", "[v]", "-map", f"{len(source_paths)}:a", "-shortest"]
+        extra_inputs = [
+            "-f",
+            "lavfi",
+            "-t",
+            f"{float(total_frames / out_rate):.6f}",
+            "-i",
+            "anullsrc=channel_layout=stereo:sample_rate=48000",
+        ]
 
     filter_complex = ";".join(parts)
     if len(filter_complex.encode("utf-8")) > 7000:

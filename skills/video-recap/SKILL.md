@@ -121,7 +121,8 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 时间线有两条不可降级的硬约束：原声只能在可靠句末/静音边界被切入、切出或恢复；旁白必须使用
 完整逐段音频，任何 clip 映射裁段、TTS 裁尾或剪映引用更长的加速前素材都阻断。Agent 收到
 `interrupts_source_sentence` / `unsafe_clip_sentence_boundary` / `no_safe_fit` /
-`timeline_audio_mismatch` 时，应移动边界、缩短整句或删除该块，而不是增加抢断 override。
+`timeline_audio_mismatch` 时，应移动边界、缩短整句或删除该块，而不是增加抢断 override；
+`unsafe_clip_sentence_boundary` 附带的 `nearest_safe` 给出前后最近的安全边界时间。
 
 ### 4.3 多视频与素材库
 
