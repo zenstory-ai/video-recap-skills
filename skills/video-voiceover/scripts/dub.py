@@ -5,6 +5,12 @@ faithful Chinese translation spoken in the ORIGINAL speaker's cloned voice
 (`mimo-v2.5-tts-voiceclone`, same MIMO_API_KEY, pure stdlib + ffmpeg, no GPU). This differs
 from recap/解说, which overlays Chinese commentary on ducked original audio.
 
+Experimental, and only on explicit request: both stages refuse to run without
+`--confirm-voice-rights`, the user's confirmation that they may use this video's audio and clone
+its speaker's voice. Remote calls: `prepare` sends 6-second windows of the source audio to MiMo
+ASR; `render` sends each Chinese line plus the ~10-second source-voice reference clip to MiMo
+voiceclone.
+
 Division of labour (the same as recap): CODE does only the mechanical parts; the AGENT does all
 the judgment. So there are NO text heuristics here (no sentence-splitting, hook-dedup, or junk
 filters) — those are exactly the things an LLM does better, and trying to do them in code is
@@ -50,6 +56,14 @@ DUB_MIN_ASR_WINDOW_SECONDS = 0.5
 DUB_TTS_STYLE_PROMPT = "自然、清晰，保持原说话人的音色与节奏，语气平稳。"
 
 DUB_SCHEMA_VERSION = 1
+# dub sends the source speech to MiMo ASR and uses the source speaker's own voice as the
+# voiceclone reference, so neither stage runs until the caller passes the user's explicit
+# confirmation. Checked before any audio extraction or network request (fail closed).
+VOICE_RIGHTS_REQUIRED = (
+    "[dub] 需要显式确认 --confirm-voice-rights：dub 会把源视频的音频分窗发送到 MiMo ASR 转写，"
+    "并截取原说话人约 10 秒声音作为 MiMo voiceclone 的参考音频来克隆其音色。"
+    "只有当用户有权使用这段视频与音频、且说话人同意被克隆声音时才可确认；否则不要运行 dub。"
+)
 # Tolerate ~1-frame rounding in agent-estimated timings so the gate blocks only GENUINE
 # errors, not rounding noise (the old render clamped such cases via min(slot_end, nxt)).
 DUB_TIMING_EPS = 0.05
@@ -536,7 +550,14 @@ def main():
                     help="prepare writes the ASR brief; render lints dub_script.json before voiceclone")
     ap.add_argument("--video", required=True, help="source video")
     ap.add_argument("--work-dir", required=True, help="work directory containing dub artifacts")
+    ap.add_argument(
+        "--confirm-voice-rights",
+        action="store_true",
+        help="required: the user confirms they may use this video's audio and clone its speaker's voice",
+    )
     args = ap.parse_args()
+    if not args.confirm_voice_rights:
+        raise SystemExit(VOICE_RIGHTS_REQUIRED)
     video, work = Path(args.video), Path(args.work_dir)
     if args.stage == "prepare":
         stage_prepare(video, work)

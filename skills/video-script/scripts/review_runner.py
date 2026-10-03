@@ -159,6 +159,10 @@ def main():
         help="block instead of advisory fail-open when required cut-output evidence mapping is missing/stale",
     )
     args = ap.parse_args()
+    if not CONFIG["api_key"]:
+        # The review sends narration and evidence text to MiMo; without a key it would only
+        # post that text to be rejected, so stop before building any request.
+        raise SystemExit("review.py 需要 MIMO_API_KEY：未设置，评审未运行，也未发送任何内容")
     timeline = args.timeline or _auto_timeline(args.work_dir)
     if args.timeline is None and timeline != "source":
         log(f"评审 grounding 时间轴自动判定为 {timeline}（检测到已校验的剪辑产物）")

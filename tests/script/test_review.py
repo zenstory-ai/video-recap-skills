@@ -171,6 +171,18 @@ def test_review_narration_writes_artifacts(monkeypatch, tmp_path):
     assert "weak_hook" in md and "需加钩子" in md
 
 
+def test_review_cli_without_api_key_sends_nothing(monkeypatch, tmp_path):
+    """No MIMO_API_KEY: stop before building a request, so no narration text leaves the machine."""
+    _seed_work_dir(tmp_path, [{"start": 0, "end": 3, "narration": "测试"}])
+    payloads = _capture_api(monkeypatch)
+    monkeypatch.setitem(review_runner.CONFIG, "api_key", "")
+    monkeypatch.setattr(sys, "argv", ["review.py", "--work-dir", str(tmp_path)])
+    with pytest.raises(SystemExit, match="MIMO_API_KEY"):
+        review_runner.main()
+    assert payloads == []
+    assert not (tmp_path / "narration_review.json").exists()
+
+
 def test_auto_timeline_detects_validated_cut(tmp_path):
     """A bare work_dir reviews on the source timeline; a validated cut (clip_plan_validated.json
     + edited_source.mp4) auto-selects cut_output so manual review matches the orchestrator."""
