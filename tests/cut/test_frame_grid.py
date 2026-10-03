@@ -264,6 +264,7 @@ def test_a_lossless_join_renders_sample_contiguous_audio(monkeypatch, tmp_path):
 
     monkeypatch.setattr(cut_render, "run_cmd", fake_run_cmd)
     monkeypatch.setattr(cut_render, "_has_audio_stream", lambda _path: True)
+    monkeypatch.setattr(cut_render, "_probe_video_format", lambda _path: {})
     monkeypatch.setattr(cut_render, "get_video_duration", lambda _path: 3.0)
     (tmp_path / "v.mp4").write_bytes(b"v")
     cut_render.build_edited_source_video(tmp_path / "v.mp4", plan, tmp_path)
