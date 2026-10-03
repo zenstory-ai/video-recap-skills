@@ -10,55 +10,19 @@ import argparse
 import json
 import os
 import shutil
-import subprocess
 import sys
 import urllib.parse
 from pathlib import Path
 
-from lib import CONFIG
+from lib import CONFIG, TTS_PROVIDERS, ffmpeg_filters
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEGRADED_GROUP = "warnings/degraded"
-TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
 def _command_path(name: str) -> str | None:
     return shutil.which(name)
-
-
-def _ffmpeg_filters() -> set[str]:
-    """Filters the installed ffmpeg lists; empty when ffmpeg is absent.
-
-    A present ffmpeg whose `-filters` fails or hangs is an environment fault and raises,
-    so it is never misreported downstream as "filter absent"."""
-    ffmpeg = _command_path("ffmpeg")
-    if not ffmpeg:
-        return set()
-    try:
-        result = subprocess.run(
-            [ffmpeg, "-hide_banner", "-filters"], text=True, capture_output=True, timeout=20
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise RuntimeError(f"`ffmpeg -filters` failed or hung: {exc}") from exc
-    if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()[:300]
-        raise RuntimeError(f"`ffmpeg -filters` failed (exit {result.returncode}): {detail}")
-    filters = set()
-    for line in result.stdout.splitlines():
-        parts = line.split()
-        if len(parts) >= 2 and parts[0] and parts[0][0] in ".TSCAPN|":
-            filters.add(parts[1])
-    return filters
-
-
-def ffmpeg_has_subtitles_filter() -> bool:
-    """True when this ffmpeg can burn subtitles — its filter list includes the libass
-    `subtitles` filter. The render burns even the .ass file through `subtitles=` (see
-    video-assemble assemble.py:_subtitle_burn_filter), so this — not the `ass` filter — is
-    the exact capability `--burn-subtitles` needs. Reused by the orchestrator preflight
-    (recap.py) to fail fast before any API spend."""
-    return "subtitles" in _ffmpeg_filters()
 
 
 def _asr_status() -> dict[str, object]:
@@ -319,7 +283,7 @@ def _build_capability_menu(checks: dict) -> dict[str, list[dict[str, str]]]:
 
 
 def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
-    filters = _ffmpeg_filters()
+    filters = ffmpeg_filters()
     ffmpeg_path = _command_path("ffmpeg") or ""
     ffprobe_path = _command_path("ffprobe") or ""
     mimo_video_configured = bool(CONFIG["mimo_video_api_key"])

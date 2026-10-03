@@ -1,6 +1,7 @@
 import json
 
 import materials
+from lib import material_id_for, source_id_for
 
 IDENTITY = {"size": 1234, "mtime_ns": 1_700_000_000_000_000_000}
 SETTINGS = {"style": "s1", "context": None}
@@ -21,15 +22,15 @@ def test_source_id_is_stem_plus_size_and_same_id_gets_numbered_suffix(tmp_path):
     assert {r["source_path"]: r["source_id"] for r in first} == {
         r["source_path"]: r["source_id"] for r in second
     }
-    assert materials.source_id_for(a) == "src_ep-01_5"
+    assert source_id_for(a) == "src_ep-01_5"
     dup = materials.assign_source_ids([{"source_path": a}, {"source_path": copy}])
     assert [r["source_id"] for r in dup] == ["src_ep-01_5", "src_ep-01_5_2"]
 
 
 def test_material_id_stable_for_same_basename_and_size(tmp_path):
     video = tmp_path / "Episode 1.mp4"
-    assert materials.material_id_for(video, IDENTITY) == materials.material_id_for(video, IDENTITY)
-    assert materials.material_id_for(video, IDENTITY) == "episode-1-1234"
+    assert material_id_for(video, IDENTITY) == material_id_for(video, IDENTITY)
+    assert material_id_for(video, IDENTITY) == "episode-1-1234"
 
 
 def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path):

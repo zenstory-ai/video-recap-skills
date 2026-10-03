@@ -3,9 +3,8 @@
 import argparse
 import os
 
+from lib import TTS_PROVIDERS
 from recap_source import AUDIO_MODES
-
-TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
 class _RecordExplicit:

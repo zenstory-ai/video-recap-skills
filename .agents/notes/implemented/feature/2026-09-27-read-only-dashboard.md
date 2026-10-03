@@ -18,10 +18,11 @@ Status: implemented
 
 - `scripts/dashboard_server.py --root <目录> [--port 0] [--host 127.0.0.1] [--open]`：标准库 `ThreadingHTTPServer`，前台运行、打印地址，
   Agent 放到后台跑。`--host` 只接受 IPv4 回环（`localhost` 映射为 127.0.0.1），其他地址直接退出并给中文说明。
-- `scripts/dashboard_io.py`：唯一的路径闸门 `resolve_under`、按上限读 JSON 的 `read_json`（2 MB，永不抛异常）、媒体白名单、标记文件发现。
-- `scripts/dashboard_runs.py`：一个 work_dir 的各阶段视图，服务端解析；运行状态复用 `recap_inspect.cmd_state`。
-- `scripts/dashboard_templates.py`：模板参数的中文行与示意几何（字幕带与最长一行、包装图层与安全区）。
-- `scripts/dashboard_data.py`：总览、资源库（复用 `library.scan_library`）、项目绑定解析（复用 `project_binding.resolve_project`）、搜索。
+- `scripts/dashboard/io.py`：唯一的路径闸门 `resolve_under`、按上限读 JSON 的 `read_json`（2 MB，永不抛异常）、媒体白名单、标记文件发现。
+- `scripts/dashboard/runs.py`：一个 work_dir 的各阶段视图，服务端解析；运行状态复用 `recap_inspect.cmd_state`。
+- `scripts/dashboard/templates.py`：模板参数的中文行与示意几何（字幕带与最长一行、包装图层与安全区）。
+- `scripts/dashboard/data.py`：总览、资源库（复用 `library.scan_library`）、项目绑定解析（复用 `resources.project_binding.resolve_project`）、搜索。
+  这四个模块 2026-10-02 起在 `dashboard/` 子包里（原为顶层 `dashboard_{io,runs,templates,data}.py`），入口仍是顶层 `dashboard_server.py`。
 - `assets/dashboard/{index.html,tokens.css,styles.css,app.js,views.js}`：原生 HTML/CSS/JS，无构建、无外部 CDN。
   import 关系 `server → data → {runs, templates} → io`，无环。
 

@@ -13,6 +13,7 @@ All notable changes to this project are documented here.
 ### Changed
 
 - **理解与写稿技能不再整文件复制旁白 lint 链。** video-understanding 去掉从不执行的 `narration_lint` / `speech_ownership` / `deslop_qc`，video-script 去掉 `timeline_fusion` 和 brief 分块代码，两个技能的脚本合计少约 1,440 行；一致性测试改为只比对两边真正共用的五个文本预算函数及其预算配置默认值。产物、命令与默认值不变。
+- **video-recap 的 dashboard 与资源库模块归入子包。** `dashboard_{data,io,runs,templates}.py` 移到 `scripts/dashboard/`，`project_binding.py`、`resource_lock.py` 移到 `scripts/resources/{project_binding,lock}.py`；文件身份与 id 函数从 `materials.py`、ffmpeg 字幕滤镜探测从 `doctor.py` 移进 `lib.py`，`TTS_PROVIDERS` 只剩一份。入口脚本（`recap.py`、`dashboard_server.py`、`library.py`、`doctor.py` 等）、产物与默认值不变。
 
 ### Removed
 

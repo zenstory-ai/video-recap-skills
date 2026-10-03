@@ -1,6 +1,9 @@
-"""Self-contained config and JSON helpers for the video-recap orchestrator."""
+"""Self-contained config, JSON, file-identity and ffmpeg-capability helpers for the video-recap orchestrator."""
 import json
 import os
+import re
+import shutil
+import subprocess
 from pathlib import Path
 
 
@@ -19,6 +22,8 @@ DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts"  # text-to-speech
 DEFAULT_FISH_TTS_API_URL = "https://api.fish.audio/v1/tts"
 DEFAULT_FISH_TTS_MODEL = "s2.1-pro-free"
 DEFAULT_FISH_TTS_REFERENCE_ID = "5653cea4ac83480aaf2bf45406556185"
+# Accepted values of TTS_PROVIDER / --tts-provider, shared by recap.py and doctor.py.
+TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
 def normalize_api_url(raw_url):
@@ -78,6 +83,72 @@ def env_bool(name, default=False):
 
 def load_json(path):
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+# ── 文件身份与 id ─────────────────────────────────────────────────────
+
+def file_identity(path):
+    """``{size, mtime_ns}`` of a file: the identity recap records and compares for a source
+    video or adopted artifact. A file rewritten in place gets a new mtime_ns."""
+    st = os.stat(os.fspath(path))
+    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+
+def _slug(text, max_len=48):
+    raw = Path(text).stem.lower()
+    raw = re.sub(r"[^a-z0-9\u4e00-\u9fff._-]+", "-", raw).strip("-._")
+    return (raw or "material")[:max_len].strip("-._") or "material"
+
+
+def _id_stem(source_path, max_len=32):
+    raw = re.sub(r"[^a-z0-9]+", "-", Path(source_path).stem.lower()).strip("-")
+    return (raw or "source")[:max_len].strip("-") or "source"
+
+
+def source_id_for(source_path):
+    """``src_<stem>_<size>``: readable, stable across runs, and distinct for a different cut
+    of the same title (the size changes)."""
+    return f"src_{_id_stem(source_path)}_{os.stat(os.fspath(source_path)).st_size}"
+
+
+def material_id_for(source_path, source_identity):
+    return f"{_slug(str(source_path))}-{source_identity['size']}"
+
+
+# ── ffmpeg 能力 ───────────────────────────────────────────────────────
+
+def ffmpeg_filters():
+    """Filters the installed ffmpeg lists; empty when ffmpeg is absent.
+
+    A present ffmpeg whose `-filters` fails or hangs is an environment fault and raises,
+    so it is never misreported downstream as "filter absent"."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return set()
+    try:
+        result = subprocess.run(
+            [ffmpeg, "-hide_banner", "-filters"], text=True, capture_output=True, timeout=20
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise RuntimeError(f"`ffmpeg -filters` failed or hung: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "").strip()[:300]
+        raise RuntimeError(f"`ffmpeg -filters` failed (exit {result.returncode}): {detail}")
+    filters = set()
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[0] and parts[0][0] in ".TSCAPN|":
+            filters.add(parts[1])
+    return filters
+
+
+def ffmpeg_has_subtitles_filter():
+    """True when this ffmpeg can burn subtitles — its filter list includes the libass
+    `subtitles` filter. The render burns even the .ass file through `subtitles=` (see
+    video-assemble assemble.py:_subtitle_burn_filter), so this — not the `ass` filter — is
+    the exact capability `--burn-subtitles` needs. The orchestrator preflight
+    (recap_runtime.py) uses it to fail fast before any API spend; doctor.py reports it."""
+    return "subtitles" in ffmpeg_filters()
 
 
 # Single MiMo credential powers ASR + VLM + TTS. Per-capability overrides

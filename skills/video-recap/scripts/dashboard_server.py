@@ -3,7 +3,7 @@
 
     python3 scripts/dashboard_server.py --root <dir> [--port 0] [--host 127.0.0.1] [--open]
 
-Serves ``assets/dashboard/`` and a small GET-only JSON API built by ``dashboard_data``.
+Serves ``assets/dashboard/`` and a small GET-only JSON API built by ``dashboard.data``.
 Binds to loopback only, checks Host / Origin against the bound port (DNS-rebinding guard),
 answers every method other than GET / HEAD with 405, and serves only files that resolve
 inside ``--root``. Nothing here writes to disk. Runs in the foreground until Ctrl+C.
@@ -20,9 +20,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-import dashboard_data
-import dashboard_io
-from dashboard_io import Refused
+import dashboard.data as dashboard_data
+import dashboard.io as dashboard_io
+from dashboard.io import Refused
 
 ASSET_DIR = Path(__file__).resolve().parent.parent / "assets" / "dashboard"
 ASSETS = {

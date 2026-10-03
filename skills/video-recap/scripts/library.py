@@ -23,7 +23,7 @@ import stat
 import sys
 from pathlib import Path
 
-from materials import file_identity
+from lib import file_identity
 
 LIBRARY_ENV = "VIDEO_RECAP_MATERIAL_LIBRARY_DIR"
 LIBRARY_SCHEMA = "video-recap.library.v1"

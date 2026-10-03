@@ -10,8 +10,7 @@ import sys
 from pathlib import Path
 
 import materials as material_lib
-from doctor import ffmpeg_has_subtitles_filter
-from lib import env_bool, env_int, load_json
+from lib import env_bool, env_int, ffmpeg_has_subtitles_filter, file_identity, load_json, material_id_for
 from recap_source import audio_binding
 
 BUNDLE = Path(__file__).resolve().parents[2]  # the skills/ directory
@@ -137,7 +136,7 @@ def _run_manifest_payload(video, args):
     return {
         "schema_version": 1,
         "source_video": str(Path(video).resolve()),
-        "source_video_identity": material_lib.file_identity(video),
+        "source_video_identity": file_identity(video),
         "settings": _analysis_settings(args),
         "audio": audio_binding(args),
     }
@@ -154,14 +153,14 @@ def _write_run_manifest(work_dir, video, args):
 def _build_multi_source_records(videos, args):
     records = []
     for video in _coerce_videos(videos):
-        identity = material_lib.file_identity(video)
+        identity = file_identity(video)
         records.append(
             {
                 "source_path": str(video),
                 "source_name": video.name,
                 "source_video_identity": identity,
                 "settings": _analysis_settings(args),
-                "material_id": material_lib.material_id_for(video, identity),
+                "material_id": material_id_for(video, identity),
             }
         )
     records = material_lib.assign_source_ids(records)

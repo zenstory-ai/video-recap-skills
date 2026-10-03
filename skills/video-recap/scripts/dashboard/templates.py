@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from dashboard_io import media_entry
+from dashboard.io import media_entry
 
 PROVENANCE_LABELS = {"measured": "实测", "fitted": "调出", "specified": "指定", "unknown": "未知"}
 SIDE_MARGIN_PX = 40  # video-assemble's default left/right subtitle margin; library.py checks against it

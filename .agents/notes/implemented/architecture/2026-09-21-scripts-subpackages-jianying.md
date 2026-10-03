@@ -33,7 +33,7 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
 
 ## Consequences
 
-- **收益**：video-assemble 顶层从 36 个文件降到 28 个（第二批字幕子包后 24 个）；video-recap 顶层从 22 个降到 15 个；剪映导出的边界从目录结构上可见；私有名跨模块 import 少一处。
+- **收益**：video-assemble 顶层从 36 个文件降到 28 个（第二批字幕子包后 24 个）；video-recap 顶层从 22 个降到 15 个（09-21 当时；之后陆续增减，第四批前为 22 个、后为 16 个）；剪映导出的边界从目录结构上可见；私有名跨模块 import 少一处。
 - **代价**：测试里 `from jianying_schema import …` 改为 `from jianying.schema import …`；子包模块不再出现在
   "顶层模块清单"里，依赖顶层入口把它们带进隔离导入测试。
 - 同日第二批（同一决定的延伸）：video-recap 的 7 个 `mimo_qc_*.py` 改为 `scripts/qc/mimo_{client,contract,evidence,observations,payload,report,runner}.py`，
@@ -46,6 +46,15 @@ jianying_timeline_contract / jianying_tracks / jianying_writer` 共 9 个文件�
   `tts_audio.py`（WAV 归一化，供应商无关）与入口 `voiceover.py`、`dub.py` 留在顶层。
   video-recap 的 `recap_cli.py` 同时把 38 个旗标按 argparse argument group 分组
   （核心流程 / 声音策略 / 本地采用三件套 / QC 与导出 / 素材库 / dub / 自检），`--help` 即分组清单，行为不变。
+- 第四批（2026-10-02）：video-recap 的 `dashboard_{data,io,runs,templates}.py` 改为 `scripts/dashboard/{data,io,runs,templates}.py`，
+  入口 `dashboard_server.py` 留在顶层；流水线模块不 import 其中任何一个。`project_binding.py`、`resource_lock.py` 改为
+  `scripts/resources/{project_binding,lock}.py`（包不能叫 `library`，会遮住被 SKILL.md 点名、且被这两个模块 import 的入口 `library.py`）。
+  `resources/` 不满足"只在特定参数下才走到"：资源锁每次 full / cut 都写，它按"资源库的消费方"成族归组。
+  同批把 recap 的身份与能力原语收进 `lib.py`：`file_identity`、`source_id_for`、`material_id_for`（原在 `materials.py`）和
+  `ffmpeg_filters` / `ffmpeg_has_subtitles_filter`（原在 `doctor.py`），`recap_runtime.py` 不再为一个预检函数 import 整个 `doctor`；
+  `TTS_PROVIDERS` 从 `recap_cli.py` 与 `doctor.py` 两份合为 `lib.py` 一份。`materials.py` 留在顶层：`restore_material` /
+  `save_material` / `assign_source_ids` 每次运行都会调用。recap 的 `recap_*` 编排模块不进 `pipeline/`（只换 import 路径，没有减法），
+  `qc_contract.py` 不动（`shift-left-qc-schema.md` 按路径引用它）。video-recap 顶层从 22 个降到 16 个。
 
 ## Verification
 
