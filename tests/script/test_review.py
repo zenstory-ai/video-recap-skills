@@ -711,3 +711,116 @@ def test_parse_review_clamps_craft_categories_to_warning_but_keeps_factual_error
     assert all(severities[category] == "warning" for category in craft_categories)
     assert severities["hallucination"] == "error"
     assert severities["incomplete"] == "error"
+
+
+def test_single_source_review_grounds_on_asr_clean_like_multi_source(tmp_path):
+    _write_json(tmp_path / "asr_result.json", [{"start": 0, "end": 5, "text": "原始转写"}])
+    _write_json(
+        tmp_path / "asr_clean.json",
+        {"segments": [{"start": 0, "end": 5, "text": "清洗后的台词"}]},
+    )
+    _, asr = review_grounding._load_review_grounding(tmp_path)
+    assert [row["text"] for row in asr] == ["清洗后的台词"]
+
+
+def _original_audio_plan(tmp_path):
+    # Padding pushes the original-dialogue beat past the clipped board JSON, which is how a
+    # real review lost it and called the beat "skipped".
+    filler = [
+        {
+            "beat_id": f"n{i:02d}",
+            "source_start": i * 2.0,
+            "source_end": i * 2.0 + 2.0,
+            "audio_owner": "narration",
+            "narration_job": "context",
+            "handoff": "旁白先补关系，原声/动作发生时完全让位；下一拍承接人物反应。" * 3,
+        }
+        for i in range(12)
+    ]
+    _write_json(
+        tmp_path / "visual_audio_board.json",
+        {
+            "items": filler
+            + [
+                {
+                    "beat_id": "b05",
+                    "source_start": 40.0,
+                    "source_end": 46.0,
+                    "output_start": 10.0,
+                    "output_end": 16.0,
+                    "audio_owner": "original_dialogue",
+                    "original_audio_anchor": "原声“大嫂”",
+                    "narration_job": "none",
+                },
+                {
+                    "beat_id": "b06",
+                    "source_start": 46.0,
+                    "source_end": 50.0,
+                    "audio_owner": "narration",
+                    "narration_job": "context",
+                },
+            ]
+        },
+    )
+    _write_json(
+        tmp_path / "recap_story_plan.json",
+        {
+            "beats": [
+                # The board says narration owns b06: the board wins over a stale plan.
+                {"beat_id": "b06", "source_start": 46.0, "source_end": 50.0,
+                 "audio_owner": "silence"},
+                # A plan-only beat that names its own owner still counts.
+                {"beat_id": "b07", "source_start": 50.0, "source_end": 53.0,
+                 "audio_owner": "action_sound", "must_keep_moment": "枪声"},
+                {"beat_id": "b08", "source_start": 53.0, "source_end": 55.0},
+            ]
+        },
+    )
+    _write_json(
+        tmp_path / "original_subtitles.json",
+        [{"start": 11.0, "end": 12.5, "text": "大嫂。"}],
+    )
+
+
+def test_review_prompt_lists_every_beat_left_to_original_audio(tmp_path):
+    _original_audio_plan(tmp_path)
+    content = review_response.build_review_messages(
+        [{"start": 0, "end": 3, "narration": "测试。"}], [], [], work_dir=tmp_path
+    )[0]["content"]
+
+    board = content.split("## visual_audio_board.json", 1)[1].split("\n## ", 1)[0]
+    assert "b05" not in board  # clipped out of the raw JSON context
+    holds = content.split("## 计划内留给原声的区间（不是漏写）", 1)[1].split("\n## ", 1)[0]
+    assert "[SOURCE 40.0-46.0s] beat b05 audio_owner=original_dialogue narration_job=none" in holds
+    assert "原声“大嫂”" in holds
+    assert "beat b07 audio_owner=action_sound" in holds and "枪声" in holds
+    assert "b06" not in holds and "b08" not in holds and "n00" not in holds
+    assert "[SOURCE 11.0-12.5s] 原声字幕块「大嫂。」" in holds
+    assert "不要报为跳过、缺失或漏写" in holds
+    assert "某拍没有旁白不算 incomplete" in content
+
+
+def test_cut_output_review_lists_original_audio_beats_on_the_output_clock(tmp_path):
+    _original_audio_plan(tmp_path)
+    bundle = evidence_bundle.build_evidence_bundle(
+        [], [], [{"start": 0, "end": 3, "narration": "测试。"}], timeline="cut_output"
+    )
+    content = review_response.build_review_messages(
+        [{"start": 0, "end": 3, "narration": "测试。"}],
+        [],
+        [],
+        work_dir=tmp_path,
+        evidence_bundle=bundle,
+    )[0]["content"]
+
+    assert "[OUTPUT 10.0-16.0s] beat b05" in content
+    # A plan beat with only source times keeps its own clock label instead of posing as output.
+    assert "[SOURCE 50.0-53.0s] beat b07" in content
+    assert "[OUTPUT 11.0-12.5s] 原声字幕块「大嫂。」" in content
+
+
+def test_review_prompt_omits_original_audio_section_without_such_beats(tmp_path):
+    content = review_response.build_review_messages(
+        [{"start": 0, "end": 3, "narration": "测试。"}], [], [], work_dir=tmp_path
+    )[0]["content"]
+    assert "计划内留给原声的区间" not in content

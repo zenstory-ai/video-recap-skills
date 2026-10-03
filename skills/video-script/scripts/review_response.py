@@ -49,11 +49,11 @@ RUBRIC = """你是中文视频解说的创作复核编辑。依据素材证据�
 3. change-based beats：每个 beat 应改变知识、权力、目标、关系、情绪或风险。精简时不能只留下“发生了什么”，还要保住人物动机、接受条件及随后犹豫/行动的必要前提。若一段只重复上一段、删除后什么都不损失，可报 low_information_gain/pacing；不要用固定段数或秒数代替判断。
 4. 钩子：开头要提出正文真实兑现的戏剧问题/利害，不是交代场景，也不是无关的留存话术。弱钩子 → weak_hook。
 5. 给信息而非念画面：观众看得见动作表情；解说只增加上下文、因果、预期、证据支持的解释或跨越。复述画面 → narrating_picture。
-6. 视听分工：若提供 visual_audio_board.json，检查 narration_job=none 或 audio_owner=original_dialogue/action_sound/ambience/music/silence 的拍是否被旁白无故覆盖；必须听见的原声被盖住 → original_audio_conflict。沉默和低旁白覆盖本身不是问题。
+6. 视听分工：若提供 visual_audio_board.json，检查 narration_job=none 或 audio_owner=original_dialogue/action_sound/ambience/music/silence 的拍是否被旁白无故覆盖；必须听见的原声被盖住 → original_audio_conflict。沉默和低旁白覆盖本身不是问题。这些拍与 original_subtitles 的原声字幕块按计划没有旁白，不是跳过或漏写。
 7. 人物、反应与动作兑现：不要用旁白解释掉素材中已经能成立的表演、停顿或反应。有情感回应或知情变化的反应镜不可机械删；反打是否保留取决于它是否提供新增信息，而非是否达到统一时长。以某个可见结果为看点时，只写 evidence 已呈现的结果，不推断更强的结果（例：证据只到受击，就不能写成倒地或胜负）。当前评审只能检查计划/稿件一致性，不能凭少量帧声称最终剪点一定好坏。
 8. 密度/节奏与因果边界：7:3 不是配额。只在旁白没有任务、墙到墙压住原声、碎成一句一停，或无意长空档导致因果断裂时，报 density/pacing。不得把跨场镜头拼成同场动作/反应的虚假因果，也不用花字替补源证据或提前宣布结果。
 9. 去废词：删空泛形容（"危机四伏""震撼人心"）→ cliche。
-10. 完整句子：半句话/未收尾 → incomplete。
+10. 完整句子：旁白本身半句话/未收尾 → incomplete。某拍没有旁白不算 incomplete。
 11. 段落衔接：解说块要为随后的原声留白铺垫，下一块要承接原声刚呈现的变化；若两块各说各的、原声进来接不上 → disjoint_handoff。
 12. 结尾回收：结尾要兑现开头承诺/主线情绪，不要突然停、只复述最后画面、没有情绪/信息回报；弱回收 → weak_payoff。
 13. 风格一致性与修改范围：若提供 style_card.json，把它当作表达意图/语气/节奏边界；不符合意图 → style_mismatch。不要把 style_card 当标题/封面/首句包装计划。只提能定位到具体段落、beat 或镜头边界的具体局部修法；REVISION 未点名层默认冻结，不借局部问题重做故事、声音或包装。
@@ -267,6 +267,91 @@ def _format_json_context(title, value, limit=3000):
     return f"## {title}\n{text[:limit]}"
 
 
+# audio_owner values that leave a beat to the source track (playbook: visual_audio_board).
+ORIGINAL_AUDIO_OWNERS = frozenset(
+    ("original_dialogue", "action_sound", "ambience", "music", "silence")
+)
+_MAX_ORIGINAL_AUDIO_LINES = 40
+
+
+def _beat_window(beat, clock):
+    """(label, start, end) on `clock` when the beat carries it, else on the other clock."""
+    for name in (clock, "source" if clock == "output" else "output"):
+        start, end = beat.get(f"{name}_start"), beat.get(f"{name}_end")
+        if (
+            isinstance(start, (int, float))
+            and isinstance(end, (int, float))
+            and not isinstance(start, bool)
+            and not isinstance(end, bool)
+            and end > start
+        ):
+            return name.upper(), float(start), float(end)
+    return None
+
+
+def _original_audio_beats(board, plan):
+    """Beats the plan leaves to the source track: audio_owner is original audio or
+    narration_job is none. visual_audio_board owns audio decisions, so a story-plan beat
+    counts only when the board does not list the same beat_id."""
+    board_items = board.get("items") if isinstance(board, dict) else None
+    plan_beats = plan.get("beats") if isinstance(plan, dict) else None
+    board_items = [b for b in board_items or [] if isinstance(b, dict)]
+    board_ids = {str(b.get("beat_id")) for b in board_items if b.get("beat_id") is not None}
+    candidates = board_items + [
+        b
+        for b in plan_beats or []
+        if isinstance(b, dict) and str(b.get("beat_id")) not in board_ids
+    ]
+    return [
+        beat
+        for beat in candidates
+        if str(beat.get("audio_owner", "")).strip() in ORIGINAL_AUDIO_OWNERS
+        or str(beat.get("narration_job", "")).strip() == "none"
+    ]
+
+
+def _format_original_audio_holds(board, plan, subtitles, clock):
+    """Name every interval the plan deliberately leaves without narration.
+
+    The planning JSON is clipped to a few thousand characters, so without this list a
+    reviewer can see a story beat with no narration and report it as skipped.
+    """
+    lines = []
+    for beat in _original_audio_beats(board, plan):
+        window = _beat_window(beat, clock)
+        when = f"{window[0]} {window[1]:.1f}-{window[2]:.1f}s" if window else "时间未标"
+        owner = str(beat.get("audio_owner", "")).strip() or "?"
+        job = str(beat.get("narration_job", "")).strip() or "?"
+        anchor = _clip_text(
+            beat.get("original_audio_anchor") or beat.get("must_keep_moment"), 60
+        )
+        tail = f" 原声锚点：{anchor}" if anchor else ""
+        lines.append(
+            f"- [{when}] beat {beat.get('beat_id', '?')} audio_owner={owner} narration_job={job}{tail}"
+        )
+    for row in subtitles if isinstance(subtitles, list) else []:
+        if not isinstance(row, dict):
+            continue
+        start, end = _safe_time(row, "start", None), _safe_time(row, "end", None)
+        text = _clip_text(row.get("text"), 60)
+        if start is None or end is None or end <= start or not text:
+            continue
+        lines.append(f"- [{clock.upper()} {start:.1f}-{end:.1f}s] 原声字幕块「{text}」")
+    if not lines:
+        return ""
+    dropped = len(lines) - _MAX_ORIGINAL_AUDIO_LINES
+    lines = lines[:_MAX_ORIGINAL_AUDIO_LINES]
+    if dropped > 0:
+        lines.append(f"- …另有 {dropped} 条同类区间未列出")
+    return (
+        "## 计划内留给原声的区间（不是漏写）\n"
+        "以下拍在 visual_audio_board/recap_story_plan 里由原声或沉默拥有，或是 original_subtitles 的原声字幕块。"
+        "这些区间没有旁白是有意的：不要报为跳过、缺失或漏写，也不要据此给 incomplete、no_throughline、"
+        "low_information_gain 或 density。只有旁白闯入并盖住必须听见的原声时报 original_audio_conflict；"
+        "相邻旁白块与这段原声接不上时报 disjoint_handoff。\n" + "\n".join(lines)
+    )
+
+
 def _format_draft(narration):
     lines = []
     for i, seg in enumerate(narration or []):
@@ -312,6 +397,13 @@ def build_review_messages(
     story_plan = _load_optional_json(work_dir, "recap_story_plan.json")
     av_board = _load_optional_json(work_dir, "visual_audio_board.json")
     style_card = _load_optional_json(work_dir, "style_card.json")
+    holds = _format_original_audio_holds(
+        av_board,
+        story_plan,
+        _load_optional_json(work_dir, "original_subtitles.json"),
+        bundle["clock"],
+    )
+    holds_block = f"{holds}\n\n" if holds else ""
     user = (
         f"{RUBRIC}\n\n"
         "## 创作计划参考\n"
@@ -325,6 +417,7 @@ def build_review_messages(
         f"{_format_json_context('recap_story_plan.json（主线/beats/original moments，可能为空）', story_plan)}\n\n"
         f"{_format_json_context('visual_audio_board.json（画面/原声/字幕/剪辑锚点，可能为空）', av_board)}\n\n"
         f"{_format_json_context('style_card.json（表达意图/语气/节奏/禁忌，不负责包装，可能为空）', style_card)}\n\n"
+        f"{holds_block}"
         f"## 背景资料（context-only/advisory：只辅助识别/消歧/弱背景，不是当前画面强事实）\n"
         f"Guardrail: clock=null/context_only；不得把未来剧情或 research-only 关系/因果升级为当前事实。\n"
         f"{research_context or '(无)'}\n\n"
