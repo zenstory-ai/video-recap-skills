@@ -158,6 +158,31 @@ def _format_substrate_warning(assessment):
     ]
 
 
+def _format_moderation_refusals(scenes_analysis):
+    """One brief line naming the scenes MiMo moderation refused, so blank descriptions read as
+    refusals (vlm.analyze_scenes sets analysis_status), not as empty footage."""
+    refused = [
+        scene for scene in scenes_analysis or []
+        if isinstance(scene, dict) and scene.get("analysis_status") == "moderation_refused"
+    ]
+    if not refused:
+        return []
+    labels = ", ".join(str(scene["scene_id"] + 1) for scene in refused[:12])
+    more = f" …(+{len(refused) - 12})" if len(refused) > 12 else ""
+    covered = sum(
+        1 for scene in refused if scene.get("description_source") == "mimo_video_overview"
+    )
+    overview_note = f"; {covered} of them are described by the MiMo overview instead" if covered else ""
+    return [
+        f"- Moderation-refused scenes: {len(refused)}/{len(scenes_analysis)} "
+        f"(Scene {labels}{more}) — MiMo refused the frame VLM request, so their frame "
+        f"description is blank and they carry no frame_facts{overview_note}. This is a "
+        "content-moderation refusal, not empty footage: ground them in ASR, burned-in "
+        "subtitles, or background research, or skip them in cut mode.",
+        "",
+    ]
+
+
 def _write_json_artifact(work_dir, name, payload):
     path = Path(work_dir) / name
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")

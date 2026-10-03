@@ -375,3 +375,44 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
     text = (tmp_path / "agent_narration_brief.md").read_text(encoding="utf-8")
     assert "MISSING_OR_STALE" in text
     assert "must not be treated as verified dialogue boundaries" in text
+
+
+TOKEN_PLAN_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+PAYG_URL = "https://api.xiaomimimo.com/v1/chat/completions"
+
+
+def test_offline_rerun_reuses_a_transcript_made_with_a_key(monkeypatch, tmp_path):
+    """Unsetting the key must not invalidate a real transcript: neither key presence nor the
+    key-derived default endpoint is an output setting when nothing can be re-requested."""
+    video, result_path, _evidence = _valid_available_evidence(tmp_path)
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_url", TOKEN_PLAN_URL)
+    _write_stage_meta(result_path, _asr_cache_payload(video))
+
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "")
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_url", PAYG_URL)
+    assert _asr_cache_state(result_path, _asr_cache_payload(video), video) == "FRESH"
+
+    # With a key the endpoint is compared again: a different provider endpoint re-transcribes.
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "sk-other")
+    assert _asr_cache_state(result_path, _asr_cache_payload(video), video) == "MISS"
+
+
+def test_legacy_sidecar_with_key_presence_flag_stays_fresh(monkeypatch, tmp_path):
+    video, result_path, _evidence = _valid_available_evidence(tmp_path)
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
+    meta = _asr_cache_payload(video)
+    legacy = json.loads(json.dumps(meta))
+    legacy["settings"]["mimo_asr_api_key_present"] = True
+    _write_stage_meta(result_path, legacy)
+    assert _asr_cache_state(result_path, meta, video) == "FRESH"
+
+
+def test_no_key_placeholder_is_never_a_cache_hit(monkeypatch, tmp_path):
+    """Setting the key after a key-less run transcribes for real."""
+    video = _video(tmp_path)
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "")
+    asr.transcribe_audio(video, tmp_path)
+    assert _cache_state_after_meta(tmp_path, video) == "MISS"
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
+    assert _asr_cache_state(tmp_path / "asr_result.json", _asr_cache_payload(video), video) == "MISS"

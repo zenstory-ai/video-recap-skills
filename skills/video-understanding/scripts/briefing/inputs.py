@@ -3,22 +3,17 @@
 import json
 from pathlib import Path
 
-from lib import CONFIG, file_identity
+from lib import (
+    CONFIG,
+    file_identity,
+    is_usable_overview_chunk,
+    offline_ignored_settings,
+    settings_match,
+)
 from briefing.context import _consolidation_model
 
 # Same literal as consolidate._ASR_SPAN_TOL; test_asr_span_tol_matches_across_files pins them.
 _ASR_SPAN_TOL = 0.05
-
-_MIMO_REJECTION_MARKERS = (
-    "request was rejected",
-    "considered high risk",
-    "high risk",
-    "content policy",
-    "cannot process",
-    "无法处理",
-    "内容审核",
-    "违规",
-)
 
 
 def _load_clean_asr(work_dir, asr_result):
@@ -67,15 +62,6 @@ def _load_clean_asr(work_dir, asr_result):
         ):
             return None
     return segments
-
-
-def _is_mimo_chunk_usable(content):
-    """A chunk is usable only if MiMo returned real analysis (not empty / a moderation refusal)."""
-    text = (content or "").strip()
-    if not text:
-        return False
-    low = text.lower()
-    return not any(marker in low for marker in _MIMO_REJECTION_MARKERS)
 
 
 def _mimo_video_settings():
@@ -138,7 +124,7 @@ def _mimo_overview_matches_current_inputs(overview, scenes, video_path=None):
     if not isinstance(chunks, list) or not all(
         isinstance(chunk, dict)
         and isinstance(chunk.get("content"), str)
-        and _is_mimo_chunk_usable(chunk["content"])
+        and is_usable_overview_chunk(chunk["content"])
         for chunk in chunks
     ):
         return False
@@ -152,7 +138,8 @@ def _mimo_overview_matches_current_inputs(overview, scenes, video_path=None):
         cached_keys = [_mimo_chunk_cache_key(chunk) for chunk in chunks]
     except (KeyError, TypeError, ValueError):
         return False
-    return overview.get("settings") == settings and cached_keys == expected_keys
+    ignored = offline_ignored_settings(CONFIG["mimo_video_api_key"], "mimo_video_api_url")
+    return settings_match(overview.get("settings"), settings, ignored) and cached_keys == expected_keys
 
 
 def _load_mimo_overview_for_brief(work_dir, scenes, enabled=None, video_path=None):
@@ -241,10 +228,12 @@ def _format_optional_stage_warnings(
         work_dir, "consolidation.status.json"
     )
     if consolidation_status is not None and consolidation_status["enabled"]:
-        if consolidation_status["status"] == "failed":
+        if consolidation_status["status"] in {"failed", "skipped_no_key"}:
             warnings.append(
                 _optional_stage_warning(
-                    "consolidation", "failed", consolidation_status["message"]
+                    "consolidation",
+                    consolidation_status["status"],
+                    consolidation_status["message"],
                 )
             )
         elif consolidation_status.get("do_index") is True and not consolidation_index:

@@ -16,9 +16,8 @@ sys.path.insert(
     ),
 )
 
-from lib import CONFIG, file_identity  # noqa: E402
+from lib import CONFIG, file_identity, is_usable_overview_chunk  # noqa: E402
 from vlm import (  # noqa: E402
-    _is_mimo_chunk_usable,
     _load_mimo_partial,
     _mimo_chunk_cache_key,
     _parse_vlm_depth_response,
@@ -440,6 +439,16 @@ def test_final_overview_cache_invalidates_on_settings_source_or_chunks(monkeypat
     assert not mimo_video_overview_cache_fresh(overview_path, video, changed_scenes)
 
 
+def test_final_overview_cache_survives_offline_endpoint_change(monkeypatch, tmp_path):
+    """Without a key the key-derived endpoint is not compared: the paid overview stays fresh."""
+    video, overview_path = _fresh_final_overview(monkeypatch, tmp_path)
+    monkeypatch.setitem(CONFIG, "mimo_video_api_key", "")
+    monkeypatch.setitem(CONFIG, "mimo_video_api_url", "https://changed.example/v1/chat/completions")
+    assert mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
+    monkeypatch.setitem(CONFIG, "mimo_video_prompt", "changed prompt")
+    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
+
+
 def test_final_overview_cache_rejects_unusable_cached_chunk(monkeypatch, tmp_path):
     video = tmp_path / "video.mp4"
     video.write_bytes(b"fake-video")
@@ -480,11 +489,32 @@ def test_all_rejected_chunks_skip_overview(monkeypatch, tmp_path):
     assert not (tmp_path / "mimo_video_overview.partial.json").exists()
 
 
-def test_is_mimo_chunk_usable():
-    assert _is_mimo_chunk_usable("范闲在竹林中打斗，剑光凌厉") is True
-    assert _is_mimo_chunk_usable("") is False
-    assert _is_mimo_chunk_usable("The request was rejected because it was considered high risk") is False
-    assert _is_mimo_chunk_usable("内容审核未通过") is False
+def test_is_usable_overview_chunk():
+    assert is_usable_overview_chunk("范闲在竹林中打斗，剑光凌厉") is True
+    assert is_usable_overview_chunk("") is False
+    assert is_usable_overview_chunk(None) is False
+    assert is_usable_overview_chunk("The request was rejected because it was considered high risk") is False
+    assert is_usable_overview_chunk("内容审核未通过") is False
+
+
+def test_refusal_markers_are_defined_once_in_lib():
+    """Narrow (ASR / per-scene VLM) and broad (overview only) marker lists live in lib.py only;
+    the broad list is a superset, so anything the narrow test drops, the overview drops too."""
+    import ast
+
+    import lib
+
+    assert set(lib.MODERATION_REFUSAL_MARKERS) <= set(lib.OVERVIEW_REJECTION_MARKERS)
+    scripts = Path(lib.__file__).parent
+    for path in scripts.rglob("*.py"):
+        if path.name == "lib.py" or "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                assert "considered high risk" not in node.value.lower(), (
+                    f"{path.name} carries its own MiMo refusal marker; import it from lib"
+                )
 
 
 def test_mixed_unusable_chunks_degrade_to_usable_overview(monkeypatch, tmp_path):

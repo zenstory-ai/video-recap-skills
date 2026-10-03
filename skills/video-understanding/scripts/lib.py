@@ -244,10 +244,20 @@ def load_background_research(work_dir):
         raise ValueError("background_research.json 顶层必须是 JSON 对象（{...}）")
     return data
 
-# MiMo answers a moderated ASR / per-scene VLM request with this English sentence as the reply
-# content ("The request was rejected because it was considered high risk"). Only the provider's
-# own wording is matched: a broader list (e.g. "违规") would also match real dialogue.
-_MODERATION_REFUSAL_MARKERS = ("request was rejected", "considered high risk")
+# MiMo refusal detection, defined once for this skill. Two deliberately different tests:
+#
+# - Narrow (`is_moderation_refusal`): ASR windows and per-scene VLM replies. MiMo answers a
+#   moderated request with the English sentence "The request was rejected because it was
+#   considered high risk" as the reply content. Only the provider's own wording is matched:
+#   a false positive here blanks real dialogue or a real scene description.
+# - Broad (`is_usable_overview_chunk`): only the optional MiMo video overview. A false
+#   positive there just retries the chunk and falls back to the frame description, so it also
+#   rejects generic refusal phrasing ("违规", "content policy", ...) that would be too
+#   aggressive for transcripts.
+MODERATION_REFUSAL_MARKERS = ("request was rejected", "considered high risk")
+OVERVIEW_REJECTION_MARKERS = MODERATION_REFUSAL_MARKERS + (
+    "high risk", "content policy", "cannot process", "无法处理", "内容审核", "违规",
+)
 
 
 def is_moderation_refusal(text):
@@ -257,7 +267,32 @@ def is_moderation_refusal(text):
     is plausible English dialogue, and a 15 s transcript window must not be blanked for it.
     """
     low = " ".join(str(text or "").lower().split())
-    return len(low) <= 200 and all(marker in low for marker in _MODERATION_REFUSAL_MARKERS)
+    return len(low) <= 200 and all(marker in low for marker in MODERATION_REFUSAL_MARKERS)
+
+
+def is_usable_overview_chunk(content):
+    """A MiMo overview chunk is usable only if it is non-empty and carries no refusal phrasing."""
+    low = str(content or "").strip().lower()
+    return bool(low) and not any(marker in low for marker in OVERVIEW_REJECTION_MARKERS)
+
+
+def offline_ignored_settings(api_key, endpoint_key):
+    """Cache-settings keys not compared when no credential is set.
+
+    The default endpoint URL is derived from the key prefix (tp-* → Token Plan cluster), so
+    unsetting the key changes it although the provider output did not change, and nothing can
+    be recomputed without a key anyway: an offline rerun must reuse the paid artifact, not
+    discard it. With a key every setting is compared."""
+    return () if api_key else (endpoint_key,)
+
+
+def settings_match(cached, current, ignore=()):
+    """True when two cache-settings dicts are equal outside the `ignore` keys."""
+    if not isinstance(cached, dict) or not isinstance(current, dict):
+        return False
+    return {k: v for k, v in cached.items() if k not in ignore} == {
+        k: v for k, v in current.items() if k not in ignore
+    }
 
 
 def file_identity(path):

@@ -137,7 +137,8 @@ def test_build_source_storyboard_writes_json_and_tiles(monkeypatch, tmp_path):
         (tmp_path / "storyboard" / "source_storyboard.json").read_text()
     )
     assert sb_json["page_images"]
-    assert all(Path(p).exists() for p in sb_json["page_images"])
+    assert all(not Path(p).is_absolute() for p in sb_json["page_images"])
+    assert all((tmp_path / p).exists() for p in sb_json["page_images"])
     # tile command shape: a tile=<cols>x<rows> filter must appear
     tile_cmds = [c for c in calls if any("tile=" in str(t) for t in c)]
     assert tile_cmds, "expected a tile= ffmpeg command"
@@ -295,6 +296,32 @@ def test_cache_hit_corrupt_sidecar_rebuilds_without_traceback(monkeypatch, tmp_p
     assert json.loads(json_path.read_text(encoding="utf-8"))["timeline"] == "source"
 
 
+def test_copied_work_dir_storyboard_names_its_own_pages(monkeypatch, tmp_path):
+    """A cache hit in a copied work_dir must not point at the original directory, including a
+    legacy sidecar that stored absolute page paths."""
+    generate, builds = _cached_source_storyboard(monkeypatch, tmp_path)
+    first = generate()
+    assert first["page_images"] == ["storyboard/source_storyboard.jpg"]
+
+    json_path = tmp_path / "storyboard" / "source_storyboard.json"
+    legacy = json.loads(json_path.read_text(encoding="utf-8"))
+    legacy["page_images"] = ["/elsewhere/original_work_dir/storyboard/source_storyboard.jpg"]
+    json_path.write_text(json.dumps(legacy), encoding="utf-8")
+    meta_path = json_path.with_name(json_path.name + ".meta.json")
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.pop("artifact")
+    understanding_storyboard._write_stage_meta(json_path, meta)  # as the old build stamped it
+
+    reused = generate()
+
+    assert builds["n"] == 1  # cache hit, no rebuild
+    assert reused["page_images"] == ["storyboard/source_storyboard.jpg"]
+    on_disk = json.loads(json_path.read_text(encoding="utf-8"))
+    assert on_disk["page_images"] == ["storyboard/source_storyboard.jpg"]
+    assert generate()["page_images"] == ["storyboard/source_storyboard.jpg"]
+    assert builds["n"] == 1  # the rewrite re-stamped the sidecar, so it still hits
+
+
 # ── graceful None on no-frames / run_cmd failure / font-probe raise ───────────
 
 
@@ -426,4 +453,4 @@ def test_real_ffmpeg_tile_smoke(tmp_path):
     scenes = [{"start": 0.0, "end": 3.0}]
     result = storyboard.build_source_storyboard(tmp_path, "video.mp4", scenes, fps=2.0)
     assert result is not None
-    assert all(Path(p).exists() for p in result["page_images"])
+    assert all((tmp_path / p).exists() for p in result["page_images"])

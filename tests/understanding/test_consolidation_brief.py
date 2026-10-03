@@ -192,6 +192,25 @@ def test_optional_stage_warnings_flag_missing_enabled_artifacts(tmp_path):
     assert "consolidation: missing_index" in text
 
 
+def test_optional_stage_warnings_flag_offline_consolidation_skip(tmp_path):
+    _write_status(
+        tmp_path,
+        "consolidation.status.json",
+        stage="consolidation",
+        enabled=True,
+        do_asr=False,
+        do_index=True,
+        status="skipped_no_key",
+        message="未设置 MIMO_API_KEY，consolidation（index）未发送请求",
+        artifacts=[],
+    )
+
+    text = _brief_text(tmp_path)
+
+    assert "consolidation: skipped_no_key — 未设置 MIMO_API_KEY" in text
+    assert "consolidation: missing_index" not in text
+
+
 def test_optional_brief_loaders_fall_back_on_invalid_json_schema_and_io(
     monkeypatch, tmp_path
 ):
@@ -975,3 +994,30 @@ def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
             120.0,
             tmp_path,
         )
+
+
+def test_brief_counts_moderation_refused_scenes(tmp_path):
+    """A refused scene has a blank placeholder description; the brief must say why."""
+    scenes = [
+        {"scene_id": 0, "start": 0.0, "end": 3.0, "description": "门口对峙"},
+        {
+            "scene_id": 1,
+            "start": 3.0,
+            "end": 6.0,
+            "description": "(VLM 无法识别此场景画面)",
+            "depth_analysis": "",
+            "analysis_status": "moderation_refused",
+        },
+    ]
+    text = build_agent_brief(scenes, ASR, SILENCE, 6.0, tmp_path).read_text(
+        encoding="utf-8"
+    )
+    count_lines = [line for line in text.splitlines() if "Moderation-refused scenes" in line]
+    assert len(count_lines) == 1
+    assert "1/2 (Scene 2)" in count_lines[0]
+    assert "- Description: (VLM 无法识别此场景画面) [moderation_refused]" in text
+    assert "[moderation_refused]" not in text.split("### Scene 1:")[1].split("### Scene 2:")[0]
+
+
+def test_brief_has_no_moderation_line_without_refusals(tmp_path):
+    assert "Moderation-refused" not in _brief_text(tmp_path)

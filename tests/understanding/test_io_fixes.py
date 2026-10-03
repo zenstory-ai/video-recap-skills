@@ -541,3 +541,75 @@ def test_understand_asr_exception_does_not_cache_empty_transcript(
 
     assert not (tmp_path / "asr_result.json").exists()
     assert not (tmp_path / "asr_result.json.meta.json").exists()
+
+
+TOKEN_PLAN_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
+PAYG_URL = "https://api.xiaomimimo.com/v1/chat/completions"
+INDEX_REPLY = '{"characters":[{"name":"范闲"}],"relationships":[],"plot_points":[],"entities":[]}'
+
+
+def _set_keys(monkeypatch, key, url):
+    for name in ("api_key", "mimo_asr_api_key"):
+        monkeypatch.setitem(understand.CONFIG, name, key)
+    for name in ("api_url", "mimo_asr_api_url"):
+        monkeypatch.setitem(understand.CONFIG, name, url)
+
+
+def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch, tmp_path):
+    """Without MIMO_API_KEY a rerun must reuse the transcript, scene analysis and index made
+    with a Token-Plan key (whose default endpoint differs), and must not send a request."""
+    from asr_timing_evidence import write_asr_timing_evidence
+    from lib import file_identity
+
+    video = _video(tmp_path)
+    transcript = [{"start": 0.0, "end": 10.0, "text": "你给我站住。"}]
+
+    def fake_asr(video_path, work_dir):
+        work_dir = Path(work_dir)
+        (work_dir / "audio.wav").write_bytes(b"RIFF-audio")
+        (work_dir / "audio.wav.meta.json").write_text(
+            json.dumps({"source_video_identity": file_identity(video_path)}), encoding="utf-8"
+        )
+        (work_dir / "asr_result.json").write_text(json.dumps(transcript), encoding="utf-8")
+        write_asr_timing_evidence(
+            work_dir, video_path, "AVAILABLE_COARSE",
+            observed_segments=transcript, final_segments=transcript,
+            audio_path=work_dir / "audio.wav",
+        )
+        return transcript
+
+    def analyze_and_write(scenes, frames, work_dir, **kwargs):
+        analysis = _fresh_analysis(scenes, frames, work_dir)
+        (Path(work_dir) / "vlm_analysis.json").write_text(json.dumps(analysis), encoding="utf-8")
+        return analysis
+
+    _patch_runner(monkeypatch, tmp_path)
+    _set_keys(monkeypatch, "tp-test", TOKEN_PLAN_URL)
+    monkeypatch.setattr("understanding_runner.transcribe_audio", fake_asr)
+    monkeypatch.setattr("understanding_runner.analyze_scenes", analyze_and_write)
+    monkeypatch.setattr("consolidate.api_call", lambda payload: {
+        "choices": [{"message": {"content": INDEX_REPLY}, "finish_reason": "stop"}]
+    })
+    _run_main(monkeypatch, video, tmp_path)
+    assert json.loads((tmp_path / "consolidation.status.json").read_text())["status"] == "ok"
+
+    def no_request(*_a, **_k):
+        pytest.fail("offline rerun must not call the provider")
+
+    _set_keys(monkeypatch, "", PAYG_URL)
+    monkeypatch.setattr("understanding_runner.transcribe_audio", no_request)
+    monkeypatch.setattr("understanding_runner.analyze_scenes", no_request)
+    monkeypatch.setattr("understanding_runner.api_call", no_request)
+    monkeypatch.setattr("consolidate.api_call", no_request)
+    _run_main(monkeypatch, video, tmp_path)
+
+    assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == transcript
+    status = json.loads((tmp_path / "consolidation.status.json").read_text())
+    assert status["status"] == "ok"  # the fresh index is reused without a request
+
+    (tmp_path / "understanding_index.json").unlink()
+    _run_main(monkeypatch, video, tmp_path)
+    status = json.loads((tmp_path / "consolidation.status.json").read_text())
+    assert status["status"] == "skipped_no_key"
+    assert "MIMO_API_KEY" in status["message"]
+    assert not (tmp_path / "understanding_index.json").exists()

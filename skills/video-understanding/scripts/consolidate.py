@@ -21,6 +21,7 @@ import re
 from pathlib import Path
 
 from lib import CONFIG, log, api_call, file_identity, load_background_research
+from index_normalize import normalize_index
 from understanding_cache import _fresh
 
 # Shared tolerance for the per-segment span check. The brief-side gate inlines the SAME
@@ -39,6 +40,18 @@ _RETRY_BUDGET_FACTOR = 2
 
 class ConsolidateIncomplete(RuntimeError):
     """The model reply was cut off or is not JSON; nothing was written for that pass."""
+
+
+class ConsolidateNoKey(RuntimeError):
+    """A pass needs the model but no API key is set; nothing was sent or written."""
+
+
+def _require_api_key(label):
+    """Offline runs reuse fresh artifacts; a pass that would call the model skips instead of
+    sending an unauthenticated request that can only 401."""
+    if not CONFIG["api_key"]:
+        log(f"consolidate({label}): 未设置 {CONFIG['api_env_var']}，跳过（不发送请求）")
+        raise ConsolidateNoKey(label)
 
 CLEAN_PROMPT = """你在清洗中文视频的 ASR 逐段转写。对【每一段】做：补标点、修明显同音/错别字、（能判断时）在句首轻标说话人，让长段连读文本变成清晰可读的句子。
 铁律：
@@ -424,6 +437,17 @@ def _extract_json(text):
         return None
 
 
+def _scenes_end(vlm_analysis):
+    """Latest scene end (source seconds), or None when no scene carries a usable end."""
+    ends = []
+    for scene in vlm_analysis or []:
+        try:
+            ends.append(float(scene["end"]))
+        except (KeyError, TypeError, ValueError):
+            continue
+    return max(ends) if ends else None
+
+
 def _index_meta_path(work_dir):
     return Path(work_dir) / "understanding_index.json.meta.json"
 
@@ -492,6 +516,7 @@ def consolidate_transcript(work_dir):
         ):
             log("consolidate(asr): asr_clean.json 已最新，跳过")
             return existing
+    _require_api_key("asr")
     content = _complete_json_reply(
         "asr", build_clean_messages(asr_result), _CLEAN_MAX_TOKENS
     )
@@ -520,8 +545,15 @@ def consolidate_index(work_dir):
     if _fresh(out_path, work_dir / "vlm_analysis.json") and _index_cache_matches(
         work_dir, vlm_analysis
     ):
+        cached = _load(work_dir, "understanding_index.json")
+        repaired = _normalized_index(cached, vlm_analysis) if isinstance(cached, dict) else cached
+        if repaired != cached:
+            # An index written before the deterministic repairs existed: fix it in place
+            # instead of paying for a new model call.
+            _store_index(work_dir, repaired, vlm_analysis)
         log("consolidate(index): understanding_index.json 已最新，跳过")
-        return _load(work_dir, "understanding_index.json")
+        return repaired
+    _require_api_key("index")
     asr_result = _load(work_dir, "asr_result.json") or []
     asr_clean = _load(work_dir, "asr_clean.json") or {}
     background_research = load_background_research(work_dir)
@@ -542,28 +574,50 @@ def consolidate_index(work_dir):
         asr_clean=asr_clean,
         background_research=background_research,
     )
-    out_path.write_text(
-        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    _write_index_meta(work_dir, vlm_analysis)
-    (work_dir / "understanding_index.md").write_text(
-        format_index_md(index), encoding="utf-8"
-    )
+    index = _normalized_index(index, vlm_analysis)
+    _store_index(work_dir, index, vlm_analysis)
     log(
         f"consolidate(index): 写出 understanding_index.json（角色 {len(index['characters'])}）"
     )
     return index
 
 
+def _normalized_index(index, vlm_analysis):
+    """Merge split characters and canonicalize plot times (index_normalize)."""
+    index, repairs = normalize_index(index, duration=_scenes_end(vlm_analysis))
+    if repairs["merged_characters"] or repairs["dropped_plot_times"]:
+        log(
+            f"consolidate(index): 合并同名/同别名角色 {repairs['merged_characters']} 个，"
+            f"丢弃无效剧情时间 {repairs['dropped_plot_times']} 个"
+        )
+    return index
+
+
+def _store_index(work_dir, index, vlm_analysis):
+    (work_dir / "understanding_index.json").write_text(
+        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    _write_index_meta(work_dir, vlm_analysis)
+    (work_dir / "understanding_index.md").write_text(
+        format_index_md(index), encoding="utf-8"
+    )
+
+
 def consolidate(work_dir, do_asr=False, do_index=True):
     """Default = index-only (Pass B, zero timing risk). Pass A (asr) is opt-in.
 
-    Failures propagate; understanding_runner catches them and writes the "failed" status."""
-    result = {}
-    if do_asr:
-        result["asr_clean"] = consolidate_transcript(work_dir)
+    Failures propagate; understanding_runner catches them and writes the "failed" status.
+    A pass that needs the model while no key is set is listed under "skipped_no_key"."""
+    result = {"skipped_no_key": []}
+    passes = [("asr", "asr_clean", consolidate_transcript)] if do_asr else []
     if do_index:
-        result["index"] = consolidate_index(work_dir)
+        passes.append(("index", "index", consolidate_index))
+    for label, key, run in passes:
+        try:
+            result[key] = run(work_dir)
+        except ConsolidateNoKey:
+            result[key] = None
+            result["skipped_no_key"].append(label)
     return result
 
 
@@ -623,7 +677,7 @@ def main():
     print(
         json.dumps(
             {
-                "status": "consolidated",
+                "status": "skipped_no_key" if res["skipped_no_key"] else "consolidated",
                 "index": bool(res.get("index")),
                 "asr_clean": bool(res.get("asr_clean")),
             },

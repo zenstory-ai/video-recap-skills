@@ -7,7 +7,7 @@ import json
 
 from pathlib import Path
 
-from lib import CONFIG, log, get_video_duration, api_call
+from lib import CONFIG, log, get_video_duration, api_call, offline_ignored_settings
 
 from extract import extract_frames
 
@@ -186,7 +186,8 @@ def main():
 
     # Step 4: VLM analysis (the only stage that requires the chat API key)
     vlm_meta = _vlm_cache_payload(video, work_dir, scenes_json, frames)
-    if not args.force and _stage_cache_valid(vlm_json, vlm_meta):
+    vlm_offline = offline_ignored_settings(CONFIG["api_key"], "api_url")
+    if not args.force and _stage_cache_valid(vlm_json, vlm_meta, ignore_settings=vlm_offline):
         vlm_analysis = _load_json(vlm_json)
         log(f"跳过 VLM 分析（已存在 {len(vlm_analysis)} 个场景）")
     else:
@@ -207,7 +208,14 @@ def main():
     # Step 4.1: optional MiMo scene-chunk video understanding
     overview_path = work_dir / "mimo_video_overview.json"
     if CONFIG["mimo_video_overview"]:
-        if not CONFIG["mimo_video_api_key"]:
+        if not CONFIG["mimo_video_api_key"] and mimo_video_overview_cache_fresh(
+            overview_path, video, scenes
+        ):
+            log("未设置 MIMO_API_KEY，复用已缓存的 MiMo 分片视频概览")
+            _write_mimo_overview_status(
+                work_dir, "cached", "未设置 MIMO_API_KEY，复用缓存", overview_path.name
+            )
+        elif not CONFIG["mimo_video_api_key"]:
             log("跳过 MiMo 分片视频概览：未设置 MIMO_API_KEY")
             overview_path.unlink(missing_ok=True)
             _write_mimo_overview_status(
@@ -254,25 +262,27 @@ def main():
         from consolidate import consolidate
 
         failure = None
+        result = {}
         try:
-            consolidate(
+            result = consolidate(
                 work_dir, do_asr=args.consolidate_asr, do_index=args.consolidate
             )
         except Exception as e:
             log(f"consolidate 跳过（忽略）: {e}")
             failure = e
         artifacts = _present_consolidation_artifacts(work_dir)
+        no_key = result.get("skipped_no_key") or []
         if failure is not None:
             status, message = "failed", failure
         else:
             expected = []
             skipped = []
-            if args.consolidate:
+            if args.consolidate and "index" not in no_key:
                 if vlm_analysis:
                     expected.append("understanding_index.json")
                 else:
                     skipped.append("无 vlm_analysis，跳过 index")
-            if args.consolidate_asr:
+            if args.consolidate_asr and "asr" not in no_key:
                 if asr_result:
                     expected.append("asr_clean.json")
                 else:
@@ -280,6 +290,11 @@ def main():
             missing = [name for name in expected if name not in artifacts]
             if missing:
                 status, message = "failed", f"未产出预期 artifact: {', '.join(missing)}"
+            elif no_key:
+                status, message = (
+                    "skipped_no_key",
+                    f"未设置 {CONFIG['api_env_var']}，consolidation（{', '.join(no_key)}）未发送请求",
+                )
             elif expected:
                 status, message = "ok", "consolidation 完成"
             else:
