@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-voiceover' / 'scripts'))
 from lib import CONFIG, env_float
 import tts_audio
+import tts_cache
 import voiceover
 from voiceover import _build_tts_segment_result, _parse_rate_offset, _run_tts_engine, _synthesize_segment, _tts_mimo, resolve_tts_engine, synthesize_tts
 
@@ -139,10 +140,10 @@ def test_synthesize_segment_raises_when_own_cache_sidecar_is_corrupt(
     narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
     tts_dir = tmp_path / "tts_segments"
     tts_dir.mkdir()
-    wav = tts_dir / "narr_000.wav"
-    wav.write_bytes(b"stale")
-    voiceover._tts_segment_cache_path(wav).write_text(metadata, encoding="utf-8")
     calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
+    wav = _seed_segment_cache(0, narration[0], narration, tts_dir, b"stale", 1.0)
+    key = voiceover._prepare_tts_segment(0, narration[0], narration, tts_dir, "mimo-tts")[4]
+    tts_cache.cache_entry(tts_dir, key)[1].write_text(metadata, encoding="utf-8")
 
     with pytest.raises(RuntimeError, match="sidecar 损坏"):
         _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
@@ -593,10 +594,10 @@ def test_fresh_voiceclone_keys_match_the_prepared_reference_snapshot(monkeypatch
     monkeypatch.setattr(voiceover, "_maybe_normalize_tts_wav", lambda path: None)
 
     segments, _engine, _failures = synthesize_tts(narration, tmp_path)
-    cache = voiceover._tts_segment_cache_path(Path(segments[0]["audio_path"]))
+    [cache] = (tmp_path / "tts_segments" / "cache").glob("*.json")
     cache_inputs = json.loads(cache.read_text(encoding="utf-8"))["settings"]
     expected = voiceover._tts_segment_cache_inputs(
-        "mimo-tts", 0, narration[0], "快照一致。",
+        "mimo-tts", narration[0], "快照一致。",
         *voiceover._compute_tts_params("快照一致。", narration, 0),
     )
 
@@ -619,8 +620,8 @@ def test_mimo_tts_injects_per_beat_emotion(monkeypatch, tmp_path):
 
 def test_tts_cache_inputs_change_with_emotion():
     base = {"start": 0.0, "end": 2.0, "narration": "测试。"}
-    k_plain = voiceover._tts_segment_cache_inputs("mimo-tts", 0, base, "测试。", "+0%", "+0Hz")
-    k_emo = voiceover._tts_segment_cache_inputs("mimo-tts", 0, {**base, "emotion": "悲伤"}, "测试。", "+0%", "+0Hz")
+    k_plain = voiceover._tts_segment_cache_inputs("mimo-tts", base, "测试。", "+0%", "+0Hz")
+    k_emo = voiceover._tts_segment_cache_inputs("mimo-tts", {**base, "emotion": "悲伤"}, "测试。", "+0%", "+0Hz")
     assert k_plain != k_emo, "changing a beat's emotion must invalidate its TTS cache"
 
 
@@ -743,23 +744,29 @@ def test_tts_rms_normalization_passes_through_a_silent_block(tmp_path):
     }
 
 
-def test_sidecar_from_content_hash_schema_is_a_plain_miss(monkeypatch, tmp_path):
-    """A sidecar written before the size/mtime identity schema (cache_key/audio_fingerprint,
-    no settings/audio) is re-synthesized once, not reported as corruption."""
+@pytest.mark.parametrize("old", [
+    "not json", {}, [], {"version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64},
+])
+def test_unusable_per_index_sidecar_from_an_earlier_version_is_a_plain_miss(monkeypatch, tmp_path, old):
+    """A per-index sidecar from before the content-addressed store (any schema, even
+    unreadable) is never read: the block re-synthesizes once and the sidecar is removed."""
     narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
     tts_dir = tmp_path / "tts_segments"
     tts_dir.mkdir()
     wav = tts_dir / "narr_000.wav"
     wav.write_bytes(b"stale")
+    legacy = tts_cache.legacy_sidecar_path(wav)
+    legacy.write_text(old if isinstance(old, str) else json.dumps(old), encoding="utf-8")
+    monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
     calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
     monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0)
 
-    for old in ({}, [], {"version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64}):
-        voiceover._tts_segment_cache_path(wav).write_text(json.dumps(old), encoding="utf-8")
-        result = _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
-        assert result is not None
-    assert len(calls) == 3
+    segments, _engine, failures = synthesize_tts(narration, tmp_path)
+
+    assert calls == ["重新生成。"]
+    assert failures == [] and segments[0]["audio_path"] == str(wav)
     assert wav.read_bytes() == b"fresh"
+    assert not legacy.exists()
 
 
 @pytest.mark.parametrize(

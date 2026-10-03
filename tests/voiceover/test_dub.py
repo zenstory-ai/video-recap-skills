@@ -387,3 +387,56 @@ def test_clone_cache_meta_from_content_hash_schema_is_a_miss(monkeypatch, tmp_pa
     assert synthesized == ["你好"]
     meta = json.loads(dub._clone_cache_meta_path(raw).read_text(encoding="utf-8"))
     assert meta["inputs"]["text"] == "你好"
+
+
+def _clone_takes(monkeypatch, seconds):
+    """Voiceclone stub writing one take per call, each `seconds[n]` long (last one repeats)."""
+    calls = []
+
+    def clone(text, _ref_b64, out):
+        calls.append(text)
+        _write_test_wav(out, seconds=seconds[min(len(calls), len(seconds)) - 1])
+
+    monkeypatch.setattr(dub, "_clone_tts", clone)
+    monkeypatch.setitem(dub.CONFIG, "tts_retries", 3)
+    monkeypatch.setitem(dub.CONFIG, "tts_min_speech_rate", 2.5)
+    return calls
+
+
+def test_hallucinated_voiceclone_take_is_retried_and_never_cached(monkeypatch, tmp_path):
+    raw = tmp_path / "line_000_raw.wav"
+    calls = _clone_takes(monkeypatch, [12.0, 1.0])  # 你好 reads in ~1s; 12s is invented speech
+
+    hit = dub._ensure_clone_tts("你好", "b64", {"size": 3, "mtime_ns": 1}, raw)
+
+    assert hit is False
+    assert calls == ["你好", "你好"]
+    assert dub._wav_seconds(raw) == pytest.approx(1.0)
+    assert dub._clone_cache_meta_path(raw).exists()
+    assert not (tmp_path / "line_000_raw.rejected.wav").exists()
+
+
+def test_persistent_voiceclone_hallucination_fails_and_keeps_the_last_take(monkeypatch, tmp_path):
+    raw = tmp_path / "line_000_raw.wav"
+    calls = _clone_takes(monkeypatch, [12.0])
+
+    with pytest.raises(RuntimeError, match="幻读") as raised:
+        dub._ensure_clone_tts("你好", "b64", {"size": 3, "mtime_ns": 1}, raw)
+
+    rejected = tmp_path / "line_000_raw.rejected.wav"
+    assert len(calls) == 3
+    assert sorted(tmp_path.iterdir()) == [rejected]
+    assert str(rejected) in str(raised.value)
+
+
+def test_voiceclone_take_cached_before_the_bound_is_resynthesized(monkeypatch, tmp_path):
+    raw = tmp_path / "line_000_raw.wav"
+    _write_test_wav(raw, seconds=12.0)
+    dub._write_clone_cache_meta(raw, "你好", {"size": 3, "mtime_ns": 1})
+    calls = _clone_takes(monkeypatch, [1.0])
+
+    hit = dub._ensure_clone_tts("你好", "b64", {"size": 3, "mtime_ns": 1}, raw)
+
+    assert hit is False
+    assert calls == ["你好"]
+    assert dub._ensure_clone_tts("你好", "b64", {"size": 3, "mtime_ns": 1}, raw) is True

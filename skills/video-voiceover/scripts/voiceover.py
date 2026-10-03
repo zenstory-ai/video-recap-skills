@@ -28,7 +28,13 @@ from lib import (
     narration_tempo_budget,
     run_cmd,
 )
-from tts_audio import _maybe_normalize_tts_wav, implausible_tts_duration
+import tts_cache
+from tts_audio import (
+    _maybe_normalize_tts_wav,
+    implausible_tts_duration,
+    rejected_take_hint,
+    rejected_take_path,
+)
 
 SUPPORTED_TTS_ENGINES = {"mimo-tts", "fish-audio", "index-tts"}
 SEGMENT_AUDIO_SCHEMA_VERSION = 1
@@ -124,31 +130,21 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice
             return cached
     text, output_wav, rate, pitch, cache_inputs = prepared
 
+    # output_wav may be a hard link into the cache (another block's audio until now): unlink it
+    # so the provider writes a new file instead of overwriting that shared audio in place.
+    _cleanup_partial_tts_outputs(output_wav)
     provider_receipt = _run_tts_engine(
         engine, text, output_wav, rate=rate, pitch=pitch, emotion=seg.get("emotion"),
-        voice_ref_b64=voice_ref_b64,
+        voice_ref_b64=voice_ref_b64, segment_number=i + 1,
     )
 
     dur = get_video_duration(output_wav)
-    seg_slot = seg["end"] - seg["start"]
-    seg_pause = seg.get("pause_after_ms", CONFIG["breath_ms"]) / 1000
-    available = max(0.5, seg_slot - seg_pause)
     rate_offset = _parse_rate_offset(rate)
-    budget = narration_tempo_budget(rate_offset)
-    raw_budget = available * budget["max_raw_duration_factor"]
     try:
-        enforce_approved_text_policy(i, seg, seg["narration"], text, dur, available, raw_budget)
+        _check_segment_window(i, seg, text, dur, rate_offset)
     except ApprovedTextDurationError:
         _cleanup_partial_tts_outputs(output_wav)
         raise
-    if dur > raw_budget:
-        # Never shorten authored text here: a truncated segment always blocked later as
-        # `truncated_speech`. assemble either fits it with bounded tempo or blocks it as
-        # `no_safe_fit` before the video encode.
-        log(
-            f"  段 {i+1}: 超出预算 {dur:.1f}s > {raw_budget:.1f}s，保留原稿，"
-            "交由 assemble 有界提速或在渲染前阻断"
-        )
 
     norm_meta = _maybe_normalize_tts_wav(output_wav)
     if norm_meta:
@@ -157,6 +153,24 @@ def _synthesize_segment(i, seg, narration, tts_dir, engine, prepared=None, voice
                              norm_meta, provider_receipt)
     return _build_tts_segment_result(
         i, seg, text, output_wav, dur, rate_offset, norm_meta, provider_receipt)
+
+
+def _check_segment_window(index, seg, spoken_text, duration, rate_offset):
+    """Fail an approved-text block that overflows its window; log any other overflow."""
+    seg_slot = seg["end"] - seg["start"]
+    seg_pause = seg.get("pause_after_ms", CONFIG["breath_ms"]) / 1000
+    available = max(0.5, seg_slot - seg_pause)
+    raw_budget = available * narration_tempo_budget(rate_offset)["max_raw_duration_factor"]
+    enforce_approved_text_policy(index, seg, seg["narration"], spoken_text, duration,
+                                 available, raw_budget)
+    if duration > raw_budget:
+        # Never shorten authored text here: a truncated segment always blocked later as
+        # `truncated_speech`. assemble either fits it with bounded tempo or blocks it as
+        # `no_safe_fit` before the video encode.
+        log(
+            f"  段 {index+1}: 超出预算 {duration:.1f}s > {raw_budget:.1f}s，保留原稿，"
+            "交由 assemble 有界提速或在渲染前阻断"
+        )
 
 
 def _build_tts_segment_result(index, seg, text, output_wav, duration, rate_offset,
@@ -259,27 +273,38 @@ def synthesize_tts(narration, work_dir):
         if cache_engine == "fish-audio":
             raise RuntimeError("Fish Audio 不接受本地 VOICE_REF/--voice-ref；请改用 FISH_TTS_REFERENCE_ID")
         raise RuntimeError("index-tts 不支持本地 VOICE_REF/--voice-ref 克隆")
-    # A fully cached narration needs no credential: probe every segment's sidecar once here;
+    # A fully cached narration needs no credential: probe every segment's cache once here;
     # hits are final and only misses reach the workers (with their prepared inputs).
     segments = []
     misses = []
+    failures = []
     for i, seg in enumerate(narration):
         prepared = _prepare_tts_segment(i, seg, narration, tts_dir, cache_engine)
         if prepared is None:
             continue
-        cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], cache_engine)
+        try:
+            cached = _reuse_tts_segment_cache(i, seg, prepared[1], prepared[4], cache_engine)
+        except ApprovedTextDurationError as e:
+            failures.append(_tts_failure_record(i, seg, e))
+            continue
         if cached:
             segments.append(cached)
         else:
             misses.append((i, seg, prepared))
-    if not segments and not misses:
+    if not segments and not misses and not failures:
         raise RuntimeError("narration.json 没有可配音的有效文本，已中止以避免生成无解说视频")
-    if not misses:
-        segments.sort(key=lambda x: x["index"])
+    if misses:
+        engine = _synthesize_misses(misses, narration, tts_dir, segments, failures)
+    else:
+        engine = cache_engine
         log(f"TTS 引擎: {cache_engine} (cache)")
-        return segments, cache_engine, []
+    return _finish_tts(narration, segments, engine, failures)
 
+
+def _synthesize_misses(misses, narration, tts_dir, segments, failures):
+    """Synthesize the cache misses in parallel into `segments` / `failures`; returns the engine."""
     engine = resolve_tts_engine()
+    voice_ref = CONFIG["voice_ref"]
 
     # Transcode the reference once per run, and only now: a fully cached rerun never runs
     # ffmpeg. The misses' cache keys hold the identity probed above, so a reference edited
@@ -293,7 +318,6 @@ def synthesize_tts(narration, work_dir):
 
     log(f"TTS 引擎: {engine}")
 
-    failures = []
     max_workers = min(len(misses), CONFIG["tts_workers"])
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -315,8 +339,13 @@ def synthesize_tts(narration, work_dir):
             if result:
                 segments.append(result)
                 log(f"  段 {result['index']+1}: {result['audio_duration']:.1f}s - {result['narration'][:25]}...")
+    return engine
 
+
+def _finish_tts(narration, segments, engine, failures):
+    """Apply the failure policy to one run's results; returns (segments, engine, failures)."""
     segments.sort(key=lambda x: x["index"])
+    failures.sort(key=lambda x: x["index"])
     approved_text_failures = [
         failure for failure in failures
         if failure.get("failure_kind") == "approved_text_duration_conflict"
@@ -343,10 +372,10 @@ def synthesize_tts(narration, work_dir):
             f"示例: {sample}。如确需继续，可设置 ALLOW_PARTIAL_TTS=1 或 --allow-partial-tts。"
         )
     if failures:
-        missing = ", ".join(str(f["index"] + 1) for f in failures[:8])
+        missing = "、".join(f"段 {f['index'] + 1}" for f in failures[:8])
         more = "…" if len(failures) > 8 else ""
         log(
-            f"警告: TTS 部分失败 {len(failures)}/{len(narration)} 段（段 {missing}{more}），"
+            f"警告: TTS 部分失败 {len(failures)}/{len(narration)} 段（{missing}{more}），"
             "成片可预览但不建议直接发布；详见 tts_meta.json failures"
         )
     if not segments:
@@ -355,13 +384,17 @@ def synthesize_tts(narration, work_dir):
 
 
 def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=None,
-                    voice_ref_b64=None):
+                    voice_ref_b64=None, segment_number=None):
     """Run one TTS engine with retry and remove partial files after failures.
 
     `engine` comes from resolve_tts_engine; index-tts controls were already forced to the
-    provider defaults by _prepare_tts_segment."""
+    provider defaults by _prepare_tts_segment. A take rejected as implausibly long is kept as
+    `<name>.rejected.wav` (the latest one) so the user can listen before relaxing the bound."""
     retries = CONFIG["tts_retries"]
     last_error = None
+    rejected = rejected_take_path(output_wav)
+    rejected.unlink(missing_ok=True)
+    label = f"段 {segment_number} " if segment_number is not None else ""
 
     for attempt in range(1, retries + 1):
         try:
@@ -381,17 +414,20 @@ def _run_tts_engine(engine, text, output_wav, rate="+0%", pitch="+0Hz", emotion=
             # retried, never cached, and never reaches assemble as an over-budget block.
             implausible = implausible_tts_duration(text, duration)
             if implausible:
+                os.replace(output_wav, rejected)
                 raise RuntimeError(implausible)
+            rejected.unlink(missing_ok=True)
             return receipt
         except Exception as exc:
             last_error = exc
             _cleanup_partial_tts_outputs(output_wav)
             if attempt < retries:
                 wait = min(2 ** (attempt - 1), 8)
-                log(f"  TTS 重试 {attempt+1}/{retries}: {exc}，等待 {wait}s")
+                log(f"  {label}TTS 重试 {attempt+1}/{retries}: {exc}，等待 {wait}s")
                 time.sleep(wait)
 
-    raise RuntimeError(f"{engine} 合成失败: {last_error}") from last_error
+    hint = rejected_take_hint(rejected)
+    raise RuntimeError(f"{engine} 合成失败: {last_error}{hint}") from last_error
 
 
 def _cleanup_partial_tts_outputs(output_wav):
@@ -401,13 +437,9 @@ def _cleanup_partial_tts_outputs(output_wav):
         wav_path,
         wav_path.with_suffix(".mp3"),
         Path(str(wav_path) + ".part"),
-        _tts_segment_cache_path(output_wav),
+        tts_cache.legacy_sidecar_path(output_wav),
     ):
         path.unlink(missing_ok=True)
-
-
-def _tts_segment_cache_path(output_wav):
-    return Path(str(output_wav) + ".cache.json")
 
 
 def _prepare_tts_segment(index, seg, narration, tts_dir, engine):
@@ -419,12 +451,13 @@ def _prepare_tts_segment(index, seg, narration, tts_dir, engine):
         rate, pitch = index_provider.default_controls(seg)
     else:
         rate, pitch = _compute_tts_params(text, narration, index)
-    cache_inputs = _tts_segment_cache_inputs(engine, index, seg, text, rate, pitch)
+    cache_inputs = _tts_segment_cache_inputs(engine, seg, text, rate, pitch)
     return text, output_wav, rate, pitch, cache_inputs
 
 
 def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
-    cached = _load_tts_segment_cache(output_wav, cache_inputs)
+    """A result from the content-addressed cache, with `output_wav` pointing at its audio."""
+    cached = tts_cache.load(output_wav.parent, cache_inputs)
     if cached is None:
         return None
     if engine == "index-tts" and not index_provider.valid_cached_receipt(cached, CONFIG):
@@ -434,6 +467,11 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
         # Written before this bound existed: re-synthesize instead of blocking every rerun.
         log(f"  段 {index+1}: 不复用缓存，重新合成：{implausible}")
         return None
+    # The window is not part of the key (it never changes the audio), so an approved-text
+    # block moved into a shorter window is re-checked here instead of re-synthesized.
+    _check_segment_window(index, seg, cached["spoken_text"], cached["audio_duration"],
+                          cached["tts_rate_offset"])
+    tts_cache.materialize(output_wav.parent, cache_inputs, output_wav)
     # The sidecar's audio identity (size, mtime_ns) still matches the WAV that produced
     # `audio_duration`; re-probing would be one ffprobe process per segment on every rerun.
     log(f"  段 {index+1}: 复用已有 ({cached['audio_duration']:.1f}s)")
@@ -449,15 +487,15 @@ def _reuse_tts_segment_cache(index, seg, output_wav, cache_inputs, engine):
     )
 
 
-def _tts_segment_cache_inputs(engine, index, seg, source_text, rate, pitch):
-    """The exact inputs that make a cached segment safe to reuse (compared by equality)."""
+def _tts_segment_cache_inputs(engine, seg, source_text, rate, pitch):
+    """The exact inputs that make cached audio safe to reuse (compared by equality).
+
+    Only what changes the audio: text, prosody and provider/voice settings. The block's
+    position and window are left out, so deleting or inserting a block reuses every other
+    block's audio (rate/pitch still differ where position changes them)."""
     payload = {
         "engine": engine,
         "source_text": source_text,
-        "segment_index": index,
-        "start": round(seg["start"], 3),
-        "end": round(seg["end"], 3),
-        "pause_after_ms": seg.get("pause_after_ms", CONFIG["breath_ms"]),
         "rate": rate,
         "pitch": pitch,
         "emotion": seg.get("emotion", ""),
@@ -472,39 +510,16 @@ def _tts_segment_cache_inputs(engine, index, seg, source_text, rate, pitch):
     return payload
 
 
-def _load_tts_segment_cache(output_wav, cache_inputs):
-    """Return cache metadata only when the sidecar's inputs and WAV identity still match."""
-    cache_path = _tts_segment_cache_path(output_wav)
-    if not output_wav.exists() or output_wav.stat().st_size == 0 or not cache_path.exists():
-        return None
-    # This skill wrote the sidecar (_write_tts_segment_cache): one it cannot parse is a bug
-    # to surface. One from the earlier content-hash schema (cache_key/audio_fingerprint,
-    # no settings/audio) is a plain miss: the segment is re-synthesized once.
-    try:
-        data = json.loads(cache_path.read_text(encoding="utf-8"))
-    except ValueError as exc:
-        raise RuntimeError(f"TTS 缓存 sidecar 损坏: {cache_path}") from exc
-    if not isinstance(data, dict) or "settings" not in data or "audio" not in data:
-        return None
-    stale = data["settings"] != cache_inputs or data["audio"] != file_identity(output_wav)
-    return None if stale else data
-
-
 def _write_tts_segment_cache(output_wav, cache_inputs, spoken_text, duration, rate_offset,
                              norm_meta=None, provider_receipt=None):
-    """Persist non-secret inputs and the WAV identity for safe per-segment TTS reuse."""
-    _tts_segment_cache_path(output_wav).write_text(
-        json.dumps({
-            "settings": cache_inputs,
-            "audio": file_identity(output_wav),
-            "spoken_text": spoken_text,
-            "audio_duration": duration,
-            "tts_rate_offset": rate_offset,
-            "normalization": norm_meta or None,
-            "provider_receipt": provider_receipt,
-        }, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    """Store the finished block WAV under its non-secret synthesis inputs for reuse."""
+    tts_cache.store(output_wav, cache_inputs, {
+        "spoken_text": spoken_text,
+        "audio_duration": duration,
+        "tts_rate_offset": rate_offset,
+        "normalization": norm_meta or None,
+        "provider_receipt": provider_receipt,
+    })
 
 
 def _configured_tts_engine_for_cache():

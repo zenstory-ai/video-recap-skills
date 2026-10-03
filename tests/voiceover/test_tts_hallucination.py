@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-voiceover" / "scripts"))
 from lib import CONFIG  # noqa: E402
 import voiceover  # noqa: E402
-from tts_audio import implausible_tts_duration, max_plausible_tts_seconds  # noqa: E402
+from tts_audio import implausible_tts_duration, max_plausible_tts_seconds, speech_units  # noqa: E402
 
 SENTENCE = "范闲替丫鬟出了这口气，一巴掌把管家扇倒在地，脸上还落下一片古怪的红斑。"
 SEGMENT = {"start": 0.0, "end": 30.0, "narration": SENTENCE, "pause_after_ms": 200}
@@ -76,6 +76,7 @@ def test_hallucinated_reply_is_retried_and_the_faithful_one_kept(monkeypatch, tm
     assert calls == [SENTENCE, SENTENCE]
     assert result["audio_duration"] == 8.2
     assert (tts_dir / "narr_000.wav").read_bytes() == b"audio-2"
+    assert not (tts_dir / "narr_000.rejected.wav").exists()
 
 
 def test_persistent_hallucination_fails_the_segment_and_caches_nothing(monkeypatch, tmp_path):
@@ -86,7 +87,13 @@ def test_persistent_hallucination_fails_the_segment_and_caches_nothing(monkeypat
 
     assert len(calls) == 3
     assert "18.1s" in str(excinfo.value)
-    assert list((tmp_path / "tts_segments").iterdir()) == []
+    # Nothing is cached or delivered; only the latest rejected take is kept for listening, and
+    # the error says where it is before suggesting a lower TTS_MIN_SPEECH_RATE.
+    rejected = tmp_path / "tts_segments" / "narr_000.rejected.wav"
+    assert list((tmp_path / "tts_segments").iterdir()) == [rejected]
+    assert rejected.read_bytes() == b"audio-3"
+    assert str(rejected) in str(excinfo.value)
+    assert "TTS_MIN_SPEECH_RATE" in str(excinfo.value)
 
 
 def test_rerun_resynthesizes_a_hallucinated_wav_cached_by_an_earlier_version(monkeypatch, tmp_path):
@@ -108,3 +115,21 @@ def test_rerun_resynthesizes_a_hallucinated_wav_cached_by_an_earlier_version(mon
     again, _engine, _failures = voiceover.synthesize_tts([SEGMENT], tmp_path)
     assert calls == [SENTENCE]
     assert again[0]["audio_duration"] == 8.2
+
+
+@pytest.mark.parametrize("text, units", [
+    ("２０２６年", 5),        # full-width digits are read one by one, like half-width ones
+    ("2026年", 5),
+    ("二〇二六年", 5),
+    ("涨了50%", 7),          # % is read 百分之
+    ("涨了５０％", 7),
+    ("He came home.", 4.5),
+])
+def test_speech_units_count_every_spoken_digit_and_percent_sign(text, units):
+    assert speech_units(text) == units
+
+
+def test_bound_does_not_reject_a_faithful_reading_of_full_width_numbers():
+    text = "２０２６年，票房涨了３５０％。"
+    # Read faithfully at the slowest calibrated pace: 12 units / 2.5 + 2 pauses + edges.
+    assert implausible_tts_duration(text, 12 / 2.5 + 0.8 + 1.5) is None

@@ -107,7 +107,7 @@
         "skill:worldwonderer/video-understanding@1.0.5",
         "skill:worldwonderer/video-cut@1.0.5",
         "skill:worldwonderer/video-script@1.0.4",
-        "skill:worldwonderer/video-voiceover@1.0.3",
+        "skill:worldwonderer/video-voiceover@1.0.4",
         "skill:worldwonderer/video-assemble@1.0.5"
       ],
       "slug": "video-recap",
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.10"
+      "version": "1.0.11"
     },
     {
       "catalogMigration": true,
@@ -243,7 +243,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "f148822c1670b33a9e7737d3387395086e3cd5ca8d64362f4a414ca7d765a7d7",
+      "packageDigest": "dda298ceefe37461e47860a631743d5fbd60124ee1c221047defd992bb820a37",
       "path": "skills/video-voiceover",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -264,7 +264,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.3"
+      "version": "1.0.4"
     }
   ]
 }

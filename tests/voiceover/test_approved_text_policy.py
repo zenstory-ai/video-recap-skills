@@ -123,10 +123,10 @@ def test_strict_cache_inputs_carry_raw_authored_text_after_cleanup(monkeypatch):
     marked = {**base, "narration": "[提示]批准文本。"}
 
     base_key = voiceover._tts_segment_cache_inputs(
-        "mimo-tts", 0, base, "批准文本。", "+0%", "+0Hz"
+        "mimo-tts", base, "批准文本。", "+0%", "+0Hz"
     )
     marked_key = voiceover._tts_segment_cache_inputs(
-        "mimo-tts", 0, marked, "批准文本。", "+0%", "+0Hz"
+        "mimo-tts", marked, "批准文本。", "+0%", "+0Hz"
     )
 
     assert base_key != marked_key

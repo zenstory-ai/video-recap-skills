@@ -21,6 +21,7 @@ brittle and case-by-case. Two stages around an agent-authored pause:
 import argparse
 import base64
 import json
+import os
 import re
 import unicodedata
 import wave
@@ -35,6 +36,7 @@ from lib import (
     mimo_tts_api_call,
     run_cmd,
 )
+from tts_audio import implausible_tts_duration, rejected_take_hint, rejected_take_path
 
 CLONE_MODEL = "mimo-v2.5-tts-voiceclone"
 CLONE_SR = 24000  # mimo voiceclone returns 24kHz mono PCM16 wav
@@ -297,6 +299,11 @@ def _clone_cache_meta_path(raw_wav):
     return raw_wav.with_name(f"{raw_wav.name}.meta.json")
 
 
+def _wav_seconds(path):
+    with wave.open(str(path), "rb") as w:
+        return w.getnframes() / w.getframerate()
+
+
 def _usable_clone_wav(path):
     try:
         sample_rate, channels, frames = _wav_frames(path)
@@ -311,6 +318,11 @@ def _write_clone_cache_meta(raw_wav, text, ref_identity):
 
 
 def _ensure_clone_tts(text, ref_b64, ref_identity, raw_wav):
+    """Reuse or synthesize one line's raw clone WAV; returns True on a cache hit.
+
+    A take far longer than reading `text` (the line plus invented speech) is the same failure
+    voiceover rejects: retried up to TTS_RETRIES times and never cached or time-fitted; the
+    latest such take is kept as `<name>.rejected.wav` for listening."""
     raw_wav = Path(raw_wav)
     expected = _clone_cache_inputs(text, ref_identity)
     meta_path = _clone_cache_meta_path(raw_wav)
@@ -320,13 +332,32 @@ def _ensure_clone_tts(text, ref_b64, ref_identity, raw_wav):
         meta = json.loads(meta_path.read_text(encoding="utf-8"))
         # A meta from the content-hash schema has no "inputs" and is simply a miss.
         if meta.get("inputs") == expected and _usable_clone_wav(raw_wav):
-            return True
+            implausible = implausible_tts_duration(text, _wav_seconds(raw_wav))
+            if not implausible:
+                return True
+            # Cached before this bound existed: re-synthesize instead of fitting it every rerun.
+            log(f"  {raw_wav.name}: 不复用缓存，重新合成：{implausible}")
 
-    _clone_tts(text, ref_b64, raw_wav)
-    if not _usable_clone_wav(raw_wav):
-        raise RuntimeError(f"MiMo voiceclone returned an invalid WAV: {raw_wav}")
-    _write_clone_cache_meta(raw_wav, text, ref_identity)
-    return False
+    rejected = rejected_take_path(raw_wav)
+    rejected.unlink(missing_ok=True)
+    retries = CONFIG["tts_retries"]
+    implausible = None
+    for attempt in range(1, retries + 1):
+        meta_path.unlink(missing_ok=True)  # never leave a sidecar vouching for an unchecked take
+        _clone_tts(text, ref_b64, raw_wav)
+        if not _usable_clone_wav(raw_wav):
+            raise RuntimeError(f"MiMo voiceclone returned an invalid WAV: {raw_wav}")
+        implausible = implausible_tts_duration(text, _wav_seconds(raw_wav))
+        if not implausible:
+            rejected.unlink(missing_ok=True)
+            _write_clone_cache_meta(raw_wav, text, ref_identity)
+            return False
+        os.replace(raw_wav, rejected)
+        if attempt < retries:
+            log(f"  {raw_wav.name}: voiceclone 重试 {attempt + 1}/{retries}: {implausible}")
+    raise RuntimeError(
+        f"MiMo voiceclone 合成失败（«{text[:18]}»）: {implausible}{rejected_take_hint(rejected)}"
+    )
 
 
 def _time_fit(raw_wav, fitted_wav, room_seconds):

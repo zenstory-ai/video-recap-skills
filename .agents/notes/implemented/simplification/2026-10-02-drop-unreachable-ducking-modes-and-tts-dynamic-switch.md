@@ -29,7 +29,7 @@ Status: implemented
 ## Consequences
 
 - 收益：assemble 与 voiceover 脚本净少约 50 行，混音入口只剩一条可读的路径，配置表少八个无人能改的键。
-- 代价：TTS 段缓存按设置载荷整体比较（`_load_tts_segment_cache`），载荷少了 `tts_dynamic_params` 后，升级前生成的 `tts_segments/*.cache.json` 全部失效，已有 work_dir 重跑 voiceover 会重新合成一次 TTS（Fish Audio 会产生一次 API 费用）。assembly 侧的 `assembly_settings` 只写进 `assembly_manifest.json` 供 `resource_lock` 读 BGM / 包装 / 字体，不参与任何缓存比较，所以合成不受影响。
+- 代价：TTS 段缓存按设置载荷整体比较（当时的 `_load_tts_segment_cache`，现为 `tts_cache.load`），载荷少了 `tts_dynamic_params` 后，升级前生成的 `tts_segments/*.cache.json` 全部失效，已有 work_dir 重跑 voiceover 会重新合成一次 TTS（Fish Audio 会产生一次 API 费用）。assembly 侧的 `assembly_settings` 只写进 `assembly_manifest.json` 供 `resource_lock` 读 BGM / 包装 / 字体，不参与任何缓存比较，所以合成不受影响。
 - 是否在默认路径：渲染结果不变；默认路径本来就是 fixed 包络与动态语速。
 - 直接 `import voiceover` 并取 `voiceover._normalize_tts_wav_rms` 的外部代码需要改从 `tts_audio` 导入。
 
