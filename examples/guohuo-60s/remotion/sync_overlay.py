@@ -15,6 +15,9 @@ caption, the title or a flower cue ends past the master.
 
     python3 sync_overlay.py --srt <work_dir>/subtitles.srt --master <recap_master.mp4>
     python3 sync_overlay.py --srt <work_dir>/subtitles.srt --duration 58.96 --out ../captions.json
+
+src/captions.json (the file Remotion imports) is always written; each --out adds another
+copy, e.g. the example's public captions.json.
 """
 
 import argparse
@@ -84,7 +87,22 @@ def out_of_range(overlay, duration, cues):
     return notes
 
 
+def caption_targets(src_captions, extra):
+    """src/captions.json first, then each --out copy, de-duplicated by resolved path."""
+    targets, seen = [], set()
+    for path in [src_captions, *(extra or [])]:
+        resolved = Path(path).resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            targets.append(Path(path))
+    return targets
+
+
 def main(argv=None):
+    # Cue text is Chinese; a cp1252 Windows console must not abort the run after writing.
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="backslashreplace")
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--srt", required=True, help="the run's work_dir/subtitles.srt")
     length = ap.add_mutually_exclusive_group(required=True)
@@ -92,8 +110,12 @@ def main(argv=None):
     length.add_argument("--duration", type=float, help="master length in seconds")
     ap.add_argument("--overlay", default=str(HERE / "src" / "overlay.json"))
     ap.add_argument(
+        "--src-captions", default=str(HERE / "src" / "captions.json"),
+        help="the captions.json Remotion imports (always written; default src/captions.json)",
+    )
+    ap.add_argument(
         "--out", action="append", default=None,
-        help="captions.json to write (repeatable; default src/captions.json)",
+        help="an extra captions.json copy to write besides --src-captions (repeatable)",
     )
     args = ap.parse_args(argv)
 
@@ -105,8 +127,8 @@ def main(argv=None):
     overlay = json.loads(overlay_path.read_text(encoding="utf-8"))
     overlay["durationInFrames"] = round(duration * overlay["fps"])
 
-    for out in args.out or [str(HERE / "src" / "captions.json")]:
-        Path(out).write_text(json.dumps(cues, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    for out in caption_targets(args.src_captions, args.out):
+        out.write_text(json.dumps(cues, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         print(f"captions: {len(cues)} cues -> {out}")
     overlay_path.write_text(json.dumps(overlay, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"overlay: durationInFrames={overlay['durationInFrames']} "

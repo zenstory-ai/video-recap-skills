@@ -169,7 +169,7 @@ def test_sync_overlay_rebuilds_the_published_captions_and_length_from_a_run(
 
     assert sync.main([
         "--srt", str(srt), "--duration", str(duration),
-        "--overlay", str(overlay), "--out", str(out),
+        "--overlay", str(overlay), "--src-captions", str(out),
     ]) == 0
 
     assert json.loads(out.read_text(encoding="utf-8")) == captions
@@ -190,7 +190,8 @@ def test_sync_overlay_flags_title_and_flower_cues_past_a_shorter_master(
     out = tmp_path / "captions.json"
 
     assert sync.main([
-        "--srt", str(srt), "--duration", "40", "--overlay", str(overlay), "--out", str(out),
+        "--srt", str(srt), "--duration", "40", "--overlay", str(overlay),
+        "--src-captions", str(out),
     ]) == 1
 
     assert json.loads(out.read_text(encoding="utf-8")) == [
@@ -201,6 +202,35 @@ def test_sync_overlay_flags_title_and_flower_cues_past_a_shorter_master(
     assert "title window 42.2-50.3s" in err
     assert "'重逢已迟'" in err and "'本能不会说谎'" in err
     assert "'旧情难藏'" not in err
+
+
+def test_sync_overlay_out_adds_a_copy_and_still_writes_the_imported_captions(
+    monkeypatch, tmp_path
+):
+    """--out is additive: the src/captions.json Remotion imports is always rewritten, so a
+    runbook that adds the public copy can never leave old cues over a new master."""
+    sync = _load_sync_overlay(monkeypatch)
+    here = tmp_path / "remotion"
+    (here / "src").mkdir(parents=True)
+    monkeypatch.setattr(sync, "HERE", here)
+    imported = here / "src" / "captions.json"
+    imported.write_text('[{"start": 0, "end": 1, "text": "旧字幕"}]\n', encoding="utf-8")
+    srt = tmp_path / "subtitles.srt"
+    srt.write_text("1\n00:00:01,000 --> 00:00:02,500\n新的解说\n", encoding="utf-8")
+    overlay = here / "src" / "overlay.json"
+    overlay.write_text((EXAMPLE / "remotion/src/overlay.json").read_text(encoding="utf-8"),
+                       encoding="utf-8")
+    public = tmp_path / "captions.json"
+
+    assert sync.main([
+        "--srt", str(srt), "--duration", "58.96", "--overlay", str(overlay),
+        "--out", str(public), "--out", str(imported),
+    ]) == 0
+
+    expected = [{"start": 1.0, "end": 2.5, "text": "新的解说"}]
+    assert json.loads(imported.read_text(encoding="utf-8")) == expected
+    assert json.loads(public.read_text(encoding="utf-8")) == expected
+    assert sync.caption_targets(imported, [str(public), str(imported)]) == [imported, public]
 
 
 def test_guohuo_story_picture_audio_and_caption_contracts_agree():

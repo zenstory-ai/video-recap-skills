@@ -13,9 +13,9 @@ runbook 还要求复现者自己从 `work_dir/subtitles.srt` 或 `_placed_*.wav`
 - 新增 `examples/guohuo-60s/remotion/src/overlay.json`：`fps`、`width`、`height`、`durationInFrames`、`title {text, windows[]}`、`flowerCues[]`，数值与原 TSX 常量一致。
 - `RecapOverlay` 改为接收 props `{captions, overlay}`；`index.tsx` 用两份 JSON 作 `defaultProps`，并用 `calculateMetadata` 从 props 取时长和画布，所以 `remotion render --props=<文件>` 传入的新数据连同时长一起生效。TSX 里没有时间或文字常量。
 - 新增 `remotion/tsconfig.json` 与 devDependencies（`typescript` 5.9.3、`@types/react` 19.2.18），`npm run typecheck` 可做类型检查。
-- 新增仅用标准库的 `remotion/sync_overlay.py`：从运行的 `subtitles.srt` 重建 `src/captions.json`（可用 `--out` 多写几份），按 `--master`（ffprobe）或 `--duration` 设 `durationInFrames`；字幕、片名窗口或花字越过母版结尾时列出来并以退出码 1 结束（文件照常写出）。它不挪动片名和花字：这些按画面决定。
+- 新增仅用标准库的 `remotion/sync_overlay.py`：从运行的 `subtitles.srt` 重建 `src/captions.json`（这份每次都写，位置可用 `--src-captions` 改；`--out` 只在它之外再写副本，按解析后路径去重，所以加 `--out captions.json` 不会让 Remotion 读到旧字幕），按 `--master`（ffprobe）或 `--duration` 设 `durationInFrames`；字幕、片名窗口或花字越过母版结尾时列出来并以退出码 1 结束（文件照常写出）。它不挪动片名和花字：这些按画面决定。
 - `skill-runbook.md` 第 5 节与样例 README 改写为“跑脚本 → 看片重放 overlay.json 的创作项 → typecheck / 抽帧 → 渲染”。
-- 测试（orchestrator 组 `test_guohuo_example.py`）：`overlay.json` 的总帧数与 fps 对上 `delivery-qc.json`；TSX 里不出现总帧数、片名和花字文字；按采用版字幕生成的 SRT 经脚本还原出逐字节相同的 `captions.json` 与 `overlay.json`；更短的母版会被标出越界的片名窗口和花字。
+- 测试（orchestrator 组 `test_guohuo_example.py`）：`overlay.json` 的总帧数与 fps 对上 `delivery-qc.json`；TSX 里不出现总帧数、片名和花字文字；按采用版字幕生成的 SRT 经脚本还原出逐字节相同的 `captions.json` 与 `overlay.json`；更短的母版会被标出越界的片名窗口和花字；给了 `--out` 时默认的 `src/captions.json` 仍会被重写。
 - 验证：在本机 `npm install` 后 `npx tsc --noEmit` 通过；`remotion render` 渲染第 74–76 帧，片名、花字“旧情难藏”与字幕“还挽着亲哥”都在 3.0 秒处正确出现；用 `--props` 传入 50 帧的新配置时，第 46 帧显示新片名、新花字和新字幕，第 60 帧被 Remotion 以超出时长拒绝。验证后删除了 `node_modules`。
 
 ## Alternatives considered
