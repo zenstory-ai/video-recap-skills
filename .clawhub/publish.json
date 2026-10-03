@@ -1,0 +1,270 @@
+{
+  "bootstrapSha": "2bbde9409cc8b55bb70d29f15e529d445afad33a",
+  "repository": "zenstory-ai/video-recap-skills",
+  "schemaVersion": 1,
+  "skillRoots": [
+    "skills"
+  ],
+  "skills": [
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "视频成片组装",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "4b455ab5e1ccbd5daff91fde3997cd1a00eafd0475588d752ef79f66b311cfa5",
+      "path": "skills/video-assemble",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python",
+        "bin:ffmpeg",
+        "bin:ffprobe"
+      ],
+      "slug": "video-assemble",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.1"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "视频剪辑规划",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "4c0d86075a37085f8b06217e53ef4c72d52ced91e5eef7e80ea409d537ffba17",
+      "path": "skills/video-cut",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python",
+        "bin:ffmpeg",
+        "bin:ffprobe"
+      ],
+      "slug": "video-cut",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.1"
+    },
+    {
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "视频解说总入口",
+      "disposition": "blocked",
+      "excludeReason": "Requires verified same-root companion installation before publication; the orchestrator directly executes five sibling skill packages.",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "path": "skills/video-recap",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python",
+        "bin:ffmpeg",
+        "bin:ffprobe",
+        "skill:worldwonderer/video-understanding@1.0.1",
+        "skill:worldwonderer/video-cut@1.0.1",
+        "skill:worldwonderer/video-script@1.0.1",
+        "skill:worldwonderer/video-voiceover@1.0.1",
+        "skill:worldwonderer/video-assemble@1.0.1"
+      ],
+      "slug": "video-recap",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "成片参考分析",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "75abcb3026febc4f957639fcd4b49f4717cfb7d3397808db673099b1e99c72dd",
+      "path": "skills/video-reference",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python",
+        "bin:ffmpeg",
+        "bin:ffprobe"
+      ],
+      "slug": "video-reference",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.0"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "视频解说脚本",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "608b4ce170d1fcea656225d83349c2d9111585191161e6e5bac7b2eab6fb3bb1",
+      "path": "skills/video-script",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python"
+      ],
+      "slug": "video-script",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.1"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "视频内容理解",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "ab2d725c58bb7dd2452ebfa9868c7e6602f5b03129307612e5ad019022028fe9",
+      "path": "skills/video-understanding",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python",
+        "bin:ffmpeg",
+        "bin:ffprobe"
+      ],
+      "slug": "video-understanding",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.1"
+    },
+    {
+      "catalogMigration": true,
+      "categories": [
+        "creative",
+        "automation",
+        "knowledge"
+      ],
+      "displayName": "视频配音生成",
+      "disposition": "publish",
+      "excludeReason": "",
+      "include": [
+        "**/*"
+      ],
+      "maintainer": "worldwonderer",
+      "packageDigest": "19a160b585c8553f0201ad769dd78b2c457f82e2dce93a2f7d0117dff97e2bf2",
+      "path": "skills/video-voiceover",
+      "publisher": "worldwonderer",
+      "rebuildOn": [],
+      "rights": {
+        "evidence": ".clawhub/README.md#rights",
+        "status": "permission-recorded"
+      },
+      "runtimeDependsOn": [
+        "bin:python",
+        "bin:ffmpeg",
+        "bin:ffprobe"
+      ],
+      "slug": "video-voiceover",
+      "supportedRuntimes": [],
+      "topics": [
+        "video-editing",
+        "video-recap",
+        "ffmpeg",
+        "content-creation"
+      ],
+      "version": "1.0.1"
+    }
+  ]
+}
