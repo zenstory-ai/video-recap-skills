@@ -210,10 +210,12 @@ python3 scripts/recap.py adopted.mp4 --work-dir packaging_work --audio-mode adop
 
 ## 5. 英译中原声复刻模式
 
-`--edit-mode dub` 把英文视频翻译为中文，并用原说话者的克隆音色替换人声；它不是在压低原声上叠加解说。
+`--edit-mode dub` 是实验功能：把英文视频翻译为中文，并用原说话者的克隆音色替换人声；它不是在压低原声上叠加解说。只在用户明确要求英译中配音时使用。
+
+dub 会把源视频音轨分窗发给 MiMo ASR 转写，并把截取的约 10 秒原说话人声音作为参考，连同每句译文发给 MiMo voiceclone。因此必须带 `--confirm-voice-rights`：先向用户确认他有权使用这段视频与音频、且说话人同意被克隆声音，确认后才加这个参数；缺少时启动即报错，不抽音频、不发请求。该参数只用于 dub，其他模式传入会报错。
 
 ```bash
-python3 scripts/recap.py <video> --edit-mode dub --work-dir <work_dir>
+python3 scripts/recap.py <video> --edit-mode dub --confirm-voice-rights --work-dir <work_dir>
 ```
 
 准备阶段会转写英文、提取一段参考音频，并写出 `dub_brief.md` 与 `dub_transcript.json`。Agent 按 `dub_brief.md` 里的翻译要求（逐句忠实、时间窗、语速）写 `dub_script.json`：

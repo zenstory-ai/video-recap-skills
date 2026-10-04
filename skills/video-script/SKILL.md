@@ -5,6 +5,9 @@ description: >
  宣发标题、花字修订和外部文案回填。普通策划输入 work_dir 的 agent_narration_brief.md 与
  vlm_analysis.json；文案返修输入当前成片的工程与内容证据。策划输出 recap_story_plan.json、visual_audio_board.json、
  可选 style_card.json、cut 模式需要的 clip_plan.json，以及通过校验的 narration.json；仅宣发文案任务交付提案或回填既有包装计划。
+ 外发说明：只有建议型评审 review.py 联网，它把旁白稿全文与理解证据、策划文件的文字摘录发到 MiMo chat 接口
+ （MIMO_API_KEY / MIMO_API_URL，不发视频、图片或音频）；单独使用时只在显式执行时运行，端到端编排默认在 TTS 前运行一次，
+ 可用 --no-review-narration / REVIEW_NARRATION=0 关闭（严格评审开启时除外）；validate.py 与 lint 仅在本地运行。
  触发词：解说词、写解说、视频旁白、宣发标题、花字修订、文案回填、
  narration script、写稿、解说文案、剪辑思路、导演思路。
 ---
@@ -37,7 +40,30 @@ Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理
 
 REVISION 先明确本轮修改项与冻结项，再编辑对应层：表达、口语节奏、字幕反馈更新 `style_card.json`；镜头、入出点、表演和声音分工更新 `visual_audio_board.json`；只有观众承诺、POV、主线或 beat 改变时才更新 `recap_story_plan.json`。被删除的镜头、原声或文案也要从相关计划中删除，不能保留过期锚点。不要把看片修改重新做成一次 CREATE。
 
-## 2. 读取素材并确认状态
+## 2. 远程调用与数据外发
+
+本技能只有一个脚本会联网：`review.py`（§7.1 的建议型语义评审）。其余全部在本地运行：`validate.py` 及其 lint、去 AI 味检查只读写 `work_dir` 里的文件，不发任何网络请求；策划与写稿由 Agent 直接读写 `work_dir` 完成。
+
+`review.py` 发给谁：
+
+- MiMo 的 OpenAI 兼容 chat 接口 `<MIMO_API_URL>/chat/completions`，用 `MIMO_API_KEY` 认证，模型为 `MIMO_MODEL`（默认 `mimo-v2.5`）。未设 `MIMO_API_URL` 时，按量计费 key 发往 `https://api.xiaomimimo.com/v1`，`tp-` 开头的 Token Plan key 发往 `MIMO_TOKEN_PLAN_CLUSTER` 选定的 token-plan 集群（默认 `https://token-plan-cn.xiaomimimo.com/v1`）。
+- 未设 `MIMO_API_KEY` 时直接退出，不构造也不发送任何请求。
+
+`review.py` 发送什么（只有文字，不发视频、帧图片或音频文件）：
+
+- `narration.json` 全部旁白段的时间与文字。
+- 理解索引的文字证据：开头、中段、结尾、长空档与各旁白时间窗附近选出的时间段内，`vlm_analysis.json` 的场景描述与 `frame_facts` 文字，以及对白转写（有 `asr_clean.json` 时用它，否则 `asr_result.json`）。
+- `background_research.json` 的梗概、角色、关系与剧情线摘录。
+- 存在时附上 `packaging_plan.json`、`recap_story_plan.json`、`visual_audio_board.json`、`style_card.json`（各截前 3000 字）和 `original_subtitles.json` 的原声字幕文字。
+- 内容较长时分块，每块一次请求；返回的意见只写回本地 `narration_review.json` / `narration_review.md`。
+
+何时运行、怎样关闭：
+
+- 单独使用本技能时，`review.py` 只在用户或 Agent 显式执行它时运行；不执行它就没有任何外发。用户不希望稿件离开本机时，不要运行它，改为人工复核后直接跑 `validate.py`。
+- 端到端编排默认在 TTS 前自动调用一次这项评审，失败不阻断；关闭方式是编排入口的 `--no-review-narration` 或环境变量 `REVIEW_NARRATION=0`。若同时开启了严格评审（`--require-narration-review` 或 `REQUIRE_NARRATION_REVIEW=1`），评审必须运行，关闭开关不生效。
+- 评审是建议型的：只写报告，从不改写 `narration.json`；是否修改由 Agent 或用户决定。
+
+## 3. 读取素材并确认状态
 
 首先阅读：
 
@@ -46,7 +72,7 @@ REVISION 先明确本轮修改项与冻结项，再编辑对应层：表达、�
 - `timeline_fusion.json`：判断某段是否有对白或静音槽。
 - `vlm_analysis.json` / `asr_result.json`：核对具体画面与原声证据；有 `asr_clean.json` 时以它的文本为准（lint、评审、剪辑和合成都读它）。
 - brief 顶部列出的 contact sheet：不要只依赖场景摘要；反应、走位、静止和台词前后的具体时刻常常更重要。
-- `production_reference.json`（仅当 `work_dir` 里有）：另一部成片拆出的可迁移方法与节奏数值，用法见 §3。
+- `production_reference.json`（仅当 `work_dir` 里有）：另一部成片拆出的可迁移方法与节奏数值，用法见 §4。
 
 full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；`edited_source.mp4` 产生后，第二阶段才按输出时间写 `narration.json`。
 
@@ -59,7 +85,7 @@ full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；
 
 必须确认旁白没有跨越错误剪辑边界，也没有落进已删除区间。整个判断只依赖 `work_dir` 产物。
 
-## 3. 制定创作方案
+## 4. 制定创作方案
 
 先阅读 `references/creative-editing-playbook.md`，再按创作控制模式写或更新工作产物：
 
@@ -71,7 +97,7 @@ full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；
 
 若 `work_dir` 有 `production_reference.json`，制定方案前先读它。它来自另一部成片，只含可迁移的方法和测得的节奏，不含本片事实，不能作为本片画面、剧情或台词的证据。优先级：用户指令 > 本片证据 > 参考。CREATE 可把它的 `structure` 当作一个候选假设，与素材自生的假设比较；DIRECTED / REVISION 默认不套用。`targets` 是参考值，不是配额：与本片的 `audio_owner`、完整台词或表演冲突时以素材为准。可在 `recap_story_plan.json` 写可选字段 `reference_methods: [{"id": "m1", "decision": "adopt|adapt|skip", "note": "…"}]`。没有这个文件就跳过本段。
 
-### 3.1 导演判断
+### 4.1 导演判断
 
 锁定：
 
@@ -82,11 +108,11 @@ full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；
 - 隐瞒与揭示
 - 结尾余味
 
-### 3.2 故事编辑
+### 4.2 故事编辑
 
 CREATE 比较两个真正可行的结构后选择一个；DIRECTED / REVISION 沿用用户指定或已确认的结构，除非最新反馈明确改变故事方向。每个 beat 至少改变一项：知识、权力、目标、关系、情绪或风险。若删除后因果、人物和情绪都没有损失，该 beat 通常不应保留。
 
-### 3.3 画面剪辑
+### 4.3 画面剪辑
 
 选择具体时刻，而不是只选择事件。比较：
 
@@ -97,7 +123,7 @@ CREATE 比较两个真正可行的结构后选择一个；DIRECTED / REVISION �
 
 在不破坏理解的前提下晚进早出，同时保留不可替代的表演、停顿、失误、动作声和完整台词。
 
-### 3.4 声音与旁白分工
+### 4.4 声音与旁白分工
 
 先指定 `audio_owner`，再写字。旁白只允许承担以下 `narration_job`：
 
@@ -110,7 +136,7 @@ CREATE 比较两个真正可行的结构后选择一个；DIRECTED / REVISION �
 
 画面、原声或沉默已经足够时使用 `none`，不要默认铺旁白。
 
-### 3.5 cut 模式第一阶段
+### 4.5 cut 模式第一阶段
 
 cut 模式先根据 `recap_story_plan.json` 与 `visual_audio_board.json` 写原片时间的 `clip_plan.json`，此时不要写 `narration.json`：
 
@@ -135,7 +161,7 @@ beat_id | function | change | POV | preferred moment | 入点 | 出点
 
 片段顺序必须构成一条完整故事线，而不是无序高光。可使用 0–1 个 cold open，随后回到因果清楚的 setup → turn → escalation → payoff。片段长度服从具体时刻，不使用统一秒数模板；片尾必须保留完整台词或动作。密集 scene-change 候选的来源判断与处理规则由剪辑阶段定义，写计划时遵循同一规则，不制造人工闪切。
 
-## 4. 撰写旁白
+## 5. 撰写旁白
 
 full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.mp4` 与剪后故事板，补充 `visual_audio_board.json` 的输出时间并重新确认 `audio_owner` / `narration_job`，再按输出时间写：
 
@@ -162,7 +188,7 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 | `overlaps_speech` | 是否与原对白重叠；连续铺底窗口通常为 `true`，真正静音槽才为 `false` |
 | `emotion` | 整个解说块的 MiMo TTS 情绪/语气标签 |
 
-### 4.1 写作规则
+### 5.1 写作规则
 
 1. **先有 `narration_job`，后有句子**：没有明确任务就不写；旁白不是默认音轨。
 2. **按连续思路写**：旁白拥有一个 beat 时，用一个或少量完整句子完成“前提 → 触发动作 → 变化/意义”，并在一次 TTS 中合成。句号服从口语思路和呼吸，不服从字幕换行；不要固定句数，也不要“一句一停”。
@@ -174,7 +200,7 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 8. **写给耳朵听**：使用具体名词和动词，句子完整、口语可听；避免字幕腔、半句、空泛拔高和破折号。TTS 文本先保证听感连续，字幕再按阅读宽度拆分，不能反过来把朗读稿切碎。
 9. **避免模板化纠偏**：“不是 A，而是 B”只在确实存在一个观众可能相信、而素材又要纠正的判断时使用。它不是禁句，但不能靠先否定再肯定制造假洞察；优先直接写人物的动作、因果和后果。
 
-### 4.2 解说结构
+### 5.2 解说结构
 
 - **钩子**：提出正文会真实兑现的问题或利害，不用无关留存话术。
 - **主线**：围绕选定 POV 与主线推进，不在每个场景重新开篇。
@@ -183,7 +209,7 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 - **收尾**：回答或有意转化开头问题，留下明确余味。
 - **衔接**：旁白块与相邻原声属于同一个 beat，前者铺垫、后者呈现、下一块承接。
 
-### 4.3 原声留白字幕
+### 5.3 原声留白字幕
 
 可选写 `original_subtitles.json`，使用成片输出时间：
 
@@ -193,7 +219,7 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 
 只写留白中实际听得到的台词，订正 ASR 错字与人名，每条尽量控制在一行；被旁白盖住或已经剪掉的句子不要写。省略时，合成阶段会使用保守的 ASR 映射兜底，并在成片中用 `「」` 区分原声对白与旁白。
 
-## 5. 创作自审
+## 6. 创作自审
 
 在调用 LLM 评审前做以下**反事实检查**：
 
@@ -209,12 +235,12 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 
 REVISION 还要逐项确认：用户点名的问题已经改变，未点名的冻结项没有意外变化，相关 `style_card.json` / `visual_audio_board.json` 中不存在旧镜头或旧表达。除非用户要求备选版本，不额外扩展新方向。
 
-## 6. 评审与校验
+## 7. 评审与校验
 
-### 6.1 建议型语义评审
+### 7.1 建议型语义评审
 
 ```bash
-python3 scripts/review.py --work-dir <work_dir>
+python3 scripts/review.py --work-dir <work_dir>   # 会联网：外发内容与关闭方式见 §2
 ```
 
 评审会自动识别 cut 模式，并在存在已校验剪辑计划时按输出时间线核对；`--timeline source` 可强制使用原片时间。打开 `narration_review.md`，逐项处理 `error`，尤其是 `category=hallucination`。
@@ -236,7 +262,7 @@ python3 scripts/review.py --work-dir <work_dir>
 
 `review.py` 本身只写报告，默认调用策略为建议型、失败开放；若调用方显式开启严格评审，事实矛盾、残句、解析失败或评审不可用可在 TTS 前阻断。覆盖记录只用于审计，`review.py` / `validate.py` 不读取它。
 
-### 6.2 确定性硬校验
+### 7.2 确定性硬校验
 
 ```bash
 python3 scripts/validate.py --work-dir <work_dir> --mode full
@@ -247,7 +273,8 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full
 
 片名或题材明确但缺少剧情上下文时，先按本技能的 `references/research-guide.md` 写 `background_research.json`。若理解素材偏薄，brief 中的数量只能当上限：宁可少写、写实，也不要为凑数复述画面。
 
-## 7. 能力边界
+## 8. 能力边界
 
 - 不运行 ASR / VLM，不合成 TTS，不渲染视频；只消费视频理解索引。
+- 唯一的远程调用是 `review.py` 的 MiMo 文字评审（见 §2）；`validate.py` 与 lint 只在本地运行。
 - 平台研究仅用于明确的宣发任务；不替代当前片内事实，也不默认改变解说和剪辑。

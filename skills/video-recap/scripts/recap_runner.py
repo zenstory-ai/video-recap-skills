@@ -434,6 +434,8 @@ def main():
     if (args.doctor or needs_voiceover(args)) and args.tts_provider not in TTS_PROVIDERS:
         ap.error("TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS))
 
+    if args.edit_mode != "dub" and args.confirm_voice_rights:
+        ap.error("--confirm-voice-rights only applies to --edit-mode dub")
     if args.doctor:
         if any(
             getattr(args, field) is not None
@@ -501,6 +503,12 @@ def main():
         )
     if args.edit_mode == "dub" and args.burn_subtitles:
         ap.error("--burn-subtitles is only supported in full/cut modes; dub never burns subtitles")
+    if args.edit_mode == "dub" and not args.confirm_voice_rights:
+        ap.error(
+            "--edit-mode dub requires --confirm-voice-rights: dub sends the source audio to "
+            "MiMo ASR and clones the original speaker's voice with MiMo voiceclone; confirm only "
+            "when the user has the rights to this video and the speaker's consent to clone the voice"
+        )
     if (args.subtitle_y_top is None) != (args.subtitle_y_bot is None):
         ap.error("--subtitle-y-top and --subtitle-y-bot must be provided together")
     if args.subtitle_y_top is not None:
@@ -572,7 +580,8 @@ def _run_dub(video, work_dir, args):
     One pause: prepare (ASR + sentence-seg + reference) -> agent writes the Chinese
     translation (dub_script.json) -> render (clone TTS + full-replace mux)."""
     dub_script = work_dir / "dub_script.json"
-    dub_args = ["--video", str(video), "--work-dir", str(work_dir)]
+    # main() has already required --confirm-voice-rights for dub; forward it to both stages.
+    dub_args = ["--video", str(video), "--work-dir", str(work_dir), "--confirm-voice-rights"]
     if not dub_script.exists():
         _run("video-voiceover", "dub.py", "--stage", "prepare", *dub_args)
         _write_run_manifest(work_dir, video, args)

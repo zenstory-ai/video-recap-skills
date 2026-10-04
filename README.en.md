@@ -396,10 +396,10 @@ The reference audio is sent to MiMo for synthesis; use it only with the voice ow
 **Dub an English video into Chinese while keeping the speaker's voice:**
 
 ```text
-Dub /path/to/english.mp4 into Chinese, keeping the original speaker's voice.
+Dub /path/to/english.mp4 into Chinese, keeping the original speaker's voice. I have the rights to this video and the speaker consents to having their voice cloned.
 ```
 
-This replaces the original speech rather than overlaying commentary; the current version supports one speaker and full-track replacement without background-music separation.
+This is experimental and replaces the original speech rather than overlaying commentary; the current version supports one speaker and full-track replacement without background-music separation. The source audio is sent to MiMo ASR for transcription and about 10 seconds of the original speaker's voice are sent to MiMo as the voice-clone reference, so the run requires `--confirm-voice-rights`: confirm only when you have the rights to the video and the speaker's consent to clone their voice.
 
 **Reuse subtitle style, voice, BGM and frame across a series:**
 

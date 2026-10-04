@@ -93,6 +93,12 @@ def parse_args(argv=None):
         choices=["full", "cut", "dub"],
     )
     core.add_argument(
+        "--confirm-voice-rights",
+        action="store_true",
+        help="dub mode only, required there: the user confirms they may use this video's audio "
+        "and clone its speaker's voice (sent to MiMo ASR and MiMo voiceclone)",
+    )
+    core.add_argument(
         "--target-duration", default=os.environ.get("TARGET_DURATION") or None
     )
     core.add_argument(

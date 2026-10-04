@@ -10,6 +10,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **dub 模式必须显式确认声音权利：`--edit-mode dub` 需要 `--confirm-voice-rights`。** dub 会把源视频音轨分窗发给 MiMo ASR，并把原说话人约 10 秒的声音当参考发给 MiMo voiceclone 克隆音色，以前只要选了 dub 就会运行，`dub.py` 被直接执行时也没有任何确认。现在 recap 在 dub 模式下缺少该参数时于建 `work_dir` 和探测视频之前报错，其他模式传入同样报错；`dub.py` 的 `--stage prepare|render` 也都必须带它，缺少时在抽取音频与任何请求之前退出并说明会外发什么。只在用户有权使用这段视频与音频、且说话人同意被克隆声音时确认。升级后在所有 dub 命令（包括旧 `work_dir` 打印的续跑命令）上补这个参数；没有环境变量形式。
+- **video-script 与 video-voiceover 的 SKILL.md 写明每条远程调用发什么、发给谁、怎样关闭。** video-script 新增 §2：`review.py` 是唯一联网的脚本，只把旁白全文、选定时间段内的画面描述与对白转写文字、背景资料和策划文件摘录发到 MiMo chat 接口（不发视频、帧图片或音频），单独使用时只在显式执行时运行，编排时用 `--no-review-narration` / `REVIEW_NARRATION=0` 关闭；`validate.py` 与 lint 只在本地运行。video-voiceover 新增 §2 逐路径列出 MiMo TTS、`--voice-ref` 克隆、Fish Audio、自托管 IndexTTS 与 dub 各自收到的内容，新增 §8 说明 dub 是实验功能、如何触发与权利要求。两份文档其后的章节号各顺延一号。
+
+### Fixed
+
+- **没有 `MIMO_API_KEY` 时 `review.py` 不再把稿件发出去。** 以前缺 key 也会把旁白与证据 POST 到 MiMo，再因 401 失败；现在在构造请求前退出，不写评审产物。编排入口的建议型评审照旧失败不阻断。
+
 ## [0.6.1] - 2026-10-03
 
 升级前先从脚本与环境里删掉本版移除的参数和环境变量（见 Removed，如 `--mimo-qc`、`validate.py --preserve-approved-text`、`cut.py --clip-padding`、`dashboard_server.py --host` 和 19 个调参变量），读 `golden_eval.json`、`mimo_qc.json`、`preflight_qc.json` 的脚本按 Removed 改读 `final_qc.json` 或对应产物。

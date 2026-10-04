@@ -229,6 +229,41 @@ def test_side_cli_stages_are_gone(monkeypatch, argv):
     assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("stage", ["prepare", "render"])
+def test_dub_refuses_both_stages_without_voice_rights_confirmation(monkeypatch, tmp_path, stage):
+    """No ASR upload, reference cut or voiceclone request until the rights are confirmed."""
+    def fail_if_called(*_args, **_kwargs):
+        raise AssertionError("dub stage ran without --confirm-voice-rights")
+
+    monkeypatch.setattr(dub, "stage_prepare", fail_if_called)
+    monkeypatch.setattr(dub, "stage_render", fail_if_called)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["dub.py", "--stage", stage, "--video", "v.mp4", "--work-dir", str(tmp_path)],
+    )
+    with pytest.raises(SystemExit) as exc:
+        dub.main()
+    assert exc.value.code == dub.VOICE_RIGHTS_REQUIRED
+    assert "MiMo ASR" in dub.VOICE_RIGHTS_REQUIRED
+    assert "voiceclone" in dub.VOICE_RIGHTS_REQUIRED
+
+
+@pytest.mark.parametrize("stage", ["prepare", "render"])
+def test_dub_runs_the_stage_once_voice_rights_are_confirmed(monkeypatch, tmp_path, stage):
+    calls = []
+    monkeypatch.setattr(dub, "stage_prepare", lambda video, work: calls.append(("prepare", video, work)))
+    monkeypatch.setattr(dub, "stage_render", lambda video, work: calls.append(("render", video, work)))
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "dub.py", "--stage", stage, "--video", "v.mp4", "--work-dir", str(tmp_path),
+            "--confirm-voice-rights",
+        ],
+    )
+    dub.main()
+    assert calls == [(stage, Path("v.mp4"), tmp_path)]
+
+
 def test_dub_render_stops_before_tts_when_lint_blocks(monkeypatch, tmp_path):
     """Mechanical dub lint must run before clone-TTS spend."""
     (tmp_path / "dub_transcript.json").write_text(

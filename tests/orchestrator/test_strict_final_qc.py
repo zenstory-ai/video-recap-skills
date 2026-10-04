@@ -182,7 +182,7 @@ def test_legacy_dub_without_strict_flag_still_prepares_and_renders(
     monkeypatch.setattr(recap_runner, "_run", lambda *args: calls.append(args))
     argv = [
         "recap.py", str(video), "--work-dir", str(work), "--edit-mode", "dub",
-        "--no-burn-subtitles",
+        "--no-burn-subtitles", "--confirm-voice-rights",
     ]
     monkeypatch.setattr(sys, "argv", argv)
     recap_runner.main()
@@ -190,9 +190,13 @@ def test_legacy_dub_without_strict_flag_still_prepares_and_renders(
         (
             "video-voiceover", "dub.py", "--stage", "prepare", "--video",
             str(video.resolve()), "--work-dir", str(work.resolve()),
+            "--confirm-voice-rights",
         )
     ]
-    assert "写完后重跑继续" in capsys.readouterr().out
+    resume_line = next(
+        line for line in capsys.readouterr().out.splitlines() if "写完后重跑继续" in line
+    )
+    assert "--confirm-voice-rights" in resume_line
 
     (work / "dub_script.json").write_text("[]", encoding="utf-8")
     calls.clear()
@@ -201,9 +205,47 @@ def test_legacy_dub_without_strict_flag_still_prepares_and_renders(
         (
             "video-voiceover", "dub.py", "--stage", "render", "--video",
             str(video.resolve()), "--work-dir", str(work.resolve()),
+            "--confirm-voice-rights",
         )
     ]
     assert "✅ 配音完成" in capsys.readouterr().out
+
+
+def test_dub_without_voice_rights_confirmation_stops_before_any_work(
+    monkeypatch, tmp_path, capsys
+):
+    """dub sends source audio to MiMo ASR and clones the speaker: no confirmation, no run."""
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"source")
+    work = tmp_path / "must-not-exist"
+    monkeypatch.setattr(
+        recap_runner, "_run",
+        lambda *_: (_ for _ in ()).throw(AssertionError("child work reached")),
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap.py", str(video), "--work-dir", str(work), "--edit-mode", "dub"],
+    )
+    with pytest.raises(SystemExit) as exc:
+        recap_runner.main()
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--confirm-voice-rights" in err
+    assert "MiMo ASR" in err and "voiceclone" in err
+    assert not work.exists()
+
+
+def test_voice_rights_confirmation_is_rejected_outside_dub(monkeypatch, tmp_path, capsys):
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"source")
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap.py", str(video), "--work-dir", str(tmp_path / "w"), "--confirm-voice-rights"],
+    )
+    with pytest.raises(SystemExit) as exc:
+        recap_runner.main()
+    assert exc.value.code == 2
+    assert "only applies to --edit-mode dub" in capsys.readouterr().err
 
 
 def _minimal_env():
@@ -314,3 +356,17 @@ os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
     assert "✅ 完成" in advisory.stdout
     assert "仅报告，不阻断" in advisory.stdout
     assert json.loads((default_work / "final_qc.json").read_text(encoding="utf-8"))["ok"] is False
+
+
+def test_doctor_rejects_the_dub_only_voice_rights_flag(monkeypatch, capsys):
+    """The flag is dub-only everywhere, including the --doctor early return."""
+    monkeypatch.delenv("EDIT_MODE", raising=False)
+    monkeypatch.setattr(
+        recap_runner, "_run",
+        lambda *_: (_ for _ in ()).throw(AssertionError("doctor must not run")),
+    )
+    monkeypatch.setattr(sys, "argv", ["recap.py", "--doctor", "--confirm-voice-rights"])
+    with pytest.raises(SystemExit) as exc:
+        recap_runner.main()
+    assert exc.value.code == 2
+    assert "--confirm-voice-rights only applies to --edit-mode dub" in capsys.readouterr().err
