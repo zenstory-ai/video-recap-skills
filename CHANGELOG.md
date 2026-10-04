@@ -10,6 +10,11 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-10-03
+
+用 dub 模式的命令（包括旧 `work_dir` 打印的续跑命令）都要补上 `--confirm-voice-rights`，否则在外发任何音频之前报错退出；只在有权使用这段视频、且说话人同意被克隆声音时确认。
+补丁号不代表可以直接升级：本版收紧了 dub 的运行条件；video-script 与 video-voiceover 写明每条远程调用发什么、发给谁、怎样关闭；没有 key 时评审不再把稿件发出去。
+
 ### Changed
 
 - **dub 模式必须显式确认声音权利：`--edit-mode dub` 需要 `--confirm-voice-rights`。** dub 会把源视频音轨分窗发给 MiMo ASR，并把原说话人约 10 秒的声音当参考发给 MiMo voiceclone 克隆音色，以前只要选了 dub 就会运行，`dub.py` 被直接执行时也没有任何确认。现在 recap 在 dub 模式下缺少该参数时于建 `work_dir` 和探测视频之前报错，其他模式传入同样报错；`dub.py` 的 `--stage prepare|render` 也都必须带它，缺少时在抽取音频与任何请求之前退出并说明会外发什么。只在用户有权使用这段视频与音频、且说话人同意被克隆声音时确认。升级后在所有 dub 命令（包括旧 `work_dir` 打印的续跑命令）上补这个参数；没有环境变量形式。
@@ -472,7 +477,8 @@ recap feels like a recap, not captions over a clip.
   MiMo API key. Five independent skills (understanding, script, cut, voiceover, assemble)
   plus a thin orchestrator; optional 剪映 draft export.
 
-[Unreleased]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.4.0...v0.5.0
