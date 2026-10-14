@@ -24,11 +24,11 @@ jobs:
   validate:
     name: ClawHub inventory validation
     needs: guard-central-ref
-    uses: zenstory-ai/.github/.github/workflows/clawhub-publish.yml@7f9ee0e3994037893dc0e829e95ba5f83c526fed
+    uses: zenstory-ai/.github/.github/workflows/clawhub-publish.yml@c584f3caac2f47168781f7165b38200f1bda2350
     with:
       source_ref: ${{ github.event.pull_request.head.sha || github.sha }}
       policy_ref: ${{ github.event.pull_request.head.sha || github.sha }}
-      control_ref: 7f9ee0e3994037893dc0e829e95ba5f83c526fed
+      control_ref: c584f3caac2f47168781f7165b38200f1bda2350
       mode: validate
       manifest_path: .clawhub/publish.json
       dry_run: true
