@@ -1,11 +1,7 @@
 ---
 name: video-cut
 user-invocable: false
-description: >
- 把长视频按 Agent 选择的原片区间剪成短片。作为两阶段创作流程中的剪辑环节，读取 clip_plan.json 与源视频，
- 输出 edited_source.mp4；随后 Agent 按输出时间线写 narration.json。支持单视频与多视频（sources manifest）拼剪，
- 本工具不读取、不映射旁白。
- 触发词：视频剪辑、剪辑式解说、video cut、clip plan、拼剪。
+description: 把长视频按 Agent 选择的原片区间剪成短片。作为两阶段创作流程中的剪辑环节，读取 clip_plan.json 与源视频， 输出 edited_source.mp4；随后 Agent 按输出时间线写 narration.json。支持单视频与多视频（sources manifest）拼剪， 本工具不读取、不映射旁白。 触发词：视频剪辑、剪辑式解说、video cut、clip plan、拼剪。
 ---
 
 ## 1. 定位

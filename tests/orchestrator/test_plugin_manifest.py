@@ -71,6 +71,18 @@ def test_every_discovered_skill_has_matching_frontmatter_identity():
             assert isinstance(frontmatter["user-invocable"], bool)
 
 
+def test_skill_descriptions_are_single_line_values():
+    # OpenClaw falls back to a single-line-only frontmatter parser when YAML parsing fails;
+    # a block scalar (`description: >`) or a wrapped plain value would read as empty there.
+    for skill_dir in sorted((ROOT / "skills").iterdir()):
+        if not (skill_dir / "SKILL.md").is_file():
+            continue
+        description = _frontmatter(skill_dir.name).get("description")
+        assert isinstance(description, str) and description, skill_dir.name
+        assert description[0] not in ">|", skill_dir.name
+        assert len(description) <= 1024, (skill_dir.name, len(description))
+
+
 def test_skill_frontmatter_exposes_router_writing_and_reference_skills():
     expected_invocability = {
         "video-recap": True,

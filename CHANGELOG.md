@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **七个 SKILL.md 的 `description` 改成单行。** 原来的 `description: >` 折叠块在 OpenClaw 只认单行键值的退路解析器下读不到完整描述；现在每条都是一行，文字与原折叠块解析后的值完全相同。新增测试要求 `description` 非空、不是 `>` / `|` 块、不超过 1024 字符。七个 ClawHub 包各升一个补丁号（video-recap 仍为 blocked，伴随依赖同步到新版本）。
+
 ## [0.6.2] - 2026-10-03
 
 用 dub 模式的命令（包括旧 `work_dir` 打印的续跑命令）都要补上 `--confirm-voice-rights`，否则在外发任何音频之前报错退出；只在有权使用这段视频、且说话人同意被克隆声音时确认。
