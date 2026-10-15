@@ -24,7 +24,7 @@ description: 合成视频解说最终成片：把旁白音频铺到源视频上�
 - `silence`
 - `narration`
 
-因此，旁白间隙是主动选择，不是必须填满的空白。不要为了“更满”而加入通用 BGM、压住必须听见的台词或消除有意义的沉默。
+旁白间隙按已选声音分工保留。只在确有任务时加入 BGM，并保住必须听见的台词与有意义的沉默。
 
 当前渲染器不解析 `visual_audio_board.json`；Agent 通过旁白时间、`overlaps_speech`、原声留白与现有混音参数落实这些决定。
 
@@ -70,7 +70,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 段落首块（与上一块作者留白超过 1.6 秒）从写的 `start` 放置，但不早于上一块实际结尾加它的 `pause_after_ms`，上一块超时会把它往后推；段落内后续块紧接上一块的实际结尾（间隔 0.35 秒），最多比写的 `start` 提前 1.2 秒。这一提前发生在旁白校验之后，所以提前的那一段不能进入原声对白：有对白时最多提前到最后一段对白结束处。真的提前了的块在 `source_entry_status` 记 `paragraph_tightened`，并在 `written_start` 记写的 `start`。
 - 旁白不做任何容差裁尾；温和加速后仍放不下即 `no_safe_fit`。每段 `_placed_*.wav`
   必须与序列化后的时间线区间等长或更短，否则 `timeline_audio_mismatch` 阻断。
-- 已采用配音的 v1 合同只支持原速、禁止段内适速；不能让环境默认 1.15 倍速或旧缓存覆盖它。放不下就修订安排，不裁尾。严格运行使用新工作目录与新输出路径；输入/实际混音来源变动或 QC 失败时，不发布候选成片。没有采用文件的旧入口仍是兼容模式，不自动获得同等证据。
+- 已采用配音按其 `tempo_policy` 执行：保守默认是原速且禁止段内适速，也可显式采用符合范围要求的其他速度策略；环境默认 1.15 倍速不能覆盖采用决定。显式完整声音混音分支固定原速，不做自动适配。放不下就修订安排，不裁尾。严格运行使用新工作目录与新输出路径；输入/实际混音来源变动或 QC 失败时，不发布候选成片。没有采用文件时仍可按默认旁白路径合成，但消费记录为 `UNADOPTED`。
 - 原声在旁白结束后最多再压低 3 秒，等这段时间内的下一个句末锚点：压到它的 `pause_start`，只在实测停顿内渐强，
   于 `source_restore_at` 回满（锚点为 `unverified` 时状态记 `sentence_boundary_unverified`）。3 秒内没有锚点时，
   离时间线末端不足 3 秒就压到末端（`held_to_timeline_end`），否则在旁白结束处直接回满（`bounded_release`），
@@ -81,7 +81,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 导出只接受 `schema_version: 2` 的 `timeline.json`，只映射视频、音频、字幕和图片叠层（`scale` / `position`）；变速、转场、蒙版、富文本、特效轨等手写扩展字段会被明确拒绝。
 - 剪映草稿引用未烧录的源视频，因此原片硬字幕仍会保留，必要时在剪映内另行遮罩。
 - 字幕外观可用 `SUBTITLE_FONT_SIZE`、`SUBTITLE_MARGIN_V`、`SUBTITLE_MAX_CHARS` 等控制。
-- `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为显示画布上的半开 `[top, bot)`，只接受方形或近方形像素（SAR 与 1:1 相差不超过 2%，未标注的 `0:1` 按方形）；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。
+- `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为显示画布上的半开 `[top, bot)`，只接受方形或近方形像素（SAR 与 1:1 相差不超过 2%，未标注的 `0:1` 按方形）；比例遮罩默认 `SUBTITLE_MASK_OPACITY=0.6`；显式指定实测字幕带时默认不透明，除非另设该变量。`SOURCE_SUBTITLE_MASK_TIMING` 默认是 `narration`。
 - 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `DUCK_BRIDGE_SECONDS`、`ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM`、`TARGET_LUFS` 与 `LOUDNESS_LIMITER_MAX_DB`。
 - 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
 - 烧录字幕需要带 `subtitles` / libass 的 ffmpeg，合成阶段在渲染前预检。显式要求烧录（`--burn-subtitles` 或环境变量 `BURN_SUBTITLES`）时缺 libass 直接失败；只是默认开启时降级：不烧录，交付外挂 `.srt`（留白里的 `「」` 原声对白仅在有 `user_subtitles.*` 时照常写进去；原本由遮罩触发的对白随遮罩一起关闭，原片硬字幕可见），`visual_qc.json` 的 `warnings` 与 `assembly_manifest.json` 的 `warnings` 记一条 `subtitle_burn_degraded`，`subtitles.burn_degraded_reason` 写原因。降级后遮罩照旧关闭（`mask.trigger` 为 `burn_subtitles_degraded`）。
@@ -89,7 +89,7 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 - 成片画面一律是 H.264 8-bit 4:2:0 并带 `+faststart`：不需要滤镜、且源画面已是 H.264 8-bit 4:2:0（`yuv420p`，或全范围的 `yuvj420p`）、宽高为偶数时才流复制，原样交付；否则重编码为 `yuv420p`。色彩标记：源未标记或已是 BT.709 时标为 BT.709（`-colorspace/-color_primaries/-color_trc bt709`），其它已声明的色彩空间原样保留；全范围（`pc`）源保留 `pc`，其余标 `tv`。YUV 源只改标记，不转换像素；RGB 源（ffprobe 报 `gbr`，如 PNG/QuickTime RLE 封装的 MOV）没有 YUV 矩阵可保留，按 BT.709 limited 转换。结果记在 `assembly_qc.json` 的 `delivery_qc.color_tags`（RGB 源多一个 `from_rgb: true`）。
 - 原声留白中的对白字幕优先读取 Agent 校对的 `original_subtitles.json`；否则保守映射 ASR。只有遮罩覆盖留白或用户字幕明确要求替换时才烧录原声对白，并用 `「」` 与旁白区分。
 
-### 按原片区间准备声音，而不是整体压低旧成片
+### 按原片区间准备声音底轨
 
 已有多段原声取舍和独立 BGM 决定时，先用 `references/source-score.md` 的独立
 `source_score.py` 从原片声音流按精确帧区间重建原声轨、音乐轨及两者之和；它只输出

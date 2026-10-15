@@ -1,6 +1,6 @@
 # 《这一秒过火》60 秒剧情解说 Demo
 
-这是一个从多集长视频中提炼 58.96 秒横屏剧情解说的工程样例。目录按仓库真实的 cut 编排流程整理，不把最终包装误写成完整工作流：
+这是一个从多集长视频中提炼 58.96 秒横屏剧情解说的工程样例，展示 cut 编排、可选包装与看片修订的衔接：
 
 ```text
 video-understanding
@@ -14,7 +14,7 @@ video-understanding
   → 最终交付 QC
 ```
 
-公开产物清单见 [`workflow-manifest.json`](workflow-manifest.json)。这个 demo 沉淀以下可复用的创作与交付方法：
+公开产物清单见 [`workflow-manifest.json`](workflow-manifest.json)。这个 demo 展示以下可复用的创作与交付方法：
 
 - 先用 `recap_story_plan.json` 锁定观众承诺、POV、戏剧问题和 change-based beats。
 - 用 `visual_audio_board.json` 决定每拍由画面、原声、动作声还是旁白主导。

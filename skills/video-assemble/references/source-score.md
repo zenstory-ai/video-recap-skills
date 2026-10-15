@@ -73,8 +73,9 @@ Each unique selected source stream is decoded from its actual PTS clock to canon
 48 kHz stereo exactly once. All authored intervals are then cut from that canonical
 sample array—never independently decoded or `-ss`-seeked per edit.
 
-The source segment duration is `(source_end_frame-source_start_frame)*48000/fps`.
-Its output end is derived, not declared. Source segments and explicit silence ranges
+The source segment length is the difference between the rounded start and end
+sample positions described above. Its output end is derived from that integer
+length, not declared or rounded from the duration again. Source segments and explicit silence ranges
 must form an exact, nonoverlapping partition of `[0,total_samples)`. There are no
 implicit gaps. Supported roles are `protected_original` and
 `mixed_original_under_narration`; their gains and labels are retained unchanged.
@@ -131,9 +132,7 @@ directory cannot publish final-named beds or a receipt.
 Diagnostic command/log/intermediate files may remain in the unique failed directory.
 
 To consume a completed receipt with explicitly adopted narration, use the strict
-`--audio-mix-adoption` path in `explicit-audio-mix.md`. To deliver an already complete
-prepared bed without narration, a dedicated prepared-audio renderer will follow in a
-later release. Do not feed `prepared_bed.wav` through legacy source ducking or
+`--audio-mix-adoption` path in `explicit-audio-mix.md`. This path does not render a final video from a prepared bed alone. Do not feed `prepared_bed.wav` through legacy source ducking or
 ambient BGM/loudness settings.
 
 ## 与旧入口的关系（中文摘要）
@@ -143,5 +142,5 @@ ambient BGM/loudness settings.
 完整音乐决定且不再叠加配乐，使用严格的 `score:{"kind":"none"}`；它生成真实全零 score，
 并保持 prepared 与 source 逐字节相同，不伪造静音音乐资产。
 
-这一步仅输出声音底轨和来源回执，不是最终视频。旧入口保留兼容行为；调用方须区分
+这一步输出声音底轨和来源回执，后续合成负责最终视频。调用方须区分
 “底轨已验证”“配音已验证”和“完整混音已验证”三种状态，不能相互冒充。

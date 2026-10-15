@@ -23,8 +23,7 @@ export INDEX_TTS_VOICE=<authorized-voice-name>
 
 ## Receipt 与缓存
 
-每段的 `provider_receipt` 只记录 `provider` 与“请求的 voice”（`requested_voice`）。它说明请求参数，
-不是该声线的声学验证，也不代表已做人耳听审或音色身份验证。endpoint 不写入任何文件。
+每段的 `provider_receipt` 只记录 `provider` 与请求的 voice（`requested_voice`）。声学身份验证与人耳听审仍需另做；endpoint 不写入任何文件。
 
 缓存复用条件：`tts_segments/cache/` 中按文本与设置（含 `index_tts_voice`）寻址的条目存在、缓存 WAV 的
 `size`/`mtime_ns` 未变，且 sidecar 的 receipt 对应当前 voice；缓存命中复用 sidecar 中的 receipt，不能现场补造。

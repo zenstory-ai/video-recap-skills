@@ -6,7 +6,7 @@ zero-based audio ordinal used by FFmpeg's `0:a:N` selector.
 
 ## `narration`
 
-- Requires non-empty `tts_meta.json` segments, as before.
+- Requires non-empty `tts_meta.json` segments.
 - Builds/places narration WAV, performs source ducking and optional BGM mix,
   then applies the configured final loudness/limiter stage and AAC encoding.
 - Missing source audio may use the existing synthetic-silence fallback.
@@ -21,8 +21,8 @@ zero-based audio ordinal used by FFmpeg's `0:a:N` selector.
 - Uses the selected input audio stream, applies `IDLE_ORIG_VOLUME`, mixes a
   declared `BGM_PATH` when present, and runs the configured final
   loudness/limiter stage before AAC encoding.
-- A declared but missing `BGM_PATH` is an error in this new mode (the legacy
-  narration-mode warn-and-skip behavior remains unchanged).
+- A declared but missing `BGM_PATH` is an error in source-mix mode. Narration
+  mode warns and skips the missing music.
 - This is a processed mix, not frozen audio. `assembly_qc.json` reports the
   operations that actually ran.
 

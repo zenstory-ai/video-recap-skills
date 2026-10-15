@@ -1,6 +1,6 @@
 # 数据格式（中间 JSON）
 
-所有中间文件均在 pipeline 工作目录（work_dir/）下。
+中间产物保存在本次运行的工作目录 `work_dir/` 下。
 
 ## vlm_analysis.json
 
@@ -41,7 +41,7 @@
 ]
 ```
 
-`start/end` 仅表示送入 MiMo ASR 的固定粗分片窗口。该列表为兼容产物，不能据此声称词级
+`start/end` 仅表示送入 MiMo ASR 的固定粗分片窗口。该列表记录粗分窗结果，不能据此声称词级
 时间、准确对白边界或静音证明；空 `text` 的原因未知。
 
 ## asr_timing_evidence.json

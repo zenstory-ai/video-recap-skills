@@ -1,7 +1,7 @@
 # 仓库架构
 
-给改代码的人看的一页地图。用法与参数以各技能 `SKILL.md` 和 `--help` 为准；每条边界背后的取舍在
-`.agents/notes/implemented/` 里，用 `rg --hidden <关键词> .agents/notes/` 检索。
+各技能通过工作目录交换产物，编排器按阶段启动子进程。命令与参数见各技能 `SKILL.md` 和 `--help`；
+边界取舍可用 `rg --hidden <关键词> .agents/notes/` 检索。
 
 ## 技能与通信
 

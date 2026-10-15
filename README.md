@@ -21,7 +21,7 @@
 <p align="center">
   <a href="https://github.com/zenstory-ai/video-recap-skills/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/video-recap-skills?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/video-recap-skills?style=flat-square&color=081431&label=Release"></a>
-  <img alt="Skills 6" src="https://img.shields.io/badge/Skills-6-081431?style=flat-square">
+  <img alt="Skills 7" src="https://img.shields.io/badge/Skills-7-081431?style=flat-square">
   <a href="https://www.python.org/"><img alt="Python 3.10%2B" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/actions/workflows/skill-validate.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/zenstory-ai/video-recap-skills/skill-validate.yml?style=flat-square&label=CI"></a>
   <a href="https://platform.xiaomimimo.com"><img alt="AI Xiaomi%20MiMo" src="https://img.shields.io/badge/AI-Xiaomi%20MiMo-34A853?style=flat-square"></a>
@@ -44,16 +44,16 @@
 决定故事与视听方案、剪辑、写稿、配音、混音和字幕。支持 `.mp4 / .mov / .mkv / .webm`。
 
 - **一个 key，本地只要 ffmpeg。** ASR、VLM、TTS 都走[小米 MiMo](https://platform.xiaomimimo.com)，本地只用 Python 标准库和 `ffmpeg`，不需要 GPU，不需要 `pip install`，也不下载模型。配音可以换成 Fish Audio，只替换配音这一段。
-- **先做创作决定，再分配声音。** Agent 先比较剪辑假设，把观众承诺、POV、戏剧问题和"发生了什么变化"的 beat 写进 `recap_story_plan.json`，再给每一拍指定画面任务和声音归属：旁白只在有明确任务时整块配音，强对白、动作声或沉默可以完整主导一拍。
-- **先剪后配，时间轴天然对齐。** 剪辑模式先把长视频剪成成片，再对着成片写解说；一次可以传多个视频，按 `source_id` 选段剪成一条主线；每个视频的分析沉淀成文件系统素材库，下次直接复用。
+- **先做创作决定，再分配声音。** 首次策划时，Agent 比较可行的剪辑方向；已有指定结构或看片反馈时，按当前决定修订。观众承诺、POV、戏剧问题和每拍变化写进 `recap_story_plan.json`，再给每一拍指定画面任务和声音归属：旁白只在有明确任务时整块配音，强对白、动作声或沉默可以完整主导一拍。
+- **先剪后配，时间轴天然对齐。** 剪辑模式先把长视频剪成成片，再对着成片写解说；一次可以传多个视频，按 `source_id` 选段剪成一条主线；视频分析可按需保存到文件系统素材库，后续在来源和设置匹配时复用。
 - **成片之外还能继续改。** 多轨时间线 `timeline.json` 可一键导出剪映草稿，原片、解说、BGM、字幕、图片叠层都可编辑；自带一份准确字幕文件就会被当作原声字幕的首选来源。
-- **每一步都留下可核对的记录。** 旁白 lint、组装 QC、交付 QC 和看片修改日志都是机器可读文件。
+- **每一步都留下可核对的记录。** 旁白 lint、组装 QC 与最终 QC 会生成机器可读报告；看片修改可另记录本轮改动、冻结项与验证结果。
 
 ## 安装
 
 ### ClawHub
 
-ClawHub 分发由仓库中的 [显式发布清单](.clawhub/publish.json) 管理，并通过 [ClawHub](https://clawhub.ai/) 提供发现入口。具体 skill 链接只有在发布者、版本和匿名访问均验证后才会写入本文档，避免把尚不存在的条目当成已上架。
+ClawHub 条目与依赖由 [显式发布清单](.clawhub/publish.json) 管理。编排器 `video-recap` 当前仍因同根安装验证未完成而标为 `blocked`；使用完整流程请按下方方式安装整套插件或源码。
 
 
 前提：Python 3.10 或更新版本，`PATH` 上有 `ffmpeg`，以及一个[小米 MiMo](https://platform.xiaomimimo.com) API Key。默认把字幕烧录进画面，这需要带 libass 的 ffmpeg；Homebrew 自带的 `ffmpeg` 没有 libass，这时默认运行不烧录，在成片旁输出同名 `.srt` 外挂字幕并在 `final_qc.json` 里记一条警告（显式传 `--burn-subtitles` 则在开跑前报错）。旁白里写了画面文字叠加（`visual_overlays`）时还需要带 drawtext 的 ffmpeg，缺了会在配音前报错。要在 macOS 上烧录字幕，可用 `brew install ffmpeg-full`（keg-only，需把它的 `bin` 放到 `PATH` 前面）。
@@ -318,7 +318,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 
 > 我有权使用〈本地视频〉，并提供了对应的已核对画面与对白记录。先只给这段素材的声音分工建议：哪句对白、哪个动作声或停顿应完整保留，哪里确需旁白，依据是哪条记录。缺证据就列待核对项，不补人物动机或没出现的事件。交付分拍说明和必要的旁白草案，不调用配音或渲染。
 
-Agent 会自动完成理解、故事与视听规划、剪辑、写稿、配音和合成。剪辑模式内部会先确定保留片段、生成剪后成片，再按输出时间轴写旁白；这些暂停和续跑也由 Agent 处理。
+完整制作请求由 Agent 完成理解、故事与视听规划、剪辑、写稿、配音和合成；只做文字交接的请求按指定范围停止。剪辑模式内部会先确定保留片段、生成剪后成片，再按输出时间轴写旁白；这些暂停和续跑也由 Agent 处理。
 
 ## 流程与七个技能
 
@@ -398,7 +398,7 @@ flowchart LR
 ```
 
 资源、模板和样片是你自己目录里的 JSON 记录，授权与"已采用"状态只由你确认；绑定与显式设置冲突、模板画布与成片不符时，会在配音之前停下。
-每条成片旁边的 `resource_lock.json` 记下这次实际用了哪些资源、授权是否清楚。格式见 [资源库、模板与样片](skills/video-recap/references/resource-library.md)。
+每次运行的 `work_dir/resource_lock.json` 记下这次实际用了哪些资源、授权是否清楚。格式见 [资源库、模板与样片](skills/video-recap/references/resource-library.md)。
 
 **在浏览器里看项目、运行和资源库（只读）：**
 
@@ -422,7 +422,7 @@ flowchart LR
 
 ### 长视频跑到一半报 429 或中断了，要从头再来吗？
 
-不用。VLM 场景分析可断点续传，限流会自愈；写好 `narration.json` 后重复同一条命令即可继续，剪辑模式在 `recap_phase.json` 记下解说对应的剪辑计划（改了计划会要求重写解说），续跑只会接同一个源视频、同一组参数的工作目录。
+VLM 会保存已完成的场景；遇到疑似限流会降低并发重试一轮，仍失败时保留错误供处理。解决原因后重复同一条命令，可以复用匹配的场景缓存并继续。写好 `narration.json` 后也用原命令续跑；剪辑模式用 `recap_phase.json` 绑定写稿时的计划，改了计划需重新核对或重写解说。续跑只接受同一源视频、同一组参数的工作目录。
 
 ### VLM 认不出谁是谁，解说里全是"黑衣男子"？
 

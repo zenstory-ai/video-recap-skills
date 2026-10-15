@@ -6,7 +6,7 @@ description: 把视频分析为结构化理解索引：场景检测、ASR 转写
 
 ## 1. 定位
 
-本技能把源视频转成 Agent 与下游阶段可读取的理解索引。它的创作角色是**素材观察员 / 场记**，不是导演：
+本技能把源视频转成 Agent 与下游阶段可读取的理解索引，以**素材观察员 / 场记**的角色记录证据：
 
 - 先观察，再解释；事实与推断分开。
 - 除了“发生了什么”，还要让下游看见知识、权力、目标、关系或情绪在哪一刻变化。
@@ -35,6 +35,14 @@ export MIMO_API_KEY=***
 ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。`--mimo-video-overview` 可开启按场景块的视频概览。未设置 key 时重跑会复用已缓存的转写、画面分析、概览与故事索引（key 决定的默认 endpoint 不参与比对）；需要请求模型的 consolidation 记为 `skipped_no_key`，不发请求。缓存对不上（例如复制 work_dir 时没保留文件时间）而已有转写时，运行停下并保留转写：用 `cp -p` / `cp -Rp` / `rsync -t` 保留时间重新复制，或设置 key 后重跑（会重新转写）。不要用 `--skip-asr` 绕过，它会把现有转写替换成 `[]`。
 
 若 `work_dir/background_research.json` 存在，本技能会把剧情梗概和角色名折入 VLM 上下文；`--context` 可补充一条简短提示。
+
+### 远程调用与本地读取
+
+ASR 把分窗音频发给 MiMo ASR；逐场景 VLM 把代表帧、帧时间和分析提示发给 MiMo；启用 `--mimo-video-overview` 时，还会把按场景截取的视频片段发给 MiMo 视频模型。故事索引汇总和可选 ASR 清洗发送的是画面描述、转写与背景资料文字。
+
+请求使用 MiMo 的 chat 接口。`MIMO_API_URL` 可指定地址；ASR 与视频概览可分别用 `MIMO_ASR_API_URL`、`MIMO_VIDEO_API_URL` 覆盖，凭据同样支持各自的 key。未覆盖时，按量 key 使用 `https://api.xiaomimimo.com/v1`，Token Plan key 使用 `MIMO_TOKEN_PLAN_CLUSTER` 选择的集群。逐场景帧分析与汇总使用 `MIMO_API_KEY`。
+
+`--skip-asr` 只关闭音频转写，`--no-consolidate` 只关闭索引汇总；它们不会关闭 VLM。需要只在本地处理已有产物时，使用 `--brief-only` 或 `--edited-storyboard-only`，这两条路径不调用 API。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 

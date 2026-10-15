@@ -22,7 +22,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
 浏览资源、模板与样片（含图片、音频与样片预览）可用只读 dashboard：`python3 scripts/dashboard_server.py --root <library 或其上层目录>`。
 
-工具从不写库。新增或修改记录时直接编辑 JSON，再跑 `check`。**错误**表示该条目不能用；**警告**表示能用但需要人看一眼
+这三个查询命令不写库。新增或修改记录时直接编辑 JSON，再跑 `check`。**错误**表示该条目不能用；**警告**表示能用但需要人看一眼
 （授权未确认、声音授权未确认、样片不在本机、模板采用后资源文件已变化）。
 
 ## 通用规则
@@ -114,7 +114,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
    任何层级出现 `source_facts`、`labels`、`evidence`、`entities`、`statement`、`from`、`path` 键都报错（与参考技能导出时的复扫同一组键）。
 5. 用户确认后把 `status` 改为 `adopted` 并用用户原话写 `adoption`。之后要改内容就出 `v2`，不改已采纳的版本。
 
-库仍然只读，登记与采纳都是手工编辑。
+上述库查询命令只读，登记与采纳由操作者编辑 JSON。
 
 ## 样片 `sample.json`
 

@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "15a41a03f82879b9d1e0abba8714a53b6f786d025edd9933d24735f669fec48c",
+      "packageDigest": "cffb0148138612267e3af8c27135013470ff6ccd4e630266cdb49a3ccdd3354e",
       "path": "skills/video-assemble",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.9"
+      "version": "1.0.10"
     },
     {
       "catalogMigration": true,
@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "89c4894c9b977c535099359a8e2076ed24a3bd17d2da68c6fb36a6ede778312b",
+      "packageDigest": "ecb82a5464e46b5c187454327d933a487c5c43f7758c4bdbf37d224ac67d339b",
       "path": "skills/video-cut",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -78,7 +78,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.7"
+      "version": "1.0.8"
     },
     {
       "categories": [
@@ -104,11 +104,11 @@
         "bin:python",
         "bin:ffmpeg",
         "bin:ffprobe",
-        "skill:worldwonderer/video-understanding@1.0.7",
-        "skill:worldwonderer/video-cut@1.0.7",
-        "skill:worldwonderer/video-script@1.0.7",
-        "skill:worldwonderer/video-voiceover@1.0.9",
-        "skill:worldwonderer/video-assemble@1.0.9"
+        "skill:worldwonderer/video-understanding@1.0.8",
+        "skill:worldwonderer/video-cut@1.0.8",
+        "skill:worldwonderer/video-script@1.0.8",
+        "skill:worldwonderer/video-voiceover@1.0.10",
+        "skill:worldwonderer/video-assemble@1.0.10"
       ],
       "slug": "video-recap",
       "supportedRuntimes": [],
@@ -118,7 +118,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.18"
+      "version": "1.0.19"
     },
     {
       "catalogMigration": true,
@@ -134,7 +134,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "62f609a1d922c08271cb188486ac89bbb417a932633c90b56815ede5d9e1d88c",
+      "packageDigest": "dc94f4b7432cdaf8d412acee957da8d84dc7468ed17283a5370792653873ee77",
       "path": "skills/video-reference",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -155,7 +155,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.3"
+      "version": "1.0.4"
     },
     {
       "catalogMigration": true,
@@ -171,7 +171,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "a4faf9013654d52d4bd29363131cc6dfae57351a4dcf4597ce65a24821b2f8f9",
+      "packageDigest": "f63d45923343e2970d9f77b357c2e1b1e92f4f9581f7c06638f68acc8d963ad8",
       "path": "skills/video-script",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -190,7 +190,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.7"
+      "version": "1.0.8"
     },
     {
       "catalogMigration": true,
@@ -206,7 +206,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "41721aeed6e6ebb94c0812dc447a00ac366e33b1dbb60d52b6a23f70628e5631",
+      "packageDigest": "d7b4459fdc3ccdb3de2c42fac76f242a1cf75661e77d3754c23b13a59d0a3818",
       "path": "skills/video-understanding",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -227,7 +227,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.7"
+      "version": "1.0.8"
     },
     {
       "catalogMigration": true,
@@ -243,7 +243,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "f291da64b034d60bb35a8fd884cac301610d1f6ebdf502c6241d92572085d773",
+      "packageDigest": "fc737311d68a35db435e47493674284a7882029d0288db6b006114d629ae8b50",
       "path": "skills/video-voiceover",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -264,7 +264,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.9"
+      "version": "1.0.10"
     }
   ]
 }

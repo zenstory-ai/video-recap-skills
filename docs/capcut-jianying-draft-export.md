@@ -1,8 +1,6 @@
-# AI 解说视频怎么一键导出剪映草稿继续改：Video Recap Skills 的做法
+# 导出剪映草稿继续编辑
 
-**一句话答案：** 先让 Agent 出成片，再加一个参数把多轨时间线导成剪映草稿。Video Recap Skills（`zenstory-ai/video-recap-skills`，开源 MIT，6 个生产 skill 加 1 个按需参考 skill）从视频文件生成中文解说成片；加 `--export-jianying` 后会把原片、解说配音、BGM、字幕和图片叠层写成可编辑的剪映草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`），素材默认打包进 `Resources/local`，草稿搬到别的机器仍能打开。本地只依赖 Python 标准库和 `ffmpeg`，远程只需要一个小米 MiMo 的 key。
-
-这份文档回答两个问题：导出的草稿里有什么、能改什么；以及和按座位付费的解说 SaaS 相比，自建这条流程要付什么。
+让 Agent 完成解说成片后，可加一个参数把多轨时间线导成剪映草稿。Video Recap Skills（`zenstory-ai/video-recap-skills`，开源 MIT，6 个生产 skill 加 1 个按需参考 skill）从视频文件生成中文解说成片；加 `--export-jianying` 后会把原片、解说配音、BGM、字幕和图片叠层写成可编辑的剪映草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`），素材默认打包进 `Resources/local`，草稿搬到别的机器仍能打开。本地只依赖 Python 标准库和 `ffmpeg`，远程只需要一个小米 MiMo 的 key。
 
 ## 流程
 
@@ -36,7 +34,7 @@ Agent 会自动完成理解、方案、剪辑、写稿、配音和合成，不�
 
 ## 让字幕更准
 
-解说块之间的原声留白会烧成【原声台词】字幕。默认由 Agent 校对、ASR 兜底；想更准，放一份字幕文件到 `work_dir`：`user_subtitles.json`（按成片或原片时间轴）或 `.srt` / `.ass`（按原片时间轴，自动映射到成片）。优先级：你的字幕文件 › Agent 校对的原声字幕 › ASR。
+需要替换原声留白字幕时，先由 Agent 校对，缺少校对稿再用 ASR 兜底；遮罩覆盖留白或用户字幕明确要求替换时才生成这类字幕。可以把已核对的字幕文件放到 `work_dir`：`user_subtitles.json`（按成片或原片时间轴）或 `.srt` / `.ass`（按原片时间轴，自动映射到成片）。优先级：你的字幕文件 › Agent 校对的原声字幕 › ASR。
 
 ## 自建和 SaaS 的成本差别
 
@@ -45,7 +43,7 @@ Agent 会自动完成理解、方案、剪辑、写稿、配音和合成，不�
 - **本地**：`ffmpeg` 和 Python 标准库，不需要 GPU，不需要本地大模型。
 - **远程**：ASR、VLM、TTS 都走一个 MiMo key，按调用量计费；TTS 可切 Fish Audio（`--tts-provider fish-audio`），只替换配音。
 
-也就是说成本随视频时长和次数走，没有座位费；代价是你要自己准备 key、装 `ffmpeg`，并且解说质量取决于 Agent 的创作决定，不是模板。适合每月做几十条以上、想保留剪辑控制权的人；偶尔做一条的人用 SaaS 更省事。
+费用随所用服务、视频时长与调用次数变化。使用者需要自己准备 key、安装 `ffmpeg` 并核对创作结果；应按实际用量比较成本。
 
 ## 边界
 

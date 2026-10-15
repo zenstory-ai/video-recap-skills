@@ -1,5 +1,3 @@
-<!-- Last synced with README.md: 2026-09-20 -->
-
 <p align="center">
   <img src="https://zenstory.ai/brand/zenstory-ai-mark.svg" alt="" width="76" height="76">
 </p>
@@ -23,7 +21,7 @@
 <p align="center">
   <a href="https://github.com/zenstory-ai/video-recap-skills/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/video-recap-skills?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/video-recap-skills?style=flat-square&color=081431&label=Release"></a>
-  <img alt="Skills 6" src="https://img.shields.io/badge/Skills-6-081431?style=flat-square">
+  <img alt="Skills 7" src="https://img.shields.io/badge/Skills-7-081431?style=flat-square">
   <a href="https://www.python.org/"><img alt="Python 3.10%2B" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/actions/workflows/skill-validate.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/zenstory-ai/video-recap-skills/skill-validate.yml?style=flat-square&label=CI"></a>
   <a href="https://platform.xiaomimimo.com"><img alt="AI Xiaomi%20MiMo" src="https://img.shields.io/badge/AI-Xiaomi%20MiMo-34A853?style=flat-square"></a>
@@ -43,16 +41,16 @@ The 59-second landscape recap above, *Guohuo (这一秒过火)*, is the final de
 Seven skills (six for production plus one on-demand reference skill) install into Claude Code, Codex CLI, OpenCode, or OpenClaw. You give the video paths and the recap you want in plain language; the agent understands picture and dialogue, decides the story and audiovisual plan, cuts, writes, voices, mixes, and subtitles. Supported inputs: `.mp4 / .mov / .mkv / .webm`.
 
 - **One key, ffmpeg locally.** ASR, VLM, and TTS all go through [Xiaomi MiMo](https://platform.xiaomimimo.com); the local runtime is Python's standard library plus `ffmpeg`, with no GPU, no `pip install`, and no model downloads. Voiceover can switch to Fish Audio, which replaces only that stage.
-- **The editorial decision comes before the sound allocation.** The agent compares edit hypotheses first, writes the viewer promise, POV, dramatic question, and change-based beats into `recap_story_plan.json`, then assigns each beat a picture job and an audio owner: narration is voiced as a block only when it has a defined job, and strong dialogue, action sound, or silence may own an entire beat.
-- **Cut first, narrate second, so the timeline is aligned by construction.** Cut mode renders the shortened video first and writes narration against that output timeline; feed several videos at once and pick ranges by `source_id` to cut one story spine; each video's analysis is saved to a filesystem material library for reuse.
+- **The editorial decision comes before the sound allocation.** For a new concept, the agent compares viable edit directions; for a directed task or viewing feedback, it follows the current decisions. It records the viewer promise, POV, dramatic question, and change-based beats in `recap_story_plan.json`, then assigns each beat a picture job and an audio owner: narration is voiced as a block only when it has a defined job, and strong dialogue, action sound, or silence may own an entire beat.
+- **Cut first, narrate second, so the timeline is aligned by construction.** Cut mode renders the shortened video first and writes narration against that output timeline; feed several videos at once and pick ranges by `source_id` to cut one story spine; analysis can be saved to a filesystem material library and reused when the source and settings match.
 - **Keep editing after the render.** The multi-track `timeline.json` exports to a JianYing draft with editable source clips, narration, BGM, subtitles, and image overlays; drop in an accurate subtitle file and it becomes the preferred source for original-dialogue captions.
-- **Every step leaves a record you can check.** Narration lint, assembly QC, delivery QC, and the revision log are machine-readable files.
+- **Every step leaves a record you can check.** Narration lint, assembly QC, and final QC produce machine-readable reports. Viewing revisions can separately record changes, frozen items, and verification.
 
 ## Install
 
 ### ClawHub
 
-ClawHub distribution is governed by the repository's [explicit publish inventory](.clawhub/publish.json), with discovery through [ClawHub](https://clawhub.ai/). A skill-specific link is added here only after its publisher, version, and anonymous accessibility are verified, so this README never presents a nonexistent listing as live.
+ClawHub entries and dependencies are governed by the [explicit publish inventory](.clawhub/publish.json). The `video-recap` orchestrator remains `blocked` pending verification of companion installation under one skills root. For the complete workflow, install the plugin bundle or source checkout below.
 
 
 Prerequisites: Python 3.10 or newer, `ffmpeg` on `PATH`, and one [Xiaomi MiMo](https://platform.xiaomimimo.com) API key. Subtitles are burned in by default, which needs an ffmpeg with libass. Homebrew's stock `ffmpeg` has no libass: the default run then skips the burn, ships a same-name `.srt` sidecar next to the recap, and records a warning in `final_qc.json` (an explicit `--burn-subtitles` stops before the run starts instead). Narration that adds on-screen text overlays (`visual_overlays`) also needs an ffmpeg with drawtext, and stops before voiceover without it. To burn subtitles on macOS, use `brew install ffmpeg-full` (keg-only: put its `bin` first on `PATH`).
@@ -329,7 +327,7 @@ Use /path/to/ep1.mp4 and /path/to/ep2.mp4 to make one ten-minute recap with a sh
 
 > I have permission to use 〈local video〉 and am supplying checked picture and dialogue records for it. Propose only the sound handoff for this material: which full dialogue line, action sound or pause to preserve, where narration is needed, and which record supports each choice. List missing evidence rather than inventing motives or unseen events. Return beat notes and necessary narration drafts without calling TTS or rendering.
 
-The agent handles understanding, story and audiovisual planning, cutting, scripting, voiceover, and assembly. In cut mode it first chooses the footage, renders the shortened video, and only then writes narration on the output timeline; the internal pauses and resumes are the agent's job too.
+For a complete production request, the agent handles understanding, story and audiovisual planning, cutting, scripting, voiceover, and assembly. A text-only handoff stops at the requested scope. In cut mode it first chooses the footage, renders the shortened video, and only then writes narration on the output timeline; the internal pauses and resumes are the agent's job too.
 
 ## Workflow and the seven skills
 
@@ -408,7 +406,7 @@ Use /path/to/library as the resource library: register this BGM, this font and t
 template for 1080x1920 for me to adopt, then render this series with /path/to/series/recap_project.json binding them.
 ```
 
-Resources, templates and sample films are JSON records in your own directory; licence and "adopted" status are only ever set by you. A binding that conflicts with an explicit setting, or a template whose canvas differs from the output, stops the run before voicing. Each render gets a `resource_lock.json` listing what it actually used and whether the licences are clear. Format: [resource library, templates and samples](skills/video-recap/references/resource-library.md).
+Resources, templates and sample films are JSON records in your own directory; licence and "adopted" status are only ever set by you. A binding that conflicts with an explicit setting, or a template whose canvas differs from the output, stops the run before voicing. Each run writes `work_dir/resource_lock.json`, listing what it actually used and whether the licences are clear. Format: [resource library, templates and samples](skills/video-recap/references/resource-library.md).
 
 **Browse projects, runs and the library in a local page (read-only):**
 
@@ -432,7 +430,7 @@ Yes. Understanding relies on the VLM reading the picture and does not require ex
 
 ### A long video hit a 429 or was interrupted halfway. Do I start over?
 
-No. VLM scene analysis resumes from where it stopped and recovers from rate limits; once `narration.json` is written, repeating the same command continues, cut mode records in `recap_phase.json` which clip plan the narration was written for (changing the plan asks for a new narration), and a resume only continues a work directory for the same source video and parameters.
+VLM analysis saves completed scenes and retries suspected rate limits once with lower concurrency. Persistent failures remain visible. After addressing the cause, repeat the same command to reuse matching scene caches and continue. Use the original command after writing `narration.json` too. In cut mode, `recap_phase.json` binds narration to its clip plan; a changed plan requires checking or rewriting the narration. Resuming requires the same source video and parameters.
 
 ### The VLM can't tell who is who and the narration is all "a man in black"?
 

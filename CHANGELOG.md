@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+
+- **技能与帮助说明按现有实现精修。** 补齐视频理解各远程路径发送的内容及关闭方式，澄清新字幕降级与原片硬字幕、实测字幕带的默认透明度、采用配音的速度策略，以及原声底轨的整数采样长度；删除不存在的 picture-plan 路径，纠正 TTS 前检查与成片看片的时序。双语 README 同步实际安装、缓存续跑与素材库行为；badcase、配对示例及真实媒体产物保留。七个技能包各升补丁号并同步编排依赖。
+
 ### Changed
 
 - **七个 SKILL.md 的 `description` 改成单行。** 原来的 `description: >` 折叠块在 OpenClaw 只认单行键值的退路解析器下读不到完整描述；现在每条都是一行，文字与原折叠块解析后的值完全相同。新增测试要求 `description` 非空、不是 `>` / `|` 块、不超过 1024 字符。七个 ClawHub 包各升一个补丁号（video-recap 仍为 blocked，伴随依赖同步到新版本）。

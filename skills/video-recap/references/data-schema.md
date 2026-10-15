@@ -1,6 +1,6 @@
 # 数据格式（中间 JSON）
 
-所有中间文件均在 pipeline 工作目录（work_dir/）下。
+中间产物保存在本次运行的工作目录 `work_dir/` 下。
 
 ## vlm_analysis.json
 
@@ -165,7 +165,7 @@ cut 第二轮（已有 `edited_source.mp4`）时本文件与 `asr_writing_chunks
 
 ## narration.json
 
-Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated cut 模式（`video-recap --edit-mode cut`）下，第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）；不存在原视频时间→输出时间的旁白映射产物：
+Agent 撰写的解说词。full 模式下使用原视频时间；**编排 cut 模式（`video-recap --edit-mode cut`）下**，第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）；不存在原视频时间→输出时间的旁白映射产物：
 
 ```json
 [
@@ -180,7 +180,7 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
 ```json
 {
   "ok": false,
-  "error_count": 1,
+  "error_count": 2,
   "warning_count": 1,
   "metrics": {
     "segment_count": 12,
@@ -245,7 +245,7 @@ CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解�
 
 ## narration_lint.json 的 deslop_qc（CLI 生成，报告型 QC）
 
-`narration_lint.json` 的 `deslop_qc` 字段由本地 deterministic scanner 生成，Agent 不手写；不再单独写 `deslop_qc.json`。它只是 report-only QC：不是 AIGC detector，不判断文本是不是 AI 写的，不会自动改写。修改仍由 Agent/人工根据报告回到 `narration.json`、`style_card.json` 或字幕源里处理。
+`narration_lint.json` 的 `deslop_qc` 字段由本地 deterministic scanner 生成，Agent 不手写；不再单独写 `deslop_qc.json`。它输出可读性报告，区分下面两类结果；不判断文本是否由 AI 生成，也不自动改写。修改仍由 Agent/人工根据报告回到 `narration.json`、`style_card.json` 或字幕源里处理。
 
 报告分两层：
 
@@ -417,14 +417,14 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 ## original_subtitles.json / user_subtitles.{json,srt,ass}（可选，原声留白字幕）
 
-解说块之间的原声留白会把【原声台词】烧成字幕（assemble 阶段用 `「」` 包裹以区分解说）。来源优先级（高→低）：
+遮罩覆盖原声留白或用户字幕明确要求替换时，assemble 才为留白生成原声对白字幕，并用 `「」` 与旁白区分。来源优先级（高→低）：
 
-1. **`work_dir/user_subtitles.json`**（用户自带，最准）— 数组 `[{start,end,text}]` 默认按**成片 OUTPUT** 时间轴直接使用；也可写成 `{"timeline": "source"|"output", "lines": [...]}`，`source` 表示按**原片**时间轴给出，由 assemble 依 `clip_plan_validated.json` 映射到成片。
+1. **`work_dir/user_subtitles.json`**（用户自带，优先使用）— 数组 `[{start,end,text}]` 默认按**成片 OUTPUT** 时间轴直接使用；也可写成 `{"timeline": "source"|"output", "lines": [...]}`，`source` 表示按**原片**时间轴给出，由 assemble 依 `clip_plan_validated.json` 映射到成片。
 2. **`work_dir/user_subtitles.srt` / `.ass`**（用户自带）— 默认按**原片**时间轴解析后映射到成片。
 3. **`work_dir/original_subtitles.json`**（Agent 校对，cut pass2 写）— OUTPUT 时间轴 `[{start,end,text}]`，订正 ASR 错字/人名、只写留白里真正出声的句子。
 4. **ASR 兜底** — 无上述文件时，用 `asr_result.json` 按留白粗略映射（中点估时，可能偏多偏乱）。
 
-来源 1–3 为「精确来源」：每条按句**区间裁剪**落到所覆盖的留白边界（跨边界会拆分），不走 ASR 兜底的中点估时；over-dense 行截断显示而非丢弃。
+来源 1–3 直接采用声明的时间区间：每条按句**区间裁剪**落到所覆盖的留白边界（跨边界会拆分），不走 ASR 兜底的中点估时；过密行截断显示而非丢弃。时间声明仍需对照实际声音核准，不能仅凭文件来源认定已精确对齐。
 
 ```json
 [
@@ -599,4 +599,4 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
  "mask_dropped": false, "message": "…", "next_action": "…"}
 ```
 
-这时成片里没有字幕，字幕在成片旁的同名 `.srt`（路径见 `assembly_manifest.json` 的 `subtitle_sidecar`）；`mask_dropped` 为 `true` 表示原本会画的原字幕遮罩也一并关掉了。`final_qc.py` 打印的摘要 `final_qc.warnings` 列出这些 code，`recap.py` 完成时打印一行警告和外挂字幕路径。
+这时新字幕保存在成片旁的同名 `.srt`，路径见 `assembly_manifest.json` 的 `subtitle_sidecar`；原片已有硬字幕仍保留。`mask_dropped` 为 `true` 表示原本会画的原字幕遮罩也一并关掉了。`final_qc.py` 打印的摘要 `final_qc.warnings` 列出这些 code，`recap.py` 完成时打印一行警告和外挂字幕路径。

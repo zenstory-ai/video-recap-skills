@@ -5,8 +5,7 @@ These JSON protocol templates are pinned to
 `ef4eb46c823910553f901649f2f13fd7575e748f`, under its MIT license. They are
 data/schema baselines, not executable upstream code. Runtime builders deep-copy
 the templates and replace authored values such as IDs, paths, timings, and canvas
-dimensions. Only the templates the exporter builds from are kept; the nested
-compound-draft templates were dropped together with green-screen export.
+dimensions. The directory contains only templates used by the exporter.
 
 The required copyright and permission notice is preserved in
 `LICENSE.duo-video` in this directory.

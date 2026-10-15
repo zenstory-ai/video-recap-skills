@@ -66,14 +66,13 @@ times are seconds and volumes are gains, so this file has no 剪映-only units.
 The exporter reads the fields above. It validates a copy of the timeline and
 rejects two kinds of input outright instead of guessing:
 
-- `schema_version` must be `2`. A 0.3-era v1 timeline is rejected; v2 only added
-  the image track, so setting `schema_version` to `2` is the whole migration.
+- `schema_version` must be `2`; other schema versions are rejected.
 - the former hand-authoring extensions (`speed`, `reverse`, `opacity`,
   `rotation_degrees`, `flip`, `transition`, `mask`, `lut`, `chroma`, `compound`,
   `green_background`, `style`, `style_id`, `words`, top-level `style_presets` /
   `resource_packages`) and the `sound` / `sticker` / `text_template` /
   `video_effect` / `face_effect` resource tracks fail with an explicit error.
-  No pipeline stage produced them, so the exporter no longer maps them.
+  These extensions are outside the supported timeline contract.
 
 ## Optional 剪映 / JianYing export
 
