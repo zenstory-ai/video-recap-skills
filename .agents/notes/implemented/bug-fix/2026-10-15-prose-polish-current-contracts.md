@@ -14,6 +14,8 @@ Status: implemented
 
 保留 schema、规则编号、badcase、配对示例、截图引用、远程调用披露和声音权利要求。161 个完整代码块中，160 个逐字保留；一个普通正向 `narration_lint` JSON 示例仅把 `error_count` 从 1 改成 2，与现有两条错误对齐。不改运行脚本、运行依赖、输入支持或套件版本，也不改历史笔记的决定；七个 ClawHub 包按字节变化升补丁号、重锁摘要并同步精确伴随版本。没有经证实可安全删除的现行文件；两份调研指南服务于不同阶段和独立安装技能，均保留。
 
+补漏复核 `examples/guohuo-60s/skill-runbook.md`，逐步精修当前操作说明，原样保留可复制用户请求和公开采用版。说明同步脚本会写入字幕与 overlay，因此在案例工作副本中执行；总帧数按 `round(duration * overlay.fps)` 计算。按现行渲染代码修正“assemble 不写色彩标记”及旧切点会少帧的说法：cut 已按帧网格剪辑，cut / assemble 写入色彩标记，项目仍需核对指定画布、帧率和实际色彩转换。既有采用版产物、源码、测试、依赖和 ClawHub 包字节均不变。事实依据沿用 [[2026-10-02-guohuo-remotion-overlay-data-driven]]、[[2026-10-02-guohuo-example-snapshots-follow-current-schema]]、[[2026-10-02-delivery-yuv420p-and-color-tags]] 与 [[2026-10-02-cut-frame-grid-cfr]]；原决定与历史验证保持。
+
 ## Alternatives considered
 
 - 只删词和调整排版：改动容易核对；但外发路径与安装方式的信息缺口会继续误导使用者，因此同时回查脚本并修正文档事实。
