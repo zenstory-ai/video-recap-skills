@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from lib import load_json
+from materials import file_identity
 from recap_runtime import (
     _coerce_videos,
     _entry,
@@ -437,7 +438,7 @@ def _source_speech_rows(source_dir):
     return load_json(raw) if raw.exists() else []
 
 
-def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
+def _write_multi_source_output_speech_evidence(work_dir, source_records, plan, validated_plan_path):
     """Map each source's speech and quiet evidence onto the combined output clock."""
     source_by_id = {row["source_id"]: row for row in source_records}
     cache = {}
@@ -503,6 +504,7 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         "artifact": "speech_boundary_anchors_output.json",
         "timeline": "cut_output",
         "source_artifact": "multi_source_manifest.json",
+        "clip_plan_identity": file_identity(validated_plan_path),
         "sentence_anchors": sorted(mapped_anchors, key=lambda row: row["time"]),
         "speech_spans": sorted(mapped_speech, key=lambda row: (row["start"], row["end"])),
         "quiet_windows": sorted(mapped_quiet, key=lambda row: (row["start"], row["end"])),
@@ -517,7 +519,7 @@ def _write_multi_source_output_brief(work_dir, source_records, validated_plan_pa
     plan = load_json(validated_plan_path)
     source_by_id = {s["source_id"]: s for s in source_records}
     speech_evidence = _write_multi_source_output_speech_evidence(
-        work_dir, source_records, plan
+        work_dir, source_records, plan, validated_plan_path
     )
     lines = [
         "# Multi-source Output Narration Brief",

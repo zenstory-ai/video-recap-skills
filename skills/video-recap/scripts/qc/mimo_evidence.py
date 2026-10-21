@@ -22,28 +22,14 @@ _JSON_ARTIFACTS = (
 
 _SOURCE_ASR_ARTIFACTS = (
     "asr_clean.json",
-    "asr.json",
     "asr_result.json",
-    "asr_segments.json",
 )
 
-_GENERATED_SUBTITLE_ARTIFACTS = (
-    "subtitles.json",
-    "subtitle.json",
-    "subtitles.srt",
-    "subtitle.srt",
-    "subtitles.vtt",
-    "subtitle.vtt",
-    "output.srt",
-    "output.vtt",
-)
+_GENERATED_SUBTITLE_ARTIFACTS = ("subtitles.srt",)
 
 _OPTIONAL_VISUAL_METADATA = (
-    "sampled_frames.json",
-    "frame_samples.json",
-    "storyboard.json",
-    "storyboard_meta.json",
-    "frames_manifest.json",
+    "storyboard/source_storyboard.json",
+    "storyboard/edited_storyboard.json",
 )
 
 

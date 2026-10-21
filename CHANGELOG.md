@@ -22,6 +22,14 @@ All notable changes to this project are documented here.
 - video-understanding 的 `narration_lint.py` / `speech_ownership.py` 与 video-script 的 `timeline_fusion.py` 副本（在所属 skill 里从不运行）。
 - 只被测试使用的函数参数与入口模块再导出（`cut.py`、`mimo_qc.py`、`voiceover.py`、`materials.restore_material`、`final_qc`、MiMo 报告的 `judge`、`dub.lint_dub_script(work_dir=)` 等）。
 
+### Fixed
+
+- **多源剪辑的句界门禁漏判。** 同一源的两段被别的源隔开时不再被当作连续拼接，落在讲话中间的硬切会阻断。
+- **多视频 cut 解说校验崩溃。** `speech_boundary_anchors_output.json` 补写 `clip_plan_identity`，`validate.py --mode cut_output` 不再 KeyError。
+- **畸形输入的崩溃路径。** `recap_project.json` 的 `bindings` 不是对象或绑定值不是 id 时给出明确错误；VLM 帧标签里 `"."`、`"1.2.3"` 这类时间戳整行丢弃；`background_research.json` 里字符串形式的剧情线与背景注释可以进入 brief。
+- **采用配音的 manifest 记录。** `assembly_settings.narration_timing` 记录 adoption 自带的 tempo 上限（显式混音不做 tempo，仍记录配置值）。
+- **MiMo QC 证据。** 证据清单只读取流水线真实写出的 ASR、`subtitles.srt` 与 `storyboard/` 下的分镜元数据。
+
 ## [0.6.0] - 2026-09-27
 
 三条主线：资源库与模板（登记与校验、项目绑定、每次运行的资源记录、字体文件、静态包装图层）；只读的本机剪辑台 dashboard；以及 skill 层分包、去内容哈希、测试审计后的架构梳理。

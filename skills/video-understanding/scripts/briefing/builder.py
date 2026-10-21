@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from lib import CONFIG, log
+from lib import CONFIG, load_background_research, log
 
 from agent_text import _chunk_asr_for_writing, _format_frame_facts
 from briefing.context import (
@@ -11,7 +11,6 @@ from briefing.context import (
     _format_consolidation,
     _format_substrate_warning,
     _format_timeline_fusion_for_brief,
-    _load_background_research,
     _load_consolidation,
     _write_json_artifact,
     assess_understanding_substrate,
@@ -189,7 +188,7 @@ def build_agent_brief(
     )
     lines.extend(_format_substrate_warning(substrate))
     lines.extend(_format_research_directive(work_dir, substrate))
-    lines.extend(_format_background_research(_load_background_research(work_dir)))
+    lines.extend(_format_background_research(load_background_research(work_dir)))
     lines.extend(_format_consolidation(consolidation_index))
 
     asr_for_chunks = _load_clean_asr(work_dir, asr_result) or asr_result

@@ -12,6 +12,7 @@ from qc.mimo_payload import build_payload
 
 
 def _write_json(path, value):
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
 
@@ -30,7 +31,7 @@ def test_collects_lightweight_evidence_prefers_validated_plan(tmp_path):
     )
     _write_json(work / "assembly_manifest.json", {"final_output": "output.mp4"})
     _write_json(work / "tts_meta.json", {"segments": [{"index": 0}]})
-    _write_json(work / "storyboard.json", {"frames": ["f1.jpg"]})
+    _write_json(work / "storyboard" / "source_storyboard.json", {"frames": ["f1.jpg"]})
     (work / "subtitles.srt").write_text(
         "1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8"
     )
@@ -45,7 +46,7 @@ def test_collects_lightweight_evidence_prefers_validated_plan(tmp_path):
     assert "assembly_manifest.json" in evidence["artifacts"]
     assert "tts_meta.json" in evidence["artifacts"]
     assert "subtitles.srt" in evidence["generated_subtitles"]
-    assert "storyboard.json" in evidence["visual_metadata"]
+    assert "storyboard/source_storyboard.json" in evidence["visual_metadata"]
     assert evidence["final_output"]["candidates"][0]["exists"] is True
     assert "tp-should-redact" not in json.dumps(evidence)
     assert "fingerprint" not in evidence
@@ -85,7 +86,7 @@ def test_payload_preserves_semantic_values_and_only_relevant_final_output(tmp_pa
         ],
     )
     _write_json(
-        work / "storyboard.json",
+        work / "storyboard" / "source_storyboard.json",
         {
             "timeline": "source",
             "labels_burned": True,

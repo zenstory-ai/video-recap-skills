@@ -34,8 +34,8 @@ def _parse_vlm_depth_response(raw_text):
             line = line.strip()
             if not line:
                 continue
-            # 格式: "12.0s | 男子拿起茶壶对嘴喝, 满脸疲惫"
-            m = re.match(r'([\d.]+)\s*s?\s*\|\s*(.+)', line)
+            # 格式: "12.0s | 男子拿起茶壶对嘴喝, 满脸疲惫"；"." 或 "1.2.3" 这类时间戳整行丢弃
+            m = re.match(r'(\d+(?:\.\d+)?)\s*s?\s*\|\s*(.+)', line)
             if m:
                 ts = m.group(1)
                 actions = [a.strip() for a in re.split(r"[，,；;、]+", m.group(2)) if a.strip()]

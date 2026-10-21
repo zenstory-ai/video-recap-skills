@@ -752,6 +752,25 @@ def test_multi_source_sentence_snap_runs_after_shot_snap(monkeypatch, tmp_path):
     assert not out["qc"].get("blocking")
 
 
+def test_multi_source_same_source_clips_split_by_another_source_are_not_a_continuous_join(tmp_path):
+    """A[0-10], B, A[10-20] removes no A media, but B plays between them: the 10s cut is audible."""
+    _write_source_json(tmp_path, "a", "asr_result.json", [{"start": 5.0, "end": 15.0, "text": "跨过十秒的一句话。"}])
+    out = _snap_multi(_multi_plan([("a", 0.0, 10.0), ("b", 0.0, 5.0), ("a", 10.0, 20.0)]),
+                      _sources(a=30.0, b=30.0), tmp_path, do_scene_snap=False, do_line_snap=False)
+    blocked = {(row["clip_id"], row["edge"]) for row in out["qc"]["blocking"]}
+    assert blocked == {(0, "end"), (2, "start")}
+
+
+def test_multi_source_adjacent_same_source_clips_stay_a_continuous_join(tmp_path):
+    _write_source_json(tmp_path, "a", "asr_result.json", [{"start": 5.0, "end": 15.0, "text": "跨过十秒的一句话。"}])
+    out = _snap_multi(_multi_plan([("a", 0.0, 10.0), ("a", 10.0, 20.0), ("b", 0.0, 5.0)]),
+                      _sources(a=30.0, b=30.0), tmp_path, do_scene_snap=False, do_line_snap=False)
+    assert not out["qc"].get("blocking")
+    joins = [row for row in out["qc"]["boundary_status"]["sentence_checks"]
+             if row["reason"] == "continuous_source_join"]
+    assert {(row["clip_id"], row["edge"]) for row in joins} == {(0, "end"), (1, "start")}
+
+
 def test_snap_multi_source_clips_noops_without_silence_or_flags(tmp_path):
     """No per-source silence data and scene-snap off -> boundaries unchanged (advisory degrade)."""
     out = _snap_multi(_multi_plan([("a", 1.0, 4.0)]), _sources(a=10.0), tmp_path, do_scene_snap=False)

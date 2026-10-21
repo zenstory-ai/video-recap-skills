@@ -1489,6 +1489,9 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
         (work / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
     )
     assert output_evidence["timeline"] == "cut_output"
+    # video-script's cut_output validation treats evidence without the current plan identity as stale.
+    plan_stat = plan.stat()
+    assert output_evidence["clip_plan_identity"] == {"size": plan_stat.st_size, "mtime_ns": plan_stat.st_mtime_ns}
     assert output_evidence["sentence_anchors"][0]["time"] == 1.0
     assert output_evidence["sentence_anchors"][0]["pause_start"] == 0.8
     assert output_evidence["sentence_anchors"][1]["time"] == 1.5

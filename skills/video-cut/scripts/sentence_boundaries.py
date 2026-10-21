@@ -528,6 +528,7 @@ def snap_multi_source_clips(
         "sentence_checks": [],
     }
     blocking_accum = []
+    boundaries_by_source = {}
     for sid, group in groups.items():
         source = sources[sid]
         duration = source["duration"]
@@ -543,26 +544,32 @@ def snap_multi_source_clips(
             _load_silence_for_source(work_dir, sid, source_work_dir),
             _load_sentence_boundary_windows(work_dir, sid, source_work_dir),
         )
+        boundaries_by_source[sid] = boundaries
         if do_line_snap:
             mini = snap_clip_starts_to_lines(
                 mini, boundaries, duration, start_max_prepend, max_trim=start_max_trim
             )
             mini = snap_clip_ends_to_lines(mini, boundaries, duration, line_max_extend)
-        mini = enforce_clip_sentence_boundaries(
-            mini,
-            boundaries,
-            _load_source_speech_spans(work_dir, sid, source_work_dir),
-            duration,
-        )
-        mini_boundary = mini["qc"]["boundary_status"]
+        mini_boundary = mini.get("qc", {}).get("boundary_status", {})
         for key, events in boundary_accum.items():
             events.extend(mini_boundary.get(key, []))
-        blocking_accum.extend(mini["qc"].get("blocking", []))
         for original, snapped in zip(group, mini["clips"]):
             original["source_start"] = snapped["source_start"]
             original["source_end"] = snapped["source_end"]
     # Recompute the global output timeline cursor-based, in plan order (not group order).
     plan["total_duration"] = _recompute_clip_timeline(clips)
+    # Sentence checks need the global output times: two clips of one source are a
+    # continuous join only when nothing from another source plays between them.
+    for sid, group in groups.items():
+        source = sources[sid]
+        mini = enforce_clip_sentence_boundaries(
+            {"clips": [dict(c) for c in group]},
+            boundaries_by_source[sid],
+            _load_source_speech_spans(work_dir, sid, source.get("source_work_dir")),
+            source["duration"],
+        )
+        boundary_accum["sentence_checks"].extend(mini["qc"]["boundary_status"]["sentence_checks"])
+        blocking_accum.extend(mini["qc"].get("blocking", []))
 
     qc = plan.setdefault("qc", {})
     boundary = qc.setdefault("boundary_status", {})
