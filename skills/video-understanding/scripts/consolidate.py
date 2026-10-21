@@ -303,15 +303,7 @@ def build_index_messages(
         fact_txt = ""
         if facts:
             actions = []
-
-            def fact_key(x):
-                # timestamps are regex-captured from the VLM reply ("[\d.]+"), so "1.2.3" is possible
-                try:
-                    return (0, float(x))
-                except ValueError:
-                    return (1, str(x))
-
-            for ts in sorted(facts.keys(), key=fact_key):
+            for ts in sorted(facts.keys(), key=float):
                 actions.extend(facts[ts])
             if actions:
                 fact_txt = " | 帧实: " + "；".join(a for a in actions[:6] if a)

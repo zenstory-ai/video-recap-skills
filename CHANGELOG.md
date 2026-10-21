@@ -12,6 +12,9 @@ All notable changes to this project are documented here.
 
 ### Fixed
 
+- **畸形输入不再崩溃。** `recap_project.json` 的 `bindings` 不是对象、或绑定值不是 id 字符串时给出明确错误（此前抛 AttributeError / TypeError）；VLM 帧标签里 `"."`、`"1.2.3"` 这类不是数字的时间戳整行丢弃，不再让 brief 与 lint 的 `float()` 崩溃；`background_research.json` 里字符串形式的剧情线、背景注释、别名与关系在 VLM 上下文和 brief 里统一规整，brief 不再在付费 VLM 调用之后崩溃，非法 JSON 给出可读错误。
+- **采用配音的 manifest 如实记录 tempo 上限。** 仅采用配音（无显式混音）时，`assembly_settings.narration_timing` 记录 adoption 自带的 `segment_tempo_max` 与累计上限，与渲染实际使用的一致；显式混音不做 tempo，记录配置值。这类运行升级后第一次续跑会重渲染一次。video-assemble、video-understanding、video-recap 的 ClawHub 包各升补丁号并同步编排依赖。
+
 - **技能与帮助说明按现有实现精修。** 补齐视频理解各远程路径发送的内容及关闭方式，澄清新字幕降级与原片硬字幕、实测字幕带的默认透明度、采用配音的速度策略，以及原声底轨的整数采样长度；删除不存在的 picture-plan 路径，纠正 TTS 前检查与成片看片的时序。双语 README 同步实际安装、缓存续跑与素材库行为；badcase、配对示例及真实媒体产物保留。七个技能包各升补丁号并同步编排依赖。
 
 ### Changed

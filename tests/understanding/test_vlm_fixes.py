@@ -42,6 +42,21 @@ def test_parse_frame_facts_splits_chinese_and_english_punctuation():
     assert facts["1.0"] == ["男子握紧拳头", "女子后退一步", "门缓缓关上", "灯光变暗", "气氛紧张"]
 
 
+def test_parse_frame_facts_drops_lines_whose_timestamp_is_not_a_number():
+    raw = """【描述】
+门口对峙
+【帧标签】
+. | 男子转身
+1.2.3s | 女子回头
+2s | 门关上
+【深层分析】
+关系破裂"""
+
+    _description, _depth, facts = _parse_vlm_depth_response(raw)
+
+    assert facts == {"2": ["门关上"]}
+
+
 # ── frame-VLM scene analysis ─────────────────────────────────────────────────
 
 

@@ -134,9 +134,14 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         raise BindingError(f"{path} 的 schema 必须是 {PROJECT_SCHEMA}")
     unknown = sorted(set(project) - PROJECT_KEYS)
     bindings = project.get("bindings") or {}
+    if not isinstance(bindings, dict):
+        raise BindingError(f"{path} 的 bindings 必须是 object")
     unknown += sorted(f"bindings.{k}" for k in set(bindings) - set(BINDING_KINDS))
     if unknown:
         raise BindingError(f"{path} 有未知字段: {', '.join(unknown)}")
+    not_ids = sorted(k for k, v in bindings.items() if v is not None and not isinstance(v, str))
+    if not_ids:
+        raise BindingError(f"{path} 的 bindings.{not_ids[0]} 必须是资源或模板 id 字符串")
     library_root = (path.parent / str(project.get("library", ""))).resolve()
     if not (library_root / "library.json").is_file():
         raise BindingError(f"库目录无效（缺少 library.json）: {library_root}")

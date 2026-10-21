@@ -803,6 +803,29 @@ def test_build_agent_brief_injects_background_research(monkeypatch, tmp_path):
     assert "范闲的护卫" in text
 
 
+def test_brief_accepts_research_written_with_bare_strings(monkeypatch, tmp_path):
+    """The VLM step accepts string plot arcs / notes; the brief must not crash on them afterwards."""
+    _set_brief_mode(monkeypatch, "full")
+    _write_json(
+        tmp_path / "background_research.json",
+        {
+            "plot_arcs": ["范闲查母亲旧案"],
+            "cultural_notes": ["监察院：庆国的监察机构"],
+            "character_details": {"范闲": {"aliases": "小范大人", "role": "主角"}, "五竹": "护卫"},
+        },
+    )
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "夜路"}],
+        [{"start": 0.0, "end": 3.0, "text": "你终于来了"}],
+        [],
+        3.0,
+        tmp_path,
+    )
+    assert "    - 范闲查母亲旧案" in text
+    assert "    - 监察院：庆国的监察机构" in text
+    assert "范闲: 别名 小范大人; 主角" in text
+
+
 def test_assess_understanding_substrate_levels():
     empty = assess_understanding_substrate(
         [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "短"}], []

@@ -12,7 +12,7 @@ from detect import ensure_speech_boundary_anchors
 
 
 from briefing.builder import build_agent_brief
-from briefing.context import assess_understanding_substrate
+from briefing.context import assess_understanding_substrate, normalize_background_research
 
 
 from understanding_cache import _load_json, _merge_overview_into_scenes
@@ -40,13 +40,14 @@ def _research_context(work_dir):
     data = load_background_research(work_dir)
     if not data:
         return ""
+    data = normalize_background_research(data)
     parts = []
     for key in ("synopsis", "episode_context", "worldbuilding"):
-        val = _clip_text(data.get(key), 320)
+        val = _clip_text(data[key], 320)
         if val:
             parts.append(val)
-    chars = data.get("characters")
-    if isinstance(chars, dict) and chars:
+    chars = data["characters"]
+    if chars:
         named = "；".join(
             f"{_clip_text(name, 40)}（{_clip_text(desc, 120)}）"
             for name, desc in list(chars.items())[:12]
@@ -54,40 +55,29 @@ def _research_context(work_dir):
         )
         if named:
             parts.append("主要人物：" + named)
-    details = data.get("character_details")
-    if isinstance(details, dict) and details:
+    details = data["character_details"]
+    if details:
         detail_lines = []
         for name, info in list(details.items())[:8]:
-            if not isinstance(info, dict):
-                continue
             bits = []
-            aliases = info.get("aliases")
-            if isinstance(aliases, list) and aliases:
-                clean_aliases = [_clip_text(alias, 30) for alias in aliases[:3]]
-                clean_aliases = [alias for alias in clean_aliases if alias]
-                if clean_aliases:
-                    bits.append("别名" + "/".join(clean_aliases))
-            role = _clip_text(info.get("role"), 60)
+            clean_aliases = [_clip_text(alias, 30) for alias in info["aliases"][:3]]
+            clean_aliases = [alias for alias in clean_aliases if alias]
+            if clean_aliases:
+                bits.append("别名" + "/".join(clean_aliases))
+            role = _clip_text(info["role"], 60)
             if role:
                 bits.append(role)
-            rels = info.get("relationships")
-            if isinstance(rels, list) and rels:
-                clean_rels = [_clip_text(rel, 60) for rel in rels[:3]]
-                bits.extend(rel for rel in clean_rels if rel)
+            clean_rels = [_clip_text(rel, 60) for rel in info["relationships"][:3]]
+            bits.extend(rel for rel in clean_rels if rel)
             clean_name = _clip_text(name, 40)
             if clean_name and bits:
                 detail_lines.append(f"{clean_name}（{'；'.join(bits)}）")
         if detail_lines:
             parts.append("人物关系：" + "；".join(detail_lines))
-    arcs = data.get("plot_arcs")
-    if isinstance(arcs, list) and arcs:
+    arcs = data["plot_arcs"]
+    if arcs:
         arc_lines = []
         for arc in arcs[:6]:
-            if not isinstance(arc, dict):
-                val = _clip_text(arc, 120)
-                if val:
-                    arc_lines.append(val)
-                continue
             name = _clip_text(arc.get("name"), 50)
             desc = _clip_text(arc.get("description"), 120)
             status = _clip_text(arc.get("status"), 30)
@@ -96,15 +86,10 @@ def _research_context(work_dir):
                 arc_lines.append(f"{name}：{desc}{tail}".strip("："))
         if arc_lines:
             parts.append("剧情线：" + "；".join(arc_lines))
-    notes = data.get("cultural_notes")
-    if isinstance(notes, list) and notes:
+    notes = data["cultural_notes"]
+    if notes:
         note_lines = []
         for note in notes[:4]:
-            if not isinstance(note, dict):
-                val = _clip_text(note, 100)
-                if val:
-                    note_lines.append(val)
-                continue
             item = _clip_text(note.get("item"), 50)
             expl = _clip_text(note.get("explanation"), 100)
             if item or expl:

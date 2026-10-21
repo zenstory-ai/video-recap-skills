@@ -95,10 +95,11 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
             "narration_cumulative_tempo_max": CONFIG["narration_cumulative_tempo_max"],
             "tts_segment_tempo_max": (
                 adopted_tempo["segment_tempo_max"]
-                if explicit_mix and adopted_tempo else CONFIG["tts_segment_tempo_max"]
+                if adopted_tempo and not explicit_mix else CONFIG["tts_segment_tempo_max"]
             ),
         }
-        if explicit_mix and adopted_tempo:
+        # An explicit mix never applies tempo; only adopted narration renders with its own caps.
+        if adopted_tempo and not explicit_mix:
             settings["narration_timing"]["narration_cumulative_tempo_max"] = \
                 adopted_tempo["cumulative_tempo_max"]
             settings["narration_timing"]["narration_cumulative_tempo_hard_max"] = \

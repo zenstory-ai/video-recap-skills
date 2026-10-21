@@ -77,4 +77,9 @@ def test_settings_record_adopted_not_ignored_ambient_speed(render_media, tmp_pat
     adoption, meta = _adoption(tmp_path, segments)
     _render(source, segments, work, adoption, meta)
     settings = assembly_settings.assembly_settings_payload(work)
-    assert settings["narration_timing"]["narration_speed"] == 1.0
+    timing = settings["narration_timing"]
+    assert timing["narration_speed"] == 1.0
+    # The render fits adopted narration with the adoption's caps (1.0), not ambient 1.2/1.3/1.4.
+    assert timing["tts_segment_tempo_max"] == 1.0
+    assert timing["narration_cumulative_tempo_max"] == 1.0
+    assert timing["narration_cumulative_tempo_hard_max"] == 1.0
