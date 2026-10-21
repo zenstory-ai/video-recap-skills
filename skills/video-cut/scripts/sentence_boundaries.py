@@ -513,7 +513,8 @@ def snap_multi_source_clips(
     Each clip is snapped using ITS OWN source's silence windows / shot changes and duration
     (a clip in source B never constrains a clip in source A), then the global OUTPUT timeline
     is recomputed once in plan order. Missing silence data leaves a boundary unchanged.
-    Mirrors the single-source snap_clip_ends_to_lines + snap_clips_off_shot_changes.
+    Runs the same passes as the single-source path in cut_cli: snap_clips_off_shot_changes,
+    snap_clip_starts_to_lines + snap_clip_ends_to_lines, then enforce_clip_sentence_boundaries.
     """
     clips = plan["clips"]
     allow_overlap = plan["allow_overlap"]

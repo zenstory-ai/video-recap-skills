@@ -13,21 +13,16 @@ from adoption.audio_mix_binding import binding_record as audio_mix_binding_recor
 from packaging import packaging_settings
 
 
-def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_stream_index=0):
+def assembly_settings_payload(work_dir, *, audio_mode="narration", audio_stream_index=0):
     """Settings that affect the rendered video, as a plain nested dict compared with ``==`` by
-    pipeline resume logic. When work_dir is given, a user_subtitles presence flag and the
-    ``{size, mtime_ns}`` identity of the overlay/subtitle-track inputs are included so dropping
-    in or rewriting one of those files rebuilds the cached subtitles."""
+    pipeline resume logic. A user_subtitles presence flag and the ``{size, mtime_ns}`` identity
+    of the overlay/subtitle-track inputs are included so dropping in or rewriting one of those
+    files rebuilds the cached subtitles."""
     burn_subtitles = CONFIG["burn_subtitles"]
     mask_policy = _source_subtitle_mask_policy(work_dir)
     mask_source_subtitles = mask_policy["active"]
-    overlay_identity = (
-        _artifact_identity(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
-    )
-    subtitle_track_identity = (
-        _artifact_identity(Path(work_dir) / "subtitle_track.json")
-        if work_dir is not None else None
-    )
+    overlay_identity = _artifact_identity(Path(work_dir) / VISUAL_OVERLAYS)
+    subtitle_track_identity = _artifact_identity(Path(work_dir) / "subtitle_track.json")
     settings = {
         "user_subtitles": _has_user_subtitles(work_dir),
         "burn_subtitles": burn_subtitles,
@@ -68,19 +63,14 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
             "selected_stream_index": audio_stream_index,
         },
     }
-    explicit_mix = (
-        audio_mix_binding_record(work_dir)
-        if work_dir is not None and audio_mode == "narration" else None
-    )
+    explicit_mix = audio_mix_binding_record(work_dir) if audio_mode == "narration" else None
     if explicit_mix:
         settings["audio"]["path"] = "explicit_adopted_full_sound"
         settings["audio_mix_binding"] = explicit_mix
     if audio_mode == "narration":
-        narration_binding = binding_record(work_dir) if work_dir else None
+        narration_binding = binding_record(work_dir)
         settings["narration_input_binding"] = narration_binding
-        adopted_tempo = (
-            narration_binding.get("tempo_policy") if narration_binding else None
-        )
+        adopted_tempo = narration_binding["tempo_policy"] if narration_binding else None
         settings["narration_timing"] = {
             "delay_seconds": 0.0 if explicit_mix else CONFIG["narration_delay_seconds"],
             "tail_pad_seconds": 0.0 if explicit_mix else CONFIG["narration_tail_pad_seconds"],
@@ -107,7 +97,6 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
     if audio_mode in {"narration", "source-mix"} and not explicit_mix:
         # adopted-packet-copy never decodes or mixes, so mix settings cannot change it.
         settings["audio_mix"] = {
-            "ducking_mode": CONFIG["ducking_mode"],
             "duck_fade_seconds": CONFIG["duck_fade_seconds"],
             "duck_bridge_seconds": CONFIG["duck_bridge_seconds"],
             "ducking_narr_weight": CONFIG["ducking_narr_weight"],
@@ -115,12 +104,6 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration", audio_st
             "idle_orig_volume": CONFIG["idle_orig_volume"],
             "speech_ducking_volume": CONFIG["speech_ducking_volume"],
             "zone_ducking_volume": CONFIG["zone_ducking_volume"],
-            "ducking_threshold": CONFIG["ducking_threshold"],
-            "ducking_ratio": CONFIG["ducking_ratio"],
-            "ducking_attack": CONFIG["ducking_attack"],
-            "ducking_release": CONFIG["ducking_release"],
-            "ducking_level_sc": CONFIG["ducking_level_sc"],
-            "ducking_makeup": CONFIG["ducking_makeup"],
             "final_loudnorm": final_loudnorm_filter(),
             "loudness_mode": _loudness_mode(),
             "bgm_path": CONFIG["bgm_path"],

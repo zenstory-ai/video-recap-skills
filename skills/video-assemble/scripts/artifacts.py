@@ -19,9 +19,7 @@ def _artifact_identity(path):
 
 
 def _explicit_source_video():
-    """Return the cut-mode source video only when the caller opted in explicitly."""
-    if not CONFIG["source_video_explicit"]:
-        return ""
+    """Return the cut-mode source video passed with --source-video, else ""."""
     return CONFIG["source_video"]
 
 

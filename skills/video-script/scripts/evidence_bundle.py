@@ -48,14 +48,8 @@ def _merge_ranges(ranges):
             merged.append(dict(r))
             continue
         merged[-1]["end"] = max(merged[-1]["end"], r["end"])
-        reasons = {
-            part
-            for part in str(merged[-1].get("selection_reason", "")).split("+")
-            if part
-        }
-        reasons.update(
-            part for part in str(r.get("selection_reason", "")).split("+") if part
-        )
+        reasons = set(merged[-1]["selection_reason"].split("+"))
+        reasons.update(r["selection_reason"].split("+"))
         order = {
             "beginning": 0,
             "middle": 1,
@@ -66,9 +60,7 @@ def _merge_ranges(ranges):
         merged[-1]["selection_reason"] = "+".join(
             sorted(reasons, key=lambda x: order.get(x, 99))
         )
-        merged[-1]["priority"] = min(
-            merged[-1].get("priority", 2), r.get("priority", 2)
-        )
+        merged[-1]["priority"] = min(merged[-1]["priority"], r["priority"])
     return merged
 
 
@@ -150,7 +142,7 @@ def coverage_policy_v1(
         candidates = [r for r in merged if r not in protected]
         candidates.sort(
             key=lambda r: (
-                r.get("priority", 2),
+                r["priority"],
                 -float(r["end"] - r["start"]),
                 r["start"],
             )
@@ -179,26 +171,18 @@ def _in_ranges(start, end, ranges):
 
 def _scene_evidence_text(scene):
     desc = str(scene.get("description", "")).strip().replace("\n", " ")
-    facts = scene.get("frame_facts")
+    facts = scene.get("frame_facts") or {}
     picks = []
-    if isinstance(facts, dict):
 
-        def fact_sort_key(value):
-            try:
-                return (0, float(value))
-            except (TypeError, ValueError):
-                return (1, str(value))
+    def fact_sort_key(value):
+        try:
+            return (0, float(value))
+        except (TypeError, ValueError):
+            return (1, str(value))
 
-        for ts in sorted(facts.keys(), key=fact_sort_key):
-            vals = facts[ts]
-            picks.extend(vals if isinstance(vals, list) else [str(vals)])
-    elif isinstance(facts, list):
-        for f in facts:
-            picks.append(
-                str(f.get("fact", f.get("text", ""))).strip()
-                if isinstance(f, dict)
-                else str(f).strip()
-            )
+    for ts in sorted(facts.keys(), key=fact_sort_key):
+        vals = facts[ts]
+        picks.extend(vals if isinstance(vals, list) else [str(vals)])
     fact_txt = "；".join(p for p in picks[:4] if p)
     return (desc + (" | 帧实: " + fact_txt if fact_txt else "")).strip()
 
@@ -373,7 +357,7 @@ def build_evidence_bundle(
 ):
     clock = "output" if timeline == "cut_output" else "source"
     coverage = coverage_policy_v1(vlm_analysis, asr_result, narration)
-    ranges = coverage.get("selected_ranges", [])
+    ranges = coverage["selected_ranges"]
     filtered = filter_evidence_by_ranges(
         vlm_analysis, asr_result, ranges, timeline=timeline
     )

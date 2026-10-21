@@ -50,27 +50,14 @@ def _load_review_grounding(work_dir):
     """
     work_dir = Path(work_dir)
     manifest = _load(work_dir, "multi_source_manifest.json")
-    sources = manifest.get("sources") if isinstance(manifest, dict) else None
-    if isinstance(sources, list):
+    if manifest is not None:
         combined_vlm = []
         combined_asr = []
-        for source in sources:
-            if not isinstance(source, dict):
-                continue
-            source_id = str(source.get("source_id") or "").strip()
-            relative_dir = source.get("source_work_dir")
-            if not source_id or not relative_dir:
-                continue
-            source_dir = (work_dir / str(relative_dir)).resolve(strict=False)
-            try:
-                source_dir.relative_to(work_dir.resolve(strict=False))
-            except ValueError:
-                continue
+        for source in manifest["sources"]:
+            source_id = source["source_id"]
+            source_dir = work_dir / source["source_work_dir"]
             for scene in _load(source_dir, "vlm_analysis.json") or []:
-                if isinstance(scene, dict):
-                    item = dict(scene)
-                    item["source_id"] = source_id
-                    combined_vlm.append(item)
+                combined_vlm.append({**scene, "source_id": source_id})
             clean_asr = _load(source_dir, "asr_clean.json")
             raw_asr = (
                 clean_asr
@@ -78,10 +65,7 @@ def _load_review_grounding(work_dir):
                 else _load(source_dir, "asr_result.json")
             )
             for segment in _asr_segments(raw_asr):
-                if isinstance(segment, dict):
-                    item = dict(segment)
-                    item["source_id"] = source_id
-                    combined_asr.append(item)
+                combined_asr.append({**segment, "source_id": source_id})
         if combined_vlm or combined_asr:
             return combined_vlm, combined_asr
 
@@ -128,11 +112,9 @@ def _load_cut_clip_spans(work_dir):
 def _source_output_overlaps(start, end, spans, *, source_id=None):
     source_id = str(source_id) if source_id is not None else None
     if source_id not in (None, "", "0"):
-        spans = [
-            span for span in (spans or []) if str(span.get("source_id")) == source_id
-        ]
+        spans = [span for span in spans if span["source_id"] == source_id]
     overlaps = []
-    for span in spans or []:
+    for span in spans:
         source_start = max(start, span["source_start"])
         source_end = min(end, span["source_end"])
         if source_end <= source_start:
@@ -145,9 +127,9 @@ def _source_output_overlaps(start, end, spans, *, source_id=None):
                 "source_end": source_end,
                 "output_start": output_start,
                 "output_end": output_end,
-                "source_id": span.get("source_id", "0"),
-                "source_clip_id": span.get("source_clip_id"),
-                "output_segment_index": span.get("output_segment_index"),
+                "source_id": span["source_id"],
+                "source_clip_id": span["source_clip_id"],
+                "output_segment_index": span["output_segment_index"],
             }
         )
     return overlaps
@@ -175,19 +157,9 @@ def remap_grounding_to_output_timeline(vlm_analysis, asr_result, clip_spans):
         return vlm_analysis or [], asr_result or []
 
     remapped_scenes = []
-    for scene in vlm_analysis or []:
-        if not isinstance(scene, dict):
-            continue
-        try:
-            start = float(scene.get("start", 0))
-            end = float(scene.get("end", start))
-        except (TypeError, ValueError):
-            continue
+    for scene in vlm_analysis:
         overlaps = _source_output_overlaps(
-            start,
-            end,
-            clip_spans,
-            source_id=scene.get("source_id") if "source_id" in scene else None,
+            scene["start"], scene["end"], clip_spans, source_id=scene.get("source_id")
         )
         for part_idx, overlap in enumerate(overlaps):
             item = dict(scene)
@@ -196,43 +168,30 @@ def remap_grounding_to_output_timeline(vlm_analysis, asr_result, clip_spans):
             item["frame_facts"] = _remap_frame_facts(scene.get("frame_facts"), overlap)
             item["source_start"] = round(overlap["source_start"], 3)
             item["source_end"] = round(overlap["source_end"], 3)
-            item["source_id"] = overlap.get("source_id", "0")
-            item["source_clip_id"] = overlap.get("source_clip_id")
-            item["output_segment_index"] = overlap.get("output_segment_index")
+            item["source_id"] = overlap["source_id"]
+            item["source_clip_id"] = overlap["source_clip_id"]
+            item["output_segment_index"] = overlap["output_segment_index"]
             if len(overlaps) > 1:
                 item["scene_id"] = f"{scene.get('scene_id', '?')}.{part_idx}"
             remapped_scenes.append(item)
 
     remapped_asr = []
-    for seg in asr_result or []:
-        if not isinstance(seg, dict):
-            continue
-        try:
-            start = float(seg.get("start", 0))
-            end = float(seg.get("end", start))
-        except (TypeError, ValueError):
-            continue
-        text = str(seg.get("text", "")).strip()
-        if not text:
+    for seg in asr_result:
+        if not seg["text"].strip():
             continue
         for overlap in _source_output_overlaps(
-            start,
-            end,
-            clip_spans,
-            source_id=seg.get("source_id") if "source_id" in seg else None,
+            seg["start"], seg["end"], clip_spans, source_id=seg.get("source_id")
         ):
             item = dict(seg)
             item["start"] = round(overlap["output_start"], 3)
             item["end"] = round(overlap["output_end"], 3)
             item["source_start"] = round(overlap["source_start"], 3)
             item["source_end"] = round(overlap["source_end"], 3)
-            item["source_id"] = overlap.get("source_id", "0")
-            item["source_clip_id"] = overlap.get("source_clip_id")
-            item["output_segment_index"] = overlap.get("output_segment_index")
+            item["source_id"] = overlap["source_id"]
+            item["source_clip_id"] = overlap["source_clip_id"]
+            item["output_segment_index"] = overlap["output_segment_index"]
             remapped_asr.append(item)
 
-    remapped_scenes.sort(
-        key=lambda x: (float(x.get("start", 0)), float(x.get("end", 0)))
-    )
-    remapped_asr.sort(key=lambda x: (float(x.get("start", 0)), float(x.get("end", 0))))
+    remapped_scenes.sort(key=lambda x: (x["start"], x["end"]))
+    remapped_asr.sort(key=lambda x: (x["start"], x["end"]))
     return remapped_scenes, remapped_asr

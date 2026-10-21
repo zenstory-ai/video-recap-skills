@@ -54,7 +54,7 @@ def _parse_vlm_depth_response(raw_text):
 
 def _max_frames_for_duration(duration):
     """Frames the VLM sees for one scene: ~1 per `vlm_seconds_per_frame`, floor 3, capped by
-    `vlm_max_frames`. Replaces the old hard cap of 6 that starved long/merged scenes."""
+    `vlm_max_frames`."""
     spf = float(CONFIG["vlm_seconds_per_frame"])
     ceiling = int(CONFIG["vlm_max_frames"])
     return max(3, min(ceiling, round(max(0.0, float(duration)) / spf)))
@@ -103,6 +103,13 @@ def _looks_rate_limited(message):
     return "429" in m or "too many requests" in m or "rate limit" in m or "限流" in m
 
 
+def vlm_depth_prompt():
+    """The exact prompt text the frame VLM sends: the depth template behind any context_info."""
+    prompt = load_prompt("VLM_DEPTH_PROMPT")
+    ctx = CONFIG["context_info"]
+    return f"已知信息：{ctx}\n\n{prompt}" if ctx else prompt
+
+
 def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     """对每个场景的关键帧调用 VLM 进行视觉分析（并行）"""
     if not scenes:
@@ -119,13 +126,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     if fps <= 0:
         raise ValueError("CONFIG['fps'] 必须大于 0；请先运行完整 pipeline 或指定 --fps")
 
-    vlm_prompt = load_prompt("VLM_DEPTH_PROMPT")
-    if not vlm_prompt:
-        vlm_prompt = "仔细观察这些视频帧。分两部分输出：\n【描述】不超过80字，描述画面中正在发生什么。\n【深层分析】不超过120字，分析角色情绪、关系动态、潜台词。"
-
-    ctx = CONFIG["context_info"]
-    if ctx:
-        vlm_prompt = f"已知信息：{ctx}\n\n{vlm_prompt}"
+    vlm_prompt = vlm_depth_prompt()
 
     # 构建帧时间映射 (frame_NNNNN.jpg -> time in seconds)。换算规则由 extract.py 独家定义：
     # ffmpeg 首帧在 t=0 而文件编号从 1 起，所以是 (n-1)/fps，不是 n/fps。
@@ -136,8 +137,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
             continue
         frame_times[f] = frame_time(num, fps)
 
-    # base64 编码缓存（LRU）。原来是无上界的 dict：整个 VLM 阶段会把用到的每一帧的 base64
-    # 都常驻内存，而 base64 比原图还大 1/3。40 分钟视频 fps=1 约 2400 帧 → 数百 MB 常驻。
+    # base64 编码缓存（LRU）。base64 比原图还大 1/3，长视频的全部帧常驻会占数百 MB；
     # 相邻场景才会复用同一帧，容量取「并发数 × 单场景最大帧数」就够，再多也命中不了。
     b64_capacity = max(
         8,
@@ -246,15 +246,15 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     # flipping e.g. mimo_disable_thinking would yield a stale/mixed analysis.
     cache_settings = {
         "vlm_prompt": vlm_prompt,
-        "vlm_model": CONFIG.get("vlm_model"),
-        "vlm_max_tokens": CONFIG.get("vlm_max_tokens"),
-        "vlm_seconds_per_frame": CONFIG.get("vlm_seconds_per_frame"),
-        "vlm_max_frames": CONFIG.get("vlm_max_frames"),
+        "vlm_model": CONFIG["vlm_model"],
+        "vlm_max_tokens": CONFIG["vlm_max_tokens"],
+        "vlm_seconds_per_frame": CONFIG["vlm_seconds_per_frame"],
+        "vlm_max_frames": CONFIG["vlm_max_frames"],
         "fps": round(float(fps), 3),
         "frame_time_convention": FRAME_TIME_CONVENTION_VERSION,
-        "api_url": CONFIG.get("api_url"),
-        "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
-        "mimo_media_resolution": CONFIG.get("mimo_media_resolution"),
+        "api_url": CONFIG["api_url"],
+        "mimo_disable_thinking": CONFIG["mimo_disable_thinking"],
+        "mimo_media_resolution": CONFIG["mimo_media_resolution"],
     }
     cache = _load_vlm_scene_cache(work_dir, cache_settings) if resume else {}
 
@@ -275,8 +275,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     def _run_pass(indices, workers):
         """分析给定场景索引；结果按批持久化到续传缓存（在主线程，无需加锁）。返回 (i, err) 失败列表。
 
-        续传缓存每次都是整份重写，原来每完成一个场景就刷一次 → 写入量随场景数平方增长
-        （300 个场景约 75MB 冗余写），而且序列化发生在收结果的主循环上。改成按批刷：
+        续传缓存每次都是整份重写，逐场景刷写会让写入量随场景数平方增长，所以按批刷：
         崩溃最多丢失不到一批的进度，而这些场景本来就会在重跑时被重新分析。
         """
         if not indices:
@@ -417,23 +416,18 @@ def _mimo_chunk_prompt(chunk):
     )
 
 
-def _mimo_video_model():
-    """MiMo 视频理解使用的模型：优先 mimo_video_model，回退 mimo_model，再回退 vlm_model。"""
-    return CONFIG.get("mimo_video_model") or CONFIG.get("mimo_model") or CONFIG["vlm_model"]
-
-
 def mimo_video_settings():
     """Return non-secret MiMo video-overview settings that affect generated content."""
     return {
-        "model": _mimo_video_model(),
-        "mimo_video_api_url": CONFIG.get("mimo_video_api_url"),
-        "mimo_video_fps": CONFIG.get("mimo_video_fps", 2.0),
-        "mimo_media_resolution": CONFIG.get("mimo_media_resolution", "default"),
-        "mimo_video_chunk_max_seconds": CONFIG.get("mimo_video_chunk_max_seconds", 20.0),
-        "mimo_video_chunk_min_seconds": CONFIG.get("mimo_video_chunk_min_seconds", 1.0),
-        "mimo_video_base64_max_mb": CONFIG.get("mimo_video_base64_max_mb", 45.0),
-        "mimo_video_prompt": CONFIG.get("mimo_video_prompt", ""),
-        "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
+        "model": CONFIG["mimo_video_model"],
+        "mimo_video_api_url": CONFIG["mimo_video_api_url"],
+        "mimo_video_fps": CONFIG["mimo_video_fps"],
+        "mimo_media_resolution": CONFIG["mimo_media_resolution"],
+        "mimo_video_chunk_max_seconds": CONFIG["mimo_video_chunk_max_seconds"],
+        "mimo_video_chunk_min_seconds": CONFIG["mimo_video_chunk_min_seconds"],
+        "mimo_video_base64_max_mb": CONFIG["mimo_video_base64_max_mb"],
+        "mimo_video_prompt": CONFIG["mimo_video_prompt"],
+        "mimo_disable_thinking": CONFIG["mimo_disable_thinking"],
     }
 
 
@@ -452,7 +446,7 @@ def _mimo_partial_provenance(video_path, scenes):
     }
 
 
-def _load_mimo_partial(partial_path, video_path=None, scenes=None):
+def _load_mimo_partial(partial_path, video_path, scenes):
     """Load the internal partial chunk cache, keyed by chunk identifier.
 
     Returns {} when missing/unreadable or when settings/source/chunk provenance differs,
@@ -468,24 +462,22 @@ def _load_mimo_partial(partial_path, video_path=None, scenes=None):
         return {}
     if partial.get("settings") != mimo_video_settings():
         return {}
-    if video_path is not None or scenes is not None:
-        try:
-            if partial.get("provenance") != _mimo_partial_provenance(video_path, scenes):
-                return {}
-        except (OSError, RuntimeError, TypeError, ValueError):
+    try:
+        if partial.get("provenance") != _mimo_partial_provenance(video_path, scenes):
             return {}
+    except (OSError, RuntimeError, TypeError, ValueError):
+        return {}
     done = partial.get("chunks")
     return done if isinstance(done, dict) else {}
 
 
-def _save_mimo_partial(partial_path, done, video_path=None, scenes=None):
+def _save_mimo_partial(partial_path, done, video_path, scenes):
     """Persist completed chunk results incrementally so paid chunks survive a mid-loop failure."""
     payload = {
         "settings": mimo_video_settings(),
         "chunks": done,
+        "provenance": _mimo_partial_provenance(video_path, scenes),
     }
-    if video_path is not None or scenes is not None:
-        payload["provenance"] = _mimo_partial_provenance(video_path, scenes)
     partial_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
@@ -542,7 +534,7 @@ def _analyze_mimo_video_chunk(chunk_path, chunk):
         },
         {"type": "text", "text": _mimo_chunk_prompt(chunk)},
     ]
-    model = _mimo_video_model()
+    model = CONFIG["mimo_video_model"]
     payload = {
         "model": model,
         "messages": [{"role": "user", "content": content_parts}],
@@ -653,7 +645,7 @@ def analyze_video_overview(video_path, work_dir, scenes=None):
     )
 
     overview = {
-        "model": _mimo_video_model(),
+        "model": CONFIG["mimo_video_model"],
         "content": content,
         "chunks": chunk_results,
         "chunk_count": len(chunk_results),

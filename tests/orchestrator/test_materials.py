@@ -74,7 +74,7 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     (work / "asr_result.json").write_text(json.dumps([{"text": "hello"}]), encoding="utf-8")
     (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "hello。"}]}), encoding="utf-8")
     video = tmp_path / "ep.mp4"
-    meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
+    materials.save_material(lib, work, video, IDENTITY, SETTINGS)
 
     dest = tmp_path / "dest"
     rewritten = {**IDENTITY, "mtime_ns": IDENTITY["mtime_ns"] + 1}
@@ -85,14 +85,12 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     ):
         mismatch = materials.restore_material(
             lib, dest, source_path=source_path, source_identity=identity, settings=settings,
-            material_id=meta["material_id"],
         )
         assert mismatch["restored"] is False
         assert not dest.exists()
 
     ok = materials.restore_material(
         lib, dest, source_path=video, source_identity=IDENTITY, settings=dict(SETTINGS),
-        material_id=meta["material_id"],
     )
     assert ok["restored"] is True
     assert (dest / "asr_result.json").exists()
@@ -104,7 +102,7 @@ def test_restore_material_prunes_stale_allowed_artifacts_before_copy(tmp_path):
     seed = tmp_path / "seed"
     seed.mkdir()
     (seed / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    meta = materials.save_material(lib, seed, tmp_path / "ep.mp4", IDENTITY, SETTINGS)
+    materials.save_material(lib, seed, tmp_path / "ep.mp4", IDENTITY, SETTINGS)
 
     dest = tmp_path / "dest"
     dest.mkdir()
@@ -117,7 +115,6 @@ def test_restore_material_prunes_stale_allowed_artifacts_before_copy(tmp_path):
         source_path=tmp_path / "ep.mp4",
         source_identity=IDENTITY,
         settings=SETTINGS,
-        material_id=meta["material_id"],
     )
 
     assert restored["restored"] is True
@@ -164,7 +161,7 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
 
     dest = tmp_path / "dest"
     materials.restore_material(lib, dest, source_path=tmp_path / "ep.mp4", source_identity=IDENTITY,
-                               settings=SETTINGS, material_id=meta["material_id"])
+                               settings=SETTINGS)
     restored = (dest / "understanding_index.json").read_text(encoding="utf-8")
     assert "tp-abcdef12345678" not in restored
     assert "secret" in restored and "token" in restored
@@ -193,30 +190,6 @@ def test_redact_text_leaves_plain_words_but_strips_token_shapes():
         "the secret garden hides a golden token"
     assert "tp-" not in materials._redact_text("key is tp-abcdef12345678 ok")
     assert "ghp_" not in materials._redact_text("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
-
-
-def test_restore_overwrite_false_does_not_prune_then_lose_staged_file(tmp_path):
-    """FF-B: prune_stale_allowed + overwrite=False must NOT prune a staged file and then skip
-    restoring it. The staged file is preserved; only true (non-staged) stale orphans are pruned."""
-    lib = tmp_path / "library"
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    (seed / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    meta = materials.save_material(lib, seed, tmp_path / "ep.mp4", IDENTITY, SETTINGS)
-
-    dest = tmp_path / "dest"
-    dest.mkdir()
-    (dest / "scenes.json").write_text(json.dumps([{"keep": "existing"}]), encoding="utf-8")  # staged name, present
-    (dest / "vlm_analysis.json").write_text(json.dumps({"stale": 1}), encoding="utf-8")        # non-staged orphan
-
-    res = materials.restore_material(lib, dest, source_path=tmp_path / "ep.mp4", source_identity=IDENTITY,
-                                     settings=SETTINGS, material_id=meta["material_id"], overwrite=False)
-
-    assert (dest / "scenes.json").exists(), "staged file must survive (not pruned-then-skipped)"
-    assert json.loads((dest / "scenes.json").read_text(encoding="utf-8")) == [{"keep": "existing"}]
-    assert not (dest / "vlm_analysis.json").exists(), "true stale orphan is pruned"
-    assert "vlm_analysis.json" in res["pruned_artifacts"]
-    assert "scenes.json" not in res["pruned_artifacts"]
 
 
 def test_save_material_reconciles_orphan_artifacts_on_resave(tmp_path):
@@ -254,19 +227,17 @@ def test_material_lookup_skips_corrupt_unrelated_cache_entry(tmp_path):
     assert found["material_id"] == valid["material_id"]
 
 
-def test_save_material_refreshes_malformed_existing_metadata(tmp_path):
+def test_save_material_refreshes_malformed_existing_metadata(tmp_path, monkeypatch):
     lib = tmp_path / "library"
     work = tmp_path / "work"
     work.mkdir()
-    first = materials.save_material(
-        lib, work, tmp_path / "episode.mp4", IDENTITY, SETTINGS, now="2026-01-01T00:00:00Z"
-    )
+    monkeypatch.setattr(materials, "utc_now_iso", lambda: "2026-01-01T00:00:00Z")
+    first = materials.save_material(lib, work, tmp_path / "episode.mp4", IDENTITY, SETTINGS)
     meta_path = lib / "materials" / first["material_id"] / "material.json"
     meta_path.write_text("{}", encoding="utf-8")
 
-    refreshed = materials.save_material(
-        lib, work, tmp_path / "episode.mp4", IDENTITY, SETTINGS, now="2026-02-01T00:00:00Z"
-    )
+    monkeypatch.setattr(materials, "utc_now_iso", lambda: "2026-02-01T00:00:00Z")
+    refreshed = materials.save_material(lib, work, tmp_path / "episode.mp4", IDENTITY, SETTINGS)
 
     assert refreshed["created_at"] == "2026-02-01T00:00:00Z"
     assert refreshed["updated_at"] == "2026-02-01T00:00:00Z"

@@ -6,7 +6,7 @@ EDL 的一个长区间内仍可能藏着 2、12、14 帧反打；因此检查对
 ```bash
 # 默认 --threshold 0.35：
 python3 scripts/shot_review.py edited_source.mp4 --output review/shot_review.json
-# 只有当前 video-cut 的输出与 sidecar 齐全，才额外关联当前剪辑计划：
+# 关联当前剪辑计划（计划须与当前 edited_source.mp4 一致）：
 python3 scripts/shot_review.py edited_source.mp4 --plan clip_plan_validated.json \
   --output review/shot_review_planned.json
 # 怀疑漏检时另跑一轮更低阈值做对照；0.08 只是一个更高召回的取值示例，不是规定的第二遍：
@@ -32,9 +32,9 @@ python3 scripts/cut.py source.mp4 --work-dir work --review-shots
 - 帧号从 0 开始，区间半开 `[start_frame,end_frame)`；首镜、末镜也检查。VFR 同时记录真实 rational PTS 时长，不能用平均 fps 乘秒数。
 - 默认候选规则：镜头不超过 **1 秒**，或 **2 秒内至少 4 个切点**。帧数上限缺省由实测帧钟换算（`round(fps × max_short_seconds)`），不写死某个帧率；需要固定帧数时用 `--max-short-frames` 显式覆盖。参数只控制召回，不是统一剪辑标准。
 - `0.35` 是默认 scene 起始阈值。加黑边、包装占比大、低反差的画面会系统性少报。**某个阈值下零候选不是没有闪帧的证据。** 用一段已知有坏短镜的窗口校准阈值，保留每一轮的报告，不静默换阈值只报告“通过”。降低阈值也可能增加曝光、运动和动效误报。
-- 未提供计划时来源为 `UNKNOWN`。提供计划时先核对计划 clips、渲染设置与 `edited_source.mp4.meta.json` 一致、源文件 `size`/`mtime_ns` 未变、输出存在非空；失配直接失败，不猜“最新版本”。报告 `plan_binding.path` 只记录所用计划路径。
+- 未提供计划时来源为 `UNKNOWN`。提供的计划与当前 `edited_source.mp4` 失配时直接失败，不猜“最新版本”；报告 `plan_binding.path` 记录所用计划路径。
 - 靠近量化后 EDL 拼接点一帧以内仅标 `EDIT_JOIN_CANDIDATE`。内部候选可以标所在已绑定 clip、估计原片秒数，但仍为 `UNKNOWN`；没有独立源片证据，不能认定是原片自带切镜。
-- 未知时码、末帧时长无法覆盖到流末尾、解码失败均阻断扫描。报告先置 `SCANNING`，失败写 `SCAN_FAILED`，不留下旧成功报告冒充本轮结果。仅新路径或可识别为本工具 schema 的旧报告可写；报告路径不能覆盖计划与元数据双方声明的视频/源文件，即使二者已经过期失配。
+- 未知时码、末帧时长无法覆盖到流末尾、解码失败均阻断扫描，报告写 `SCAN_FAILED`。
 
 ## 如何处理候选
 

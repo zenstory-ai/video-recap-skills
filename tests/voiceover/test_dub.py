@@ -150,7 +150,7 @@ def test_dub_render_corrupt_clone_cache_meta_raises(monkeypatch, tmp_path):
     _stub_render_pipeline(monkeypatch)
     monkeypatch.setattr(dub, "_clone_tts", lambda *_a, **_k: pytest.fail("must not re-synthesize"))
     with pytest.raises(ValueError):
-        dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
+        dub.stage_render(tmp_path / "video.mp4", tmp_path)
 
 
 def test_brief_lists_windows_for_the_agent():
@@ -160,19 +160,16 @@ def test_brief_lists_windows_for_the_agent():
     assert "Hello there." in md
 
 
-def test_dub_lint_rejects_non_list_script(tmp_path):
+def test_dub_lint_rejects_non_list_script():
     """A malformed (non-list) dub_script.json is a clean FAIL, not a traceback."""
-    report = dub.lint_dub_script(
-        {"start": 0, "zh": "x"}, duration=5.0, work_dir=tmp_path
-    )
+    report = dub.lint_dub_script({"start": 0, "zh": "x"}, duration=5.0)
 
     assert report["verdict"] == "FAIL"
     assert report["blocking"] is True
     assert report["errors"][0]["code"] == "script_not_a_list"
-    assert (tmp_path / "dub_lint.json").exists()
     # build_dub_review must also tolerate the non-list input without raising
     review = dub.build_dub_review(
-        {"start": 0, "zh": "x"}, {"duration": 5.0, "windows": []}
+        {"start": 0, "zh": "x"}, {"duration": 5.0, "windows": []}, report
     )
     assert review["verdict"] == "FAIL"
 
@@ -196,14 +193,14 @@ def test_dub_review_maps_lint_to_revise_edits():
         "duration": 3.0,
         "windows": [{"start": 0.0, "end": 3.0, "text": "hello"}],
     }
-    review = dub.build_dub_review(script, transcript)
+    review = dub.build_dub_review(script, transcript, dub.lint_dub_script(script, transcript["duration"]))
 
     assert review["verdict"] == "REVISE"
     assert review["checks"]["faithful_to_source"] == "needs_agent_review"
     assert review["highest_return_edits"]
 
 
-def test_dub_lint_reports_blocking_script_errors(tmp_path):
+def test_dub_lint_reports_blocking_script_errors():
     """dub_lint.json deterministically blocks empty, overlapping, and out-of-range lines."""
     script = [
         {"start": 0.0, "end": 1.0, "zh": "第一句。"},
@@ -211,7 +208,7 @@ def test_dub_lint_reports_blocking_script_errors(tmp_path):
         {"start": 6.5, "end": 7.2, "zh": "越界句。"},
     ]
 
-    report = dub.lint_dub_script(script, duration=6.0, work_dir=tmp_path)
+    report = dub.lint_dub_script(script, duration=6.0)
 
     assert report["verdict"] == "FAIL"
     assert report["blocking"] is True
@@ -220,8 +217,6 @@ def test_dub_lint_reports_blocking_script_errors(tmp_path):
         "overlap",
         "time_out_of_range",
     ]
-    persisted = json.loads((tmp_path / "dub_lint.json").read_text(encoding="utf-8"))
-    assert persisted == report
 
 
 def test_dub_stage_lint_and_review_write_artifacts(tmp_path, capsys):
@@ -271,7 +266,7 @@ def test_dub_render_stops_before_tts_when_lint_blocks(monkeypatch, tmp_path):
     monkeypatch.setattr(dub, "_clone_tts", fail_if_called)
 
     with pytest.raises(SystemExit, match="dub_lint.json"):
-        dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
+        dub.stage_render(tmp_path / "video.mp4", tmp_path)
 
 
 def _write_test_wav(path, *, seconds=0.1):
@@ -329,7 +324,7 @@ def test_dub_render_reuses_matching_voiceclone_cache(monkeypatch, tmp_path):
         ),
     )
 
-    dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
+    dub.stage_render(tmp_path / "video.mp4", tmp_path)
 
     manifest = json.loads((tmp_path / "dub_manifest.json").read_text(encoding="utf-8"))
     assert manifest["lines"][0]["tts_cache"] == "hit"
@@ -349,7 +344,7 @@ def test_dub_render_invalidates_voiceclone_cache_when_text_changes(
 
     monkeypatch.setattr(dub, "_clone_tts", clone)
 
-    dub.stage_render(tmp_path / "video.mp4", tmp_path, ref_start=0.0, ref_dur=2.0)
+    dub.stage_render(tmp_path / "video.mp4", tmp_path)
 
     assert calls == ["新台词"]
     manifest = json.loads((tmp_path / "dub_manifest.json").read_text(encoding="utf-8"))

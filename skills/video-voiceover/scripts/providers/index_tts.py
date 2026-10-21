@@ -89,15 +89,6 @@ def synthesize_configured(text, output_path, config):
     )
 
 
-def valid_cached_receipt(cache_data, config):
-    """A cached index-tts segment must carry the receipt of a request for the current voice."""
-    receipt = cache_data.get("provider_receipt")
-    return isinstance(receipt, dict) and receipt == {
-        "provider": "index-tts",
-        "requested_voice": config["index_tts_voice"],
-    }
-
-
 def _discard_http_error_body(error):
     """Drain a bounded slice and close; the body is never surfaced (it may echo private URLs)."""
     with contextlib.suppress(Exception):

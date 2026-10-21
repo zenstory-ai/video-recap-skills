@@ -17,7 +17,6 @@ sys.path.insert(
 
 from lib import CONFIG, file_identity  # noqa: E402
 import briefing.context as brief_context  # noqa: E402
-import briefing.inputs as brief_inputs  # noqa: E402
 import briefing.timeline as brief_timeline  # noqa: E402
 from briefing.builder import build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
@@ -31,12 +30,14 @@ from briefing.inputs import (  # noqa: E402
     _load_mimo_overview_for_brief,
     _load_optional_stage_status,
 )
-from narration_lint import lint_narration  # noqa: E402
+from timeline_fusion import _build_timeline_fusion  # noqa: E402
+from vlm import mimo_video_settings  # noqa: E402
 
 SCENES = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
 ASR = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
 SILENCE = [{"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False}]
 INDEX_HEADING = "Understanding index (from consolidate.py)"
+NO_ASR_EVIDENCE = {"status": "MISSING_OR_STALE", "glossary_modifications": None}
 
 
 def _write_index_with_meta(work_dir, index, scenes=SCENES, **meta_overrides):
@@ -57,6 +58,7 @@ def _write_index_with_meta(work_dir, index, scenes=SCENES, **meta_overrides):
 
 
 def _brief_text(tmp_path, **kwargs):
+    kwargs.setdefault("asr_evidence", NO_ASR_EVIDENCE)
     return build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path, **kwargs).read_text(
         encoding="utf-8"
     )
@@ -80,13 +82,6 @@ def test_brief_without_consolidation_uses_raw_asr_and_writes_sidecars(monkeypatc
     monkeypatch.setitem(CONFIG, "asr_chunk_min_chars", 5)
     monkeypatch.setitem(CONFIG, "asr_chunk_max_chars", 12)  # == len(ASR text): max flush
     text = _brief_text(tmp_path, style="纪实复盘")
-    requirements = json.loads(
-        (tmp_path / "deslop_qc_requirements.json").read_text(encoding="utf-8")
-    )
-    assert requirements == {
-        "schema_version": 1,
-        "style_card_required": False,
-    }
     assert INDEX_HEADING not in text
     for leaked in ["范闲", "监察院", "五竹", "京都"]:  # no hardcoded example entities
         assert leaked not in text
@@ -342,9 +337,7 @@ def test_brief_ignores_stale_mimo_overview_when_disabled_or_chunk_mismatch(
                     }
                 ],
                 "settings": {
-                    "model": CONFIG.get("mimo_video_model")
-                    or CONFIG.get("mimo_model")
-                    or CONFIG.get("vlm_model"),
+                    "model": CONFIG["mimo_video_model"],
                     "mimo_video_fps": CONFIG.get("mimo_video_fps", 2.0),
                     "mimo_media_resolution": CONFIG.get(
                         "mimo_media_resolution", "default"
@@ -395,6 +388,7 @@ def _set_brief_mode(monkeypatch, edit_mode, target_duration="", context_info="")
 
 
 def _agent_brief_text(scenes, asr, silence, duration, work_dir, **kwargs):
+    kwargs.setdefault("asr_evidence", NO_ASR_EVIDENCE)
     return build_agent_brief(scenes, asr, silence, duration, work_dir, **kwargs).read_text(
         encoding="utf-8"
     )
@@ -620,12 +614,15 @@ def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
             "content": "这是 MiMo 对分片汇总的故事线概览。",
         }
     ]
+    video = tmp_path / "video.mp4"
+    video.write_bytes(b"video")
     overview = {
         "input": "scene_chunks",
         "content": "这是 MiMo 对分片汇总的故事线概览。",
         "reasoning_content": "内部推理",
         "chunks": chunks,
-        "settings": brief_inputs._mimo_video_settings(),
+        "source_video_identity": file_identity(video),
+        "settings": mimo_video_settings(),
     }
     _write_json(tmp_path / "mimo_video_overview.json", overview)
     _set_brief_mode(monkeypatch, "full")
@@ -636,6 +633,7 @@ def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
         [],
         3.0,
         tmp_path,
+        mimo_overview_video_path=video,
     )
     assert "MiMo scene-chunk video overview" in text
     assert "这是 MiMo 对分片汇总的故事线概览。" in text
@@ -879,23 +877,6 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
     assert output_anchors["sentence_anchors"][0]["pause_start"] == 3.88
     assert output_anchors["sentence_anchors"][0]["source_pause_start"] == 103.88
 
-    lint = lint_narration(
-        [
-            {
-                "start": 2.0,
-                "end": 6.0,
-                "narration": "剪后时间中途切入。",
-                "overlaps_speech": True,
-            },
-        ],
-        mode="cut",
-        work_dir=tmp_path,
-    )
-    issue = next(
-        item for item in lint["errors"] if item["code"] == "interrupts_source_sentence"
-    )
-    assert issue["suggested_start"] == 4.0
-
 
 def test_cut_output_anchors_map_to_every_repeated_source_range(tmp_path):
     plan = {
@@ -965,4 +946,40 @@ def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
             [],
             120.0,
             tmp_path,
+            asr_evidence=NO_ASR_EVIDENCE,
         )
+
+
+def test_timeline_fusion_aligns_scenes_dialogue_and_quiet_slots():
+    fusion = _build_timeline_fusion(
+        [
+            {
+                "scene_id": 0,
+                "start": 0.0,
+                "end": 10.0,
+                "description": "对峙",
+                "frame_facts": {"1.0": ["看门"]},
+            }
+        ],
+        [
+            {"start": 2.0, "end": 4.0, "text": "你到底是谁"},
+            {"start": 8.0, "end": 12.0, "text": "跨场对白"},
+        ],
+        [
+            {"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False},
+            {"start": 5.0, "end": 7.0, "duration": 2.0, "has_speech": False},
+            {"start": 9.0, "end": 9.5, "duration": 0.5, "has_speech": True},
+        ],
+    )
+
+    item = fusion[0]
+    assert item["dialogue_overlap_seconds"] == 4.0
+    assert [seg["text"] for seg in item["dialogue_segments"]] == [
+        "你到底是谁",
+        "跨场对白",
+    ]
+    assert [(slot["start"], slot["end"]) for slot in item["narration_slots"]] == [
+        (0.0, 1.0),
+        (5.0, 7.0),
+    ]
+    assert item["frame_facts"] == {"1.0": ["看门"]}

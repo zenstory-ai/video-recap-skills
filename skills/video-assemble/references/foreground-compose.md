@@ -86,7 +86,7 @@ run report records each sequence's directory and validated `frame_count`. Legacy
 
 ## Base and output invariants
 
-The first version accepts one selected `v:0` H264, zero-origin CFR, YUV420P,
+Composition accepts only one selected `v:0` H264, zero-origin CFR, YUV420P,
 BT.709/TV-range base and adopted AAC `a:0`. Declared fps, canvas, and frame count are
 checked independently against actual decoded frame PTS. Picture and audio intervals
 must satisfy the narrow `pair_media` timing contract.
@@ -114,5 +114,4 @@ not infer semantic truth from pixels or claim that dialogue/subtitle duplication
 absent. A separate producer/reviewer must establish that evidence.
 
 Every run reports `direct_listening` and `normal_speed_review` as `NOT_CHECKED` and
-`release_approved` as false. Pixel validation and deterministic rendering are not
-commercial-quality or release approval.
+`release_approved` as false.

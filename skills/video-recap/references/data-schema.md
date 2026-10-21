@@ -105,14 +105,16 @@
 ```json
 {
   "schema_version": 2,
+  "artifact": "speech_boundary_anchors_output.json",
   "timeline": "cut_output",
+  "clip_plan_identity": {"size": 1834, "mtime_ns": 1758326400000000000},
   "sentence_anchors": [{"time": 4.0, "pause_start": 3.8, "confidence": "high"}],
   "speech_spans": [{"start": 0.0, "end": 3.8}],
   "quiet_windows": [{"start": 3.8, "end": 4.1}]
 }
 ```
 
-该文件必须不早于当前 `clip_plan_validated.json`（按修改时间判断）。缺失、过期或畸形的
+`clip_plan_identity` 必须等于当前 `clip_plan_validated.json` 的 `{size, mtime_ns}`，否则视为过期。缺失、过期或畸形的
 output 证据一律 fail closed，不能回退到原片时钟或信任 Agent 写入的
 `overlaps_speech=false`。多来源剪辑的每条映射记录还保留 `source_id` 和原片起止时间。
 
@@ -142,7 +144,7 @@ output 证据一律 fail closed，不能回退到原片时钟或信任 Agent 写
 
 ## narration.json
 
-Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated cut 模式（`video-recap --edit-mode cut`）下，第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` 必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）；不存在原视频时间→输出时间的旁白映射产物：
+Agent 撰写的解说词。full 模式下使用原视频时间；cut 模式（`video-recap --edit-mode cut`）第二次暂停时已经先剪出 `edited_source.mp4`，因此 `narration.json` **必须直接使用剪后成片的 OUTPUT 时间轴（0..成片总时长）**：
 
 ```json
 [
@@ -152,7 +154,7 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
 
 ## narration_lint.json
 
-`--step script` 或续跑验证 `narration.json` 时生成的预检结果。它检查写稿、时间安全和解说覆盖。`metrics` 为 full 模式下的诊断指标（cut 模式为空对象），不是要求命中某个旁白比例的创作配额；低覆盖 warning 应回到 `visual_audio_board.json` 检查是否为有意的原声/沉默选择。
+video-script 的 validate.py（recap 续跑时自动调用）验证 `narration.json` 时生成的预检结果。它检查写稿、时间安全和解说覆盖。`metrics` 为 full 模式下的诊断指标（cut 模式为空对象），不是要求命中某个旁白比例的创作配额；低覆盖 warning 应回到 `visual_audio_board.json` 检查是否为有意的原声/沉默选择。`deslop_qc` 内嵌同一份 `deslop_qc.json` 报告，其 blocker 同时并入 `errors`。
 
 ```json
 {
@@ -161,12 +163,14 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
   "warning_count": 1,
   "metrics": {
     "segment_count": 12,
+    "timeline_span_seconds": 90.0,
+    "narrated_seconds": 61.2,
     "narration_coverage": 0.68,
-    "narration_seconds": 61.2,
-    "timeline_seconds": 90.0,
-    "avg_block_chars": 48,
-    "original_block_count": 4
+    "coverage_target": 0.7,
+    "original_block_count": 4,
+    "avg_block_chars": 48.0
   },
+  "deslop_qc": {"ok": true, "blocker_count": 0, "advisory_count": 0, "blockers": [], "advisories": []},
   "errors": [
     {"level": "error", "index": 2, "code": "time_overlap", "message": "Segment overlaps the previous narration segment"}
   ],
@@ -176,19 +180,19 @@ Agent 撰写的解说词。full 模式下使用原视频时间；**orchestrated 
 }
 ```
 
-常见 code：`invalid_time`、`empty_narration`、`time_overlap`、`outside_clip_plan`、`over_budget`、`incomplete_sentence`、`slot_too_short`、`under_narrated`、`over_narrated`、`fragmented_beats`、`no_original_blocks`。
+常见 code：`invalid_time_range`、`empty_narration`、`time_overlap`、`over_budget`、`incomplete_sentence`、`slot_too_short`、`interrupts_source_sentence`、`under_narrated`（覆盖率偏低）、`no_original_blocks`（覆盖率过高，原声没有喘息）、`no_original_breaks`（没有足够长的原声留白块）、`fragmented_beats`，以及 `deslop_qc` 的 blocker（如 `em_dash`、`placeholder_leakage`）。
 
 ## recap_story_plan.json / visual_audio_board.json（Agent 创作工作产物）
 
 这两个 JSON 是 skill 层的创作决策记录：前者保存导演意图、备选剪辑假设、POV/主线和 change-based beats；后者保存每拍的画面/表演选择、入点/出点、原声锚点、`audio_owner` 与 `narration_job`。完整字段与工作流见 video-script 技能的 `creative-editing-playbook.md`。
 
-CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解说评审在文件存在时读取它们，Agent 则用它们保证 cut、旁白和声音选择没有偏离同一个创作意图。
+CLI 不以它们作为渲染硬门禁；建议型解说评审在文件存在时读取它们，Agent 则用它们保证 cut、旁白和声音选择没有偏离同一个创作意图。
 
 ## style_card.json（Agent 撰写，可选/按 brief 要求）
 
-`style_card.json` 是表达层契约：由 Agent 根据 `--style`、`--context`、素材证据、ASR 和用户偏好信号综合撰写。`--style` 是 freeform verbatim guidance（原样自由文本指导），不是枚举、preset、switch，也不是一组可穷举风格名；不要把它翻译成固定档位。它是当前版本的活动契约：用户对声音、节奏、字幕阅读或禁忌提出新反馈后，更新原文件并移除过期偏好，不要只改 `narration.json`。
+`style_card.json` 是表达层契约：由 Agent 根据 `--style`、`--context`、素材证据、ASR 和用户偏好信号综合撰写。它是活动契约：用户对声音、节奏、字幕阅读或禁忌提出新反馈后，更新原文件并移除过期偏好，不要只改 `narration.json`。
 
-这个文件记录声音、节奏、回收意图和证据支撑的表达判断；字段可以随项目增减，下游只把它当 JSON object 读取，不要求固定键名。它不负责标题、封面、首句承诺或卖点包装。
+这个文件记录声音、节奏、回收意图和证据支撑的表达判断；字段可以随项目增减，下游只把它当 JSON object 读取，不要求固定键名。它不负责标题、封面、首句承诺或卖点包装。缺少该文件时 `deslop_qc` 只记一条 `missing_style_card` advisory。
 
 ```json
 {
@@ -217,47 +221,29 @@ CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解�
 }
 ```
 
-## deslop_qc_requirements.json（工具/brief 生成的运行契约）
-
-`deslop_qc_requirements.json` 是 tool/brief generated run contract：工具或 brief 生成本次运行的 QC 要求，供 `deslop_qc` 读取，不由 Agent 手写。字段为 `schema_version` 与 `style_card_required`。
-
-`style_card_required` 默认 `false`（advisory）：缺少 `style_card.json` 只是 warning，不阻断出片。将来的 opt-in 运行可把它设为 `true`，让 `style_card.json` 成为硬性要求——`deslop_qc` 只读这个字段判断缺少 `style_card.json` 是否是 blocker，不扫描 `agent_narration_brief.md` 的 prompt wording 来推断。如果 requirements 文件缺失或损坏，按 legacy/migration advisory 处理，不作为 hard failure。
-
-该契约不改变 `--style`：`--style` 仍是 freeform verbatim guidance，不增加固定风格档位。它也不改变 `deslop_qc` 边界：仍然是 report-only，不是 AIGC detector，不自动改写。
-
-最小示例：
-
-```json
-{
-  "schema_version": 1,
-  "style_card_required": false
-}
-```
-
 ## deslop_qc.json（CLI 生成，报告型 QC）
 
-`deslop_qc.json` 由本地 deterministic scanner 生成，Agent 不手写。它只是 report-only QC：不是 AIGC detector，不判断文本是不是 AI 写的，不会自动改写。修改仍由 Agent/人工根据报告回到 `narration.json`、`style_card.json` 或字幕源里处理。
+`deslop_qc.json` 由本地确定性扫描器生成，Agent 不手写。它只报告可读性风险，不是 AIGC detector，不改写文本；修改由 Agent/人工回到 `narration.json`、`style_card.json` 或字幕源里处理。
 
 报告分两层：
 
-- `blockers`：客观阻断项，会并入 `narration_lint.json` 的 error，例如 requirements 要求但缺少/损坏 `style_card.json`、破折号、占位符泄漏。
-- `advisories`：建议项，只提示可读性/口语化风险，例如模板化“不是……而是……”转折、套话密度、抽象总结词、解释链、比喻标记、过长段落；它们不自动阻断，也不自动改写。
+- `blockers`：客观阻断项，会并入 `narration_lint.json` 的 error，例如破折号、占位符泄漏。
+- `advisories`：建议项，只提示可读性/口语化风险，例如模板化“不是……而是……”转折、套话密度、抽象总结词、解释链、比喻标记、过长段落、缺少 `style_card.json`；它们不阻断。
 
 ```json
 {
   "ok": false,
   "contract": "Local readability/QC report only: this is not an AIGC detector, does not claim AI-generation accuracy, and never rewrites text. Corrections remain human/agent rewrite work.",
   "scanner": "deslop_qc.py",
-  "style_card_required": true,
   "blocker_count": 1,
   "advisory_count": 1,
   "blockers": [
-    {"severity": "blocker", "code": "missing_style_card", "source": "style_card", "index": null, "message": "style_card.json is required by this expression/packaging run but is missing"}
+    {"severity": "blocker", "code": "em_dash", "source": "narration", "index": 3, "message": "破折号（—/——）不得出现在 narration/original_subtitles 中", "matches": ["——"]}
   ],
   "advisories": [
-    {"severity": "advisory", "code": "cliche_density", "source": "narration", "index": null, "message": "套话/高频抽象词偏密，建议换成具体行动、选择和后果"}
+    {"severity": "advisory", "code": "cliche_density", "source": "narration", "index": null, "message": "套话/高频抽象词偏密，建议换成具体行动、选择和后果", "count": 5}
   ],
-  "metrics": {"segments_scanned": 12, "text_units": 860, "sentence_count": 38}
+  "metrics": {"segments_scanned": 12, "text_units": 860, "sentence_count": 38, "cliche_count": 5, "abstract_count": 2, "reasoning_marker_count": 1, "metaphor_marker_count": 2, "connective_count": 14}
 }
 ```
 
@@ -376,13 +362,13 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
     artifacts/understanding_index.json
 ```
 
-`materials_index.jsonl` 每次保存追加一行，字段包括 `schema_version`, `event`, `material_id`, `source_name`, `source_path`, `source_video_identity`, `summary`, `tags`, `material_dir`, `updated_at`；`material.json` 另外记录分析 `settings` 字典与每个产物的 `bytes`。当前权威状态始终以 `materials/<material_id>/material.json` 为准。MVP 只承诺 `grep -R "关键词" <library>` 这类文件检索；没有 DB、embedding 或语义搜索。
+`materials_index.jsonl` 每次保存追加一行，字段包括 `schema_version`, `event`, `material_id`, `source_name`, `source_path`, `source_video_identity`, `summary`, `tags`, `material_dir`, `updated_at`；`material.json` 另外记录分析 `settings` 字典与每个产物的 `bytes`。当前权威状态始终以 `materials/<material_id>/material.json` 为准。只支持 `grep -R "关键词" <library>` 这类文件检索；没有 DB、embedding 或语义搜索。
 
 保存时会对凭证形态（`tp-`/`sk-`/`gh*_`/`AKIA`/JWT 与 `KEY=VALUE` 赋值）和凭证命名的 JSON key 做脱敏，但这只是**尽力而为**的兜底，不是保证：陌生格式的密钥仍可能漏过。请从源头避免把密钥写进分析产物——key 从环境变量/`.env` 读取，不需要落进 scenes/ASR/VLM/summary 等 JSON。
 
 ## original_subtitles.json / user_subtitles.{json,srt,ass}（可选，原声留白字幕）
 
-解说块之间的原声留白会把【原声台词】烧成字幕（assemble 阶段用 `「」` 包裹以区分解说）。来源优先级（高→低）：
+烧录字幕时，assemble 只在两种情况下把解说块之间原声留白里的【原声台词】烧成字幕（用 `「」` 包裹以区分解说）：`work_dir` 里有 `user_subtitles.*`，或原片字幕遮罩在留白处也生效（不透明且 `SOURCE_SUBTITLE_MASK_TIMING=all`）。默认两者都不满足，留白不烧字幕。`SUBTITLE_ORIGINAL_IN_GAPS=0` 关闭这一功能。来源优先级（高→低）：
 
 1. **`work_dir/user_subtitles.json`**（用户自带，最准）— 数组 `[{start,end,text}]` 默认按**成片 OUTPUT** 时间轴直接使用；也可写成 `{"timeline": "source"|"output", "lines": [...]}`，`source` 表示按**原片**时间轴给出，由 assemble 依 `clip_plan_validated.json` 映射到成片。
 2. **`work_dir/user_subtitles.srt` / `.ass`**（用户自带）— 默认按**原片**时间轴解析后映射到成片。
@@ -423,11 +409,11 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 }
 ```
 
-> `character_details`、`plot_arcs`、`cultural_notes` 为（可选，新增）字段。仅含 `synopsis`、`characters`、`worldbuilding`、`episode_context` 四个原始字段的旧 JSON 仍然有效。
+`character_details`、`plot_arcs`、`cultural_notes` 可选。
 
 ## narration_review.json
 
-解说评审阶段输出 LLM-as-judge 结果。旧字段 `verdict/summary/findings` 仍然有效；新增一份 **advisory** 的内容效果 scorecard 与改稿清单。**scorecard 不改变 verdict、也不作硬门禁**——硬门禁仍是 `findings` 里的 error（事实矛盾/残句）经 `--require-narration-review` 严格模式拦截。`verdict` 词表为 `PASS|REVISE|FAIL`，`OK` 作为旧值的兼容别名。
+解说评审阶段输出 LLM-as-judge 结果：`verdict/summary/findings`，以及一份 **advisory** 的内容效果 scorecard 与改稿清单。**scorecard 不改变 verdict、也不作硬门禁**——硬门禁是 `findings` 里的 error（事实矛盾/残句）经 `--require-narration-review` 严格模式拦截。`verdict` 词表为 `PASS|REVISE|FAIL`，`OK` 等同 `PASS`。
 
 ```json
 {
@@ -436,7 +422,8 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
   "scorecard": {
     "promise_match": 4, "hook_3s": 4, "first_15s_delivery": 4, "spine_clarity": 4,
     "stakes_escalation": 4, "information_gain": 4, "spoken_language": 4, "sentence_brevity": 4,
-    "tts_pacing": 4, "grounding": 4, "original_audio_use": 4, "subtitle_readability": 4
+    "tts_pacing": 4, "grounding": 4, "original_audio_use": 4, "subtitle_readability": 4,
+    "ending_payoff": 4, "style_consistency": 4, "ai_flavor": 4, "packaging_consistency": 4
   },
   "hook_candidates_review": [{"candidate": "首句", "type": "suspense", "score": 4, "keep": true}],
   "retention_risk_points": [{"time": "00:28", "risk": "信息重复可能掉人", "fix": "删掉复述画面的句子"}],
@@ -448,7 +435,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 }
 ```
 
-> 若 `work_dir` 提供了 `packaging_plan.json` / `recap_story_plan.json` / `visual_audio_board.json`（可选、Agent 撰写），review 会把它们并入评估上下文；缺失时 review 仅基于解说与画面/对白证据评分，行为不受影响。
+> 若 `work_dir` 提供了 `packaging_plan.json` / `recap_story_plan.json` / `visual_audio_board.json`（可选、Agent 撰写），review 会把它们并入评估上下文；缺失时只基于解说与画面/对白证据评分。
 
 ## tts_meta.json（partial 失败可见性）
 
@@ -468,7 +455,7 @@ CLI 校验 `clip_plan.json` 后写出，额外包含输出时间轴：
 
 `voice` 记录本次实际使用的音色：`{"provider": "mimo-tts", "model": "mimo-v2.5-tts", "voice_id": "冰糖", "reference": null}`。
 用参考音频克隆时 `voice_id` 为 `null`，`reference` 为 `{path, size, mtime_ns}`；Fish Audio 的 `voice_id` 是 reference id，
-index-tts 的是 `INDEX_TTS_VOICE`。旧 `tts_meta.json` 没有这个字段时按只知道 `engine` 处理。
+index-tts 的是 `INDEX_TTS_VOICE`。`tts_meta.json` 没有 `voice` 时，`resource_lock.json` 只按 `engine` 记录供应商。
 
 ## resource_lock.json（本次运行用到的资源）
 
@@ -533,13 +520,13 @@ Dub 模式下，`dub_script.json` 在 voiceclone **之前**先经过 determinist
 ```
 
 > CLI：`dub.py --stage lint|review`（无需 video）、`dub.py --print-schema` 打印以上全部 dub artifact 契约；`--stage render` 会在克隆前自动写 `dub_lint.json` / `dub_review.json`，lint 非 PASS 即中止。
-> 最终 `dub_<name>.mp4` 显式输出 48 kHz AAC；不能沿用 `loudnorm` 内部的 96 kHz 分析采样率。
+
 ## shift-left QC artifacts
 
-`preflight_qc.json`、`final_qc.json`、`golden_eval.json`、`mimo_qc.json` 共用最小 QC 契约；stage 仅允许 `pre_cut` / `post_cut` / `pre_tts` / `post_tts` / `pre_assemble` / `post_render` / `golden`，其中 `mimo_qc.json` 是 artifact 而不是 stage。详见 `shift-left-qc-schema.md`。
+`preflight_qc.json`、`final_qc.json`、`golden_eval.json`、`mimo_qc.json` 共用最小 QC 契约，详见 `shift-left-qc-schema.md`。
 
-`recap.py` 可通过 `--mimo-qc pre-assemble|post-render|both`（默认 `off`）在组装前和/或成片后写 `mimo_qc.json`。每个 stage 最多一次 live request；报告的 `metadata.cache_input`（证据文件的 kind/bytes/mtime_ns、模型、提示与抽帧元数据）与本次完全相等时复用上次结果，`--mimo-qc-refresh` 可刷新。`post_render` 最多临时抽取 6 张、最长边 768px 的 JPEG；base64 只进入请求，不写进 artifact。多 stage 报告聚合在 `metadata.stages`，状态为 `completed` / `cached` / `unavailable` / `failed`，任何状态都不阻断、也不自动修复。关闭功能会清理旧 `mimo_qc.json`，避免陈旧建议被误认为本轮结果。
+`recap.py` 可通过 `--mimo-qc pre-assemble|post-render|both`（默认 `off`）在组装前和/或成片后写 `mimo_qc.json`。每个 stage 最多一次 live request；报告的 `metadata.cache_input`（证据文件的 kind/bytes/mtime_ns、模型、提示与抽帧元数据）与本次完全相等时复用上次结果，`--mimo-qc-refresh` 可刷新。`post_render` 最多临时抽取 6 张、最长边 768px 的 JPEG；base64 只进入请求，不写进 artifact。多 stage 报告聚合在 `metadata.stages`，状态为 `completed` / `cached` / `unavailable` / `failed`。`--mimo-qc off` 的运行会删除 work_dir 里已有的 `mimo_qc.json`。
 
 QC 证据把 `source_asr` 与 `generated_subtitles` 分开：前者只用于源事实/原声时序，后者是本轮旁白派生字幕，不能反过来充当事实证据。多视频项目从 `multi_source_manifest.json` 指向的逐源 work dir 汇集 ASR；`cut_output` 解说评审同样按 `source_id` 映射逐源 VLM/ASR，避免项目根目录没有单一 ASR 文件时产生空证据。
 
-渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再运行可选 MiMo 提示，最后写 `final_qc.json` 和 `golden_eval.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json`、`mimo_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。MiMo 和其他 non-deterministic finding 永远不能成为 blocker；客观佐证必须由 deterministic producer 另发 finding。`golden_eval.json` 默认要求 `final_qc.json.ok=true`，也可用 golden fixture 做简单的时长、codec 和必需 artifact 断言。所有 QC metadata/evidence 写入前都经过 `qc_contract.redact_secrets`：secret-looking key/value 会被替换，URL userinfo/query/fragment 会被移除，仅保留必要 host/path 诊断信息。
+渲染后，`recap.py` 先更新 `preflight_qc.json` 的 `post_render` stage，再运行可选 MiMo 提示，最后写 `final_qc.json` 和 `golden_eval.json`。`final_qc.json` 汇总最终 mp4、`assembly_manifest.json`、`assembly_qc.json`、`visual_qc.json`、`preflight_qc.json`、`mimo_qc.json` 的本地元数据；缺失/空成片、ffprobe 不可用或失败、以及 assembly/visual QC 的客观 blocker 会进入 deterministic blockers。`golden_eval.json` 默认要求 `final_qc.json.ok=true`，也可用 golden fixture 做简单的时长、codec 和必需 artifact 断言。

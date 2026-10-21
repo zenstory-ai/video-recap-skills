@@ -55,26 +55,15 @@ _foreign_under_narration_volume = 0.05  # original volume under narration when s
 
 CONFIG = {
     "fade_ms": env_int("FADE_MS", 120, minimum=0),  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
-    "ducking_mode": "fixed",  # fixed | sidechaincompress | none
-    "ducking_threshold": 0.15,
-    "ducking_ratio": 3,
-    "ducking_attack": 10,
-    "ducking_release": 300,
-    "ducking_level_sc": 2.0,
-    "ducking_makeup": 1.2,
     "ducking_narr_weight": 1.5,
     "ducking_orig_volume": env_float("DUCKING_ORIG_VOLUME", 0.3, minimum=0.0),  # 解说时原声基准音量
-    # Derived report of the FOREIGN_SOURCE_AUDIO knob this skill implements: it selects the
-    # ducking volumes below. Declared so callers can see which policy is in effect.
-    "foreign_source_audio": _foreign_source_audio,
     "zone_ducking_volume": env_float("ZONE_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.12, minimum=0.0),  # 解说时原声压低到的音量
     "idle_orig_volume": env_float("IDLE_ORIG_VOLUME", 1.0, minimum=0.0),  # 解说块之间的"原声块"音量：默认满音量(1.0)，让精彩原声整段放出来，不被压低（用户要求解说成块、原声也成块）
     "duck_fade_seconds": env_float("DUCK_FADE_SECONDS", 0.3, minimum=0.0),  # 解说块/原声块切换的淡入淡出(秒)，略放宽到 0.3 让满音量↔压低的过渡更顺
     "duck_bridge_seconds": env_float("DUCK_BRIDGE_SECONDS", 1.5, minimum=0.0),  # 仅把间隔小于此值的相邻解说窗口并成一段压低；超过则视为作者特意留的"原声块"，原声放回满音量。默认 1.5s：解说块内部连续压低，块与块之间的留白放出满音量原声。该值只控制短间隔合并，不设定旁白/原声配额。调大→更连续铺底、原声块更少；调小→更碎
     "bgm_path": os.environ.get("BGM_PATH", "").strip(),  # 背景音乐文件(可选)，留空则不加 BGM
-    "source_video": os.environ.get("SOURCE_VIDEO", "").strip(),  # 剪辑模式下的原始视频(可选)，用于时间线/剪映导出引用原片片段
-    "source_video_explicit": False,  # 仅 assemble.py --source-video 显式传入时为 True；环境变量 SOURCE_VIDEO 不算显式
+    "source_video": "",  # 剪辑模式下的原始视频，仅由 assemble.py --source-video 设置，用于时间线/剪映导出引用原片片段
     "export_jianying": env_bool("EXPORT_JIANYING", False),  # 渲染后可选导出剪映草稿(默认关；与核心解耦)
     "jianying_draft_dir": os.environ.get("JIANYING_DRAFT_DIR", "").strip(),  # 剪映草稿输出父目录(留空=work_dir)
     "jianying_bundle_media": env_bool("JIANYING_BUNDLE_MEDIA", True),  # 默认开：macOS 剪映沙箱读不到外部路径，须把素材拷进草稿目录

@@ -46,7 +46,7 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
     try:
         if active:
             report = narration_binding.finalize_binding(
-                binding, tts_segments,
+                binding,
                 (work_dir / "narration.wav" if explicit_mix is not None else narration_wav),
                 published_output, rendered_output=render_output,
             )
@@ -62,9 +62,7 @@ def publish_render(*, work_dir, binding, explicit_mix, tts_segments, narration_w
                 mix_binding_written = True
                 mix_record = {"path": str(mix_binding_path.resolve()), "status": "FINALIZED"}
         elif binding:
-            narration_binding.finalize_binding(
-                binding, tts_segments, narration_wav, render_output
-            )
+            narration_binding.finalize_binding(binding, narration_wav, render_output)
             narration_record = current_narration_binding(work_dir, audio_mode)
             mix_record = None
         else:

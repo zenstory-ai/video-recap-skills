@@ -259,9 +259,6 @@
     "SOURCE_SUBTITLE_MASK_TIMING": {
       "classification": "value"
     },
-    "SOURCE_VIDEO": {
-      "classification": "value"
-    },
     "SPEECH_DUCKING_VOLUME": {
       "classification": "value"
     },

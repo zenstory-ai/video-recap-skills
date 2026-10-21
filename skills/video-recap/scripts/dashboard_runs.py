@@ -15,7 +15,7 @@ import recap_inspect
 from dashboard_io import (RUN_FILE, dir_of, media_entry, nearest, raw_text,
                           read_json, read_object, unreadable_reason)
 
-# Files cmd_state parses; each must stay under the JSON cap before it is handed over.
+# QC reports shown as cards on the QC view.
 QC_FILES = (
     ("final_qc.json", "成片 QC"),
     ("golden_eval.json", "黄金评估"),
@@ -327,9 +327,3 @@ def run_views(root: Path, rel: str, runs: set) -> dict:
         "stages": _stage_bar(mode, audio_mode, state, views, qc),
         "views": views,
     }
-
-
-def run_brief(root: Path, rel: str, runs: set) -> dict:
-    """The run without its per-stage views, for lists."""
-    full = run_views(root, rel, runs)
-    return {k: v for k, v in full.items() if k not in {"views", "state", "qc"}}

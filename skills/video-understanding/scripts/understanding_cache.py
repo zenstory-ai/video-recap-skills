@@ -6,12 +6,8 @@ from pathlib import Path
 
 from asr_timing_evidence import EVIDENCE_FILENAME, validate_asr_timing_evidence
 from extract import FRAME_TIME_CONVENTION_VERSION
-from lib import CONFIG, log, file_identity, load_prompt
-
-
-from vlm import (
-    _is_mimo_chunk_usable,
-)
+from lib import CONFIG, log, file_identity, optional_file_identity
+from vlm import _is_mimo_chunk_usable, vlm_depth_prompt
 
 
 def _fresh(out, *inputs):
@@ -39,12 +35,6 @@ def _video_input(video_path):
     return {"path": str(Path(video_path).resolve()), **file_identity(video_path)}
 
 
-def _artifact_identity(path):
-    """{size, mtime_ns} of an input artifact, or None when it does not exist."""
-    path = Path(path)
-    return file_identity(path) if path.exists() else None
-
-
 def _stage_cache_valid(artifact_path, expected_meta):
     """A stage output is reusable when it exists, is non-empty, its sidecar equals the
     expected inputs/settings dict, and the output itself is the one the sidecar recorded."""
@@ -68,7 +58,7 @@ def _stage_cache_valid(artifact_path, expected_meta):
 def _write_stage_meta(artifact_path, meta):
     meta_path = _artifact_meta_path(artifact_path)
     payload = dict(meta)
-    payload["artifact"] = _artifact_identity(artifact_path)
+    payload["artifact"] = optional_file_identity(artifact_path)
     meta_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -189,12 +179,12 @@ def _scene_cache_payload(video_path):
         "stage": "scenes",
         "inputs": {"video": _video_input(video_path)},
         "settings": {
-            "scene_threshold": CONFIG.get("scene_threshold"),
-            "scene_junk_filter": CONFIG.get("scene_junk_filter"),
-            "scene_merge_min": CONFIG.get("scene_merge_min"),
-            "scene_junk_dark_luma": CONFIG.get("scene_junk_dark_luma"),
-            "scene_junk_bright_luma": CONFIG.get("scene_junk_bright_luma"),
-            "scene_junk_pixel_ratio": CONFIG.get("scene_junk_pixel_ratio"),
+            "scene_threshold": CONFIG["scene_threshold"],
+            "scene_junk_filter": CONFIG["scene_junk_filter"],
+            "scene_merge_min": CONFIG["scene_merge_min"],
+            "scene_junk_dark_luma": CONFIG["scene_junk_dark_luma"],
+            "scene_junk_bright_luma": CONFIG["scene_junk_bright_luma"],
+            "scene_junk_pixel_ratio": CONFIG["scene_junk_pixel_ratio"],
         },
     }
 
@@ -206,12 +196,12 @@ def _asr_cache_payload(video_path, *, skip_asr=False):
         "inputs": {"video": _video_input(video_path)},
         "settings": {
             "skip_asr": bool(skip_asr),
-            "mimo_asr_api_key_present": bool(CONFIG.get("mimo_asr_api_key")),
-            "mimo_asr_api_url": CONFIG.get("mimo_asr_api_url"),
-            "mimo_asr_model": CONFIG.get("mimo_asr_model"),
-            "mimo_asr_language": CONFIG.get("mimo_asr_language"),
-            "mimo_asr_base64_max_mb": CONFIG.get("mimo_asr_base64_max_mb"),
-            "asr_segment_seconds": CONFIG.get("asr_segment_seconds"),
+            "mimo_asr_api_key_present": bool(CONFIG["mimo_asr_api_key"]),
+            "mimo_asr_api_url": CONFIG["mimo_asr_api_url"],
+            "mimo_asr_model": CONFIG["mimo_asr_model"],
+            "mimo_asr_language": CONFIG["mimo_asr_language"],
+            "mimo_asr_base64_max_mb": CONFIG["mimo_asr_base64_max_mb"],
+            "asr_segment_seconds": CONFIG["asr_segment_seconds"],
         },
     }
 
@@ -242,40 +232,26 @@ def _silence_cache_payload(video_path, asr_json):
         "stage": "silence",
         "inputs": {
             "video": _video_input(video_path),
-            "asr_result": _artifact_identity(asr_json),
+            "asr_result": optional_file_identity(asr_json),
         },
         "asr_meta": _load_json(_artifact_meta_path(asr_json))
         if _artifact_meta_path(asr_json).exists()
         else None,
         "settings": {
-            "silence_noise_threshold": CONFIG.get("silence_noise_threshold"),
-            "silence_min_duration": CONFIG.get("silence_min_duration"),
-            "quiet_window_min": CONFIG.get("quiet_window_min"),
-            "silence_merge_gap": CONFIG.get("silence_merge_gap"),
-            "source_boundary_noise_threshold": CONFIG.get(
-                "source_boundary_noise_threshold"
-            ),
-            "source_boundary_min_pause": CONFIG.get("source_boundary_min_pause"),
-            "source_boundary_max_alignment_error": CONFIG.get(
-                "source_boundary_max_alignment_error"
-            ),
+            "silence_noise_threshold": CONFIG["silence_noise_threshold"],
+            "silence_min_duration": CONFIG["silence_min_duration"],
+            "quiet_window_min": CONFIG["quiet_window_min"],
+            "silence_merge_gap": CONFIG["silence_merge_gap"],
+            "source_boundary_noise_threshold": CONFIG["source_boundary_noise_threshold"],
+            "source_boundary_min_pause": CONFIG["source_boundary_min_pause"],
+            "source_boundary_max_alignment_error": CONFIG["source_boundary_max_alignment_error"],
         },
     }
 
 
 def _vlm_prompt_payload():
     """The exact prompt/context text the VLM stage sends; compared by equality."""
-    prompt = load_prompt("VLM_DEPTH_PROMPT")
-    if not prompt:
-        prompt = (
-            "仔细观察这些视频帧。分两部分输出：\n"
-            "【描述】不超过80字，描述画面中正在发生什么。\n"
-            "【深层分析】不超过120字，分析角色情绪、关系动态、潜台词。"
-        )
-    context = CONFIG.get("context_info", "")
-    if context:
-        prompt = f"已知信息：{context}\n\n{prompt}"
-    return {"prompt_text": prompt, "context_info": context}
+    return {"prompt_text": vlm_depth_prompt(), "context_info": CONFIG["context_info"]}
 
 
 def _vlm_cache_payload(video_path, work_dir, scenes_json, frames):
@@ -284,19 +260,19 @@ def _vlm_cache_payload(video_path, work_dir, scenes_json, frames):
         "stage": "vlm",
         "inputs": {
             "video": _video_input(video_path),
-            "scenes": _artifact_identity(scenes_json),
-            "background_research": _artifact_identity(
+            "scenes": optional_file_identity(scenes_json),
+            "background_research": optional_file_identity(
                 Path(work_dir) / "background_research.json"
             ),
         },
-        "frames": _frame_cache_payload(video_path, CONFIG.get("fps"), frames),
+        "frames": _frame_cache_payload(video_path, CONFIG["fps"], frames),
         "prompt": _vlm_prompt_payload(),
         "settings": {
-            "fps": CONFIG.get("fps"),
-            "vlm_model": CONFIG.get("vlm_model"),
-            "api_url": CONFIG.get("api_url"),
-            "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
-            "mimo_media_resolution": CONFIG.get("mimo_media_resolution"),
+            "fps": CONFIG["fps"],
+            "vlm_model": CONFIG["vlm_model"],
+            "api_url": CONFIG["api_url"],
+            "mimo_disable_thinking": CONFIG["mimo_disable_thinking"],
+            "mimo_media_resolution": CONFIG["mimo_media_resolution"],
         },
     }
 

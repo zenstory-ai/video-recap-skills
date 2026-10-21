@@ -203,6 +203,7 @@ def parse_args(argv=None):
     selfcheck = parser.add_argument_group("自检")
     selfcheck.add_argument("--doctor", action="store_true")
 
+    parser.set_defaults(resolved_project=None, _bound_from_project=frozenset())
     _record_explicit_options(parser)
     args = parser.parse_args(argv)
     args._explicit_options = frozenset(getattr(args, "_explicit_options", ()))

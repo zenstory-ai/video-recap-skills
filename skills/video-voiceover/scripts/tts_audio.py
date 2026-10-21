@@ -1,9 +1,4 @@
-"""Loudness normalization for synthesized TTS blocks.
-
-Split out of voiceover.py to keep that module within the bundle's per-module line
-budget. Dependency-free on purpose (stdlib `wave` + `array` only) so QC and assembly
-can reuse the returned metadata without pulling in the synthesis path.
-"""
+"""Loudness normalization for synthesized TTS blocks (stdlib `wave` + `array` only)."""
 import array
 import math
 import os
@@ -15,11 +10,7 @@ from lib import CONFIG
 
 
 def _normalize_tts_wav_rms(input_wav, output_wav, *, target_rms_dbfs=-20.0, peak_limit=0.98):
-    """Normalize a mono/stereo 16-bit WAV to a target RMS with peak guard.
-
-    This helper is intentionally dependency-free so QC/assembly can reuse the
-    returned metadata even when normalization is applied in a later lane.
-    """
+    """Normalize a mono/stereo 16-bit WAV to a target RMS with peak guard."""
     input_wav = Path(input_wav)
     output_wav = Path(output_wav)
     with wave.open(str(input_wav), "rb") as wf:
@@ -31,10 +22,7 @@ def _normalize_tts_wav_rms(input_wav, output_wav, *, target_rms_dbfs=-20.0, peak
     if sampwidth != 2:
         raise ValueError(f"仅支持 16-bit PCM WAV: {input_wav}")
 
-    # array('h') decodes the whole block in C. The previous per-sample int.from_bytes
-    # comprehension ran three times over the audio (decode, normalize, re-decode the
-    # OUTPUT just to measure it) — about 420ms for a 12s block, times every narration
-    # segment. Same arithmetic, same rounding, one decode.
+    # array('h') decodes the whole block in C, once.
     samples = array.array("h")
     samples.frombytes(data)
     if sys.byteorder != "little":  # wave data is little-endian regardless of host

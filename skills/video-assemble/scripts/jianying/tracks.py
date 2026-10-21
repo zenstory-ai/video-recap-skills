@@ -13,26 +13,25 @@ class TrackBand:
     kind: str
     track_type: str
     layout_order: int
-    description: str
 
 
 SEGMENT_RENDER_INDEX = 2
 
 
 TRACK_LAYOUT_BANDS = {
-    "sound": TrackBand("sound", "audio", 10_000, "sound effects"),
-    "audio": TrackBand("audio", "audio", 20_000, "narration, music, and general audio"),
-    "green_screen": TrackBand("green_screen", "video", 30_000, "green-screen background"),
-    "video": TrackBand("video", "video", 40_000, "base video"),
-    "image": TrackBand("image", "video", 50_000, "image and photo overlays"),
-    "mask": TrackBand("mask", "video", 60_000, "masks"),
-    "effect": TrackBand("effect", "effect", 70_000, "video effects"),
-    "video_effect": TrackBand("video_effect", "effect", 70_000, "video effects"),
-    "face_effect": TrackBand("face_effect", "effect", 70_010, "face effects"),
-    "sticker": TrackBand("sticker", "sticker", 80_000, "stickers"),
-    "subtitle": TrackBand("subtitle", "text", 90_000, "subtitles"),
-    "text": TrackBand("text", "text", 100_000, "plain text"),
-    "text_template": TrackBand("text_template", "text", 110_000, "text templates"),
+    "sound": TrackBand("sound", "audio", 10_000),
+    "audio": TrackBand("audio", "audio", 20_000),
+    "green_screen": TrackBand("green_screen", "video", 30_000),
+    "video": TrackBand("video", "video", 40_000),
+    "image": TrackBand("image", "video", 50_000),
+    "mask": TrackBand("mask", "video", 60_000),
+    "effect": TrackBand("effect", "effect", 70_000),
+    "video_effect": TrackBand("video_effect", "effect", 70_000),
+    "face_effect": TrackBand("face_effect", "effect", 70_010),
+    "sticker": TrackBand("sticker", "sticker", 80_000),
+    "subtitle": TrackBand("subtitle", "text", 90_000),
+    "text": TrackBand("text", "text", 100_000),
+    "text_template": TrackBand("text_template", "text", 110_000),
 }
 
 

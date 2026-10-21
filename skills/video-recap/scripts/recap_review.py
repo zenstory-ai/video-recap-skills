@@ -25,17 +25,16 @@ def review_result_status(work_dir):
     data = json.loads(path.read_text(encoding="utf-8"))
     error_count = sum(1 for finding in data["findings"] if finding["severity"] == "error")
     if data.get("parse_error"):
-        return {"ok": False, "reason": "parse_error", "review": data, "errors": error_count}
+        return {"ok": False, "reason": "parse_error", "errors": error_count}
     if error_count:
         return {
             "ok": False,
             "reason": f"error {error_count}",
-            "review": data,
             "errors": error_count,
         }
     # Strict mode gates only on parse errors or factual error findings. The model's
     # holistic verdict stays advisory because craft-class findings are warnings.
-    return {"ok": True, "reason": "ok", "review": data, "errors": error_count}
+    return {"ok": True, "reason": "ok", "errors": error_count}
 
 
 def clear_narration_review_artifacts(work_dir):

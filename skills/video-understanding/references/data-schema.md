@@ -41,8 +41,8 @@
 ]
 ```
 
-`start/end` 仅表示送入 MiMo ASR 的固定粗分片窗口。该列表为兼容产物，不能据此声称词级
-时间、准确对白边界或静音证明；空 `text` 的原因未知。
+`start/end` 仅表示送入 MiMo ASR 的固定粗分片窗口，不能据此声称词级时间、准确对白边界或
+静音证明；空 `text` 的原因未知。
 
 ## asr_timing_evidence.json
 
@@ -119,6 +119,20 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 
 `has_speech` 标记该窗口是否与检测到的 ASR 语音重叠；下游（pipeline / narration）只把 `has_speech=false` 的窗口当作可放解说的安静窗口。
 
+## speech_boundary_anchors.json
+
+原声句末安全切入点：把 ASR 终止标点的估算时间吸附到短声学停顿（约 0.1–0.5 秒）。下游据此检查旁白入点与剪辑入/出点是否打断原声句子；缺少 `audio.wav` 或 ASR 时 `status` 为 `unavailable`，静音检测失败时为 `failed`。
+
+```json
+{
+  "schema_version": 1,
+  "status": "completed",
+  "sentence_anchors": [
+    {"time": 5.809, "confidence": "high", "text_tail": "带你重走詹姆斯的二十一年。", "pause_start": 5.222, "pause_end": 5.809}
+  ]
+}
+```
+
 ## timeline_fusion.json
 
 由 CLI 在生成 brief 时自动写出。它把 VLM 场景、ASR 对白和静音窗口按时间轴 overlap 合并，减少写稿时手工推断“这一幕有没有对白/能不能插解说”的成本。
@@ -143,22 +157,9 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 ]
 ```
 
-## deslop_qc_requirements.json（工具/brief 生成的运行契约）
+## understanding_index.json
 
-`deslop_qc_requirements.json` 是 tool/brief generated run contract：工具或 brief 生成本次运行的 QC 要求，供 `deslop_qc` 读取，不由 Agent 手写。字段为 `schema_version` 与 `style_card_required`。
-
-`style_card_required` 默认 `false`（advisory）：缺少 `style_card.json` 只是 warning，不阻断出片。将来的 opt-in 运行可把它设为 `true`，让 `style_card.json` 成为硬性要求——`deslop_qc` 只读这个字段判断缺少 `style_card.json` 是否是 blocker，不扫描 `agent_narration_brief.md` 的 prompt wording 来推断。如果 requirements 文件缺失或损坏，按 legacy/migration advisory 处理，不作为 hard failure。
-
-该契约不改变 `--style`：`--style` 仍是 freeform verbatim guidance，不增加固定风格档位。它也不改变 `deslop_qc` 边界：仍然是 report-only，不是 AIGC detector，不自动改写。
-
-最小示例：
-
-```json
-{
-  "schema_version": 1,
-  "style_card_required": false
-}
-```
+默认开启的整理步骤（`--no-consolidate` 关闭）从 `vlm_analysis.json`、ASR 与 `background_research.json` 汇总全片索引，同时写出可读版 `understanding_index.md`，并折入创作简报。顶层字段为 `schema_version`、`characters`、`relationships`、`plot_points`、`entities` 与 `research_glossary`；`research_glossary` 每项带 `support: "context_only"`，只作背景，不是当前画面事实。
 
 ## background_research.json
 
@@ -186,7 +187,7 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 }
 ```
 
-> `character_details`、`plot_arcs`、`cultural_notes` 为（可选，新增）字段。仅含 `synopsis`、`characters`、`worldbuilding`、`episode_context` 四个原始字段的旧 JSON 仍然有效。
+> 所有字段均可选；没查到的字段直接省略。
 
 ## 其他产物
 

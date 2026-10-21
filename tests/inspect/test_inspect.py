@@ -31,7 +31,7 @@ def test_state_full_mode(tmp_path):
         "settings": {"edit_mode": "full"},
     }), encoding="utf-8")
 
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["mode"] == "full"
     assert state["source_video"]["path"] == "/videos/movie.mp4"
     assert state["source_video"]["origin"] == "recap_run_manifest.json"
@@ -44,7 +44,7 @@ def test_state_full_mode(tmp_path):
 def test_state_full_mode_next_pause_is_narration(tmp_path):
     """Full mode without narration.json waits on narration.json."""
     (tmp_path / "scenes.json").write_text("[]", encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["mode"] == "full"
     assert state["next_pause"]["artifact"] == "narration.json"
 
@@ -53,7 +53,7 @@ def test_state_cut_mode_pass1_waits_on_clip_plan(tmp_path):
     """Cut mode is detected from clip_plan_validated.json; before clip_plan.json the next pause
     is clip_plan.json (pass 1)."""
     (tmp_path / "clip_plan_validated.json").write_text(json.dumps({"clips": []}), encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["mode"] == "cut"
     assert state["next_pause"]["artifact"] == "clip_plan.json"
 
@@ -63,7 +63,7 @@ def test_state_cut_mode_pass2_waits_on_narration(tmp_path):
     (tmp_path / "clip_plan.json").write_text("[]", encoding="utf-8")
     (tmp_path / "clip_plan_validated.json").write_text(json.dumps({"clips": []}), encoding="utf-8")
     (tmp_path / "edited_source.mp4").write_bytes(b"\x00")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["mode"] == "cut"
     assert state["next_pause"]["artifact"] == "narration.json"
 
@@ -75,7 +75,7 @@ def test_state_source_from_assembly_manifest_when_no_run_manifest(tmp_path):
         "source_video": "/videos/src.mp4",
         "source_video_identity": {"size": 1, "mtime_ns": 1},
     }), encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["source_video"]["path"] == "/videos/src.mp4"
     assert state["source_video"]["origin"] == "assembly_manifest.json"
 
@@ -87,7 +87,7 @@ def test_state_source_from_cut_meta_when_no_manifests(tmp_path):
         "sources": {"/videos/ep1.mp4": {"size": 10, "mtime_ns": 5}},
         "plan": [],
     }), encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["source_video"] == {
         "path": "/videos/ep1.mp4",
         "origin": "edited_source.mp4.meta.json",
@@ -96,7 +96,7 @@ def test_state_source_from_cut_meta_when_no_manifests(tmp_path):
 
 def test_state_source_unknown_when_nothing_records_it(tmp_path):
     """No manifest anywhere → source reported unknown, no crash."""
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["source_video"]["path"] is None
     assert state["source_video"]["origin"] == "unknown"
 
@@ -106,7 +106,7 @@ def test_state_lists_storyboards_when_present(tmp_path):
     sb = tmp_path / "storyboard"
     sb.mkdir()
     (sb / "source_storyboard.json").write_text("{}", encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert "storyboard/source_storyboard.json" in state["storyboards"]
     assert "storyboard/edited_storyboard.json" not in state["storyboards"]
 
@@ -114,7 +114,7 @@ def test_state_lists_storyboards_when_present(tmp_path):
 def test_state_missing_artifact_no_traceback(tmp_path):
     """An empty work_dir produces a clear human report with a stale-manifest warning, never a
     traceback. (Renders to markdown without raising.)"""
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     md = recap_inspect._render_state_md(state, compact=True)
     assert "缺少 recap_run_manifest.json" in md
     assert "unknown" in md
@@ -124,7 +124,7 @@ def test_state_missing_artifact_no_traceback(tmp_path):
 def test_state_missing_work_dir_message(tmp_path):
     """A nonexistent work_dir returns a clear error, not a traceback."""
     missing = tmp_path / "does_not_exist"
-    state = recap_inspect.cmd_state(missing, compact=True)
+    state = recap_inspect.cmd_state(missing)
     assert "error" in state
     md = recap_inspect._render_state_md(state, compact=True)
     assert "不存在" in md
@@ -138,7 +138,7 @@ def test_state_cut_narration_without_phase_ledger_flagged_stale(tmp_path):
     (tmp_path / "narration.json").write_text("[]", encoding="utf-8")
     (tmp_path / "recap_run_manifest.json").write_text(json.dumps(
         {"source_video": "/v.mp4", "source_video_identity": {"size": 1, "mtime_ns": 1}}), encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     notes = " ".join(state["stale_manifest_notes"])
     assert "recap_phase.json" in notes
 
@@ -297,7 +297,7 @@ def test_state_surfaces_multi_source_manifest(tmp_path):
              "source_video_identity": {"size": 2, "mtime_ns": 2}, "source_work_dir": "sources/src_b", "material_id": "b-src_b"},
         ],
     }), encoding="utf-8")
-    state = recap_inspect.cmd_state(tmp_path, compact=True)
+    state = recap_inspect.cmd_state(tmp_path)
     assert state["mode"] == "cut"
     assert [s["source_id"] for s in state["multi_source"]["sources"]] == ["src_a", "src_b"]
     md = recap_inspect._render_state_md(state, compact=True)

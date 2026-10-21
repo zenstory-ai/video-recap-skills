@@ -109,8 +109,8 @@ def timeline_image_segments(layers, canvas, duration_s):
 
 def packaging_settings(work_dir):
     """What the manifest records: the plan file and each layer image's identity."""
-    path = Path(work_dir) / PACKAGING_LAYERS if work_dir is not None else None
-    if path is None or not path.exists():
+    path = Path(work_dir) / PACKAGING_LAYERS
+    if not path.exists():
         return {"artifact": PACKAGING_LAYERS, "present": False, "layers": []}
     plan = json.loads(path.read_text(encoding="utf-8"))
     layers = []

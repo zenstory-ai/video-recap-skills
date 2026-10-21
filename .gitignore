@@ -5,6 +5,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
+.coverage
 .omx/
 .env
 .env.*
@@ -18,8 +19,6 @@ work_dir*/
 outputs*/
 output*/
 tts_segments/
-mimo_cache/
-mimo_video_overview_cache/
 recap_*.mp4
 dub_*.mp4
 final_*.mp4

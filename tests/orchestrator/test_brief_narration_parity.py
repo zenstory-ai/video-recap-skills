@@ -12,19 +12,11 @@ UNDERSTANDING_DESLOP = UNDERSTANDING_SCRIPTS / "deslop_qc.py"
 SCRIPT_DESLOP = SCRIPT_SCRIPTS / "deslop_qc.py"
 
 SYNC_PAIRS = (
-    *[
-        pytest.param(
-            UNDERSTANDING_SCRIPTS / name,
-            SCRIPT_SCRIPTS / name,
-            id=f"agent-brief-{Path(name).stem}",
-        )
-        for name in (
-            "agent_text.py",
-            "narration_lint.py",
-            "speech_ownership.py",
-            "timeline_fusion.py",
-        )
-    ],
+    pytest.param(
+        UNDERSTANDING_SCRIPTS / "agent_text.py",
+        SCRIPT_SCRIPTS / "agent_text.py",
+        id="agent-brief-agent_text",
+    ),
     pytest.param(UNDERSTANDING_DESLOP, SCRIPT_DESLOP, id="deslop-qc"),
 )
 
@@ -35,32 +27,6 @@ def test_intentional_local_copies_stay_byte_identical(first, second):
     assert first.read_bytes() == second.read_bytes(), (
         f"Self-contained copies drifted: {first} != {second}. "
         "Apply the same change to both local copies; do not replace them with a cross-skill path."
-    )
-
-
-def _top_level_literal(path, name):
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    for node in tree.body:
-        if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name) and target.id == name
-            for target in node.targets
-        ):
-            return ast.literal_eval(node.value)
-    raise AssertionError(f"{path}: missing top-level constant {name}")
-
-
-def test_asr_span_tol_matches_across_files():
-    paths = {
-        ROOT / "skills/video-understanding/scripts/consolidate.py",
-        UNDERSTANDING_SCRIPTS / "briefing" / "inputs.py",
-    }
-    values = {
-        str(path.relative_to(ROOT)): _top_level_literal(path, "_ASR_SPAN_TOL")
-        for path in paths
-    }
-
-    assert set(values.values()) == {0.05}, (
-        f"_ASR_SPAN_TOL drifted across files: {values}"
     )
 
 

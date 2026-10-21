@@ -48,10 +48,8 @@ def load_source_sentence_evidence(work_dir, mode="full"):
         ]
     else:
         payload = _read_json(work_dir / "speech_boundary_anchors_output.json")
-        if mode == "cut_output" and not _output_payload_is_current(payload, work_dir):
+        if not _output_payload_is_current(payload, work_dir):
             return _empty_evidence(mode)
-        if payload is None:
-            payload = {"sentence_anchors": [], "speech_spans": [], "quiet_windows": []}
         speech_spans = payload["speech_spans"]
         quiet_windows = payload["quiet_windows"]
     anchors = [

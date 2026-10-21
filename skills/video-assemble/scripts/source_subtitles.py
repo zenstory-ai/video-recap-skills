@@ -25,13 +25,13 @@ from subtitles.core import (
 
 def _has_user_subtitles(work_dir):
     """True when the user dropped a bring-your-own original-subtitle file into work_dir."""
-    return work_dir is not None and any(
+    return any(
         (Path(work_dir) / name).exists()
         for name in ("user_subtitles.json", "user_subtitles.srt", "user_subtitles.ass")
     )
 
 
-def _source_subtitle_mask_policy(work_dir=None):
+def _source_subtitle_mask_policy(work_dir):
     """Explicit source-subtitle mask policy and trigger facts for visual QC/cache keys.
 
     Older builds treated ``MASK_SOURCE_SUBTITLES=True`` as an ambient default black
@@ -229,9 +229,8 @@ def _map_asr_to_output(asr_segs, clip_spans):
                 continue
             start = c["output_start"] + (ov_s - c["source_start"])
             end = c["output_start"] + (ov_e - c["source_start"])
-            entry = c.get("entry", {})
-            source_key = (c.get("source_id") or entry.get("source_id"),
-                          c.get("source_path") or entry.get("source_path"))
+            entry = c["entry"]
+            source_key = (entry.get("source_id"), entry.get("source_path"))
             if (fragments and abs(fragments[-1]["source_end"] - ov_s) < _CLIP_CONTIGUITY_TOLERANCE
                     and abs(fragments[-1]["end"] - start) < _CLIP_CONTIGUITY_TOLERANCE
                     and fragments[-1]["source_key"] == source_key):
@@ -416,7 +415,7 @@ def _combined_subtitle_entries(narration, work_dir, video_duration):
     return entries
 
 
-def _source_subtitle_mask_covers_gaps(work_dir=None):
+def _source_subtitle_mask_covers_gaps(work_dir):
     """Whether the effective source mask hides hardcoded subtitles outside narration."""
     if not _source_subtitle_mask_policy(work_dir)["active"]:
         return False

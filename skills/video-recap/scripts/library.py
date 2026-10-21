@@ -274,7 +274,7 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
             report.error(path, "line_too_wide",
                          f"{per_line} 字 × {size}px 超过画布宽 {canvas['width']} 减去两侧各 "
                          f"{SUBTITLE_SIDE_MARGIN}px 边距；减小字号或每行字数")
-        band = params.get("band", {}).get("value") if isinstance(params.get("band"), dict) else None
+        band = params["band"].get("value") if isinstance(params.get("band"), dict) else None
         if band is not None and canvas and not (
             isinstance(band, dict) and _is_int(band.get("y_top")) and _is_int(band.get("y_bot"))
             and 0 <= band["y_top"] < band["y_bot"] <= canvas["height"]
@@ -377,11 +377,11 @@ def _check_links(index: dict, report: Report):
         for sample_id in template["samples"]:
             if sample_id not in samples:
                 report.error(path, "sample_missing", f"引用的样片不存在: {sample_id}")
-        snapshot = (template["adoption"] or {}).get("resources") if isinstance(template["adoption"], dict) else None
+        snapshot = template["adoption"].get("resources") if isinstance(template["adoption"], dict) else None
         for res_id, files in (snapshot or {}).items():
             current = {Path(f["path"]).relative_to(report.root.resolve()).as_posix(): f
                        for f in resources.get(res_id, {}).get("files", [])}
-            for recorded in files if isinstance(files, list) else []:
+            for recorded in files:
                 now = current.get(recorded.get("path"))
                 if now is None or (now["size"], now["mtime_ns"]) != (recorded.get("size"), recorded.get("mtime_ns")):
                     report.warn(path, "changed_since_adoption",

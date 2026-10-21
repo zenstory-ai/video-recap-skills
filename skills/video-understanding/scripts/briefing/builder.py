@@ -28,7 +28,6 @@ from briefing.timeline import (
     _load_cut_output_spans_for_brief,
     _parse_target_seconds,
     _remap_brief_evidence_to_output_timeline,
-    _write_deslop_qc_requirements,
 )
 from timeline_fusion import (
     _build_timeline_fusion,
@@ -46,7 +45,7 @@ def build_agent_brief(
     *,
     mimo_overview_enabled=None,
     mimo_overview_video_path=None,
-    asr_evidence=None,
+    asr_evidence,
 ):
     """Write a compact brief that tells the agent exactly how to author recap artifacts."""
     # account for the global narration atempo (CONFIG['narration_speed']) so a beat's text
@@ -111,11 +110,6 @@ def build_agent_brief(
         f"- Target duration (cut mode): {target_duration}",
         f"- Effective speech budget: {effective_rate:.2f} Chinese chars/sec after {breath_sec:.2f}s pause allowance",
     ]
-    # Understanding validates evidence before calling; the standalone script skill
-    # has no producer dependency and must not invent an available ASR status.
-    if asr_evidence is None:
-        asr_evidence = {"status": "MISSING_OR_STALE", "glossary_modifications": None}
-
     lines.extend(
         [
             "",
@@ -397,6 +391,5 @@ def build_agent_brief(
 
     brief_path = Path(work_dir) / "agent_narration_brief.md"
     brief_path.write_text("\n".join(lines), encoding="utf-8")
-    _write_deslop_qc_requirements(work_dir)
     log(f"已写入 Agent 解说写作 brief: {brief_path}")
     return brief_path

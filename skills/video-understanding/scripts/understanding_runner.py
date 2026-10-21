@@ -364,8 +364,7 @@ def main():
         mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )
-    # C1: post-process the RETURNED brief FILE (not brief.py) so the brief⇄narration twin stays
-    # byte-identical. Prepends a storyboard header pointing the agent at the sheet(s).
+    # Prepend a storyboard header pointing the agent at the sheet(s).
     _prepend_storyboard_brief_header(
         brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode
     )

@@ -60,6 +60,8 @@ def manifest_args(**overrides):
         "narration_adoption": None,
         "audio_mix_adoption": None,
         "_explicit_options": frozenset(),
+        "resolved_project": None,
+        "_bound_from_project": frozenset(),
     }
     values.update(overrides)
     return Namespace(**values)
@@ -68,9 +70,10 @@ def manifest_args(**overrides):
 def write_assemble_output(work, final_output):
     """Leave behind what assemble.py writes on success."""
     (work / "output.mp4").write_bytes(b"mp4")
-    (work / "assembly_manifest.json").write_text(
-        json.dumps({"final_output": str(final_output)}), encoding="utf-8"
-    )
+    (work / "assembly_manifest.json").write_text(json.dumps({
+        "final_output": str(final_output),
+        "assembly_settings": {"video_filters": {"packaging_layers": {"layers": []}}},
+    }), encoding="utf-8")
 
 
 def write_cut_output(work, clips=None, **qc_overrides):

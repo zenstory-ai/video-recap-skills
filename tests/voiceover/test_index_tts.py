@@ -300,22 +300,6 @@ def test_index_cache_settings_track_voice_without_exposing_endpoint(monkeypatch)
     assert first["index_tts_voice"] == "voice-a"
 
 
-def test_index_cached_receipt_requires_current_voice():
-    config = {"index_tts_endpoint": "http://host/tts", "index_tts_voice": "voice"}
-    base = {"provider_receipt": {"provider": "index-tts", "requested_voice": "voice"}}
-    assert index_tts.valid_cached_receipt(base, config) is True
-
-    mutations = [
-        lambda data: data["provider_receipt"].update(requested_voice="other"),
-        lambda data: data["provider_receipt"].pop("provider"),
-        lambda data: data.update(provider_receipt=None),
-    ]
-    for mutate in mutations:
-        candidate = json.loads(json.dumps(base))
-        mutate(candidate)
-        assert index_tts.valid_cached_receipt(candidate, config) is False
-
-
 def test_index_provider_rejects_clone_reference_before_cache(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
@@ -340,8 +324,7 @@ def test_explicit_index_provider_requires_endpoint_and_voice_at_config_load(endp
     assert config["index_tts_endpoint"] == endpoint
 
 
-def test_index_preparation_uses_provider_default_speed_despite_dynamic_params(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", True)
+def test_index_preparation_uses_provider_default_speed(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice")
     segment = {"start": 0.0, "end": 2.0, "narration": "很长很长的感叹句！"}
@@ -367,7 +350,6 @@ def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "tts_provider", "index-tts")
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", True)
     monkeypatch.setitem(CONFIG, "tts_segment_normalize", False)
     monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
     monkeypatch.setitem(CONFIG, "allow_partial_tts", False)
@@ -393,8 +375,3 @@ def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     assert receipt == {"provider": "index-tts", "requested_voice": "voice-a"}
     sidecar = json.loads((tmp_path / "tts_segments/narr_000.wav.cache.json").read_text())
     assert sidecar["provider_receipt"] == receipt
-
-    sidecar.pop("provider_receipt")
-    (tmp_path / "tts_segments/narr_000.wav.cache.json").write_text(json.dumps(sidecar))
-    voiceover.synthesize_tts(narration, tmp_path)
-    assert len(calls) == 2

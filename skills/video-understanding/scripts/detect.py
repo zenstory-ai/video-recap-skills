@@ -50,7 +50,7 @@ def detect_scenes(video_path, work_dir, threshold=None):
     # （合并会保留短场景的 start，若黑场被并入长场景，单点采样会误删整段，故顺序在前）
     if CONFIG["scene_junk_filter"]:
         scenes = _filter_junk_scenes(scenes, video_path)
-    # 合并短场景（< 3s 合并到相邻场景）
+    # 合并短场景（短于 scene_merge_min 的并入相邻场景）
     scenes = _merge_short_scenes(scenes, min_duration=CONFIG["scene_merge_min"])
 
     # 保存
@@ -69,8 +69,7 @@ def _merge_short_scenes(scenes, min_duration=4.0):
     merged = [scenes[0]]
     for s in scenes[1:]:
         prev = merged[-1]
-        # 任一侧过短就把两段并成一段 [prev.start, s.end]。（原来写成 if/elif 两个分支，
-        # 但两个分支体完全一样，读起来像是有两种不同处理，实际没有区别。）
+        # 任一侧过短就把两段并成一段 [prev.start, s.end]。
         too_short = (
             prev["end"] - prev["start"] < min_duration
             or s["end"] - s["start"] < min_duration
@@ -197,7 +196,7 @@ def _compact_ffmpeg_error(stderr, limit=400):
         return text
     return "…" + text[-limit:]
 
-def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=None, configured_segment_seconds=None):
+def annotate_quiet_windows_with_asr(periods, asr_result, *, video_duration, configured_segment_seconds):
     """Pure helper: annotate quiet windows with ASR-overlap confidence and QC.
 
     Coarse grid ASR (large synthetic windows from chunking) must not turn every quiet
@@ -221,10 +220,7 @@ def annotate_quiet_windows_with_asr(periods, asr_result=None, *, video_duration=
             valid_segments.append((ss, se))
     asr_coverage = sum(se - ss for ss, se in valid_segments)
     avg_seg_dur = asr_coverage / len(valid_segments) if valid_segments else 0
-    if video_duration is None:
-        ends = [float(p["end"]) for p in out] + [se for _, se in valid_segments]
-        video_duration = max(ends or [0.0])
-    configured = float(configured_segment_seconds if configured_segment_seconds is not None else CONFIG["asr_segment_seconds"])
+    configured = float(configured_segment_seconds)
     coarse_asr = (
         (len(valid_segments) <= 5 and asr_coverage > float(video_duration) * 0.8) or
         asr_coverage > float(video_duration) * 1.5 or

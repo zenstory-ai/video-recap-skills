@@ -13,6 +13,10 @@ from jianying.templates import template
 
 
 DRAFT_PATH_PLACEHOLDER = "##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##"
+RESOURCE_KINDS = frozenset({
+    "audio", "effect", "fonts", "image", "lut", "mask", "sticker",
+    "text", "text_template", "transition", "video",
+})
 
 
 def validate_draft_name(draft_name):
@@ -184,10 +188,7 @@ def _descriptor(raw, default_kind, *, required):
     source = raw["source_path"]
     resource_kind = raw.get("resource_kind", default_kind)
     target_path = raw.get("target_path")
-    if not isinstance(resource_kind, str) or resource_kind not in {
-        "audio", "effect", "fonts", "image", "lut", "mask", "sticker",
-        "text", "text_template", "transition", "video",
-    }:
+    if not isinstance(resource_kind, str) or resource_kind not in RESOURCE_KINDS:
         raise ValueError(f"invalid JianYing resource kind: {resource_kind}")
     return {
         "source_path": source,
@@ -224,11 +225,7 @@ def bundle_media(content, meta, draft_dir):
     """
     resources_root = os.path.join(draft_dir, "Resources", "local")
     copied = {}
-    resource_kinds = {
-        "audio", "effect", "fonts", "image", "lut", "mask", "sticker",
-        "text", "text_template", "transition", "video",
-    }
-    used = {kind: set() for kind in resource_kinds}
+    used = {kind: set() for kind in RESOURCE_KINDS}
     meta_values = []
     notes = []
     timestamp_ms = int(time.time() * 1000)
@@ -330,7 +327,6 @@ def draft_dir_has_user_content(draft_dir):
 
 def collision_safe_draft_dir(out_dir, draft_name):
     """Pick a fresh draft folder instead of overwriting an existing non-empty one."""
-    validate_draft_name(draft_name)
     base = os.path.join(out_dir, draft_name)
     if not draft_dir_has_user_content(base):
         return base, draft_name
@@ -374,9 +370,6 @@ def write_draft(content, meta, notes, out_dir, draft_name, bundle_media_enabled=
         if os.path.isdir(draft_dir) and not draft_dir_has_user_content(draft_dir):
             os.rmdir(draft_dir)
         os.replace(tmp_dir, draft_dir)
-    except Exception:
-        shutil.rmtree(tmp_parent, ignore_errors=True)
-        raise
     finally:
         if os.path.exists(tmp_parent):
             shutil.rmtree(tmp_parent, ignore_errors=True)

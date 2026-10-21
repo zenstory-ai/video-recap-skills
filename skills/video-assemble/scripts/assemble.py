@@ -33,10 +33,6 @@ __all__ = [
 AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
 
 
-_current_narration_binding = strict_publish.current_narration_binding
-_current_audio_mix_binding = strict_publish.current_audio_mix_binding
-
-
 def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                    audio_mode="narration", audio_stream_index=0,
                    narration_adoption_path=None, tts_meta_path=None,
@@ -130,28 +126,20 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         )
         narration_wav = Path(explicit_runtime["voice_bus"]["path"])
     elif audio_mode == "narration":
-        if binding["tempo_policy"]:
-            narration_audio._apply_narration_speed(
-                tts_segments, work_dir, tempo_policy=binding["tempo_policy"]
-            )
-        else:
-            narration_audio._apply_narration_speed(tts_segments, work_dir)
+        narration_audio._apply_narration_speed(
+            tts_segments, work_dir, tempo_policy=binding["tempo_policy"]
+        )
         narration_wav = work_dir / "narration.wav"
-        if binding["tempo_policy"]:
-            narration_audio._build_timed_narration(
-                tts_segments, narration_wav, video_duration, work_dir,
-                tempo_policy=binding["tempo_policy"],
-            )
-            if any(
-                segment.get("blocking") or segment.get("fit_status") == "no_safe_fit"
-                for segment in tts_segments
-            ):
-                raise RuntimeError(
-                    "严格 narration adoption 存在 no_safe_fit，禁止提速或裁尾渲染"
-                )
-        else:
-            narration_audio._build_timed_narration(
-                tts_segments, narration_wav, video_duration, work_dir
+        narration_audio._build_timed_narration(
+            tts_segments, narration_wav, video_duration, work_dir,
+            tempo_policy=binding["tempo_policy"],
+        )
+        if binding["tempo_policy"] and any(
+            segment.get("blocking") or segment.get("fit_status") == "no_safe_fit"
+            for segment in tts_segments
+        ):
+            raise RuntimeError(
+                "严格 narration adoption 存在 no_safe_fit，禁止提速或裁尾渲染"
             )
         handoffs = audio_mix._apply_source_sentence_handoffs(tts_segments, work_dir, video_duration)
         if handoffs:
@@ -495,13 +483,8 @@ def main():
         if not os.path.exists(args.source_video):
             ap.error(f"--source-video does not exist: {args.source_video}")
         lib.CONFIG["source_video"] = args.source_video
-        lib.CONFIG["source_video_explicit"] = True
     else:
-        # SOURCE_VIDEO is an ambient env var in lib.CONFIG. Do not let a stale
-        # shell value silently bind full-mode/direct timeline.json or JianYing
-        # exports to an unrelated original; cut mode must pass --source-video.
         lib.CONFIG["source_video"] = ""
-        lib.CONFIG["source_video_explicit"] = False
     if args.export_jianying:
         lib.CONFIG["export_jianying"] = True
     if args.jianying_bundle_media is not None:
@@ -559,8 +542,8 @@ def main():
         manifest = assembly_contract._assembly_manifest_payload(
             args.video, tts_segments, work_dir, output_path,
             tts_meta_path=tts_meta,
-            narration_input_binding=_current_narration_binding(work_dir, args.audio_mode),
-            audio_mix_binding=_current_audio_mix_binding(work_dir, args.audio_mode),
+            narration_input_binding=strict_publish.current_narration_binding(work_dir, args.audio_mode),
+            audio_mix_binding=strict_publish.current_audio_mix_binding(work_dir, args.audio_mode),
             final_output=final_output,
             settings_payload=assembly_settings.assembly_settings_payload,
             audio_mode=args.audio_mode,

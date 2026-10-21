@@ -37,7 +37,7 @@ def _file_entry(role: str, path, detail=None) -> dict:
 
 
 def _source_entries(work_dir: Path) -> list[dict]:
-    manifest = _read(work_dir / "recap_run_manifest.json") or {}
+    manifest = json.loads((work_dir / "recap_run_manifest.json").read_text(encoding="utf-8"))
     if manifest.get("mode") == "multi_source":
         return [_file_entry("source_video", s.get("source_path"), {"source_id": s.get("source_id")})
                 for s in manifest.get("sources", [])]
@@ -48,7 +48,7 @@ def _source_entries(work_dir: Path) -> list[dict]:
 
 def _voice_entry(work_dir: Path) -> dict | None:
     meta = _read(work_dir / "tts_meta.json")
-    if not isinstance(meta, dict):
+    if meta is None:
         return None
     voice = meta.get("voice") or {"provider": meta.get("engine")}
     reference = voice.get("reference") or {}
@@ -60,17 +60,16 @@ def _voice_entry(work_dir: Path) -> dict | None:
 
 
 def _assembly_entries(work_dir: Path) -> list[dict]:
-    manifest = _read(work_dir / "assembly_manifest.json") or {}
-    settings = manifest.get("assembly_settings") or {}
+    manifest = json.loads((work_dir / "assembly_manifest.json").read_text(encoding="utf-8"))
+    settings = manifest["assembly_settings"]
     entries = []
     bgm = (settings.get("audio_mix") or {}).get("bgm_path")
     if bgm:
         entries.append(_file_entry("bgm", bgm))
-    packaging = (settings.get("video_filters") or {}).get("packaging_layers") or {}
-    for layer in packaging.get("layers", []):
+    for layer in settings["video_filters"]["packaging_layers"]["layers"]:
         entries.append(_file_entry("packaging_layer", layer.get("path"), {"name": layer.get("name")}))
     style = settings.get("subtitle_style")
-    if isinstance(style, dict):
+    if style:
         entries.append(_file_entry("subtitle_font", style.get("font_file"),
                                    {"family": style.get("font_name")}))
     return entries
@@ -128,7 +127,6 @@ def build_resource_lock(work_dir, *, library_dir=None, project=None) -> dict:
     if voice:
         entries.append(voice)
     entries += _assembly_entries(work_dir)
-    entries += list((project or {}).get("resources", []))
     library_root = None
     if library_dir and Path(library_dir).is_dir():
         library_root = str(Path(library_dir).resolve())

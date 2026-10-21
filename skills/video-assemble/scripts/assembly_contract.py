@@ -32,8 +32,7 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                                audio_mode="narration", audio_stream_index=0,
                                narration_input_binding=None, audio_mix_binding=None):
     """Slim render record. The orchestrator reads `final_output` to report the result;
-    `source_video` stays None unless cut mode explicitly passed --source-video, proving a
-    stale ambient SOURCE_VIDEO never leaked into a full-mode timeline / 剪映 export."""
+    `source_video` stays None unless cut mode passed --source-video."""
     input_video = Path(input_video)
     output_path = Path(output_path)
     source_video_identity = _source_video_identity()
@@ -181,8 +180,8 @@ def _placed_audio_matches_timeline(seg):
 
 
 def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render_delivery,
-                       output_path=None, source_has_audio=None, loudness_mode=None,
-                       loudnorm_measurement=None, visual_qc=None, audio_mode="narration",
+                       output_path, source_has_audio, visual_qc, loudness_mode=None,
+                       loudnorm_measurement=None, audio_mode="narration",
                        adopted_audio=None,
                        narration_input_binding=None, audio_mix_binding=None,
                        source_audio_status=None):
@@ -210,7 +209,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         max_effective = max(max_effective, eff)
         if eff > hard_max + 1e-6:
             tempo_exceeded.append(s["index"])
-        if s["truncated"] or s["truncate_reason"] == "tail_trim_tolerance":
+        if s["truncated"]:
             truncated.append(s["index"])
         if s.get("source_handoff_blocking", False):
             handoff_failed.append(s["index"])
@@ -235,33 +234,25 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         blocking_codes.append("timeline_audio_mismatch")
     if placed and max(placed) <= 0.0 and not no_safe:
         blocking_codes.append("empty_narration")
-    visual_rollup = (
-        _visual_qc_rollup(visual_qc)
-        if visual_qc is not None
-        else {"present": False, "verdict": "NOT_RUN", "blocking": False, "blocking_codes": [], "summary": {}}
-    )
+    visual_rollup = _visual_qc_rollup(visual_qc)
     if visual_rollup["blocking"]:
         blocking_codes.append("visual_qc_failed")
     if source_audio_status is not None:
         source_audio = source_audio_status
-    elif source_has_audio is False:
-        # Not blocking: assemble can synthesize a silent original track.
-        source_audio = "synthetic_silence"
-    elif source_has_audio is True:
+    elif source_has_audio:
         source_audio = "present"
     else:
-        source_audio = "unknown"
+        # Not blocking: assemble can synthesize a silent original track.
+        source_audio = "synthetic_silence"
 
-    output = {}
-    if output_path is not None:
-        output_path = Path(output_path)
-        output = {
-            "path": str(output_path),
-            "exists": output_path.exists(),
-            "bytes": output_path.stat().st_size if output_path.exists() else 0,
-        }
-        if output_path.exists() and output["bytes"] <= 0:
-            blocking_codes.append("empty_output")
+    output_path = Path(output_path)
+    output = {
+        "path": str(output_path),
+        "exists": output_path.exists(),
+        "bytes": output_path.stat().st_size if output_path.exists() else 0,
+    }
+    if output_path.exists() and output["bytes"] <= 0:
+        blocking_codes.append("empty_output")
 
     return {
         "schema_version": 1,

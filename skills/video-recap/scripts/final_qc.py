@@ -12,7 +12,7 @@ import shutil
 import subprocess
 from pathlib import Path
 from typing import Any
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 
 import qc_contract
 from lib import load_json
@@ -30,7 +30,6 @@ _COLLECT_ARTIFACTS = (
 )
 # video-assemble QC artifacts: {"verdict", "blocking", "blocking_codes": [...]}.
 _UPSTREAM_QC_ARTIFACTS = ("assembly_qc.json", "visual_qc.json")
-ProbeRunner = Callable[[Path], Mapping[str, Any]]
 
 
 def _load_fixture(value: Any) -> Any:
@@ -155,10 +154,10 @@ def _tail_decode_check(path: Path) -> tuple[bool | None, str | None]:
     return True, None
 
 
-def _probe_metadata(path: Path, *, probe_fixture: Any = None, probe_runner: ProbeRunner | None = None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+def _probe_metadata(path: Path, *, probe_fixture: Any = None) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
     """Return (probe, error); an ffprobe failure on existing media becomes a deterministic blocker."""
     try:
-        raw = _load_fixture(probe_fixture) if probe_fixture is not None else (probe_runner or _run_ffprobe)(path)
+        raw = _load_fixture(probe_fixture) if probe_fixture is not None else _run_ffprobe(path)
         if not isinstance(raw, Mapping):
             raise TypeError("probe metadata must be a JSON object")
         streams = raw.get("streams", [])
@@ -214,7 +213,7 @@ def _probe_fps(video_stream: Mapping[str, Any] | None) -> tuple[float | None, st
         return None, "missing", None
     return _first_positive([
         video_stream.get(key)
-        for key in ("avg_frame_rate", "r_frame_rate", "fps", "frame_rate")
+        for key in ("avg_frame_rate", "r_frame_rate")
     ])
 
 
@@ -299,13 +298,13 @@ def _upstream_blockers(work_dir: Path, artifact_name: str) -> list[dict[str, Any
 
 
 def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = None,
-                     probe_fixture: Any = None, probe_runner: ProbeRunner | None = None) -> dict[str, Any]:
+                     probe_fixture: Any = None) -> dict[str, Any]:
     root = Path(work_dir)
     selected = _final_output_path(root, final_output)
     probe = probe_error = None
     final_meta = _file_metadata(selected, root)
     if final_meta["exists"] and final_meta["bytes"] > 0:
-        probe, probe_error = _probe_metadata(selected, probe_fixture=probe_fixture, probe_runner=probe_runner)
+        probe, probe_error = _probe_metadata(selected, probe_fixture=probe_fixture)
     return {
         "work_dir": str(root),
         "final_output": final_meta,
@@ -318,11 +317,10 @@ def collect_metadata(work_dir: str | Path, *, final_output: str | Path | None = 
 
 
 def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
-                   probe_fixture: Any = None, probe_runner: ProbeRunner | None = None,
-                   decode_runner: Callable[[Path], tuple[bool | None, str | None]] | None = None) -> dict[str, Any]:
+                   probe_fixture: Any = None) -> dict[str, Any]:
     root = Path(work_dir)
     selected = _final_output_path(root, final_output)
-    metadata = collect_metadata(root, final_output=final_output, probe_fixture=probe_fixture, probe_runner=probe_runner)
+    metadata = collect_metadata(root, final_output=final_output, probe_fixture=probe_fixture)
     final_meta = metadata["final_output"]
     findings: list[dict[str, Any]] = []
     if not final_meta["exists"]:
@@ -362,7 +360,7 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
         # A cheap tail decode catches it; skip for offline fixtures and when ffmpeg is absent
         # (decode_ok is None). Only add on a definite decode failure to avoid false-blocking.
         if probe_fixture is None and not probe_findings:
-            decode_ok, decode_detail = (decode_runner or _tail_decode_check)(selected)
+            decode_ok, decode_detail = _tail_decode_check(selected)
             if decode_ok is False:
                 findings.append(_finding(
                     finding_id="final-qc-undecodable-stream",
@@ -483,7 +481,7 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def run(work_dir: str | Path, final_output: str | Path | None = None,
         probe_fixture: Any = None, golden_fixture: Any = None,
-        probe_runner: ProbeRunner | None = None, only: str = "all") -> dict[str, Any]:
+        only: str = "all") -> dict[str, Any]:
     root = Path(work_dir)
     root.mkdir(parents=True, exist_ok=True)
     mode = {"final": "final_qc", "golden": "golden_eval"}.get(only, only)
@@ -492,7 +490,7 @@ def run(work_dir: str | Path, final_output: str | Path | None = None,
     result: dict[str, Any] = {"work_dir": str(root), "written": []}
     final_report: dict[str, Any] | None = None
     if mode in {"all", "final_qc"}:
-        final_report = build_final_qc(root, final_output=final_output, probe_fixture=probe_fixture, probe_runner=probe_runner)
+        final_report = build_final_qc(root, final_output=final_output, probe_fixture=probe_fixture)
         _write_report(root / FINAL_QC_ARTIFACT, final_report)
         result["final_qc"] = {"ok": final_report["ok"], "blocker_count": final_report["blocker_count"]}
         result["written"].append(FINAL_QC_ARTIFACT)

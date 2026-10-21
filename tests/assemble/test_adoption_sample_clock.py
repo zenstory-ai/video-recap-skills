@@ -58,4 +58,4 @@ def test_non_narration_mode_does_not_read_stale_narration_binding(
         raise AssertionError("non-narration mode read stale narration evidence")
 
     monkeypatch.setattr(assemble.narration_binding, "binding_record", forbidden)
-    assert assemble._current_narration_binding(tmp_path, audio_mode) is None
+    assert assemble.strict_publish.current_narration_binding(tmp_path, audio_mode) is None

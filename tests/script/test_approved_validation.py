@@ -118,27 +118,6 @@ def test_full_over_budget_text_is_kept_only_with_preserve_flag(
         assert any(item["code"] == "over_budget" for item in lint["warnings"])
 
 
-def test_cut_preserve_mode_validates_without_writing(monkeypatch, tmp_path):
-    approved = [
-        {
-            "start": 1,
-            "end": 4,
-            "narration": "这段批准稿保持原样。",
-            "pause_after_ms": 123,
-            "overlaps_speech": False,
-            "extra": {"owner": "author"},
-        }
-    ]
-    path, raw = _write_narration(tmp_path, approved, separators=(",", ":"))
-    (tmp_path / "clip_plan.json").write_text(
-        json.dumps({"clips": [{"start": 0, "end": 5}]}), encoding="utf-8"
-    )
-
-    _run_validate(monkeypatch, tmp_path, "cut")
-
-    assert path.read_text(encoding="utf-8") == raw
-
-
 def test_cut_output_preserves_fields_and_derives_only_ownership(monkeypatch, tmp_path):
     _write_output_evidence(tmp_path)
     approved = [

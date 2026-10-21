@@ -16,11 +16,11 @@ import urllib.parse
 from pathlib import Path
 
 from lib import CONFIG
+from recap_cli import TTS_PROVIDERS
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
 DEGRADED_GROUP = "warnings/degraded"
-TTS_PROVIDERS = ("auto", "mimo-tts", "fish-audio", "index-tts")
 
 
 def _command_path(name: str) -> str | None:

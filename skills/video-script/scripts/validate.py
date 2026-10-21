@@ -2,7 +2,7 @@
 """video-script validation entrypoint.
 
 Validate an agent-written narration.json against the local understanding index.
-Legacy full mode performs budget cleanup/deduplication and derives speech ownership.
+Full mode performs budget cleanup/deduplication and derives speech ownership.
 Protected mode keeps the approved timeline and metadata exact except for measured
 ``overlaps_speech`` ownership.
 """
@@ -12,33 +12,14 @@ import json
 import math
 from pathlib import Path
 
-from lib import CONFIG, log
-from narration_lint import (
-    _validate_narration_budget,
-    validate_narration_or_raise,
-)
+from lib import log
+from narration_lint import _align_narration_to_quiet, validate_narration_or_raise
 from speech_ownership import measure_narration_speech_ownership
-from timeline_fusion import _align_narration_to_quiet
 
 
 def _load(path):
     path = Path(path)
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-
-
-def _load_cut_clip_plan(work_dir):
-    raw_plan = Path(work_dir) / "clip_plan.json"
-    validated_plan = Path(work_dir) / "clip_plan_validated.json"
-    if not validated_plan.exists():
-        return _load(raw_plan)
-    if not raw_plan.exists():
-        return _load(validated_plan)
-
-    # Validation may run before the cut stage refreshes clip_plan_validated.json;
-    # a validated plan older than the raw plan is stale, so lint against the raw plan.
-    if validated_plan.stat().st_mtime_ns >= raw_plan.stat().st_mtime_ns:
-        return _load(validated_plan)
-    return _load(raw_plan)
 
 
 def _validate_output_timeline_bounds(narration, duration, tolerance=0.05):
@@ -80,7 +61,7 @@ def main():
         description="Validate + align agent-written narration.json."
     )
     ap.add_argument("--work-dir", required=True)
-    ap.add_argument("--mode", default="full", choices=["full", "cut", "cut_output"])
+    ap.add_argument("--mode", default="full", choices=["full", "cut_output"])
     ap.add_argument(
         "--output-duration",
         type=float,
@@ -95,7 +76,6 @@ def main():
     args = ap.parse_args()
 
     work_dir = Path(args.work_dir)
-    CONFIG["edit_mode"] = args.mode
     narration_path = work_dir / "narration.json"
     narration = _load(narration_path)
     if narration is None:
@@ -108,7 +88,7 @@ def main():
         # ownership from the mapped output evidence and persist that measured flag for
         # voiceover/assemble instead of trusting JSON.
         report = validate_narration_or_raise(
-            narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir,
+            narration, None, mode="cut_output", work_dir=work_dir,
             require_chronological=args.preserve_approved_text,
         )
         narration = measure_narration_speech_ownership(
@@ -134,16 +114,9 @@ def main():
         narration_path.write_text(
             json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
         )
-    elif args.mode == "cut":
-        clip_plan = _load_cut_clip_plan(work_dir)
-        validate_narration_or_raise(
-            narration, vlm_analysis, clip_plan=clip_plan, mode="cut", work_dir=work_dir
-        )
-        if not args.preserve_approved_text:
-            narration = _validate_narration_budget(narration, vlm_analysis)
     else:
         validate_narration_or_raise(
-            narration, vlm_analysis, clip_plan=None, mode="full", work_dir=work_dir,
+            narration, vlm_analysis, mode="full", work_dir=work_dir,
             require_chronological=args.preserve_approved_text,
         )
         if args.preserve_approved_text:

@@ -12,7 +12,6 @@ const TPL_STATUS = { adopted: ["ok", "已采用"], draft: ["off", "草稿"], ret
 const BINDING = { ok: ["ok", "已解析"], missing: ["bad", "找不到"], not_adopted: ["bad", "未采用，不会生效"], kind_mismatch: ["bad", "类型不符"], version_required: ["bad", "缺版本"], no_library: ["bad", "没有资源库"], invalid: ["bad", "写法无效"] };
 const SEVERITY_CHIP = { danger: ["bad", "必须处理"], todo: ["todo", "等你"], warn: ["warn", "留意"], ok: ["ok", "正常"] };
 const ROLE_LABEL = { source_video: "原片", voice: "音色", bgm: "背景音乐", subtitle_font: "字幕字体", packaging_layer: "包装图层", subtitle_style: "字幕样式", packaging: "包装" };
-const PROVENANCE = { measured: "实测", fitted: "调出", specified: "指定", unknown: "未知" };
 const QC_LEVEL = { ok: ["ok", "通过"], warn: ["warn", "留意"], error: ["bad", "阻断"], unparseable: ["bad", "无法解析"] };
 const KIND_LABEL = { bgm: "背景音乐", sfx: "音效", voice: "音色", font: "字体", image: "图片", subtitle_style: "字幕样式", packaging: "包装" };
 const MODE_LABEL = { full: "整段", cut: "剪辑" };
@@ -294,7 +293,7 @@ function resourceCard(res) {
 
 function paramTable(rows) {
   if (!rows || !rows.length) return "";
-  return `<div class="table-card"><table class="rows prm"><thead><tr><th>参数</th><th>值</th><th>来源</th></tr></thead><tbody>${rows.map((row) => `<tr data-param="${esc(row.key)}"><td>${esc(row.label)}</td><td>${row.swatch ? `<i class="swatch" data-css="background:${esc(row.swatch)}"></i>` : ""}<span class="mono">${esc(row.value)}</span>${row.unit ? ` <span class="muted">${esc(row.unit)}</span>` : ""}</td><td>${row.provenance ? `<span class="prov ${esc(row.provenance)}">${esc(PROVENANCE[row.provenance] || row.provenance)}</span>` : '<span class="muted">—</span>'}</td></tr>`).join("")}</tbody></table></div>`;
+  return `<div class="table-card"><table class="rows prm"><thead><tr><th>参数</th><th>值</th><th>来源</th></tr></thead><tbody>${rows.map((row) => `<tr data-param="${esc(row.key)}"><td>${esc(row.label)}</td><td>${row.swatch ? `<i class="swatch" data-css="background:${esc(row.swatch)}"></i>` : ""}<span class="mono">${esc(row.value)}</span>${row.unit ? ` <span class="muted">${esc(row.unit)}</span>` : ""}</td><td>${row.provenance ? `<span class="prov ${esc(row.provenance)}">${esc(row.provenance_label || row.provenance)}</span>` : '<span class="muted">—</span>'}</td></tr>`).join("")}</tbody></table></div>`;
 }
 
 const box = (b) => `left:${b.left}%;top:${b.top}%;width:${b.width}%;height:${b.height}%`;

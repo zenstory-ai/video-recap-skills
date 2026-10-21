@@ -221,7 +221,7 @@ def _cut_narration_is_stale(ledger, current_clip_plan_identity):
 
 def _continuation_command(video, work_dir, args):
     # Values a project binding filled in are re-derived from --project on resume.
-    bound = getattr(args, "_bound_from_project", frozenset())
+    bound = args._bound_from_project
     parts = [
         sys.executable,
         str(_entry("video-recap", "recap.py")),

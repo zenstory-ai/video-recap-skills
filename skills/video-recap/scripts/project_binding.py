@@ -75,7 +75,7 @@ def _subtitle_env(template, record, resources):
 
 def _voice_updates(resource, args):
     record = _record(resource)
-    voice = record.get("voice") or {}
+    voice = record["voice"]
     provider = voice.get("provider")
     consent = (record.get("consent") or {}).get("status")
     if resource["files"] and consent == "denied":
@@ -219,7 +219,6 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         "env": env,
         "arg_updates": updates,
         "templates": used_templates,
-        "resources": [],
         "packaging": packaging and {"record": _record(packaging), "resources": resources},
     }
 

@@ -219,7 +219,7 @@ So [`narration.json`](examples/guohuo-60s/narration.json) has only 7 narration b
 
 Translated: "She renamed herself Fang Mulan and pretends not to know him, but one look confesses the whole affair from three years ago." / "Oh no, the threat hasn't even landed and the next second they're kissing."
 
-The three protected lines, proofread by the agent, go into [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json) and are burned as 「」 captions in the gaps:
+The three protected lines, proofread by the agent, go into [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json); when the source-subtitle mask covers the gaps, they are burned there as 「」 captions:
 
 ```json
 [
@@ -418,7 +418,7 @@ The dashboard is read-only and listens on loopback only; wherever something need
 
 <img alt="Dashboard template view: canvas schematics for packaging and subtitle style, parameter table with provenance" src="docs/dashboard-templates.png" width="100%">
 
-**Bring your own original-dialogue subtitles for accurate 「」 captions:** put `user_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]` on the output timeline; wrap it as `{"timeline": "source", "lines": [...]}` for source-timeline subs mapped through the clip plan) or `user_subtitles.srt` / `.ass` (source timeline) into `work_dir`. Priority: your file › the agent-proofread `original_subtitles.json` › ASR fallback.
+**Original-dialogue 「」 captions in the gaps:** off by default. Put `user_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]` on the output timeline; wrap it as `{"timeline": "source", "lines": [...]}` for source-timeline subs mapped through the clip plan) or `user_subtitles.srt` / `.ass` (source timeline) into `work_dir` to turn them on; a full-time opaque source-subtitle mask (`SOURCE_SUBTITLE_MASK_TIMING=all`) also turns them on. Priority: your file › the agent-proofread `original_subtitles.json` › ASR fallback.
 
 ## FAQ
 

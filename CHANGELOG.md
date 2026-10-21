@@ -10,6 +10,18 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **升级后第一次续跑会重新合成 TTS 并重渲染一次。** voiceover 分段缓存设置去掉了恒为真的 `tts_dynamic_params`，assemble 的 `assembly_settings` 去掉了从未生效的 ducking 键，旧缓存与旧 manifest 都会判为不匹配。
+- **文档与代码对齐。** 留白原声字幕默认不烧录（只在有用户字幕文件或原片字幕遮罩覆盖留白时开启）；测得的字幕带默认用不透明遮罩；已采用配音按 adoption 的 `tempo_policy` 适速；`narration_lint.json` 的指标名与错误码按实际输出更正。video-script SKILL.md 不再复述创作手册。
+
+### Removed
+
+- video-assemble 的 `DUCKING_MODE` 说明及 sidechain / none 闪避分支（从无入口可选），以及被 `--source-video` 覆盖、从不生效的 `SOURCE_VIDEO` 环境变量读取。
+- video-script `validate.py --mode cut`（编排器只用 `full` 与 `cut_output`）与 `deslop_qc_requirements.json`（只写过 `style_card_required: false`；缺少 `style_card.json` 始终是 advisory）。
+- video-understanding 的 `narration_lint.py` / `speech_ownership.py` 与 video-script 的 `timeline_fusion.py` 副本（在所属 skill 里从不运行）。
+- 只被测试使用的函数参数与入口模块再导出（`cut.py`、`mimo_qc.py`、`voiceover.py`、`materials.restore_material`、`final_qc`、MiMo 报告的 `judge`、`dub.lint_dub_script(work_dir=)` 等）。
+
 ## [0.6.0] - 2026-09-27
 
 三条主线：资源库与模板（登记与校验、项目绑定、每次运行的资源记录、字体文件、静态包装图层）；只读的本机剪辑台 dashboard；以及 skill 层分包、去内容哈希、测试审计后的架构梳理。

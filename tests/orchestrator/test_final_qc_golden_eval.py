@@ -45,27 +45,25 @@ def _upstream_blocker(artifact="assembly_qc.json"):
         pytest.param((None, "ffmpeg unavailable"), True, id="decode-skipped"),
     ],
 )
-def test_tail_decode_blocks_only_a_real_decode_failure(tmp_path, decode_result, ok):
+def test_tail_decode_blocks_only_a_real_decode_failure(monkeypatch, tmp_path, decode_result, ok):
     """A container-valid but truncated render is a blocker; a skipped decode (no ffmpeg) is not."""
     (tmp_path / "output.mp4").write_bytes(b"\x00" * 4096)
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output="output.mp4",
-        probe_runner=lambda p: _probe(),  # header probe passes cleanly
-        decode_runner=lambda p: decode_result,
-    )
+    monkeypatch.setattr(final_qc, "_run_ffprobe", lambda p: _probe())  # header probe passes cleanly
+    monkeypatch.setattr(final_qc, "_tail_decode_check", lambda p: decode_result)
+    report = final_qc.build_final_qc(tmp_path, final_output="output.mp4")
     assert report["ok"] is ok
     assert (report["blocker_count"] == 0) is ok
     assert any(f["code"] == "undecodable_stream" for f in report["findings"]) is not ok
 
 
-def test_missing_and_empty_final_output_are_valid_blockers(tmp_path):
+def _no_probe(_path):
+    raise AssertionError("no probe")
+
+
+def test_missing_and_empty_final_output_are_valid_blockers(monkeypatch, tmp_path):
+    monkeypatch.setattr(final_qc, "_run_ffprobe", _no_probe)
     missing = tmp_path / "missing.mp4"
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output=missing,
-        probe_runner=lambda p: (_ for _ in ()).throw(AssertionError("no probe")),
-    )
+    report = final_qc.build_final_qc(tmp_path, final_output=missing)
 
     assert report["ok"] is False
     assert report["artifact"] == "final_qc.json"
@@ -75,11 +73,7 @@ def test_missing_and_empty_final_output_are_valid_blockers(tmp_path):
 
     empty = tmp_path / "empty.mp4"
     empty.write_bytes(b"")
-    report = final_qc.build_final_qc(
-        tmp_path,
-        final_output=empty,
-        probe_runner=lambda p: (_ for _ in ()).throw(AssertionError("no probe")),
-    )
+    report = final_qc.build_final_qc(tmp_path, final_output=empty)
 
     assert report["ok"] is False
     assert any(f["code"] == "empty_final_output" for f in report["findings"])
@@ -154,26 +148,27 @@ def test_probe_fixture_missing_objective_media_metadata_are_valid_blockers(tmp_p
     assert qc.validate_report(report) is True
 
 
-def test_probe_fixture_accepts_numeric_and_rational_video_fps(tmp_path):
+def test_probe_fixture_falls_back_to_r_frame_rate(tmp_path):
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
 
     rational = final_qc.build_final_qc(
         tmp_path, final_output=output, probe_fixture=_probe()
     )
-    numeric = final_qc.build_final_qc(
+    fallback = final_qc.build_final_qc(
         tmp_path,
         final_output=output,
         probe_fixture={
-            "streams": [{"codec_type": "video", "codec_name": "h264", "fps": 29.97}],
+            "streams": [{"codec_type": "video", "codec_name": "h264",
+                         "avg_frame_rate": "0/0", "r_frame_rate": "25/1"}],
             "format": {"duration": "1.5"},
         },
     )
 
     assert rational["ok"] is True
-    assert numeric["ok"] is True
+    assert fallback["ok"] is True
     assert qc.validate_report(rational) is True
-    assert qc.validate_report(numeric) is True
+    assert qc.validate_report(fallback) is True
 
 
 def _raise(error):
@@ -181,19 +176,21 @@ def _raise(error):
 
 
 @pytest.mark.parametrize(
-    "probe",
+    "runner, probe",
     [
-        pytest.param({"probe_runner": _raise(RuntimeError("ffprobe boom"))}, id="runtime"),
-        pytest.param({"probe_runner": _raise(OSError("missing executable"))}, id="oserror"),
+        pytest.param(_raise(RuntimeError("ffprobe boom")), {}, id="runtime"),
+        pytest.param(_raise(OSError("missing executable")), {}, id="oserror"),
         pytest.param(
+            _no_probe,
             {"probe_fixture": {"streams": [None], "format": {"duration": "1"}}},
             id="malformed-metadata",
         ),
     ],
 )
-def test_probe_failure_on_existing_nonempty_mp4_is_deterministic_blocker(tmp_path, probe):
+def test_probe_failure_on_existing_nonempty_mp4_is_deterministic_blocker(monkeypatch, tmp_path, runner, probe):
     output = tmp_path / "recap.mp4"
     output.write_bytes(b"fake mp4 bytes")
+    monkeypatch.setattr(final_qc, "_run_ffprobe", runner)
 
     report = final_qc.build_final_qc(tmp_path, final_output=output, **probe)
 
@@ -437,13 +434,11 @@ def test_recap_shift_left_redacts_direct_tts_and_assembly_metadata(tmp_path):
     assert qc.validate_report(report) is True
 
 
-def test_missing_assembly_manifest_without_explicit_output_is_a_blocker(tmp_path):
+def test_missing_assembly_manifest_without_explicit_output_is_a_blocker(monkeypatch, tmp_path):
     """No --final-output and no assembly_manifest.json: report a missing final output,
     never a traceback (the --require-final-qc contract keeps the report)."""
-    report = final_qc.build_final_qc(
-        tmp_path,
-        probe_runner=lambda p: (_ for _ in ()).throw(AssertionError("no probe")),
-    )
+    monkeypatch.setattr(final_qc, "_run_ffprobe", _no_probe)
+    report = final_qc.build_final_qc(tmp_path)
 
     assert report["ok"] is False
     assert report["findings"][0]["code"] == "missing_final_output"

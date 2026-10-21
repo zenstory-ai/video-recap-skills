@@ -13,7 +13,6 @@ from typing import Any
 from collections.abc import Callable, Mapping, Sequence
 
 import qc_contract
-from qc.mimo_client import mimo_qc_api_call
 from qc.mimo_evidence import (
     _cache_evidence,
     _effective_config,
@@ -30,10 +29,6 @@ from qc.mimo_contract import (
     MAX_FRAME_DIMENSION,
     MAX_FRAMES,
 )
-
-JudgeCallable = Callable[
-    [Mapping[str, Any]], Mapping[str, Any] | Sequence[Mapping[str, Any]]
-]
 
 FrameSampler = Callable[..., Sequence[Mapping[str, Any]]]
 
@@ -178,14 +173,13 @@ def build_report(
     stage: str = DEFAULT_STAGE,
     fixture: Any | None = None,
     dry_run: bool = False,
-    judge: JudgeCallable | None = None,
     config: Mapping[str, Any] | None = None,
     final_output: str | Path | None = None,
     live: bool = False,
     refresh: bool = False,
     frame_sampler: FrameSampler | None = None,
     existing: Mapping[str, Any] | None = None,
-    api_call: Callable[..., Any] | None = None,
+    api_call: Callable[..., Any],
 ) -> dict[str, Any]:
     """Build one validated stage report; all live failures remain successful QC."""
     root = Path(work_dir)
@@ -193,7 +187,7 @@ def build_report(
     payload = build_payload(evidence, stage=stage, config=config)
     cfg = safe_mimo_config(config)
     samples: Sequence[Mapping[str, Any]] = []
-    if stage == "post_render" and (fixture is not None or judge is not None or live):
+    if stage == "post_render" and (fixture is not None or live):
         output = _existing_final_output(root, final_output)
         if output is not None:
             sampler = frame_sampler or sample_video_frames
@@ -217,13 +211,6 @@ def build_report(
     if fixture is not None:
         model_output = fixture
         mode = "fixture"
-    elif judge is not None and not dry_run:
-        mode = "injected_judge"
-        try:
-            model_output = judge(payload)
-        except Exception as exc:
-            model_output = {"observations": []}
-            status, error = "failed", _error_name(exc)
     elif live and not dry_run:
         mode = "live"
         if not cfg["key_present"]:
@@ -233,7 +220,7 @@ def build_report(
             # Fail-open boundary for the third-party request: transport errors arrive as
             # MiMoQCRequestError (a RuntimeError), malformed responses as ValueError.
             try:
-                response = (api_call or mimo_qc_api_call)(
+                response = api_call(
                     _request_payload(payload, samples),
                     config=_effective_config(config),
                     timeout=60,

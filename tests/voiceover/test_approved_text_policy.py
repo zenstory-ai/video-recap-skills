@@ -15,7 +15,7 @@ from lib import CONFIG
 
 
 def _configure_offline_tts(monkeypatch):
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
+    monkeypatch.setattr(voiceover, "_compute_tts_params", lambda *_args: ("+0%", "+0Hz"))
     monkeypatch.setitem(CONFIG, "tts_segment_normalize", False)
     monkeypatch.setitem(CONFIG, "narration_speed", 1.0)
     monkeypatch.setitem(CONFIG, "narration_cumulative_tempo_max", 1.2)
@@ -45,7 +45,8 @@ def test_preserve_approved_text_fails_closed_without_resynthesis(monkeypatch, tm
     }
 
     with pytest.raises(voiceover.ApprovedTextDurationError) as raised:
-        voiceover._synthesize_segment(3, seg, [seg], tts_dir, "mimo-tts")
+        voiceover._synthesize_segment(
+            3, seg, "mimo-tts", voiceover._prepare_tts_segment(3, seg, [seg], tts_dir, "mimo-tts"))
 
     evidence = raised.value.evidence
     assert calls == ["这是已经批准、不得自动删减的完整旁白。"]
@@ -88,7 +89,8 @@ def test_legacy_default_still_truncates_and_resynthesizes(monkeypatch, tmp_path)
     text = "第一句需要保留。第二句会超出窗口。第三句也很长。"
     seg = {"start": 0.0, "end": 4.0, "pause_after_ms": 200, "narration": text}
 
-    result = voiceover._synthesize_segment(0, seg, [seg], tts_dir, "mimo-tts")
+    result = voiceover._synthesize_segment(
+        0, seg, "mimo-tts", voiceover._prepare_tts_segment(0, seg, [seg], tts_dir, "mimo-tts"))
 
     assert len(calls) == 2
     assert calls[0] == text

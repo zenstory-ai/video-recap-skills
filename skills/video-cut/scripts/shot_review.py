@@ -145,7 +145,7 @@ def _validate_scene_roi(roi, video):
 def detect_scene_pts(video, threshold, roi=None):
     """No seek or float pts_time: showinfo integer pts + its actual filter timebase.
 
-    The single library-side check of threshold/ROI; the CLIs pre-check with parser.error."""
+    Validates threshold/ROI for every caller, including this module's own CLI."""
     if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) or not math.isfinite(threshold) or not 0 <= threshold <= 1:
         raise ValueError("scene threshold must be finite and in [0,1]")
     filters = []

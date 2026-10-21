@@ -1,6 +1,6 @@
 # Narration adoption and the consumed-input record
 
-Narration assembly accepts legacy `tts_meta.json`, but a current file by itself is
+Narration assembly accepts `tts_meta.json` on its own, but that file by itself is
 not an adoption decision. Use an explicit adoption document when the selected spoken
 text, requested provider/voice, and tempo policy must be bound to the actual final mix.
 
@@ -61,7 +61,7 @@ render reads only the snapshots. Every conversion, placed WAV, and the completed
 narration bus is recorded with its path and probed PCM facts before the final FFmpeg
 command runs.
 
-On the legacy narration-mix path, Python's standard WAV reader cannot open every valid post-processed WAV encoding.
+On the default narration-mix path, Python's standard WAV reader cannot open every valid post-processed WAV encoding.
 Noncanonical input, including `pcm_f32le`, 48 kHz, or stereo WAV, is explicitly
 decoded by the existing FFmpeg executable to 44.1 kHz mono PCM16 before placement.
 The conversion path and actual PCM facts are recorded; the consumer does not claim
@@ -92,12 +92,11 @@ After successful assembly, `work/narration_input_binding.json` records:
 
 The report uses one of two identity statuses:
 
-- `UNADOPTED`: no adoption was supplied; the legacy inputs were consumed as given;
+- `UNADOPTED`: no adoption was supplied; the `tts_meta.json` inputs were consumed as given;
 - `BOUND_TO_ADOPTION`: the adoption's selection and tempo policy were carried
   through the final mix.
 
-`BOUND_TO_ADOPTION` records what was consumed, not provider truth, acoustic speaker
-identity, direct listening, naturalness, or release approval; voice authentication
-and direct listening stay `NOT_CHECKED`. QC, manifest, and settings records reference
-a binding only while its recorded final output path still exists; source-mix and
-adopted-packet-copy modes do not reuse narration binding evidence.
+`BOUND_TO_ADOPTION` records what was consumed, not who spoke or how it sounds:
+`voice_authentication` and `direct_listening` stay `NOT_CHECKED`. QC, manifest, and
+settings records reference a binding only while its recorded final output path still
+exists; source-mix and adopted-packet-copy modes do not reuse narration binding evidence.

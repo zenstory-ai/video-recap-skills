@@ -9,7 +9,11 @@ from pathlib import Path
 
 from lib import CONFIG, log, api_call
 
-from evidence_bundle import build_evidence_bundle
+from evidence_bundle import (
+    COVERAGE_POLICY_VERSION,
+    EVIDENCE_CONTRACT_VERSION,
+    build_evidence_bundle,
+)
 from review_grounding import (
     _load_cut_clip_spans,
     _load_required,
@@ -25,10 +29,6 @@ from review_response import (
     format_review_md,
     parse_review_response,
 )
-
-EVIDENCE_CONTRACT_VERSION = 1
-
-COVERAGE_POLICY_VERSION = "coverage_policy_v1"
 
 
 def review_narration(work_dir, *, timeline="source", strict_evidence=False):
@@ -63,11 +63,7 @@ def review_narration(work_dir, *, timeline="source", strict_evidence=False):
     chunks = _chunk_evidence_bundle(bundle)
     for chunk in chunks:
         messages = build_review_messages(
-            narration,
-            vlm_analysis,
-            asr_result,
-            work_dir=work_dir,
-            evidence_bundle=chunk,
+            narration, work_dir=work_dir, evidence_bundle=chunk
         )
         resp = api_call(
             {
@@ -130,18 +126,8 @@ def _auto_timeline(work_dir):
     work_dir = Path(work_dir)
     manifest = work_dir / "recap_run_manifest.json"
     if manifest.exists():
-        try:
-            mode = (
-                json.loads(manifest.read_text(encoding="utf-8"))
-                .get("settings", {})
-                .get("edit_mode")
-            )
-        except (ValueError, OSError):
-            mode = None
-        if mode == "cut":
-            return "cut_output"
-        if mode:  # "full" or any non-cut mode → narration.json is source time
-            return "source"
+        mode = json.loads(manifest.read_text(encoding="utf-8"))["settings"]["edit_mode"]
+        return "cut_output" if mode == "cut" else "source"
     has_cut = (work_dir / "clip_plan_validated.json").exists() and (
         work_dir / "edited_source.mp4"
     ).exists()

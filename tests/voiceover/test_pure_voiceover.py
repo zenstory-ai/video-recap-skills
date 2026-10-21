@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-voiceover' / 'scripts'))
 from lib import CONFIG, env_float
 import voiceover
+from tts_audio import _normalize_tts_wav_rms
 from voiceover import _build_tts_segment_result, _parse_rate_offset, _run_tts_engine, _synthesize_segment, _tts_mimo, resolve_tts_engine, synthesize_tts
 
 
@@ -32,16 +33,23 @@ def _offline_mimo_segment(monkeypatch, write=None):
         calls.append(text)
         output_wav.write_bytes(write(text, len(calls)))
 
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
+    monkeypatch.setattr(voiceover, "_compute_tts_params", lambda *_args: ("+0%", "+0Hz"))
     monkeypatch.setitem(CONFIG, "tts_segment_normalize", False)
+    monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
     monkeypatch.setitem(CONFIG, "mimo_tts_model", "mimo-v2.5-tts")
     monkeypatch.setitem(CONFIG, "mimo_tts_voice", "冰糖")
     monkeypatch.setattr(voiceover, "_run_tts_engine", fake_run_tts)
     return calls
 
 
+def _synthesize_miss(i, seg, narration, tts_dir):
+    """Synthesize one segment the way synthesize_tts's workers do after a cache miss."""
+    prepared = voiceover._prepare_tts_segment(i, seg, narration, tts_dir, "mimo-tts")
+    return _synthesize_segment(i, seg, "mimo-tts", prepared)
+
+
 def _seed_segment_cache(i, seg, narration, tts_dir, wav_bytes, duration):
-    """Write a wav plus a sidecar that _synthesize_segment will accept as a cache hit."""
+    """Write a wav plus a sidecar that synthesize_tts will accept as a cache hit."""
     wav = tts_dir / f"narr_{i:03d}.wav"
     wav.write_bytes(wav_bytes)
     text, output_wav, rate, _pitch, cache_inputs = voiceover._prepare_tts_segment(
@@ -52,7 +60,7 @@ def _seed_segment_cache(i, seg, narration, tts_dir, wav_bytes, duration):
     return wav
 
 
-def _fail_second_segment(i, seg, _narration_data, tts_dir, _engine, _prepared=None):
+def _fail_second_segment(i, seg, _engine, prepared):
     if i == 1:
         raise RuntimeError("network timeout")
     return {
@@ -60,7 +68,7 @@ def _fail_second_segment(i, seg, _narration_data, tts_dir, _engine, _prepared=No
         "start": seg["start"],
         "end": seg["end"],
         "narration": seg["narration"],
-        "audio_path": str(tts_dir / f"narr_{i:03d}.wav"),
+        "audio_path": str(prepared[1]),
         "audio_duration": 0.5,
     }
 
@@ -96,13 +104,13 @@ def test_build_tts_segment_result_versions_text_and_preserves_source_trace(tmp_p
         "source_end": 13.0,
         "source_clip_id": 2,
         "narration": authored,
-    }, spoken, tmp_path / "narr.wav", 1.2, 0.05)
+    }, spoken, tmp_path / "narr.wav", 1.2, 0.05, truncated=True, truncate_reason="sentence_boundary")
 
     assert result["segment_audio_schema_version"] >= 1
     assert result["narration"] == authored
     assert result["spoken_text"] == spoken
     assert result["truncated"] is True
-    assert result["truncate_reason"] in {"sentence_boundary", "none"}
+    assert result["truncate_reason"] == "sentence_boundary"
     assert result["audio_duration"] == 1.2
     assert result["global_narration_speed"] == CONFIG.get("narration_speed")
     assert result["effective_tempo"] <= CONFIG.get("narration_cumulative_tempo_max", 1.35)
@@ -116,14 +124,14 @@ def test_synthesize_segment_reuses_only_matching_cache(monkeypatch, tmp_path):
     calls = _offline_mimo_segment(monkeypatch)
     monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0 if Path(path).exists() else 0.0)
 
-    first = _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
-    second = _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
+    first = synthesize_tts(narration, tmp_path)[0][0]
+    second = synthesize_tts(narration, tmp_path)[0][0]
 
     assert calls == ["第一版。"]
     assert first["narration"] == second["narration"] == "第一版。"
 
     changed = [{"start": 0.0, "end": 2.0, "narration": "第二版。"}]
-    third = _synthesize_segment(0, changed[0], changed, tts_dir, "mimo-tts")
+    third = synthesize_tts(changed, tmp_path)[0][0]
 
     assert calls == ["第一版。", "第二版。"]
     assert third["narration"] == "第二版。"
@@ -145,7 +153,7 @@ def test_synthesize_segment_raises_when_own_cache_sidecar_is_corrupt(
     calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
 
     with pytest.raises(RuntimeError, match="sidecar 损坏"):
-        _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
+        synthesize_tts(narration, tmp_path)
 
     assert calls == []
     assert wav.read_bytes() == b"stale"
@@ -157,7 +165,6 @@ def test_tts_cache_inputs_change_with_narration_speed(monkeypatch, tmp_path):
     tts_dir = tmp_path / "tts_segments"
     tts_dir.mkdir()
 
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
     monkeypatch.setitem(CONFIG, "mimo_tts_model", "mimo-v2.5-tts")
     monkeypatch.setitem(CONFIG, "mimo_tts_voice", "冰糖")
 
@@ -183,16 +190,16 @@ def test_synthesize_segment_block_truncation_accounts_for_narration_speed(monkey
     # slot 12s, pause 0.2s -> available 11.8s; raw budget = 11.8 * min(1.3 * 1.2, cap 1.35) ≈ 15.9s.
     # 50-char block -> raw 15s: over the un-sped 11.8s slot, but fits the speed-aware budget.
     block = "情节推进。" * 10
-    res = _synthesize_segment(0, {"start": 0.0, "end": 12.0, "narration": block, "pause_after_ms": 200},
-                              [block], tts_dir, "mimo-tts")
+    res = _synthesize_miss(0, {"start": 0.0, "end": 12.0, "narration": block, "pause_after_ms": 200},
+                           [block], tts_dir)
     assert calls == [block]                       # exactly one TTS call -> NOT truncated
     assert res["narration"] == block
 
     # 100-char block -> raw 30s: overflows even after the speedup -> still truncated (two calls).
     calls.clear()
     huge = "情节推进。" * 20
-    res2 = _synthesize_segment(1, {"start": 0.0, "end": 12.0, "narration": huge, "pause_after_ms": 200},
-                               [huge], tts_dir, "mimo-tts")
+    res2 = _synthesize_miss(1, {"start": 0.0, "end": 12.0, "narration": huge, "pause_after_ms": 200},
+                            [huge], tts_dir)
     assert len(calls) == 2                         # re-synthesized after truncation
     assert res2["narration"] == huge               # authored narration stays intact for schema stability
     assert len(res2["spoken_text"]) < len(huge)     # rendered text is what gets shortened
@@ -205,9 +212,9 @@ def test_synthesize_segment_rejects_cache_when_wav_bytes_change(monkeypatch, tmp
     calls = _offline_mimo_segment(monkeypatch, write=lambda text, n: f"audio:{text}:call{n}".encode("utf-8"))
     monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0 if Path(path).exists() else 0.0)
 
-    _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
+    synthesize_tts(narration, tmp_path)
     (tts_dir / "narr_000.wav").write_bytes(b"externally-mutated-wav")
-    _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
+    synthesize_tts(narration, tmp_path)
 
     assert calls == ["第一版。", "第一版。"]
     assert (tts_dir / "narr_000.wav").read_text(encoding="utf-8") == "audio:第一版。:call2"
@@ -223,7 +230,6 @@ def test_complete_cache_reuse_needs_neither_mimo_key_nor_ffprobe(monkeypatch, tm
     tts_dir = tmp_path / "tts_segments"
     tts_dir.mkdir()
     monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "")
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
     wavs = [
         _seed_segment_cache(i, seg, narration, tts_dir, f"cached-{i}".encode(), 1.25)
         for i, seg in enumerate(narration)
@@ -275,7 +281,6 @@ def test_synthesize_tts_voiceclone_cache_does_not_transcode_reference(monkeypatc
     tts_dir.mkdir()
     monkeypatch.setitem(CONFIG, "voice_ref", str(ref))
     monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "")
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
     monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0 if Path(path).exists() else 0.0)
 
     wav = _seed_segment_cache(0, narration[0], narration, tts_dir, b"cached-clone", 1.0)
@@ -570,7 +575,7 @@ def test_fresh_voiceclone_keys_match_the_prepared_reference_snapshot(monkeypatch
     ref.write_bytes(b"first-reference")
     monkeypatch.setitem(CONFIG, "voice_ref", str(ref))
     monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
-    monkeypatch.setitem(CONFIG, "tts_dynamic_params", False)
+    monkeypatch.setattr(voiceover, "_compute_tts_params", lambda *_args: ("+0%", "+0Hz"))
     prepared = []
 
     def fake_prepare(source):
@@ -685,7 +690,7 @@ def test_p0_synthesize_segment_budget_uses_cumulative_tempo_cap(monkeypatch, tmp
     # slot 10s, pause 0s. With global speed 1.2 and cumulative cap 1.35,
     # raw budget = 10 * 1.35 = 13.5s, not old 10*1.2*1.2=14.4s.
     text = "情节推进。" * 10  # synthetic 15s, should be rewritten under P0 cap.
-    res = _synthesize_segment(0, {"start": 0.0, "end": 10.0, "narration": text, "pause_after_ms": 0}, [text], tts_dir, "mimo-tts")
+    res = _synthesize_miss(0, {"start": 0.0, "end": 10.0, "narration": text, "pause_after_ms": 0}, [text], tts_dir)
 
     assert len(calls) == 2
     assert res["spoken_text"] != text
@@ -729,8 +734,8 @@ def test_p0_tts_rms_normalization_helper_matches_blocks_without_clipping(tmp_pat
     _write_constant_wav(loud, 12000)
     _write_constant_wav(quiet, 1200)
 
-    loud_meta = voiceover._normalize_tts_wav_rms(loud, loud_out, target_rms_dbfs=-20.0, peak_limit=0.98)
-    quiet_meta = voiceover._normalize_tts_wav_rms(quiet, quiet_out, target_rms_dbfs=-20.0, peak_limit=0.98)
+    loud_meta = _normalize_tts_wav_rms(loud, loud_out, target_rms_dbfs=-20.0, peak_limit=0.98)
+    quiet_meta = _normalize_tts_wav_rms(quiet, quiet_out, target_rms_dbfs=-20.0, peak_limit=0.98)
 
     assert abs(_wav_rms_dbfs(loud_out) - _wav_rms_dbfs(quiet_out)) <= 1.5
     assert _wav_peak(loud_out) <= 0.98
@@ -748,7 +753,7 @@ def test_tts_rms_normalization_passes_through_a_silent_block(tmp_path):
     out = tmp_path / "silent_norm.wav"
     _write_constant_wav(silent, 0, seconds=0)
 
-    meta = voiceover._normalize_tts_wav_rms(silent, out, target_rms_dbfs=-20.0, peak_limit=0.98)
+    meta = _normalize_tts_wav_rms(silent, out, target_rms_dbfs=-20.0, peak_limit=0.98)
 
     assert out.read_bytes() == silent.read_bytes()
     assert meta == {
@@ -772,8 +777,8 @@ def test_sidecar_from_content_hash_schema_is_a_plain_miss(monkeypatch, tmp_path)
 
     for old in ({}, [], {"version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64}):
         voiceover._tts_segment_cache_path(wav).write_text(json.dumps(old), encoding="utf-8")
-        result = _synthesize_segment(0, narration[0], narration, tts_dir, "mimo-tts")
-        assert result is not None
+        segments, _engine, _failures = synthesize_tts(narration, tmp_path)
+        assert len(segments) == 1
     assert len(calls) == 3
     assert wav.read_bytes() == b"fresh"
 

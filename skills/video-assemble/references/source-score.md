@@ -131,17 +131,14 @@ directory cannot publish final-named beds or a receipt.
 Diagnostic command/log/intermediate files may remain in the unique failed directory.
 
 To consume a completed receipt with explicitly adopted narration, use the strict
-`--audio-mix-adoption` path in `explicit-audio-mix.md`. To deliver an already complete
-prepared bed without narration, a dedicated prepared-audio renderer will follow in a
-later release. Do not feed `prepared_bed.wav` through legacy source ducking or
-ambient BGM/loudness settings.
+`--audio-mix-adoption` path in `explicit-audio-mix.md`. Do not feed `prepared_bed.wav`
+through the default narration path's source ducking or ambient BGM/loudness settings.
 
-## 与旧入口的关系（中文摘要）
+## 中文摘要
 
 原片完整解码一次再切样本，分别执行保留对白、低位原声和明确静音；渐变必须显式给定。
 已处理的音乐轨走 `frozen`，不能再次偏移、调增益或加渐变。若采用的原声底轨本身已包含
 完整音乐决定且不再叠加配乐，使用严格的 `score:{"kind":"none"}`；它生成真实全零 score，
 并保持 prepared 与 source 逐字节相同，不伪造静音音乐资产。
 
-这一步仅输出声音底轨和来源回执，不是最终视频。旧入口保留兼容行为；调用方须区分
-“底轨已验证”“配音已验证”和“完整混音已验证”三种状态，不能相互冒充。
+这一步仅输出声音底轨和来源回执，不是最终视频。

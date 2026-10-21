@@ -321,12 +321,6 @@ def normalize_multi_source_clip_plan(
         },
         "allow_overlap": bool(allow_overlap),
     }
-    if target_duration and total_duration > target_duration * 1.15:
-        plan["warning"] = (
-            f"validated clips total {total_duration:.1f}s exceeds target "
-            f"{target_duration:.1f}s by more than 15%"
-        )
-        log(f"警告: {plan['warning']}")
     return plan
 
 
@@ -415,10 +409,4 @@ def normalize_clip_plan(
         "source_duration": round(video_duration, 3),
         "allow_overlap": bool(allow_overlap),
     }
-    if target_duration and total_duration > target_duration * 1.15:
-        plan["warning"] = (
-            f"validated clips total {total_duration:.1f}s exceeds target "
-            f"{target_duration:.1f}s by more than 15%"
-        )
-        log(f"警告: {plan['warning']}")
     return plan

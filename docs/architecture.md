@@ -47,9 +47,9 @@ video-understanding ─▶ Agent 按 video-script 写计划与旁白 ─▶ [vid
 ## 刻意复制的模块
 
 同一份代码出现在两个技能里时必须逐字节一致，清单以 `tests/orchestrator/test_brief_narration_parity.py` 为准：
-video-understanding 与 video-script 共有的旁白 lint 链（`agent_text`、`deslop_qc`、`narration_lint`、
-`speech_ownership`、`timeline_fusion`）。只复制技能自己入口会用到的模块；brief 生成链只在 video-understanding
-（`simplification/2026-09-21-drop-script-brief-chain-and-orphan-references.md`）。
+video-understanding 与 video-script 共有的 `agent_text` 与 `deslop_qc`。只复制技能自己会运行的模块：
+`narration_lint`、`speech_ownership` 只在 video-script，`timeline_fusion` 与 brief 生成链只在 video-understanding
+（`architecture/2026-10-20-drop-unused-parity-copies.md`）。
 
 ## 结构守卫
 

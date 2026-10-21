@@ -30,6 +30,7 @@ def _finished_work(tmp_path, *, bgm=None, voice=None, font_name="Arial"):
     _write(work / "assembly_manifest.json", {"assembly_settings": {
         "audio_mix": {"bgm_path": str(bgm) if bgm else ""},
         "subtitle_style": {"font_name": font_name},
+        "video_filters": {"packaging_layers": {"layers": []}},
     }})
     return video, work
 

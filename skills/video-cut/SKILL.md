@@ -17,7 +17,7 @@ description: >
 3. 拼接选定区间，输出 `edited_source.mp4`。
 4. 到此停止，由 Agent 按真实输出时间线写 `narration.json`；本工具不读取旁白，也不做原片→输出映射。
 
-相同输入会得到相同输出。`edited_source.mp4.meta.json` 记录标准化 clips、渲染设置和每个源文件的 `size`/`mtime_ns`；三者与当前一致且 `edited_source.mp4` 存在非空才复用，任一不同即重渲染。只有 sidecar 而没有媒体文件不复用。
+相同输入会得到相同输出；片段、渲染设置或源文件变化时重新渲染。
 
 ## 2. 输入契约
 
@@ -61,7 +61,7 @@ beat_id | function | change | POV | preferred moment | 入点 reason | 出点 re
 
 `source` 使用实际源文件绝对路径，`start/end` 是原片秒；多源可另填 `source_id` 消歧。只登记确实需要保留的具体时刻，不将整个 beat 默认锁死。`before` 只登记本片必需的先后关系；无需约束顺序时写 `before: []`。
 
-工具在全部画面/句界吸附后检查每个必保时刻至少有一处完整连续保留、来源和先后；音频节点还检查源音轨是否存在。每次结果出现（包括局部片段）都需满足其声明的前提，不能用后面的完整段替开头缺前提的片段过关。结果写入 `clip_plan_validated.json.qc.required_evidence`；缺段、错序或无效声明会在预检、缓存复用和渲染前阻断，时长放宽选项不会跳过。该结果验证选段保留，实际语义与最终混音仍按审片步骤核对。
+缺段、错序或无效声明会阻断，结果写入 `clip_plan_validated.json.qc.required_evidence`。该结果只验证选段保留，实际语义与最终混音仍按审片步骤核对。
 
 下面的 `scripts/...` 均相对于本技能目录。若执行器从仓库根目录启动，请给脚本路径加上本技能的绝对目录。
 

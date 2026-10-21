@@ -97,11 +97,6 @@ def load_adoption(path, *, tts_meta_path, tts_segments):
     }
 
 
-def _copy_snapshot(source, destination):
-    """Copy seam kept small so tests can inject a post-preflight source mutation."""
-    shutil.copyfile(source, destination)
-
-
 def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
                     tts_meta_path=None):
     """Validate first, then snapshot the adopted narration inputs into work_dir."""
@@ -148,7 +143,7 @@ def prepare_binding(tts_segments, work_dir, *, narration_adoption_path=None,
     for position, (segment, original) in enumerate(zip(tts_segments, originals)):
         suffix = original["source"].suffix or ".audio"
         snapshot = snapshot_dir / f"segment_{position:04d}_{segment['index']}{suffix}"
-        _copy_snapshot(original["source"], snapshot)
+        shutil.copyfile(original["source"], snapshot)
         segment["audio_path"] = str(snapshot)
         segment["narration_input_original"] = {"path": str(original["source"])}
         segment["narration_input_snapshot"] = {"path": str(snapshot)}
@@ -246,13 +241,12 @@ def _active_report(context, rendered_output, final_output):
     }
 
 
-def finalize_binding(context, tts_segments, narration_wav, final_output, *, rendered_output=None):
+def finalize_binding(context, narration_wav, final_output, *, rendered_output=None):
     """Write ``narration_input_binding.json`` beside ``narration_wav`` and return it.
 
     ``rendered_output`` is the candidate file to probe when the published
     ``final_output`` path does not exist yet; it defaults to ``final_output``.
     """
-    del tts_segments  # already sealed; the record describes what was consumed
     if not context.get("active"):
         report = {
             "artifact": ARTIFACT, "schema_version": 1, "status": "FINALIZED",

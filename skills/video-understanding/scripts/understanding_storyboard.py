@@ -2,14 +2,9 @@
 
 from pathlib import Path
 
-from lib import CONFIG, log
-
-
+from lib import CONFIG, log, optional_file_identity
 from storyboard import build_source_storyboard, build_edited_storyboard
-
-
 from understanding_cache import (
-    _artifact_identity,
     _video_input,
     _frames_manifest_path,
     _load_json,
@@ -33,10 +28,10 @@ def _edited_storyboard_meta(clip_plan_validated_json, frames_manifest_path):
         "schema_version": 1,
         "stage": "edited_storyboard",
         "inputs": {
-            "clip_plan_validated": _artifact_identity(clip_plan_validated_json),
-            "frames_manifest": _artifact_identity(frames_manifest_path),
+            "clip_plan_validated": optional_file_identity(clip_plan_validated_json),
+            "frames_manifest": optional_file_identity(frames_manifest_path),
         },
-        "fps": float(CONFIG.get("fps") or 0),
+        "fps": float(CONFIG["fps"]),
         "sample_policy": _storyboard_sample_policy(),
     }
 
@@ -47,7 +42,7 @@ def _generate_source_storyboard(
     """Generate (or reuse cached) the source storyboard. Advisory: returns dict|None, never raises.
 
     Cached via _write_stage_meta/_stage_cache_valid on storyboard/source_storyboard.json; the
-    meta includes fps + the frames-manifest identity so an fps-change resume rebuilds (Principle 5).
+    meta includes fps + the frames-manifest identity so an fps-change resume rebuilds.
     If frames/ is absent (cache hit skipped extraction / cleaned) → skip + log; pipeline continues.
     """
     if not CONFIG["storyboard"]:
@@ -62,10 +57,10 @@ def _generate_source_storyboard(
         "stage": "source_storyboard",
         "inputs": {
             "video": _video_input(video_path),
-            "scenes": _artifact_identity(scenes_json),
-            "frames_manifest": _artifact_identity(_frames_manifest_path(work_dir)),
+            "scenes": optional_file_identity(scenes_json),
+            "frames_manifest": optional_file_identity(_frames_manifest_path(work_dir)),
         },
-        "fps": float(CONFIG.get("fps") or 0),
+        "fps": float(CONFIG["fps"]),
         "sample_policy": _storyboard_sample_policy(),
     }
     if not force and _stage_cache_valid(json_path, meta):
@@ -128,9 +123,8 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
 def _prepend_storyboard_brief_header(
     brief_path, source_storyboard, edited_storyboard, *, cut_mode
 ):
-    """Post-process the RETURNED brief markdown FILE (C1): prepend a short storyboard header.
+    """Prepend a short storyboard header to the written brief markdown file.
 
-    Editing the brief FILE on disk (not brief.py) keeps the brief⇄narration twin byte-identical.
     Branches the edited-storyboard line on clip_plan_validated presence (edited_storyboard truthy)
     so pass1 never prints a not-yet-existing path. If labels_burned:false, point to inspect clip-map.
     """
@@ -161,7 +155,7 @@ def _prepend_storyboard_brief_header(
             )
         lines.append("")
         header = "\n".join(lines) + "\n"
-        existing = brief_path.read_text(encoding="utf-8") if brief_path.exists() else ""
+        existing = brief_path.read_text(encoding="utf-8")
         brief_path.write_text(header + existing, encoding="utf-8")
     except OSError as exc:
         log(f"storyboard brief 头部写入失败（忽略）: {exc}")

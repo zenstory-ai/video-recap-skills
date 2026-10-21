@@ -11,7 +11,7 @@ one image instead of opening dozens of frames:
 Both reuse the frames already extracted by understand.py (frames/frame_*.jpg at CONFIG["fps"]).
 Nothing here re-extracts video. Every function returns dict|None and degrades to
 None + log(...) on ANY failure (no frames, ffmpeg missing/non-zero, font probe raises),
-so a storyboard quirk can NEVER block the pipeline (Principle 1: advisory, never blocking).
+so a storyboard quirk can NEVER block the pipeline (advisory, never blocking).
 
 drawtext "mm:ss" labels are attempted when a usable font is found (labels_burned:true);
 when no font is available (or drawtext errors) the sheet is still produced UNLABELLED
@@ -131,7 +131,7 @@ def _scene_anchor_timestamps(scenes, max_tiles):
     Returns a list of (scene_id, timestamp). A scene is "long" when adding the thirds gives
     materially distinct sample points; we treat scenes longer than `long_scene_seconds` as
     long. Total is capped at max_tiles by evenly subsampling the ordered anchor list, so the
-    sheet stays legible (D2: one bounded contact sheet, not dozens of frame reads).
+    sheet stays legible (one bounded contact sheet, not dozens of frame reads).
     """
     long_scene_seconds = float(CONFIG["storyboard_long_scene_seconds"])
     anchors = []
@@ -342,7 +342,7 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
 
 
 def _source_to_output(source_time, clip):
-    """Forward affine source→output map for ONE clip (reimplements cut.py:319 locally).
+    """Forward affine source→output map for ONE clip (the video-cut mapping, reimplemented locally).
 
     output = clip.output_start + (src − clip.source_start), clamped to [output_start, output_end].
     Read the authoritative numbers from clip_plan_validated.json; do NOT import cut.py.

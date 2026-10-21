@@ -535,9 +535,7 @@ def build_audio_track(ctx, timeline_track):
         place_us = want_us
         required_source_us = int(round(want_us * speed_value))
         if required_source_us > mat_dur_us:
-            if role == "bgm" and timeline_track.get("loop"):
-                place_us = want_us
-            else:
+            if not (role == "bgm" and timeline_track.get("loop")):
                 place_us = int(mat_dur_us / speed_value)
             if role == "bgm" and not timeline_track.get("loop"):
                 ctx.note(

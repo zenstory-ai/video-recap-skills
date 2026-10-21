@@ -13,6 +13,7 @@ from agent_text import (
     _clean_narration_punctuation,
     _find_scene_for_midpoint,
     _normalise_narration_segment,
+    _overlap_seconds,
     _post_dedup_narration,
     _recommended_char_budget,
     _scene_available_seconds,
@@ -113,27 +114,6 @@ def _frame_fact_times_for_segment(scenes_analysis, start, end):
     )
 
 
-def _clip_span(clip):
-    """A validated plan clip carries source_start/source_end; a raw agent plan start/end."""
-    if "source_start" in clip:
-        return clip["source_start"], clip["source_end"]
-    return clip["start"], clip["end"]
-
-
-def _clip_matches_for_segment(seg, clip_plan, requested_clip_id):
-    if not clip_plan:
-        return []
-    clips = clip_plan["clips"]
-    midpoint = (seg["start"] + seg["end"]) / 2
-    if requested_clip_id is not None:
-        clips = [clip for clip in clips if clip.get("clip_id") == requested_clip_id]
-    return [
-        clip
-        for clip in clips
-        if _clip_span(clip)[0] <= midpoint <= _clip_span(clip)[1]
-    ]
-
-
 def _source_sentence_entry_issue(index, start, anchors, speech_owned):
     """Return a blocking issue when narration enters midway through source speech.
 
@@ -157,8 +137,8 @@ def _source_sentence_entry_issue(index, start, anchors, speech_owned):
             suggested_start=None,
         )
     # Only the measured acoustic pause owns a safe entry. A tiny 80ms post-anchor
-    # tolerance covers timestamp/sample rounding; the old +450ms allowance could
-    # already be several Chinese syllables into the next sentence.
+    # tolerance covers timestamp/sample rounding; anything wider can already be
+    # several Chinese syllables into the next sentence.
     for anchor in anchors:
         when = anchor["time"]
         pause_start = anchor.get("pause_start", when - 0.12)
@@ -197,7 +177,7 @@ def _has_connected_predecessor(narration, idx, start):
 
 
 def lint_narration(
-    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
+    narration, scenes_analysis=None, *, mode="full", work_dir=None,
     require_chronological=False,
 ):
     """Preflight-check agent narration before TTS; write narration_lint.json when work_dir is set.
@@ -407,60 +387,6 @@ def lint_narration(
                     )
                 )
 
-            if mode == "cut":
-                requested_clip_id = seg.get("source_clip_id")
-                if requested_clip_id is not None:
-                    try:
-                        requested_clip_id = int(requested_clip_id)
-                    except (TypeError, ValueError):
-                        errors.append(
-                            _lint_issue(
-                                "error",
-                                idx,
-                                "invalid_source_clip_id",
-                                "source_clip_id must be an integer",
-                            )
-                        )
-                        continue
-                matches = _clip_matches_for_segment(seg, clip_plan, requested_clip_id)
-                if not matches:
-                    errors.append(
-                        _lint_issue(
-                            "error",
-                            idx,
-                            "outside_clip_plan",
-                            "Cut-mode narration must fall inside a selected clip",
-                            start=start,
-                            end=end,
-                        )
-                    )
-                elif len(matches) > 1 and requested_clip_id is None:
-                    errors.append(
-                        _lint_issue(
-                            "error",
-                            idx,
-                            "ambiguous_source_clip",
-                            "Repeated/overlapping clips require source_clip_id",
-                            start=start,
-                            end=end,
-                        )
-                    )
-                if len(matches) == 1:
-                    clip_start, clip_end = _clip_span(matches[0])
-                    if start < clip_start or end > clip_end:
-                        warnings.append(
-                            _lint_issue(
-                                "warning",
-                                idx,
-                                "crosses_clip_boundary",
-                                "Narration extends beyond its clip; it will be trimmed to the clip and may describe footage that was cut",
-                                start=start,
-                                end=end,
-                                clip_start=round(clip_start, 3),
-                                clip_end=round(clip_end, 3),
-                            )
-                        )
-
             normalized.append(
                 {"index": idx, "start": start, "end": end, "char_count": char_count}
             )
@@ -490,8 +416,7 @@ def lint_narration(
                 )
             )
 
-    # Block-coverage check (full mode only; cut-mode density is measured on the mapped output
-    # timeline, not the source timestamps used here). Coverage is diagnostic, not a creative quota:
+    # Block-coverage check (full mode only). Coverage is diagnostic, not a creative quota:
     # flag wall-to-wall or sparse drafts so the Agent consciously checks the visual/audio board,
     # plus missing original-audio gaps and fragmented one-sentence TTS blocks.
     metrics = {}
@@ -642,11 +567,11 @@ def lint_narration(
 
 
 def validate_narration_or_raise(
-    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
+    narration, scenes_analysis=None, *, mode="full", work_dir=None,
     require_chronological=False,
 ):
     report = lint_narration(
-        narration, scenes_analysis, clip_plan=clip_plan, mode=mode, work_dir=work_dir,
+        narration, scenes_analysis, mode=mode, work_dir=work_dir,
         require_chronological=require_chronological,
     )
     if report["errors"]:
@@ -705,3 +630,27 @@ def _validate_narration_budget(narration, scenes_analysis):
         else:
             deduped.append(item)
     return _post_dedup_narration(deduped)
+
+
+def _align_narration_to_quiet(narration, scenes_analysis, silence_periods):
+    """Recompute overlaps_speech from real quiet windows; keep the agent's timing.
+
+    The dense continuous-bed design places narration ON the pictured beat over a
+    ducked original bed, so segments are never relocated into silence gaps. Only
+    the overlaps_speech flag that the ducking stage consumes is corrected, leaving
+    the agent's start/end (and text) intact.
+
+    Budget/dedup runs FIRST so a dedup-merged beat's overlaps_speech reflects its
+    extended timing, not its original shorter span.
+    """
+    aligned = _validate_narration_budget(narration, scenes_analysis)
+    quiet_windows = [qp for qp in silence_periods if not qp["has_speech"]]
+    quiet_ratio_min = CONFIG["quiet_overlap_min_ratio"]
+    for n in aligned:
+        seg_dur = n["end"] - n["start"]
+        quiet_overlap = sum(
+            _overlap_seconds(n["start"], n["end"], qw["start"], qw["end"])
+            for qw in quiet_windows
+        )
+        n["overlaps_speech"] = quiet_overlap < max(0.3, seg_dur * quiet_ratio_min)
+    return aligned

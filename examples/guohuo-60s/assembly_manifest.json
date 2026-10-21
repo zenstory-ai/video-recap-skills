@@ -40,7 +40,6 @@
       "tts_segment_tempo_max": 1.2
     },
     "audio_mix": {
-      "ducking_mode": "fixed",
       "duck_fade_seconds": 0.3,
       "duck_bridge_seconds": 1.5,
       "ducking_narr_weight": 2.4,
@@ -48,12 +47,6 @@
       "idle_orig_volume": 1.0,
       "speech_ducking_volume": 0.2,
       "zone_ducking_volume": 0.12,
-      "ducking_threshold": 0.15,
-      "ducking_ratio": 3,
-      "ducking_attack": 10,
-      "ducking_release": 300,
-      "ducking_level_sc": 2.0,
-      "ducking_makeup": 1.2,
       "final_loudnorm": "loudnorm=I=-14.0:TP=-1.0:LRA=11.0:linear=true:print_format=summary,alimiter=limit=0.98:level=false",
       "loudness_mode": "equivalent",
       "bgm_path": "",

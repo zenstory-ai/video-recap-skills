@@ -5,21 +5,10 @@ from pathlib import Path
 
 from lib import CONFIG, file_identity
 from briefing.context import _consolidation_model
+from vlm import mimo_video_overview_cache_fresh
 
-# Shared with consolidate.py, which this byte-identical copy cannot import (the sibling
-# skill ships no consolidate.py). Keep both literals in sync.
+# Consolidate preserves spans exactly, so this tolerance only guards hand-edited asr_clean.json.
 _ASR_SPAN_TOL = 0.05
-
-_MIMO_REJECTION_MARKERS = (
-    "request was rejected",
-    "considered high risk",
-    "high risk",
-    "content policy",
-    "cannot process",
-    "无法处理",
-    "内容审核",
-    "违规",
-)
 
 
 def _load_clean_asr(work_dir, asr_result):
@@ -70,108 +59,14 @@ def _load_clean_asr(work_dir, asr_result):
     return segments
 
 
-def _is_mimo_chunk_usable(content):
-    """A chunk is usable only if MiMo returned real analysis (not empty / a moderation refusal)."""
-    text = (content or "").strip()
-    if not text:
-        return False
-    low = text.lower()
-    return not any(marker in low for marker in _MIMO_REJECTION_MARKERS)
-
-
-def _mimo_video_settings():
-    """Non-secret MiMo video-overview settings that affect generated content."""
-    return {
-        "model": CONFIG["mimo_video_model"],
-        "mimo_video_api_url": CONFIG["mimo_video_api_url"],
-        "mimo_video_fps": CONFIG["mimo_video_fps"],
-        "mimo_media_resolution": CONFIG["mimo_media_resolution"],
-        "mimo_video_chunk_max_seconds": CONFIG["mimo_video_chunk_max_seconds"],
-        "mimo_video_chunk_min_seconds": CONFIG["mimo_video_chunk_min_seconds"],
-        "mimo_video_base64_max_mb": CONFIG["mimo_video_base64_max_mb"],
-        "mimo_video_prompt": CONFIG["mimo_video_prompt"],
-        "mimo_disable_thinking": CONFIG["mimo_disable_thinking"],
-    }
-
-
-def _mimo_chunk_cache_key(chunk):
-    """Stable identifier for a MiMo chunk (index + scene span) for partial-cache reuse."""
-    return f"{chunk['chunk_id']}|{chunk['scene_id']}|{chunk['start']:.3f}-{chunk['end']:.3f}"
-
-
-def _mimo_video_chunks(scenes):
-    """Split scene spans into MiMo video chunks. scenes.json rows carry no scene_id, so the
-    row index stands in for it there."""
-    max_seconds = CONFIG["mimo_video_chunk_max_seconds"]
-    min_seconds = CONFIG["mimo_video_chunk_min_seconds"]
-    chunks = []
-    for scene_index, scene in enumerate(scenes):
-        start, end = scene["start"], scene["end"]
-        scene_id = scene.get("scene_id", scene_index)
-        cursor = start
-        while cursor < end:
-            chunk_end = min(end, cursor + max_seconds)
-            if end - chunk_end < min_seconds and chunk_end < end:
-                chunk_end = end
-            chunks.append(
-                {
-                    "chunk_id": len(chunks),
-                    "scene_id": scene_id,
-                    "start": round(cursor, 3),
-                    "end": round(chunk_end, 3),
-                }
-            )
-            cursor = chunk_end
-    return chunks
-
-
-def _mimo_overview_matches_current_inputs(overview, scenes, video_path=None):
-    """True only when mimo_video_overview.json was produced from the current settings,
-    source video and scene plan, and none of its chunks was moderation-rejected.
-    Provenance keys are read with .get: a stale or partial file simply does not match."""
-    if not isinstance(overview, dict) or overview.get("input") != "scene_chunks":
-        return False
-    settings = _mimo_video_settings()
-    expected_keys = [
-        _mimo_chunk_cache_key(chunk) for chunk in _mimo_video_chunks(scenes)
-    ]
-    chunks = overview.get("chunks")
-    if not isinstance(chunks, list) or not all(
-        isinstance(chunk, dict)
-        and isinstance(chunk.get("content"), str)
-        and _is_mimo_chunk_usable(chunk["content"])
-        for chunk in chunks
-    ):
-        return False
-    if video_path is not None:
-        try:
-            if overview.get("source_video_identity") != file_identity(video_path):
-                return False
-        except OSError:
-            return False
-    try:
-        cached_keys = [_mimo_chunk_cache_key(chunk) for chunk in chunks]
-    except (KeyError, TypeError, ValueError):
-        return False
-    return overview.get("settings") == settings and cached_keys == expected_keys
-
-
 def _load_mimo_overview_for_brief(work_dir, scenes, enabled=None, video_path=None):
     """The current MiMo overview for the brief, or None when disabled, absent or stale."""
     if not (CONFIG["mimo_video_overview"] if enabled is None else enabled):
         return None
     path = Path(work_dir) / "mimo_video_overview.json"
-    if not path.exists():
+    if not mimo_video_overview_cache_fresh(path, video_path, scenes):
         return None
-    try:
-        overview = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return None
-    if not _mimo_overview_matches_current_inputs(
-        overview, scenes, video_path=video_path
-    ):
-        return None
-    return overview
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _load_optional_stage_status(work_dir, filename):

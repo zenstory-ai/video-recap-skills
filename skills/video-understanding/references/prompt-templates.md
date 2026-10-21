@@ -1,6 +1,6 @@
 # Prompt 模板
 
-> 本文件被 `load_prompt()` 按 `### NAME` 切片读取。当前 CLI 只读取 VLM 模板；解说词由 Agent 根据 `agent_narration_brief.md` 撰写。
+> `load_prompt()` 按 `### NAME` 标题切片读取本文件。
 
 ## 目录
 

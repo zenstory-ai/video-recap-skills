@@ -48,7 +48,7 @@ DUB_TTS_STYLE_PROMPT = "自然、清晰，保持原说话人的音色与节奏�
 
 DUB_SCHEMA_VERSION = 1
 # Tolerate ~1-frame rounding in agent-estimated timings so the gate blocks only GENUINE
-# errors, not rounding noise (the old render clamped such cases via min(slot_end, nxt)).
+# errors, not rounding noise.
 DUB_TIMING_EPS = 0.05
 DUB_LINT_SCHEMA = {
     "schema_version": DUB_SCHEMA_VERSION,
@@ -130,7 +130,7 @@ def _normalize_dub_script(script):
     return sorted(lines, key=lambda x: (float("inf") if x["start"] is None else x["start"], x["_input_index"]))
 
 
-def lint_dub_script(script, duration, work_dir=None):
+def lint_dub_script(script, duration):
     """Deterministic hard gate for dub_script.json before expensive voiceclone render."""
     duration = float(duration)
     issues = []
@@ -138,7 +138,7 @@ def lint_dub_script(script, duration, work_dir=None):
         # A malformed (non-list) script is a hard FAIL, not a crash: keep the "fail fast,
         # see dub_lint.json" promise so the agent gets a clean message instead of a traceback.
         bad = _issue("error", "script_not_a_list", None, "dub_script.json must be a JSON array of {start,end,zh}")
-        report = {
+        return {
             "schema_version": DUB_SCHEMA_VERSION,
             "verdict": "FAIL",
             "blocking": True,
@@ -146,9 +146,6 @@ def lint_dub_script(script, duration, work_dir=None):
             "issues": [bad],
             "summary": {"lines": 0, "errors": 1, "warnings": 0, "max_chars_per_second": 0.0, "trim_risk_lines": []},
         }
-        if work_dir is not None:
-            _write_json(Path(work_dir) / "dub_lint.json", report)
-        return report
     lines = _normalize_dub_script(script)
     max_cps = 0.0
     trim_risk = []
@@ -186,7 +183,7 @@ def lint_dub_script(script, duration, work_dir=None):
     priority = {"empty_translation": 0, "overlap": 1, "time_out_of_range": 2}
     error_items = sorted(error_items, key=lambda x: (priority.get(x["code"], 99), x.get("line", 0)))
     warnings = sum(1 for x in issues if x["severity"] == "warning")
-    report = {
+    return {
         "schema_version": DUB_SCHEMA_VERSION,
         "verdict": "FAIL" if error_items else "PASS",
         "blocking": bool(error_items),
@@ -200,15 +197,10 @@ def lint_dub_script(script, duration, work_dir=None):
             "trim_risk_lines": trim_risk,
         },
     }
-    if work_dir is not None:
-        _write_json(Path(work_dir) / "dub_lint.json", report)
-    return report
 
 
-def build_dub_review(script, transcript, lint=None):
+def build_dub_review(script, transcript, lint):
     """Script-level review scaffold: deterministic timing/naturalness signals for agent review."""
-    duration = float(transcript["duration"])
-    lint = lint or lint_dub_script(script, duration)
     lines = _normalize_dub_script(script) if isinstance(script, list) else []
     edits = []
     for issue in lint["issues"]:
@@ -500,7 +492,7 @@ def _brief_md(windows, duration):
     return "\n".join(lines) + "\n"
 
 
-def stage_render(video, work, ref_start, ref_dur):
+def stage_render(video, work):
     transcript = json.loads((work / "dub_transcript.json").read_text(encoding="utf-8"))
     duration = transcript["duration"]
     script = json.loads((work / "dub_script.json").read_text(encoding="utf-8"))
@@ -513,14 +505,11 @@ def stage_render(video, work, ref_start, ref_dur):
     if lint["verdict"] != "PASS":
         raise SystemExit(f"[dub] dub_script.json failed lint; see {work / 'dub_lint.json'}")
     lines = [{"start": ln["start"], "end": ln["end"], "zh": ln["zh"]}
-             for ln in _normalize_dub_script(script) if ln["zh"]]
+             for ln in _normalize_dub_script(script)]
     if not lines:
         raise SystemExit("[dub] dub_script.json has no lines")
 
     ref_wav = work / "dub_reference.wav"
-    if not ref_wav.exists():
-        rs, rd = _ref_window(duration, ref_start, ref_dur)
-        _cut_wav(work / "dub_source.wav", ref_wav, rs, rd)
     ref_identity = file_identity(ref_wav)
     ref_b64 = base64.b64encode(ref_wav.read_bytes()).decode("ascii")
 
@@ -616,7 +605,7 @@ def main():
     elif args.stage == "review":
         stage_review(work)
     else:
-        stage_render(video, work, args.ref_start, args.ref_dur)
+        stage_render(video, work)
 
 
 if __name__ == "__main__":

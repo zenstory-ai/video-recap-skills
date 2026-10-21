@@ -110,9 +110,7 @@ def main():
     ):
         parser.error("--shot-roi requires --review-shots, nonnegative X/Y and positive WIDTH/HEIGHT")
 
-    # CLIP_PADDING is declared in every skill's CONFIG, but video-cut is the only place that
-    # implements padding — and it used to read the CLI flag alone, so setting the env var did
-    # nothing at all while `clip_padding_source: "env"` reported otherwise. CLI still wins.
+    # --clip-padding wins over the CLIP_PADDING env var.
     clip_padding = (
         args.clip_padding if args.clip_padding is not None else CONFIG["clip_padding"]
     )
@@ -213,14 +211,10 @@ def main():
             clip["source_path"] for clip in validated_plan["clips"] if "source_path" in clip
         )
     ) or [str(args.video)]
-    _, _, _, geometry_qc = _select_output_geometry(source_paths, validated_plan["clips"])
+    geometry_qc = _select_output_geometry(source_paths, validated_plan["clips"])
     validated_plan["qc"]["output_geometry"] = geometry_qc
     validated_plan["qc"]["output_geometry_reason"] = geometry_qc["reason"]
-    update_cut_qc(
-        validated_plan,
-        allow_duration_drift=bool(args.allow_duration_drift),
-        duration_drift_allowed_by="--allow-duration-drift" if args.allow_duration_drift else None,
-    )
+    update_cut_qc(validated_plan, allow_duration_drift=args.allow_duration_drift)
     if isinstance(raw_plan, dict) and 'required_evidence' in raw_plan:
         # Re-evaluate the final snapped ranges even when the media cache can be reused.
         # A prior rendered receipt must not survive a failed revision preflight.

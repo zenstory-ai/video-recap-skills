@@ -6,6 +6,9 @@ import pytest
 import mimo_qc
 import qc.mimo_report as mimo_qc_report
 import qc_contract as qc
+from qc.mimo_evidence import collect_evidence, safe_mimo_config
+from qc.mimo_observations import normalize_observations
+from qc.mimo_payload import build_payload
 
 
 def _write_json(path, value):
@@ -33,7 +36,7 @@ def test_collects_lightweight_evidence_prefers_validated_plan(tmp_path):
     )
     (work / "output.mp4").write_bytes(b"mp4")
 
-    evidence = mimo_qc.collect_evidence(work)
+    evidence = collect_evidence(work)
 
     assert "narration.json" in evidence["artifacts"]
     assert "visual_overlays.json" in evidence["artifacts"]
@@ -94,8 +97,8 @@ def test_payload_preserves_semantic_values_and_only_relevant_final_output(tmp_pa
     (work / "output.mp4").write_bytes(b"mp4")
     _write_json(work / "assembly_manifest.json", {"final_output": "output.mp4"})
 
-    evidence = mimo_qc.collect_evidence(work)
-    pre = mimo_qc.build_payload(evidence, stage="pre_assemble")
+    evidence = collect_evidence(work)
+    pre = build_payload(evidence, stage="pre_assemble")
 
     narration = pre["evidence"]["artifacts"]["narration.json"]["summary"]
     tts = pre["evidence"]["artifacts"]["tts_meta.json"]["summary"]
@@ -118,7 +121,7 @@ def test_payload_preserves_semantic_values_and_only_relevant_final_output(tmp_pa
         in pre["evidence"]["evidence_roles"]["narration_and_subtitle_gaps"]
     )
 
-    post = mimo_qc.build_payload(evidence, stage="post_render")
+    post = build_payload(evidence, stage="post_render")
     assert "subtitles.srt" in post["evidence"]["generated_subtitles"]
     assert "not source ASR" in post["evidence"]["evidence_roles"]["generated_subtitles"]
     assert (
@@ -161,8 +164,8 @@ def test_multi_source_evidence_collects_per_source_asr_instead_of_stale_subtitle
     )
     (work / "subtitles.srt").write_text("上一版生成字幕", encoding="utf-8")
 
-    evidence = mimo_qc.collect_evidence(work)
-    pre = mimo_qc.build_payload(evidence, stage="pre_assemble")
+    evidence = collect_evidence(work)
+    pre = build_payload(evidence, stage="pre_assemble")
 
     assert set(pre["evidence"]["source_asr"]) == {"src_a", "src_b"}
     assert "选秀夜原声" in json.dumps(pre["evidence"]["source_asr"], ensure_ascii=False)
@@ -178,8 +181,8 @@ def test_post_qc_drops_source_caption_claim_when_visible_text_is_generated_cue(
     (work / "subtitles.srt").write_text(
         "1\n00:00:01,000 --> 00:00:05,000\n从成熟的面孔切回选秀夜，\n", encoding="utf-8"
     )
-    payload = mimo_qc.build_payload(mimo_qc.collect_evidence(work), stage="post_render")
-    findings = mimo_qc.normalize_observations(
+    payload = build_payload(collect_evidence(work), stage="post_render")
+    findings = normalize_observations(
         {
             "observations": [
                 {
@@ -278,7 +281,7 @@ def test_no_secret_persistence_in_report(tmp_path):
 
 
 def test_safe_mimo_config_strips_url_credentials_query_and_fragment():
-    cfg = mimo_qc.safe_mimo_config(
+    cfg = safe_mimo_config(
         {
             "mimo_api_url": "https://user:pass@mimo.example.test/v1/chat?api_key=sk-url-secret#frag",
             "mimo_video_api_url": "https://video_user:tp-url-password@video.example.test/v2/judge?token=tp-query-secret",
@@ -312,29 +315,34 @@ def test_dry_run_writes_valid_evidence_only_report_with_caller_stage(tmp_path):
     assert qc.validate_report(report) is True
 
 
-def test_injected_judge_payload_and_report_validation(tmp_path):
+def test_live_request_payload_and_report_validation(monkeypatch, tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     _write_json(work / "narration.json", [{"narration": "line"}])
-    seen = {}
+    seen = []
 
-    def judge(payload):
-        seen.update(payload)
-        return {
-            "observations": [
+    def api_call(payload, *, config=None, timeout=60):
+        seen.append(payload)
+        return _api_response(
+            [
                 {
                     "code": "sampled_frame_issue",
                     "message": "sampled concern",
                     "sample_policy": "sampled",
                 }
             ]
-        }
+        )
 
-    result = mimo_qc.run(work, judge=judge, config={"mimo_video_model": "mimo-judge"})
+    monkeypatch.setattr(mimo_qc, "mimo_qc_api_call", api_call)
+    result = mimo_qc.run(
+        work,
+        live=True,
+        config={"mimo_video_api_key": "sk-test-secret", "mimo_video_model": "mimo-judge"},
+    )
 
-    assert seen["artifact"] == "mimo_qc.json"
-    assert "instructions" in seen
-    assert "payload_fingerprint" not in seen and "evidence_fingerprint" not in seen
+    request = json.loads(seen[0]["messages"][0]["content"][0]["text"])
+    assert "instructions" in request
+    assert "payload_fingerprint" not in request and "evidence_fingerprint" not in request
     finding = result["report"]["findings"][0]
     assert finding["sample_policy"]["type"] == "sampled"
     assert finding["severity"] == "advisory"

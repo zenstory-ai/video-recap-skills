@@ -1,8 +1,7 @@
 """Bind an explicit output-clock subtitle track to media before any consumer uses it.
 
-The first render integration deliberately supports adopted AAC only. A future
-newly mixed narration track needs its own final-mix identity, not this input's
-soundtrack. Bound cue timing is a declared decision, not proof of speech onset.
+Only adopted AAC narration can be bound. Bound cue timing is a declared
+decision, not proof of speech onset.
 """
 
 import bisect
@@ -21,18 +20,14 @@ VALIDATION_SCHEMA = 1
 PROJECTOR_VERSION = 1
 
 
-def current_bindings(video, selected_audio_stream=0, *, edit_plan_path=None):
+def current_bindings(video, selected_audio_stream=0):
     """Compute the binding facts independently of the supplied subtitle track.
 
-    The picture binding is the resolved media path (plus the edit plan path when one
-    exists); the audio binding is the selected stream ordinal with its sample rate and
-    packet count.
+    The picture binding is the resolved media path; the audio binding is the selected
+    stream ordinal with its sample rate and packet count.
     """
     packets = probe_audio_packets(video, selected_audio_stream)
-    picture = {'path': str(Path(video).resolve())}
-    if edit_plan_path is not None:
-        picture['edit_plan'] = str(Path(edit_plan_path).resolve())
-    return {'picture': picture,
+    return {'picture': {'path': str(Path(video).resolve())},
             'audio': {'selected_stream': selected_audio_stream,
                       'sample_rate': packets['sample_rate'],
                       'packet_count': packets['packet_count']}}
@@ -78,12 +73,11 @@ def _project_boundary(target, frame_pts, duration):
 
 
 def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
-                           selected_audio_stream=0, edit_plan_path=None,
-                           reject_legacy_estimate=False):
+                           selected_audio_stream=0):
     """Validate and project an explicit track before SRT/ASS/timeline/QC consumers.
 
-    No track preserves legacy behavior. A present but invalid track fails instead
-    of falling back to proportional timing. The persisted record is not approval.
+    No track keeps the generated subtitles. A present but invalid track fails instead
+    of falling back to proportional timing.
     """
     work = Path(work_dir)
     path = work / TRACK
@@ -94,13 +88,13 @@ def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
     if audio_mode != 'adopted-packet-copy':
         raise ValueError('Explicit subtitle_track currently requires adopted-packet-copy; new mix is not bound')
     document = json.loads(path.read_bytes())
-    bindings = current_bindings(input_video, selected_audio_stream, edit_plan_path=edit_plan_path)
+    bindings = current_bindings(input_video, selected_audio_stream)
     frame_pts, duration = _picture_clock(input_video)
     if abs(float(duration) - float(video_duration)) > 0.05:
         raise ValueError('Picture duration differs from assembly duration')
     loaded = load_subtitle_track(
         document, expected_picture_identity=bindings['picture'], expected_audio_identity=bindings['audio'],
-        expected_duration_seconds=duration, reject_legacy_estimate=reject_legacy_estimate,
+        expected_duration_seconds=duration,
     )
     clock = document['clock']['timebase']
     tick = Fraction(clock['numerator'], clock['denominator'])
@@ -117,10 +111,8 @@ def prepare_subtitle_track(input_video, work_dir, video_duration, *, audio_mode,
     loaded['projector_version'] = PROJECTOR_VERSION
     loaded['binding'] = {
         'input_video': str(Path(input_video).resolve()), 'identities': bindings,
-        'inputs': {'track': file_identity(path), 'video': file_identity(input_video),
-                   'edit_plan': file_identity(edit_plan_path) if edit_plan_path is not None else None},
+        'inputs': {'track': file_identity(path), 'video': file_identity(input_video)},
         'duration': str(duration), 'frame_count': len(frame_pts),
-        'edit_plan': str(Path(edit_plan_path).resolve()) if edit_plan_path is not None else None,
         'verification': 'media_binding_and_declared_frame_projection_only',
         'direct_listening': 'NOT_CHECKED', 'acoustic_alignment': 'NOT_CHECKED',
     }
@@ -141,8 +133,6 @@ def _load_validation(work):
 
 def bound_subtitle_entries(work_dir, video_duration):
     """Return prepared exact entries, or None only when no explicit track exists."""
-    if work_dir is None:
-        return None
     work = Path(work_dir)
     if not (work / TRACK).exists():
         return None
@@ -154,9 +144,6 @@ def bound_subtitle_entries(work_dir, video_duration):
     video = Path(record['input_video'])
     if not video.is_file() or file_identity(video) != inputs['video']:
         raise ValueError('stale subtitle track: adopted media changed after prepare')
-    if record['edit_plan'] and (not Path(record['edit_plan']).is_file()
-                                or file_identity(record['edit_plan']) != inputs['edit_plan']):
-        raise ValueError('stale subtitle track: edit plan changed after prepare')
     if abs(float(Fraction(record['duration'])) - float(video_duration)) > 0.05:
         raise ValueError('stale subtitle track: consumer duration changed after prepare')
     return loaded['entries']

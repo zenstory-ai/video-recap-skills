@@ -96,12 +96,9 @@ def _approved_validation_args(args):
 
 def _record_resources(work_dir, args):
     """Write resource_lock.json for the finished render and surface anything needing a person."""
-    library_dir = getattr(args, "material_library_dir", None) or os.environ.get(
-        "VIDEO_RECAP_MATERIAL_LIBRARY_DIR"
-    )
     try:
         lock = resource_lock.write_resource_lock(
-            work_dir, library_dir=library_dir, project=getattr(args, "resolved_project", None)
+            work_dir, library_dir=_material_library_dir(args), project=args.resolved_project
         )
     except (OSError, ValueError, TypeError, KeyError) as exc:  # a record must never fail a finished render
         print(f"[video-recap] ⚠ 未能写出 resource_lock.json: {type(exc).__name__}: {exc}", flush=True)
@@ -312,7 +309,7 @@ def _narrate(work_dir, args, timeline):
 
 def _deliver(work_dir, args, assemble_video, recap_stem, timeline, extra_assemble_args=()):
     """Shared tail of every full/cut run: narration (if owned) -> assemble -> final QC."""
-    project = getattr(args, "resolved_project", None)
+    project = args.resolved_project
     if project and project["templates"]:
         project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
     project_binding.sync_packaging_layers(work_dir, project)
@@ -456,7 +453,6 @@ def main():
     if not args.video:
         ap.error("video is required (unless --doctor)")
     validate_audio_routing(ap, args)
-    args.resolved_project = None
     if args.project:
         args.project = str(project_binding.project_path(args.project))
         if uses_local_adoption(args) or args.edit_mode == "dub":
@@ -579,7 +575,7 @@ def _execute_pipeline(args, videos):
 
 def _run_dub(video, work_dir, args):
     """EN->ZH translation-dub in the original cloned voice (replaces speech, not overlay).
-    One pause: prepare (ASR + sentence-seg + reference) -> agent writes the Chinese
+    One pause: prepare (windowed ASR + voice reference) -> agent splits and writes the Chinese
     translation (dub_script.json) -> render (clone TTS + full-replace mux)."""
     dub_script = work_dir / "dub_script.json"
     dub_args = ["--video", str(video), "--work-dir", str(work_dir)]

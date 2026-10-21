@@ -79,8 +79,6 @@ def _sequence(value, required, *, local_count, width, height):
     directory = value["directory"]
     if not isinstance(directory, str) or not directory or "://" in directory:
         raise ValueError("Sequence requires a local directory")
-    if value["pattern"] != PATTERN:
-        raise ValueError(f"Only the literal simple pattern {PATTERN!r} is supported")
     resolved, paths = _sequence_paths(directory, value["pattern"], 0, local_count)
     for path in paths:
         _validate_rgba(path, width, height)

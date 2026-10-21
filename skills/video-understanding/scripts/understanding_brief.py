@@ -6,25 +6,15 @@ from pathlib import Path
 
 from lib import CONFIG, log, load_background_research
 from asr_timing_evidence import asr_evidence_summary_for_brief
-
-
 from detect import detect_speech_boundary_anchors
-
-
 from brief import build_agent_brief, assess_understanding_substrate
-
-
+from briefing.context import _clip_text
 from understanding_cache import _load_json, _merge_overview_into_scenes
 from understanding_storyboard import (
     _generate_edited_storyboard,
     _generate_source_storyboard,
     _prepend_storyboard_brief_header,
 )
-
-
-def _clip_text(text, limit):
-    value = " ".join(str(text or "").split()).strip()
-    return value[:limit]
 
 
 def _research_context(work_dir):

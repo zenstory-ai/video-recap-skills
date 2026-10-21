@@ -3,7 +3,7 @@
 
 Each skill ships its OWN lib.py (the bundle has no shared code), so a single
 `pytest tests/` would import several skills' modules into one process and collide
-on the `lib` (and `narration`) module names. Run one group per subprocess instead.
+on the `lib`, `agent_text` and `deslop_qc` module names. Run one group per subprocess instead.
 
 Works on macOS, Linux, and Windows (the bash equivalent is scripts/test.sh).
 

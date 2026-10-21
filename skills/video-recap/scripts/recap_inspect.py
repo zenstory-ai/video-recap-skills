@@ -189,8 +189,7 @@ def _present_storyboards(work_dir):
     return [n for n in _STORYBOARD_ARTIFACTS if _present(work_dir, n)]
 
 
-def cmd_state(work_dir, compact=None):
-    del compact
+def cmd_state(work_dir):
     work_dir = Path(work_dir)
     if not work_dir.exists():
         return {"error": f"work_dir 不存在: {work_dir}"}

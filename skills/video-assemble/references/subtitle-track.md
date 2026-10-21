@@ -152,23 +152,20 @@ Because cue intervals are half-open, a cue is not visible at any tick before its
 - Schema v1 has no source-to-cut/edit map and cannot map source-clock cues.
 - The module does not inspect media, select audio streams, or tolerate a
   self-declared binding without current caller facts.
-- Validation proves schema consistency and the requested bindings only. Actual
-  rendered first/last subtitle frames and perceptual speech alignment require
-  separate render/media review.
 
 ## Current assembly integration (bounded, not automatic alignment)
 
 Place `subtitle_track.json` in `work_dir` and select
 `assemble.py --audio-mode adopted-packet-copy`. A present track is a **complete
 replacement** of all generated narration/original-dialogue subtitles, not a
-partial patch and not merged with legacy subtitles. Carry every cue that should
+partial patch or merge. Carry every cue that should
 remain; an empty `cues` array intentionally removes all generated subtitles.
 Unknown patch/merge modes are rejected by schema v1. This does not detect words
 missing from the authored full track: acoustic/coverage review remains required.
 
 The assembly integration independently probes the chosen input stream for its
 sample rate and packet count, resolves the input path for the picture binding,
-and records the `{size, mtime_ns}` of the track, video and optional edit plan in
+and records the `{size, mtime_ns}` of the track and video in
 `subtitle_track_validation.json`. It does not use the track's own declarations
 as current facts.
 
@@ -180,9 +177,9 @@ schema and projector version. SRT and timeline consume resolved frame seconds;
 ASS thresholds are chosen to switch on those same frames despite ASS's 10ms
 clock. A cue with no visible frame, or a boundary that ASS cannot distinguish,
 is rejected rather than silently dropped. The original author file is not
-rewritten. Legacy subtitles keep their previous rendering behavior.
+rewritten.
 
-Each consumption re-checks the track/media/optional edit plan `{size, mtime_ns}`
+Each consumption re-checks the track/media `{size, mtime_ns}`
 and the consumer duration; a rewritten input is stale and must be prepared
 again. Deleting the explicit track clears its previous validation record.
 An invalid/stale track never falls back to character-proportional timing.
@@ -190,13 +187,10 @@ An invalid/stale track never falls back to character-proportional timing.
 Current limits:
 - Integration is for output media starting at zero with an adopted AAC track,
   not raw-source-to-edited-output mapping or a newly mixed narration track.
-- The low-level preparation API accepts `edit_plan_path`, but the assembly CLI
-  does not yet expose it. CLI tracks must omit `edit_plan`; that path binds the
-  input media, not edit-plan ancestry.
-- The low-level policy `reject_legacy_estimate=True` is available. There is not
-  yet a wired commercial-profile CLI gate. The current CLI preserves timing
-  evidence labels and does not call every accepted cue precisely aligned.
-- The actual FFmpeg regression demonstrates frame timing with a synthetic cue,
-  not phoneme alignment. `direct_listening` and `acoustic_alignment` remain
-  `NOT_CHECKED`; evidence labels are declarations, not automatically verified
-  human approval or proof that an external evidence reference is true.
+- Assembly binds the input media only, so tracks used with `assemble.py` must
+  omit `edit_plan`.
+- Assembly accepts `legacy_estimate` cues and preserves every timing evidence
+  label as declared.
+- `subtitle_track_validation.json` records `direct_listening` and
+  `acoustic_alignment` as `NOT_CHECKED`: frame projection is verified, speech
+  alignment is not.

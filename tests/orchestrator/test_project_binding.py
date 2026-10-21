@@ -10,7 +10,7 @@ import pytest
 import project_binding
 import recap_runner
 import recap_timeline
-from _helpers import seed_full_work, stub_child_run
+from _helpers import seed_full_work, stub_child_run, write_assemble_output
 from recap_cli import parse_args
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -127,7 +127,7 @@ def test_project_run_forwards_bound_settings_and_records_them(monkeypatch, tmp_p
 
     def assemble(cli):
         seen.update({k: recap_runner.os.environ[k] for k in ("BGM_PATH", "SUBTITLE_FONT_SIZE")})
-        (work / "assembly_manifest.json").write_text(json.dumps({"final_output": "x.mp4"}), encoding="utf-8")
+        write_assemble_output(work, "x.mp4")
 
     calls = []
     monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, None, calls, assemble=assemble))

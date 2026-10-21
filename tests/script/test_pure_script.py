@@ -5,13 +5,11 @@ sys.path.insert(
     0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
 )
 import json
-import os
 import validate as narration_validate
 import pytest
 from lib import CONFIG, env_float, file_identity
 from agent_text import _post_dedup_narration, _text_char_count
-from narration_lint import lint_narration
-from timeline_fusion import _align_narration_to_quiet, _build_timeline_fusion
+from narration_lint import _align_narration_to_quiet, lint_narration
 
 
 def _write_json(path, payload):
@@ -271,6 +269,28 @@ def test_validate_cut_output_uses_output_clock_sentence_anchors(
     )
 
 
+def test_lint_cut_output_suggests_next_output_clock_anchor(tmp_path):
+    _write_cut_output_speech_evidence(tmp_path)
+
+    report = lint_narration(
+        [
+            {
+                "start": 2.0,
+                "end": 6.0,
+                "narration": "剪后时间中途切入。",
+                "overlaps_speech": True,
+            },
+        ],
+        mode="cut_output",
+        work_dir=tmp_path,
+    )
+
+    issue = next(
+        item for item in report["errors"] if item["code"] == "interrupts_source_sentence"
+    )
+    assert issue["suggested_start"] == 4.0
+
+
 def test_validate_cut_output_rejects_false_speech_override(monkeypatch, tmp_path):
     _write_cut_output_speech_evidence(tmp_path)
     _write_json(
@@ -413,34 +433,6 @@ def test_lint_counts_leading_original_audio_block_and_interval_union(tmp_path):
     assert report["metrics"]["original_block_count"] >= 1
 
 
-def test_lint_narration_cut_mode_checks_clip_membership_and_boundaries():
-    """A beat outside the plan is an error; one spilling past its clip is silently trimmed
-    by the mapper, so it must at least warn."""
-    plan = {"clips": [{"clip_id": 0, "source_start": 10.0, "source_end": 20.0}]}
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 30.0}]
-
-    membership = lint_narration(
-        [
-            {"start": 11.0, "end": 15.0, "narration": "片段内解说。"},
-            {"start": 22.0, "end": 24.0, "narration": "片段外解说。"},
-        ],
-        scenes,
-        clip_plan=plan,
-        mode="cut",
-    )
-    assert membership["ok"] is False
-    assert any(issue["code"] == "outside_clip_plan" for issue in membership["errors"])
-    assert "crosses_clip_boundary" not in {i["code"] for i in membership["warnings"]}
-
-    crossing = lint_narration(
-        [{"start": 12.0, "end": 25.0, "narration": "跨过片段边界的解说。"}],
-        scenes,
-        clip_plan=plan,
-        mode="cut",
-    )  # mid 18.5 in clip, end 25 > 20
-    assert "crosses_clip_boundary" in {i["code"] for i in crossing["warnings"]}
-
-
 def test_lint_narration_warns_when_segment_spans_too_many_visual_beats(monkeypatch):
     monkeypatch.setitem(CONFIG, "visual_beat_max_seconds", 10.0)
     monkeypatch.setitem(CONFIG, "visual_beat_max_facts", 2)
@@ -521,8 +513,8 @@ def test_lint_block_coverage_metrics_and_warnings(monkeypatch):
     assert 0.45 <= report["metrics"]["narration_coverage"] <= 0.85
     assert report["metrics"]["original_block_count"] >= 2
 
-    # cut mode -> coverage lint is skipped (measured on the mapped output timeline elsewhere)
-    cut_report = lint_narration(sparse, mode="cut")
+    # coverage lint runs in full mode only
+    cut_report = lint_narration(sparse, mode="cut_output")
     assert cut_report["metrics"] == {}
 
 
@@ -642,59 +634,6 @@ def test_post_dedup_keeps_distinct_short_beats(monkeypatch):
     ]
     result = _post_dedup_narration([dict(n) for n in narration])
     assert len(result) == 2
-
-
-def test_timeline_fusion_aligns_scenes_dialogue_and_quiet_slots():
-    fusion = _build_timeline_fusion(
-        [
-            {
-                "scene_id": 0,
-                "start": 0.0,
-                "end": 10.0,
-                "description": "对峙",
-                "frame_facts": {"1.0": ["看门"]},
-            }
-        ],
-        [
-            {"start": 2.0, "end": 4.0, "text": "你到底是谁"},
-            {"start": 8.0, "end": 12.0, "text": "跨场对白"},
-        ],
-        [
-            {"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False},
-            {"start": 5.0, "end": 7.0, "duration": 2.0, "has_speech": False},
-            {"start": 9.0, "end": 9.5, "duration": 0.5, "has_speech": True},
-        ],
-    )
-
-    item = fusion[0]
-    assert item["dialogue_overlap_seconds"] == 4.0
-    assert [seg["text"] for seg in item["dialogue_segments"]] == [
-        "你到底是谁",
-        "跨场对白",
-    ]
-    assert [(slot["start"], slot["end"]) for slot in item["narration_slots"]] == [
-        (0.0, 1.0),
-        (5.0, 7.0),
-    ]
-    assert item["frame_facts"] == {"1.0": ["看门"]}
-
-
-def test_cut_validate_uses_validated_plan_only_when_newer_than_raw(tmp_path):
-    raw_payload = {"clips": [{"start": 40.0, "end": 50.0}]}
-    raw = tmp_path / "clip_plan.json"
-    validated = tmp_path / "clip_plan_validated.json"
-    _write_json(raw, raw_payload)
-    _write_json(
-        validated, {"clips": [{"clip_id": 0, "source_start": 40.0, "source_end": 50.0}]}
-    )
-    os.utime(raw, ns=(2_000_000_000, 2_000_000_000))
-    os.utime(validated, ns=(1_000_000_000, 1_000_000_000))
-    stale = narration_validate._load_cut_clip_plan(tmp_path)
-    assert stale["clips"][0]["start"] == 40.0  # validated older than raw -> raw wins
-
-    os.utime(validated, ns=(2_000_000_000, 2_000_000_000))
-    fresh = narration_validate._load_cut_clip_plan(tmp_path)
-    assert fresh["clips"][0]["source_start"] == 40.0
 
 
 def test_full_validation_rewrite_preserves_visual_overlays(tmp_path, monkeypatch):

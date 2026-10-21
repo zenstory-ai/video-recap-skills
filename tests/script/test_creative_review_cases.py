@@ -7,9 +7,10 @@ sys.path.insert(
 )
 
 import review_response
+from evidence_bundle import build_evidence_bundle
 
 
-def test_creative_case_rules_enter_review_prompt_without_schema_drift():
+def test_creative_case_rules_enter_review_prompt_without_schema_drift(tmp_path):
     expected_categories = [
         "hallucination",
         "weak_hook",
@@ -52,8 +53,11 @@ def test_creative_case_rules_enter_review_prompt_without_schema_drift():
         "packaging_consistency",
     ]
 
+    narration = [{"start": 0, "end": 2, "narration": "他接受挑战。"}]
     messages = review_response.build_review_messages(
-        [{"start": 0, "end": 2, "narration": "他接受挑战。"}], [], []
+        narration,
+        work_dir=tmp_path,
+        evidence_bundle=build_evidence_bundle([], [], narration),
     )
 
     assert review_response.CATEGORIES == expected_categories

@@ -9,10 +9,10 @@ from pathlib import Path
 
 
 from evidence_bundle import (
+    COVERAGE_POLICY_VERSION,
     _clip_text,
     _in_ranges,
     _safe_time,
-    build_evidence_bundle,
     build_review_coverage_metadata,
     render_evidence_bundle,
 )
@@ -62,8 +62,6 @@ SCORECARD_KEYS = [
 ]
 
 FACTUAL_CATEGORIES = {"hallucination", "incomplete"}
-
-COVERAGE_POLICY_VERSION = "coverage_policy_v1"
 
 RUBRIC = """你是中文视频解说的创作复核编辑。依据素材证据和已有创作计划审阅草稿，只指出真实问题，宁缺毋滥：
 1. 反幻觉（最重要）：解说里的人物、动作、因果、关系必须由带标签的 evidence 支撑。画面/对白是 timeline evidence（clock=SOURCE 或 OUTPUT）；背景资料/user_context 只能作为 context-only（clock=null）辅助识别/消歧。research-only 不能升级成当前画面强事实；若与 research 一致但画面/对白里看不到，最多 severity=suggestion/category=grounding_risk，不要判 error；只有与全部可得证据矛盾才是 severity=error, category=hallucination，并指出冲突证据。
@@ -305,8 +303,6 @@ def _format_review_research_context(research, limit=1200):
 
 
 def _load_optional_json(work_dir, name):
-    if work_dir is None:
-        return None
     return _load_agent_optional(Path(work_dir), name)
 
 
@@ -368,31 +364,13 @@ def _format_draft(narration):
     return "\n".join(lines)
 
 
-def build_review_messages(
-    narration,
-    vlm_analysis,
-    asr_result,
-    work_dir=None,
-    research_context=None,
-    evidence_bundle=None,
-):
+def build_review_messages(narration, *, work_dir, evidence_bundle):
     """Pure: assemble the reviewer chat messages (testable without the API)."""
     draft = _format_draft(narration)
-    research_obj = (
-        _load_review_research_context(work_dir) if work_dir is not None else {}
+    research_context = _format_review_research_context(
+        _load_review_research_context(work_dir)
     )
-    if research_context is None:
-        research_context = _format_review_research_context(research_obj)
-    bundle = evidence_bundle or build_evidence_bundle(
-        vlm_analysis,
-        asr_result,
-        narration,
-        timeline="cut_output"
-        if any("source_start" in x for x in (vlm_analysis or []) if isinstance(x, dict))
-        else "source",
-        research=research_obj,
-    )
-    evidence_text = render_evidence_bundle(bundle)
+    evidence_text = render_evidence_bundle(evidence_bundle)
     # Optional, agent-authored planning/QC artifacts. Bad JSON returns None via _load, matching
     # existing fail-open optional artifact behavior; these only sharpen advisory scoring.
     packaging = _load_optional_json(work_dir, "packaging_plan.json")

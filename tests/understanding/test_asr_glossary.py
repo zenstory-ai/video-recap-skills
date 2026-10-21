@@ -14,11 +14,8 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
 
 import asr  # noqa: E402
-from asr import (  # noqa: E402
-    _apply_glossary_corrections,
-    _correct_text_with_glossary,
-    _load_name_glossary,
-)
+from asr import _apply_glossary_corrections, _correct_text_with_glossary  # noqa: E402
+from asr_timing_evidence import load_glossary_names  # noqa: E402
 
 
 def _write_research(work_dir, characters=None, character_details=None):
@@ -53,7 +50,7 @@ def test_glossary_includes_character_details_keys_and_aliases(tmp_path):
         tmp_path,
         character_details={"范闲": {"aliases": ["小范闲"]}},
     )
-    names = _load_name_glossary(tmp_path)
+    names = load_glossary_names(tmp_path)
     assert "范闲" in names and "小范闲" in names
 
 
@@ -83,4 +80,4 @@ def test_missing_or_empty_glossary_is_noop(tmp_path, characters):
     segments = [{"start": 0.0, "end": 3.0, "text": "她叫叶青眉"}]
     _apply_glossary_corrections(segments, tmp_path)
     assert segments[0]["text"] == "她叫叶青眉"
-    assert _load_name_glossary(tmp_path) == []
+    assert load_glossary_names(tmp_path) == []

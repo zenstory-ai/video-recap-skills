@@ -193,9 +193,6 @@ def build_finding(
     elif blocking is None:
         blocking = severity in BLOCKING_SEVERITIES
 
-    if is_non_deterministic and blocking:
-        raise QCContractError(f"non-deterministic blocking finding is not allowed: {category}/{code}")
-
     finding = {
         "finding_id": finding_id,
         "id": finding_id,

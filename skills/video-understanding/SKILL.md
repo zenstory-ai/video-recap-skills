@@ -23,9 +23,10 @@ description: >
 2. **抽帧**：为视觉分析提取代表帧。
 3. **ASR**：通过 `mimo-v2.5-asr` 写粗分段对白 `asr_result.json`，并写
    `asr_timing_evidence.json` 说明可用性、有限时间精度与文本修正来源。
-4. **静音检测**：写 `silence_periods.json`，标注安静窗口与 `has_speech`。
+4. **静音检测**：写 `silence_periods.json`，标注安静窗口与 `has_speech`；同时写原声句末锚点 `speech_boundary_anchors.json`。
 5. **VLM 观察**：写 `vlm_analysis.json`，包含场景描述、深层分析和 `frame_facts`。
-6. **时间线融合与创作 brief**：写 `timeline_fusion.json`、`asr_writing_chunks.json` 和 `agent_narration_brief.md`。
+6. **全片整理**：写 `understanding_index.json` / `.md`。
+7. **时间线融合与创作 brief**：写 `timeline_fusion.json`、`asr_writing_chunks.json` 和 `agent_narration_brief.md`。
 
 各阶段只有在输出产物与 provenance sidecar 同时匹配当前视频及影响结果的设置时才会复用；`--force` 强制重算。
 
@@ -60,6 +61,8 @@ python3 scripts/understand.py <video> --work-dir <work_dir> \
 | `silence_periods.json` | `[{start, end, duration, has_speech}]` 安静窗口 |
 | `timeline_fusion.json` | VLM、ASR 与静音信息的统一时间线 |
 | `asr_writing_chunks.json` | 按句界和场景切分的 ASR 写作块 |
+| `speech_boundary_anchors.json` | 原声句末安全切入点，供下游检查旁白入点与剪辑入/出点是否打断原声句子 |
+| `understanding_index.json` / `.md` | 角色、关系、剧情主线与背景术语的全片索引（默认生成，`--no-consolidate` 关闭） |
 | `agent_narration_brief.md` | Agent 首先阅读的创作简报 |
 
 后续写作阶段根据创作简报与索引制定方案并写 `narration.json`。

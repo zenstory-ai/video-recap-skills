@@ -8,20 +8,6 @@ from deslop_qc import analyze_deslop_qc
 from narration_lint import lint_narration
 
 
-def _write_deslop_requirements(work_dir):
-    (work_dir / "deslop_qc_requirements.json").write_text(json.dumps({
-        "schema_version": 1,
-        "owner": "video-script.narration",
-        "style_card_required": True,
-        "packaging_plan_expected": True,
-        "deslop_qc": {
-            "report_only": True,
-            "aigc_detector": False,
-            "auto_rewrite": False,
-        },
-    }, ensure_ascii=False), encoding="utf-8")
-
-
 def test_deslop_qc_ta_pronoun_not_placeholder_but_scaffold_copy_is():
     """Regression: the gender-neutral pronoun 'TA' (他/她) followed by 要 (idiomatic 解说
     suspense device) must NOT trip placeholder_leakage and hard-abort the render; only the
@@ -37,8 +23,6 @@ def test_deslop_qc_ta_pronoun_not_placeholder_but_scaffold_copy_is():
 
 
 def test_lint_narration_embeds_deslop_qc_and_writes_sibling_report(tmp_path):
-    _write_deslop_requirements(tmp_path)
-    (tmp_path / "agent_narration_brief.md").write_text("Brief text no longer controls style-card gating", encoding="utf-8")
     (tmp_path / "original_subtitles.json").write_text(
         json.dumps([{"start": 1, "end": 2, "text": "原声台词——带破折号"}], ensure_ascii=False),
         encoding="utf-8",
@@ -49,24 +33,11 @@ def test_lint_narration_embeds_deslop_qc_and_writes_sibling_report(tmp_path):
     ], work_dir=tmp_path)
 
     codes = {issue["code"] for issue in report["errors"]}
-    assert {"missing_style_card", "em_dash"}.issubset(codes)
-    assert report["deslop_qc"]["style_card_required"] is True
-    assert report["deslop_qc"]["style_card_requirement_source"] == "deslop_qc_requirements.json"
+    assert "em_dash" in codes
+    assert "missing_style_card" not in codes  # the style card is advisory only
+    assert "missing_style_card" in {item["code"] for item in report["deslop_qc"]["advisories"]}
     assert (tmp_path / "deslop_qc.json").exists()
     assert (tmp_path / "narration_lint.json").exists()
-
-
-def test_prompt_style_card_mention_without_requirements_does_not_gate(tmp_path):
-    (tmp_path / "agent_narration_brief.md").write_text("Please author style_card.json first", encoding="utf-8")
-
-    report = lint_narration([
-        {"start": 0.0, "end": 3.0, "narration": "正常解说。"},
-    ], work_dir=tmp_path)
-
-    codes = {issue["code"] for issue in report["errors"]}
-    assert "missing_style_card" not in codes
-    assert report["deslop_qc"]["style_card_required"] is False
-    assert report["deslop_qc"]["style_card_requirement_source"] == "legacy_default"
 
 
 def test_deslop_qc_is_report_only_with_blocker_advisory_split(tmp_path):
@@ -85,7 +56,6 @@ def test_deslop_qc_is_report_only_with_blocker_advisory_split(tmp_path):
     assert report["contract"].startswith("Local readability/QC report only")
     assert "not an AIGC detector" in report["contract"]
     assert "never rewrites text" in report["contract"]
-    assert report["style_card_required"] is False
     # em-dash is an objective blocker; the idiomatic 不是…而是 is advisory-only.
     assert {item["code"] for item in report["blockers"]} == {"em_dash"}
 

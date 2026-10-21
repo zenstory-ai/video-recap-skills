@@ -12,23 +12,15 @@ description: >
 本技能负责最终合成：
 
 1. 把各段旁白音频放到视频时间线上。
-2. 在旁白窗口内压低原声，支持 fixed / sidechain / zone 模式。
+2. 在旁白窗口内按固定包络压低原声。
 3. 根据旁白位置生成 `subtitles.srt`；默认同时生成并烧录 `subtitles.ass`，`--no-burn-subtitles` 可关闭。
 4. 可选把最终响度标准化到目标 LUFS。
 
 ## 2. 声音收尾契约
 
-合成阶段只实现创作决定，不凭空制造决定。Agent 在写旁白位置前，已在 `visual_audio_board.json` 为每个 beat 指定 `audio_owner`：
+合成阶段只实现创作决定，不凭空制造决定。旁白间隙是脚本阶段主动留下的选择，不是必须填满的空白；不要为了“更满”而加入通用 BGM、压住必须听见的台词或消除有意义的沉默。
 
-- `original_dialogue`
-- `action_sound`
-- `ambience` / `music`
-- `silence`
-- `narration`
-
-因此，旁白间隙是主动选择，不是必须填满的空白。不要为了“更满”而加入通用 BGM、压住必须听见的台词或消除有意义的沉默。
-
-当前渲染器不解析 `visual_audio_board.json`；Agent 通过旁白时间、`overlaps_speech`、原声留白与现有混音参数落实这些决定。
+渲染器不读取 `visual_audio_board.json`；这些决定通过旁白时间、`overlaps_speech`、原声留白与混音参数落实。
 
 ## 3. 输入契约
 
@@ -66,47 +58,40 @@ python3 scripts/assemble.py <video> --work-dir <work_dir> \
 
 ## 6. 合成规则
 
-- 音频模式的处理与冻结语义见 `references/audio-modes.md`。默认仍为 `narration`；另外两种模式必须显式选择。
-- `--audio-mix-adoption` 只与显式 `--tts-meta`、`--narration-adoption` 同时使用；它保留 `narration` 模式名，但跳过旧速度/适配、原声 handoff、环境 BGM、duck、loudnorm 和 limiter。
+- 音频模式的处理与冻结语义见 `references/audio-modes.md`。默认为 `narration`；另外两种模式必须显式选择。
+- `--audio-mix-adoption` 只与显式 `--tts-meta`、`--narration-adoption` 同时使用；它保留 `narration` 模式名，但跳过速度适配、原声 handoff、环境 BGM、duck、loudnorm 和 limiter。
 - 音频按轨道混合：原声、可选 BGM 与旁白各自独立。
 - 旁白不做任何容差裁尾；温和加速后仍放不下即 `no_safe_fit`。每段 `_placed_*.wav`
   必须与序列化后的时间线区间等长或更短，否则 `timeline_audio_mismatch` 阻断。
-- 已采用配音的 v1 合同只支持原速、禁止段内适速；不能让环境默认 1.15 倍速或旧缓存覆盖它。放不下就修订安排，不裁尾。严格运行使用新工作目录与新输出路径；输入/实际混音来源变动或 QC 失败时，不发布候选成片。没有采用文件的旧入口仍是兼容模式，不自动获得同等证据。
+- 已采用配音按 adoption 的 `tempo_policy` 适速（默认原速、不做段内适速）；环境默认倍速或旧缓存不会覆盖它。放不下就修订安排，不裁尾。严格运行使用新工作目录与新输出路径；输入/实际混音来源变动或 QC 失败时，不发布候选成片。
 - 原声在旁白结束后保持压低到下一可靠句末的 `pause_start`，只在实测停顿内渐强，
   于 `source_restore_at` 回满；无后续锚点时保持压低到时间线末端，而不是放出半句。
 - `--export-jianying` / `EXPORT_JIANYING=1` 可把 `timeline.json` 导出为可编辑草稿。cut 模式应传 `--source-video <orig>`，让草稿引用真实原片区间。
 - 剪映导出默认把视频、音频与图片复制到 `Resources/local/{video,audio,image}`，保持草稿可搬迁；`--jianying-no-bundle-media` 只适合原路径始终可访问的情况。
 - 重叠覆盖物会拆到编号轨道；非空目标目录不会覆盖，而会创建编号兄弟目录。
-- 常速、倒放、变换、富文本、转场、蒙版、LUT、绿幕复合草稿及显式特效轨道通过 timeline v2 扩展表达。需要素材包的功能只接受调用方合法提供的离线资源。
+- 常速、倒放、富文本、转场、蒙版、LUT、绿幕复合草稿及显式特效轨道是 timeline v2 扩展：`assemble.py` 不写这些字段（只为包装图层写缩放与位置），它们只在手写 `timeline.json` 并用 `scripts/export_jianying.py <timeline.json> --out-dir <dir>` 导出时生效。需要素材包的功能只接受调用方合法提供的离线资源。
 - 剪映草稿引用未烧录的源视频，因此原片硬字幕仍会保留，必要时在剪映内另行遮罩。
 - 字幕外观可用 `SUBTITLE_FONT_SIZE`、`SUBTITLE_MARGIN_V`、`SUBTITLE_MAX_CHARS` 等控制。
 - `SUBTITLE_Y_TOP/BOT` 把 ASS 基线放到测得的原片字幕区域，坐标为半开 `[top, bot)`；显式遮罩策略下默认 `SUBTITLE_MASK_OPACITY=0.6`，`SOURCE_SUBTITLE_MASK_TIMING=narration`。
-- 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `DUCKING_MODE`、`ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM` 与 `TARGET_LUFS`。
-- 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。不要在没有创作依据时设置通用 BGM。
+- 原声在旁白间隙回到 `IDLE_ORIG_VOLUME`，旁白下压到 `SPEECH_DUCKING_VOLUME`；`DUCK_FADE_SECONDS` 控制过渡。还可配置 `ZONE_DUCKING_VOLUME`、`FINAL_LOUDNORM` 与 `TARGET_LUFS`。
+- 可通过 `BGM_PATH` 指定 BGM；它会循环到成片长度，并按 `BGM_VOLUME` / `BGM_DUCKING_VOLUME` 混音。
 - 烧录字幕需要带 `subtitles` / libass 的 ffmpeg；合成阶段会预检并在缺失时明确失败。
-- 原声留白中的对白字幕优先读取 Agent 校对的 `original_subtitles.json`；否则保守映射 ASR。只有遮罩覆盖留白或用户字幕明确要求替换时才烧录原声对白，并用 `「」` 与旁白区分。
+- 原声留白中的对白字幕优先读取用户提供的 `user_subtitles.json` / `.srt` / `.ass`，其次是 Agent 校对的 `original_subtitles.json`；都没有时保守映射 ASR。只有遮罩覆盖留白或用户字幕明确要求替换时才烧录原声对白，并用 `「」` 与旁白区分。
 
 ### 按原片区间准备声音，而不是整体压低旧成片
 
 已有多段原声取舍和独立 BGM 决定时，先用 `references/source-score.md` 的独立
 `source_score.py` 从原片声音流按精确帧区间重建原声轨、音乐轨及两者之和；它只输出
 声音底轨和来源回执。要与逐段已采用配音合成，再由调用方提供 `references/explicit-audio-mix.md`
-的严格 adoption；不要将底轨塞入旧入口自动 duck，也不要从含旧解说的成片取整条声音冒充干净原声。
+的严格 adoption；不要把底轨交给默认 narration 路径自动 duck，也不要从含旧解说的成片取整条声音冒充干净原声。
 
 ## 7. 字幕与可选包装
 
-先锁定画面、剪点、旁白和混音，再投入字幕动画或边框包装；字幕样式不能掩盖叙事、剪点或声音问题。
-普通交付优先使用现有 ASS 路径；只有用户需要逐 cue 排版、动画或透明图层时，才用项目级代码渲染器，
-并按 `references/foreground-compose.md` 把它生成的 RGBA 序列叠到锁定母版。包装顺序与样帧抽检清单见
-`references/packaging.md`。
+- 字幕与包装的顺序、代码渲染器取舍和样帧抽检见 `references/packaging.md`；把 RGBA 序列叠到锁定母版见 `references/foreground-compose.md`。
+- 显式输出轴字幕轨的独立合同与完整替换语义见 `references/subtitle-track.md`。
+- 画面回原片重建后，若需保留另一文件中的已采用完整混音，先按 `references/pair-media.md` 显式配对独立画面与音轨。配对只复制流，不补字幕或片名卡；后续字幕轨必须重新绑定配对后的容器与 `a:0`。
 
 ## 8. 能力边界
 
 - 不生成旁白文字，不合成 TTS，不重新转写视频。
 - 字幕烧录默认开启；关闭时不会重编码绘制字幕区域。
-
-显式输出轴字幕轨的独立合同、完整替换语义和当前边界见 `references/subtitle-track.md`。
-
-画面回原片重建后，若需保留另一文件中的已采用完整混音，先按
-`references/pair-media.md` 显式配对独立画面与音轨。配对只复制流，不补字幕或片名卡；
-后续字幕轨必须重新绑定配对后的容器与 `a:0`，不能继续沿用旧版本身份。

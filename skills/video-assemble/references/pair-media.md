@@ -41,7 +41,7 @@ provides:
 - `adopted_audio_identity.json`: donor and output AAC packet/decoder facts.
 - mux command/log for reconstruction and diagnosis.
 
-The first implementation deliberately accepts H264 or HEVC in an MP4-family container,
+`pair_media.py` accepts only H264 or HEVC in an MP4-family container,
 complete zero-origin CFR picture (1–120 fps), and contiguous AAC packets with
 known nominal sample duration. No VFR, retime, offset, format conversion, padding,
 trimming, `-shortest`, normalization or gain is inferred. Packet priming and skip
@@ -50,7 +50,7 @@ stream interval (at most one nominal priming packet before the start; the packet
 end matches the stream end within one sample). This is checked again on the
 actual muxed output. Picture/audio starts and ends must differ by no more than
 the larger of one picture frame or one nominal AAC packet. The interval check is
-compatibility, **not perceptual synchronization or acoustic alignment**. A tiny
+compatibility, not acoustic alignment. A tiny
 container-tail tolerance does not authorize cutting a word.
 
 Muxing goes to a staging file. The output's video decoder/packet sizes and
@@ -70,5 +70,4 @@ file or the donor's old stream ordinal. A present stale subtitle track fails rat
 back to estimated timings. See [subtitle-track.md](subtitle-track.md).
 
 Pairing preserves the input picture, including any explicit black tail; it does
-not turn that black tail into a branded end card. Listening, normal-speed review,
-editorial intent and release approval remain separate from this mechanical proof.
+not turn that black tail into a branded end card.

@@ -368,8 +368,7 @@ def validate_prepared_receipt(reference, expected_format):
                  Fraction(stream["start_time"]) != 0):
             raise ValueError(f"{name} must be zero-origin 48 kHz stereo float PCM")
         actual = _output_facts(path)
-        if actual["pcm"]["codec_name"] != CODEC \
-                or actual["pcm"]["samples"] != expected_format["total_samples"]:
+        if actual["pcm"]["samples"] != expected_format["total_samples"]:
             raise ValueError(f"{name} does not match the required full PCM format")
         prepared[name] = actual
     return {

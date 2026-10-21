@@ -66,7 +66,6 @@ def test_parse_review_normalizes_bad_severity_and_category_and_verdict():
 @pytest.mark.parametrize(
     "frame_facts, expected_facts",
     [
-        pytest.param([{"fact": "男子握紧拳头"}], ["男子握紧拳头"], id="list_of_fact_dicts"),
         pytest.param(
             {"2.0": ["男子握紧拳头"], "4.0": ["女子后退一步"]},
             ["男子握紧拳头", "女子后退一步"],
@@ -80,10 +79,9 @@ def test_parse_review_normalizes_bad_severity_and_category_and_verdict():
     ],
 )
 def test_build_review_messages_grounds_draft_asr_and_every_frame_fact_shape(
-    frame_facts, expected_facts
+    tmp_path, frame_facts, expected_facts
 ):
-    """frame_facts may be a list of {fact} dicts or vlm.py's {ts: [actions]} dict (regression
-    guard for the list-as-dict silent drop); every action must reach the reviewer."""
+    """Every action in vlm.py's {ts: [actions]} frame_facts must reach the reviewer."""
     narration = [
         {"start": 1.0, "end": 4.0, "narration": "他下定决心。", "overlaps_speech": True}
     ]
@@ -97,7 +95,11 @@ def test_build_review_messages_grounds_draft_asr_and_every_frame_fact_shape(
         }
     ]
     asr = [{"start": 1, "end": 4, "text": "你给我站住"}]
-    content = review.build_review_messages(narration, vlm, asr)[0]["content"]
+    content = review.build_review_messages(
+        narration,
+        work_dir=tmp_path,
+        evidence_bundle=review.build_evidence_bundle(vlm, asr, narration),
+    )[0]["content"]
     assert "他下定决心" in content and "门口对峙" in content
     assert "你给我站住" in content
     for fact in expected_facts:
@@ -128,11 +130,11 @@ def test_build_review_messages_includes_bounded_research_context(tmp_path):
         },
     )
 
+    narration = [{"start": 1.0, "end": 4.0, "narration": "他开始反击。"}]
     content = review.build_review_messages(
-        [{"start": 1.0, "end": 4.0, "narration": "他开始反击。"}],
-        [],
-        [],
+        narration,
         work_dir=tmp_path,
+        evidence_bundle=review.build_evidence_bundle([], [], narration),
     )[0]["content"]
 
     assert "背景资料（context-only/advisory" in content
@@ -206,6 +208,9 @@ def test_cut_output_review_remaps_grounding_to_output_timeline():
             "source_end": 20.0,
             "output_start": 0.0,
             "output_end": 10.0,
+            "source_id": "0",
+            "source_clip_id": 0,
+            "output_segment_index": 0,
         }
     ]
     vlm, asr = review.remap_grounding_to_output_timeline(
@@ -465,8 +470,11 @@ def test_build_review_messages_includes_optional_planning_style_and_deslop_artif
         tmp_path / "deslop_qc.json",
         {"flags": [{"type": "template_transition", "text": "然而"}]},
     )
+    narration = [{"start": 0, "end": 3, "narration": "测试。"}]
     content = review.build_review_messages(
-        [{"start": 0, "end": 3, "narration": "测试。"}], [], [], work_dir=tmp_path
+        narration,
+        work_dir=tmp_path,
+        evidence_bundle=review.build_evidence_bundle([], [], narration),
     )[0]["content"]
 
     assert "packaging_plan.json" in content and "看到反转" in content
@@ -787,8 +795,11 @@ def test_build_review_messages_bad_style_and_deslop_json_keep_context_titles(tmp
     (tmp_path / "style_card.json").write_text("{bad json", encoding="utf-8")
     (tmp_path / "deslop_qc.json").write_text("[bad json", encoding="utf-8")
 
+    narration = [{"start": 0, "end": 1, "narration": "测试。"}]
     content = review.build_review_messages(
-        [{"start": 0, "end": 1, "narration": "测试。"}], [], [], work_dir=tmp_path
+        narration,
+        work_dir=tmp_path,
+        evidence_bundle=review.build_evidence_bundle([], [], narration),
     )[0]["content"]
 
     assert "style_card.json" in content

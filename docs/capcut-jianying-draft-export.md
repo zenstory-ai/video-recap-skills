@@ -30,13 +30,13 @@ Agent 会自动完成理解、方案、剪辑、写稿、配音和合成，不�
 | 字幕 | 解说字幕，以及解说留白处的【原声台词】 |
 | 图片叠层 | 本地图片包装 |
 
-所有素材默认复制到 `Resources/local/{video,audio,image}` 并建立索引，clone 或搬目录后草稿仍可用；只有原路径永远可访问时才用 `--jianying-no-bundle-media`。常速、倒放、变换、富文本、转场、蒙版、LUT、绿幕等复合草稿通过 timeline v2 扩展表达。
+所有素材默认复制到 `Resources/local/{video,audio,image}` 并建立索引，clone 或搬目录后草稿仍可用；只有原路径永远可访问时才用 `--jianying-no-bundle-media`。常速、倒放、变换、富文本、转场、蒙版、LUT、绿幕等复合草稿属于 timeline v2 扩展，`assemble.py` 不写这些字段，只在手写 `timeline.json` 并用 `export_jianying.py` 导出时生效。
 
 两条边界：草稿引用未烧录的源视频，所以原片自带的硬字幕仍会保留，必要时在剪映里遮罩；`ffmpeg` 渲染出的 `recap_<名>.mp4` 才是最终成片的判定标准，草稿是给你继续改的。
 
 ## 让字幕更准
 
-解说块之间的原声留白会烧成【原声台词】字幕。默认由 Agent 校对、ASR 兜底；想更准，放一份字幕文件到 `work_dir`：`user_subtitles.json`（按成片或原片时间轴）或 `.srt` / `.ass`（按原片时间轴，自动映射到成片）。优先级：你的字幕文件 › Agent 校对的原声字幕 › ASR。
+解说块之间的原声留白默认不烧字幕。放一份字幕文件到 `work_dir` 即在留白处烧【原声台词】：`user_subtitles.json`（按成片或原片时间轴）或 `.srt` / `.ass`（按原片时间轴，自动映射到成片）。原片字幕遮罩全程不透明（`SOURCE_SUBTITLE_MASK_TIMING=all`）时，留白也会用 Agent 校对的原声字幕或 ASR 补上。优先级：你的字幕文件 › Agent 校对的原声字幕 › ASR。
 
 ## 自建和 SaaS 的成本差别
 

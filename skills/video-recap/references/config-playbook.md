@@ -4,8 +4,7 @@ The bundle runs **zero-config** with sensible defaults. To change behavior, set 
 environment variables below (or pass the noted CLI flags) — they **override** the defaults.
 Nothing here is required; this is documentation only. The only config file any tool reads is an
 optional `recap_project.json` passed with `--project` (see `resource-library.md`): it resolves to the same
-variables below, and a variable you set that disagrees with the project stops the run. The bundle ships no
-root `CLAUDE.md` (so it never collides with your project/global instructions).
+variables below, and a variable you set that disagrees with the project stops the run.
 Defaults below are bundle-level defaults unless a note scopes them to a specific stage.
 
 | Concern | Env var / flag | Default | Notes |
@@ -28,9 +27,8 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | TTS transport | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | request timeout, parallel segments, and per-segment retries for all providers |
 | Advisory MiMo QC | `MIMO_QC` / `--mimo-qc {off,pre-assemble,post-render,both}` | `off` | optional subjective review at the selected stage(s), one request per stage. Always fail-open: results only point the agent/user to `mimo_qc.json`, never block or auto-repair |
 | MiMo QC refresh/model | `MIMO_QC_REFRESH` / `--mimo-qc-refresh`; `MIMO_QC_MODEL` | cache on / VLM fallback | the reuse check compares evidence file sizes/mtimes, model and prompt, never absolute paths. Post-render temporarily samples at most 6 JPEGs (≤768px); base64 is never persisted. The standalone adapter requires explicit `mimo_qc.py --live` for network access |
-| Narration block coverage | `NARRATION_COVERAGE_TARGET` / `NARRATION_BLOCK_SECONDS` | `0.7` / `9.0` | current block-recap density controls |
 | Narration speed | `NARRATION_SPEED` | `1.15` | global atempo on the voiceover; set `1.0` for long-form/documentary |
-| Narration authored start | `NARRATION_DELAY_SECONDS` | `0` | the renderer uses the Agent-authored `start` exactly. Set a non-zero value only for legacy drafts; hidden delay can move a validated sentence-boundary entry back into source speech |
+| Narration authored start | `NARRATION_DELAY_SECONDS` | `0` | the renderer uses the Agent-authored `start` exactly. A non-zero delay can move a validated sentence-boundary entry back into source speech |
 | Source sentence boundary detector | `SOURCE_BOUNDARY_NOISE_THRESHOLD` / `SOURCE_BOUNDARY_MIN_PAUSE` / `SOURCE_BOUNDARY_MAX_ALIGNMENT_ERROR` | `-18dB` / `0.12` / `2.1` | aligns ASR terminal punctuation to short acoustic pauses and writes `speech_boundary_anchors.json`; unsafe narration entries and cut in/out points are blocked. There is no intentional-interrupt override |
 | Cut sentence snapping | `SNAP_CLIP_LINE_END` / `CLIP_START_SNAP_MAX_PREPEND` / `CLIP_START_SNAP_MAX_TRIM` / `CLIP_SNAP_MAX_EXTEND` | on / `1.8` / `0.35` / `2.0` | scene-cut cleanup runs first; reliable sentence/quiet snapping runs last. An ASR-owned edge still inside speech produces `unsafe_clip_sentence_boundary` instead of a half sentence |
 | Mask source subs | `MASK_SOURCE_SUBTITLES` / `SOURCE_SUBTITLE_MASK_POLICY` / `SOURCE_SUBTITLE_MASK_RATIO` | off / `off` / `0.14` | masking requires an explicit policy (`opt_in`, `safe`, or `forced`) and burned recap subtitles. Passing measured `--subtitle-y-top/--subtitle-y-bot` opts in automatically. With `--no-burn-subtitles`, the MP4 stays unmasked |
@@ -56,7 +54,7 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | 剪映 export (optional) | `--export-jianying` / `EXPORT_JIANYING` | off | after rendering, also write a 剪映/JianYing draft from `timeline.json`. Decoupled — the core render never needs it |
 | 剪映 draft dir | `JIANYING_DRAFT_DIR` | work_dir | parent folder for the exported draft (point it at 剪映's drafts root to open in-app) |
 | 剪映 bundle media | `JIANYING_BUNDLE_MEDIA` / `--jianying-no-bundle-media` | **on** | copies video/audio/photo into `Resources/local/*`, uses draft-placeholder paths, and writes the type-0 material index in `draft_meta_info.json`. This makes a cloned/moved draft self-contained and is required on sandboxed macOS. Use `--jianying-no-bundle-media` only if 剪映 can reach the original paths |
-| Source video | `--source-video` | — | original video (cut mode) so `timeline.json` / 剪映 export reference the real source clips instead of the concatenated `edited_source.mp4`; direct `video-assemble` runs intentionally ignore ambient `SOURCE_VIDEO` unless `--source-video` is passed |
+| Source video | `--source-video` | — | original video (cut mode) so `timeline.json` / 剪映 export reference the real source clips instead of the concatenated `edited_source.mp4` |
 
 `video-assemble` always writes `timeline.json` — a backend-neutral multi-track model
 (video / original-audio / narration / BGM / subtitle, with ducking automation). The

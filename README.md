@@ -212,7 +212,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 },
 ```
 
-三段被保护的原声由 Agent 校对后写进 [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json)，在留白处烧成「」字幕：
+三段被保护的原声由 Agent 校对后写进 [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json)；原片字幕遮罩覆盖留白时，它们会在留白处烧成「」字幕：
 
 ```json
 [
@@ -408,7 +408,7 @@ MiMo 复核每个阶段最多一次请求，只给建议，失败也不阻断出
 
 <img alt="剪辑台模板视图：包装图层与字幕样式的画布示意、带来源标记的参数表" src="docs/dashboard-templates.png" width="100%">
 
-**自带原声字幕，让留白处的「」字幕更准：** 把 `user_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "台词"}]`，按成片时间轴；包一层 `{"timeline": "source", "lines": [...]}` 则按原片时间轴自动映射）或 `user_subtitles.srt` / `.ass`（按原片时间轴）放进 `work_dir`。优先级：你的字幕文件 › Agent 校对的 `original_subtitles.json` › ASR 兜底。
+**留白处的「」原声字幕：** 默认不烧。把 `user_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "台词"}]`，按成片时间轴；包一层 `{"timeline": "source", "lines": [...]}` 则按原片时间轴自动映射）或 `user_subtitles.srt` / `.ass`（按原片时间轴）放进 `work_dir` 即开启；原片字幕遮罩全程不透明（`SOURCE_SUBTITLE_MASK_TIMING=all`）时也会开启。优先级：你的字幕文件 › Agent 校对的 `original_subtitles.json` › ASR 兜底。
 
 ## 常见问题
 

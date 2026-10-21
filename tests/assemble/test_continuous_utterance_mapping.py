@@ -15,7 +15,8 @@ from subtitles.render import _generate_ass
 
 def span(source_start, source_end, output_start):
     return {'source_start': source_start, 'source_end': source_end,
-            'output_start': output_start, 'output_end': output_start + source_end - source_start}
+            'output_start': output_start, 'output_end': output_start + source_end - source_start,
+            'entry': {}}
 
 
 def test_same_utterance_spans_continuous_picture_cut_without_repeat():
@@ -106,10 +107,10 @@ def test_join_survives_four_decimal_timeline_serialization_of_the_cut_point():
     spans = [
         {'source_start': _floor_time(1.0), 'source_end': _ceil_time(cut),
          'output_start': _floor_time(0.0), 'output_end': _ceil_time(cut - 1.0),
-         'source_id': 's', 'source_path': 's.mp4'},
+         'entry': {'source_id': 's', 'source_path': 's.mp4'}},
         {'source_start': _floor_time(cut), 'source_end': _ceil_time(5.0),
          'output_start': _floor_time(cut - 1.0), 'output_end': _ceil_time(4.0),
-         'source_id': 's', 'source_path': 's.mp4'},
+         'entry': {'source_id': 's', 'source_path': 's.mp4'}},
     ]
 
     result = _map_asr_to_output([{'start': 1.5, 'end': 4.5, 'text': '跨过剪辑点的一句'}], spans)

@@ -23,13 +23,6 @@ class ASRProviderError(RuntimeError):
     """Provider/API response failed, so an empty transcript is not cacheable success."""
 
 
-def _load_name_glossary(work_dir):
-    """从 background_research.json 收集已知人名（characters 键 + character_details 键及别名）。
-
-    返回去重后、长度 >=2 的人名列表（按长度降序，长名优先匹配）。文件缺失或无名字时返回 []。
-    """
-    return load_glossary_names(work_dir)
-
 
 def _correct_text_with_glossary(text, names):
     """用人名表修正 ASR 同音字错误（如 叶青眉 → 叶轻眉）。
@@ -73,7 +66,7 @@ def _one_char_diff(a, b):
 
 def _apply_glossary_corrections(segments, work_dir):
     """对已转录的 segments 就地应用人名表修正；无人名表时为 no-op。"""
-    names = _load_name_glossary(work_dir)
+    names = load_glossary_names(work_dir)
     if not names:
         return segments
     for seg in segments:

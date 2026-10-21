@@ -27,6 +27,7 @@ Status: implemented
 - **代价**：共享逻辑要同步改多份副本，parity 测试会在忘记时变红；裁剪配置时静态 grep 和运行时插桩都看不到经 `dict(DEFAULT_CONFIG)` 副本发生的读取，#67 因此误删了 QC 报告依赖的 12 个键，#68 补回并改用行为测试（env → CONFIG → 请求链）兜底。裁配置 must 配行为测试，不能只靠结构检查。
 - 重访信号：所有目标宿主都开始支持 skill 间共享包时，再考虑抽公共库。
 - 2026-09-21：video-script 侧的 brief 链副本已删除，parity 清单缩到两 skill 仍共有的五个模块，见 [[2026-09-21-drop-script-brief-chain-and-orphan-references]]。
+- 2026-10-20：只被 import、从不运行的三份副本已删除，parity 清单缩到 `agent_text` 与 `deslop_qc`，见 [[2026-10-20-drop-unused-parity-copies]]。
 
 ## Verification
 

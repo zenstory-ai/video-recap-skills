@@ -256,15 +256,10 @@ def _build_timed_narration(
         available_samples = end_boundary - actual_start
         available_duration = max(available_samples / sample_rate, 0)
         if tts_dur > available_duration > 0:
-            if tempo_policy:
-                wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
-                    wav_path, available_duration, tts_rate_offset,
-                    tempo_policy=tempo_policy,
-                )
-            else:
-                wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
-                    wav_path, available_duration, tts_rate_offset
-                )
+            wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
+                wav_path, available_duration, tts_rate_offset,
+                tempo_policy=tempo_policy,
+            )
             seg.update({
                 "fit_status": fit_meta["fit_status"],
                 "segment_tempo_factor": fit_meta["segment_tempo_factor"],
@@ -371,8 +366,6 @@ def _build_timed_narration(
         for i in range(fade_out_len):
             gain = 1.0 - i / fade_out_len
             s = (write_samples - 1 - i) * 2
-            if s < 0:
-                break
             sample = int.from_bytes(wf_data[s:s+2], 'little', signed=True)
             sample = int(sample * gain)
             wf_data[s:s+2] = sample.to_bytes(2, 'little', signed=True)

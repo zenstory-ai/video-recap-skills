@@ -5,7 +5,7 @@ selects the final audio workflow:
 
 | Audio mode | Narration validation/review | TTS | Assemble input |
 | --- | --- | --- | --- |
-| `narration` (default) | Runs as before | Runs as before | source or rendered cut |
+| `narration` (default) | Runs | Runs | source or rendered cut |
 | `source-mix` | Not applicable | Not run | current source or rendered cut |
 | `adopted-packet-copy` | Not applicable | Not run | current source or rendered cut |
 
@@ -28,17 +28,14 @@ that does not already exist. `--output-dir` is optional; when omitted, delivery 
 new work directory's parent. The route calls only the video-assemble CLI; it does
 not run understanding, script validation, narration review, voiceover, MiMo QC, cut,
 continuation, editor export, or material-cache reuse. Ambient TTS provider and voice
-configuration are inert. Explicit TTS/voice/review/MiMo/editor flags are rejected rather
-than silently ignored.
+configuration are inert. Explicit TTS/voice/review/MiMo/editor flags are rejected.
 
 `recap_run_manifest.json` records the resolved path of all three local artifacts under
 `audio.local_adoption`, and the picture's path plus `{size, mtime_ns}` as
-`source_video_identity`. Analysis settings remain separate and unchanged. Recap validates
+`source_video_identity`. Analysis settings are recorded separately. Recap validates
 routing and, after the child run, checks that the assembler's binding records reference
 the same adoption files and picture; video-assemble remains authoritative for the adoption
-schemas, PCM shapes, frame clock, mix, bindings, and final media transaction. This path
-executes caller-adopted assets and does not claim that recap authored or approved their
-story, voice, or mix.
+schemas, PCM shapes, frame clock, mix, bindings, and final media transaction.
 
 ## Keep adopted voice after a cut
 
@@ -54,9 +51,8 @@ episodes. Use two existing stages rather than sending an old mix binding into a 
      --sources-manifest SOURCES_JSON
    ```
 
-   A single-source cut omits `--sources-manifest`. For already locked frame decisions,
-   use the picture-plan path instead. Read `clip_plan_validated.json` (or the locked path's
-   `picture_map.json`) before placing sound.
+   A single-source cut omits `--sources-manifest`. Read `clip_plan_validated.json` before
+   placing sound.
 2. Keep the selected WAVs, `tts_meta.json`, and `narration_adoption.json` when the words,
    WAV bytes, and selected voice are unchanged. Do not run voiceover just to move a line.
    In this explicit mix, new `output_start_sample` values own placement; old generation
@@ -73,15 +69,14 @@ episodes. Use two existing stages rather than sending an old mix binding into a 
 
 The same steps handle a later revision: keep unchanged picture/voice assets, rebuild only
 the affected bed and placement decisions, then assemble into a new directory. The local
-assembly command still does not resume an old work directory or decide new placements.
+assembly command does not resume an old work directory or decide new placements.
 
 ## Identity and resume
 
 `recap_run_manifest.json` binds `{mode, selected_stream_index}` separately from
 understanding/material settings. Changing audio mode or stream requires a new
-work directory; it never reuses narrated TTS accidentally. Legacy manifests
-without the audio field are interpreted as `narration`, stream 0, preserving
-old in-flight narration runs. Continuation commands retain the audio selection.
+work directory; it never reuses narrated TTS accidentally. Continuation commands
+retain the audio selection.
 
 An unbound work directory containing `narration.json` is ambiguous and cannot
 be adopted by a source mode. Existing run-local QC stages are reset after the
@@ -92,9 +87,7 @@ narration review files are not read as evidence for the current run.
 ## Fail-closed combinations
 
 - `dub` cannot be combined with a non-narration audio mode.
-- Explicit TTS/text-policy options are rejected in source modes rather than
-  ignored. Ambient TTS provider/voice configuration is inert because TTS does
-  not run, and continuation commands do not promote it into explicit flags.
+- Explicit TTS/text-policy options are rejected in source modes.
 - Cut audio modes support selected stream 0 only. Full mode may pass
   another stream to assemble, subject to assemble/export support.
 - Source modes do not support advisory MiMo QC; use `off`.
@@ -104,8 +97,8 @@ narration review files are not read as evidence for the current run.
 - `source-mix` rejects an explicit `subtitle_track.json` before analysis or cut,
   because the precise-track contract only binds adopted packet audio.
 
-`--preserve-approved-text` remains opt-in and is forwarded unchanged to
-voiceover and continuation only in narration mode.
+`--preserve-approved-text` is opt-in and is forwarded to voiceover and
+continuation only in narration mode.
 
 Narration may explicitly select `--tts-provider index-tts`; `auto` does not
 select Index TTS. Index TTS cannot be combined with MiMo voice selection,
@@ -123,4 +116,3 @@ treated as caller-authored packaging and preserved.
 passed to assemble. In `full`, that is the input video. In `cut`, the cut stage
 has already rendered `edited_source.mp4`; packet-copy verification therefore
 applies to that file's audio, **not** to AAC packets from any original source.
-This routing does not prove listening quality or publication approval.

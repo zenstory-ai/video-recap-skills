@@ -77,7 +77,8 @@ def test_map_asr_identity_in_full_mode():
 
 
 def test_map_asr_cut_intersection_and_dropout():
-    spans = [{"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0}]
+    spans = [{"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0,
+              "entry": {}}]
     # a line at source 12-15 maps to output 2-5
     assert source_subtitles._map_asr_to_output([{"start": 12.0, "end": 15.0, "text": "hi"}], spans) == \
         [{"start": 2.0, "end": 5.0, "text": "hi"}]
@@ -392,8 +393,6 @@ def test_settings_payload_user_subtitles_flag(tmp_path):
     assert assembly_settings.assembly_settings_payload(tmp_path)["user_subtitles"] is False
     (tmp_path / "user_subtitles.json").write_text("[]", encoding="utf-8")
     assert assembly_settings.assembly_settings_payload(tmp_path)["user_subtitles"] is True
-    # no work_dir → flag is constant False (back-compat for no-arg callers)
-    assert assembly_settings.assembly_settings_payload()["user_subtitles"] is False
 
 
 # --- R2: precise interval-clip path -------------------------------------------

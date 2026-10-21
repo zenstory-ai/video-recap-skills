@@ -19,13 +19,9 @@ import json
 import re
 from pathlib import Path
 
-from lib import CONFIG, log, api_call, file_identity, load_background_research
+from lib import CONFIG, log, api_call, load_background_research, optional_file_identity
 from understanding_cache import _fresh
 
-# Shared tolerance for the per-segment span check. The brief-side gate inlines the SAME
-# literal (it cannot import this module without breaking the brief/narration byte-parity).
-# Keep both in sync. Consolidate preserves spans exactly, so this only guards hand-edited files.
-_ASR_SPAN_TOL = 0.05
 ASR_CLEAN_POSTPROCESS_VERSION = 2
 
 CLEAN_PROMPT = """你在清洗中文视频的 ASR 逐段转写。对【每一段】做：补标点、修明显同音/错别字、（能判断时）在句首轻标说话人，让长段连读文本变成清晰可读的句子。
@@ -91,12 +87,6 @@ def parse_clean_response(text, asr_result):
             merged["speaker"] = speaker
         out.append(merged)
     return out
-
-
-def _input_identity(work_dir, name):
-    """{size, mtime_ns} of one input artifact, or None when it is absent."""
-    path = Path(work_dir) / name
-    return file_identity(path) if path.exists() else None
 
 
 def _research_glossary_from_context(background_research):
@@ -186,20 +176,10 @@ def _apply_deterministic_asr_research_fallback(
     and written to characters[*].asr_mentions/evidence_ids without inventing relationships or
     plot facts. Research remains context_only via research_glossary.
     """
-    index = dict(index or {})
-    for key in (
-        "characters",
-        "relationships",
-        "plot_points",
-        "entities",
-        "research_glossary",
-    ):
-        index.setdefault(key, [])
-    glossary = index.get("research_glossary") or _research_glossary_from_context(
+    index = dict(index)
+    glossary = index["research_glossary"] or _research_glossary_from_context(
         background_research
     )
-    if not glossary:
-        glossary = _research_glossary_from_context(background_research)
     for item in glossary:
         if isinstance(item, dict):
             item["support"] = "context_only"
@@ -207,7 +187,7 @@ def _apply_deterministic_asr_research_fallback(
 
     segments = _dialogue_segments_for_index(asr_result=asr_result, asr_clean=asr_clean)
     char_by_name = {}
-    for c in index.get("characters") or []:
+    for c in index["characters"]:
         if isinstance(c, dict) and str(c.get("name", "")).strip():
             char_by_name[str(c.get("name")).strip()] = c
     for g in glossary:
@@ -419,13 +399,14 @@ def _index_meta(work_dir, vlm_analysis):
     """Provenance of understanding_index.json: `source` (vlm_analysis.json identity) + `model`
     are what brief consumers check; the other inputs and the prompt text are the producer's
     own rebuild gate."""
+    work_dir = Path(work_dir)
     return {
         "schema_version": INDEX_SCHEMA_VERSION,
-        "source": _input_identity(work_dir, "vlm_analysis.json"),
+        "source": optional_file_identity(work_dir / "vlm_analysis.json"),
         "inputs": {
-            "asr_result": _input_identity(work_dir, "asr_result.json"),
-            "asr_clean": _input_identity(work_dir, "asr_clean.json"),
-            "background_research": _input_identity(work_dir, "background_research.json"),
+            "asr_result": optional_file_identity(work_dir / "asr_result.json"),
+            "asr_clean": optional_file_identity(work_dir / "asr_clean.json"),
+            "background_research": optional_file_identity(work_dir / "background_research.json"),
         },
         "scene_count": len([s for s in (vlm_analysis or []) if isinstance(s, dict)]),
         "model": CONFIG["vlm_model"],
@@ -472,7 +453,7 @@ def consolidate_transcript(work_dir):
     if _fresh(out_path, work_dir / "asr_result.json"):
         existing = _load(work_dir, "asr_clean.json") or {}
         if (
-            existing.get("source") == _input_identity(work_dir, "asr_result.json")
+            existing.get("source") == optional_file_identity(work_dir / "asr_result.json")
             and existing.get("model") == CONFIG["vlm_model"]
             and existing.get("prompt") == CLEAN_PROMPT
             and existing.get("postprocess_version") == ASR_CLEAN_POSTPROCESS_VERSION
@@ -490,7 +471,7 @@ def consolidate_transcript(work_dir):
     content = _response_text(resp)
     segments = parse_clean_response(content, asr_result)
     payload = {
-        "source": _input_identity(work_dir, "asr_result.json"),
+        "source": optional_file_identity(work_dir / "asr_result.json"),
         "model": CONFIG["vlm_model"],
         "prompt": CLEAN_PROMPT,
         "postprocess_version": ASR_CLEAN_POSTPROCESS_VERSION,

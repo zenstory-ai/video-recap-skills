@@ -3,7 +3,7 @@
 Use this path only when the picture, a completed `prepared_bed_receipt`, an exact
 narration adoption, narration placements/gains, and one fixed master gain have already
 been independently selected. It is still `audio_mode=narration`, but it bypasses the
-legacy narration timing, ducking, ambient BGM, loudness-normalization, and limiter path.
+default narration timing, ducking, ambient BGM, loudness-normalization, and limiter path.
 
 ```bash
 python3 scripts/assemble.py picture.mp4 --work-dir NEW_WORK \
@@ -12,9 +12,7 @@ python3 scripts/assemble.py picture.mp4 --work-dir NEW_WORK \
   --audio-mix-adoption /local/audio_mix_adoption.json
 ```
 
-All strict output paths, including the CLI delivery alias, must be new. The CLI copies
-to a hidden delivery stage and creates the alias with an exclusive atomic link, so a
-concurrent or existing file is never overwritten.
+All strict output paths, including the CLI delivery alias, must be new.
 
 ## Adoption schema v1
 

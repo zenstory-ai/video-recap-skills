@@ -152,7 +152,7 @@ def _build_video_clips(input_video, work_dir, duration_s):
 
     In cut mode each plan entry becomes a clip referencing the ORIGINAL source
     range. Multi-source validated plans carry per-clip source_path and do not
-    require an explicit ambient --source-video. Without any declared source (full
+    require --source-video. Without any declared source (full
     mode, or cut mode rendered without --source-video) the rendered input is one clip.
     """
     explicit_source_video = _explicit_source_video()

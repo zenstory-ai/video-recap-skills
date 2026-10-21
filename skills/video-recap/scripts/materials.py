@@ -234,10 +234,8 @@ def save_material(
     source_identity: dict,
     settings: dict,
     *,
-    duration: float | None = None,
     source_id: str | None = None,
     material_id: str | None = None,
-    now: str | None = None,
 ) -> dict:
     """Persist small reusable analysis artifacts into the filesystem library."""
     lib = Path(library_dir)
@@ -245,7 +243,7 @@ def save_material(
     dest = material_dir(lib, mid)
     artifacts_dir = dest / "artifacts"
     artifacts_dir.mkdir(parents=True, exist_ok=True)
-    now = now or utc_now_iso()
+    now = utc_now_iso()
 
     sources = allowed_artifact_paths(work_dir)
     fresh_names = {src.name for src in sources}
@@ -274,7 +272,6 @@ def save_material(
         "source_name": source_path.name,
         "source_path": str(source_path),
         "source_video_identity": dict(source_identity),
-        "duration": duration,
         "settings": dict(settings),
         "artifacts": copied,
         "created_at": created_at,
@@ -321,8 +318,8 @@ def find_material_by_source(
             candidates.append(data)
     if not candidates:
         return None
-    # Deterministic fallback policy for legacy/manual callers that do not know
-    # the expected material_id: newest wins, then material_id for stable ties.
+    # More than one folder can match (e.g. a copied material folder): newest wins,
+    # then material_id for stable ties.
     candidates.sort(key=lambda d: (d["updated_at"], d["material_id"]), reverse=True)
     return candidates[0]
 
@@ -334,35 +331,21 @@ def restore_material(
     source_path: str | Path,
     source_identity: dict,
     settings: dict,
-    material_id: str | None = None,
-    overwrite: bool = True,
-    prune_stale_allowed: bool = True,
 ) -> dict:
     """Restore allowed artifacts when source path, identity and settings all match.
 
     Returns a status dict and never partially restores on mismatch.
 
-    By default the restored material is treated as the authoritative analysis
-    snapshot for ``work_dir``: allowed analysis artifacts are staged first, then
-    stale allowed artifacts in the destination are pruned before replacement.
-    This prevents reused work dirs from mixing old scenes/ASR/VLM files with a
-    newly restored material. Non-allowed files (for example narration.json or
-    clip_plan.json) are never removed here.
+    The restored material is treated as the authoritative analysis snapshot for
+    ``work_dir``: allowed analysis artifacts are staged first, then stale allowed
+    artifacts in the destination are pruned before replacement. This prevents
+    reused work dirs from mixing old scenes/ASR/VLM files with a newly restored
+    material. Non-allowed files (for example narration.json or clip_plan.json)
+    are never removed here.
     """
-    lib = Path(library_dir)
-    if material_id:
-        meta_path = material_dir(lib, material_id) / "material.json"
-        meta = _material_cache_entry(meta_path)
-        if meta is None:
-            return {"restored": False, "reason": "material missing or invalid"}
-        meta["material_dir"] = str(meta_path.parent)
-    else:
-        meta = find_material_by_source(lib, source_path, source_identity)
-        if meta is None:
-            return {"restored": False, "reason": "material not found"}
-    if meta["source_path"] != str(Path(source_path).resolve()) \
-            or meta["source_video_identity"] != source_identity:
-        return {"restored": False, "reason": "source identity mismatch", "material_id": meta["material_id"]}
+    meta = find_material_by_source(library_dir, source_path, source_identity)
+    if meta is None:
+        return {"restored": False, "reason": "material not found"}
     if meta["settings"] != settings:
         return {"restored": False, "reason": "settings mismatch", "material_id": meta["material_id"]}
 
@@ -380,27 +363,18 @@ def restore_material(
             copy_artifact_redacted(src_dir / name, tmp / name)
 
         pruned = []
-        if prune_stale_allowed:
-            # Never prune an artifact we are about to restore: the restore loop below honors
-            # `overwrite`, so pruning a staged name would (with overwrite=False) delete it and
-            # then skip the copy, losing the file.
-            for name in sorted(ALLOWED_ARTIFACTS - set(staged)):
-                out = dest / name
-                if out.exists():
-                    out.unlink()
-                    pruned.append(name)
-
-        restored = []
-        for name in staged:
+        for name in sorted(ALLOWED_ARTIFACTS - set(staged)):
             out = dest / name
-            if out.exists() and not overwrite:
-                continue
-            (tmp / name).replace(out)
-            restored.append(name)
+            if out.exists():
+                out.unlink()
+                pruned.append(name)
+
+        for name in staged:
+            (tmp / name).replace(dest / name)
     return {
-        "restored": bool(restored),
+        "restored": True,
         "material_id": meta["material_id"],
-        "artifacts": restored,
+        "artifacts": staged,
         "pruned_artifacts": pruned,
         "material": meta,
     }

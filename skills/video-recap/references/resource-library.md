@@ -6,7 +6,7 @@
 ```text
 <library>/
   library.json                                     # {"schema": "video-recap.library.v1", "name": "…"}
-  materials/…                                      # 理解分析库（见 data-schema.md），不变
+  materials/…                                      # 理解分析库（见 data-schema.md）
   resources/<kind>/<id>/resource.json (+ 文件)
   templates/<kind>/<id>/v<version>/template.json
   samples/<id>/sample.json (+ 样片文件，或指向库外的绝对路径)

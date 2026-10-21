@@ -3,26 +3,14 @@
 from __future__ import annotations
 
 import argparse
-
-
 import json
-
-
 from pathlib import Path
-
 from typing import Any
 from collections.abc import Callable, Mapping, Sequence
 
 import qc_contract
-
-from qc.mimo_report import _stage_reports, build_report, write_report
+from qc.mimo_report import FrameSampler, _stage_reports, build_report, write_report
 from qc.mimo_contract import ARTIFACT_NAME, DEFAULT_STAGE
-
-JudgeCallable = Callable[
-    [Mapping[str, Any]], Mapping[str, Any] | Sequence[Mapping[str, Any]]
-]
-
-FrameSampler = Callable[..., Sequence[Mapping[str, Any]]]
 
 
 def run(
@@ -31,14 +19,13 @@ def run(
     stage: str = DEFAULT_STAGE,
     fixture: Any | None = None,
     dry_run: bool = False,
-    judge: JudgeCallable | None = None,
     config: Mapping[str, Any] | None = None,
     final_output: str | Path | None = None,
     output: str | Path | None = None,
     live: bool = False,
     refresh: bool = False,
     frame_sampler: FrameSampler | None = None,
-    api_call: Callable[..., Any] | None = None,
+    api_call: Callable[..., Any],
 ) -> dict[str, Any]:
     path = Path(output) if output else Path(work_dir) / ARTIFACT_NAME
     existing = _stage_reports(path).get(stage)
@@ -47,7 +34,6 @@ def run(
         stage=stage,
         fixture=fixture,
         dry_run=dry_run,
-        judge=judge,
         config=config,
         final_output=final_output,
         live=live,
@@ -79,7 +65,7 @@ def _load_fixture(path: str | Path | None) -> Any | None:
 def main(
     argv: Sequence[str] | None = None,
     *,
-    run_callable: Callable[..., dict[str, Any]] | None = None,
+    run_callable: Callable[..., dict[str, Any]],
 ) -> int:
     parser = argparse.ArgumentParser(
         description="Write advisory MiMo QC from local recap evidence."
@@ -106,7 +92,7 @@ def main(
     args = parser.parse_args(argv)
     fixture = _load_fixture(args.fixture)
     config = {"mimo_qc_model": args.model} if args.model else None
-    result = (run_callable or run)(
+    result = run_callable(
         args.work_dir,
         stage=args.stage,
         fixture=fixture,

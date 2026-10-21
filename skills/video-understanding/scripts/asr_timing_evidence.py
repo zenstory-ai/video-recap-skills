@@ -6,7 +6,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from lib import file_identity, load_background_research
+from lib import load_background_research, optional_file_identity
 
 
 EVIDENCE_FILENAME = "asr_timing_evidence.json"
@@ -36,12 +36,6 @@ _PRECISION = {
     "word_alignment": "NOT_PERFORMED",
     "empty_text_meaning": "UNKNOWN_NOT_PROVEN_SILENCE",
 }
-
-
-def _identity(path):
-    """{size, mtime_ns} of a bound file, or None when it does not exist."""
-    path = Path(path)
-    return file_identity(path) if path.exists() else None
 
 
 def load_glossary_names(work_dir):
@@ -119,9 +113,9 @@ def write_asr_timing_evidence(
     payload = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
-        "source_video": _identity(video_path),
-        "audio": _identity(audio_path) if audio_path else None,
-        "asr_result": _identity(work_dir / "asr_result.json"),
+        "source_video": optional_file_identity(video_path),
+        "audio": optional_file_identity(audio_path) if audio_path else None,
+        "asr_result": optional_file_identity(work_dir / "asr_result.json"),
         "glossary": _glossary_binding(work_dir, legacy=legacy),
         "precision": dict(_PRECISION),
         "windows": _window_evidence(observed_segments, final_segments, legacy),
@@ -188,8 +182,8 @@ def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
         return False
     if evidence.get("precision") != _PRECISION:
         return False
-    source_identity = _identity(video_path)
-    result_identity = _identity(result_path)
+    source_identity = optional_file_identity(video_path)
+    result_identity = optional_file_identity(result_path)
     if not _is_identity(source_identity) or evidence.get("source_video") != source_identity:
         return False
     if not _is_identity(result_identity) or evidence.get("asr_result") != result_identity:
@@ -205,7 +199,7 @@ def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
 
     if audio is not None:
         audio_path = evidence_path.parent / "audio.wav"
-        if audio != _identity(audio_path):
+        if audio != optional_file_identity(audio_path):
             return False
         try:
             audio_meta = json.loads(

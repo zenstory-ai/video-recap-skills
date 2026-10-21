@@ -12,9 +12,9 @@ import re
 from pathlib import Path
 
 from dashboard_io import media_entry
+from library import SUBTITLE_SIDE_MARGIN
 
 PROVENANCE_LABELS = {"measured": "实测", "fitted": "调出", "specified": "指定", "unknown": "未知"}
-SIDE_MARGIN_PX = 40  # video-assemble's default left/right subtitle margin; library.py checks against it
 SAMPLE_TEXT = "这是按每行字数校准的最长一行字幕示意"
 SUBTITLE_ROWS = (
     ("font", "字体", ""),
@@ -116,8 +116,8 @@ def _subtitle_preview(canvas: dict, params: dict) -> dict:
                  "font_size": _pct(size, width) if size else None,  # percent of canvas width
                  "bottom": _pct(margin_v, height) if margin_v is not None else None,
                  "width_px": size * chars if size and chars else None,
-                 "usable_px": width - 2 * SIDE_MARGIN_PX},
-        "band_px": band, "margin_v": margin_v, "side": _pct(SIDE_MARGIN_PX, width),
+                 "usable_px": width - 2 * SUBTITLE_SIDE_MARGIN},
+        "band_px": band, "margin_v": margin_v, "side": _pct(SUBTITLE_SIDE_MARGIN, width),
     }
 
 

@@ -215,10 +215,9 @@ def _select_output_geometry(source_paths, clips):
         )
     fps = sorted(fps_duration.items(), key=lambda kv: (kv[1], kv[0]), reverse=True)[0][0]
 
-    width, height = selected["width"], selected["height"]
-    reason = {
-        "width": width,
-        "height": height,
+    return {
+        "width": selected["width"],
+        "height": selected["height"],
         "fps": round(fps, 3),
         "reason": "weighted_orientation_area_fps",
         "source_id": selected["source_id"],
@@ -235,4 +234,3 @@ def _select_output_geometry(source_paths, clips):
         "display_height": selected["display_height"],
         "sources": rows,
     }
-    return width, height, round(fps, 3), reason
