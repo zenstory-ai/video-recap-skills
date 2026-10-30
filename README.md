@@ -436,6 +436,7 @@ VLM 会保存已完成的场景；遇到疑似限流会降低并发重试一轮�
 - [影视解说文案怎么写](docs/video-recap-script-writing.md) — 仓库内文档：先定观众问题，再分配画面、原声与旁白
 - [AI 分析视频乱编剧情怎么办](docs/ai-video-analysis-without-invented-plot.md) — 仓库内文档：把观察、解释和未知分开
 - [剪映草稿导出与成本](docs/capcut-jianying-draft-export.md) — 仓库内文档：草稿里有什么、自建与 SaaS 的账单差别
+- [开源 AI 影视解说工具怎么选](docs/open-source-ai-video-recap-tools.md) — 仓库内文档：8 个项目按使用方式、许可证、剪映导出与模型来源对比（含利益相关说明）
 - [仓库架构](docs/architecture.md) — 仓库内文档：技能分工、功能子包、编排路径与复制模块清单
 - [能力边界与验收原则](docs/production-boundaries.md) — 仓库内文档：哪些交付规则进通用库、哪些属于单个项目；三类验收不能互相冒充
 - [《这一秒过火》案例复现 runbook](examples/guohuo-60s/skill-runbook.md) · [从内容锁定到最终版的决策链](examples/guohuo-60s/iteration-notes.md)
