@@ -1,25 +1,25 @@
 {
   "schema_version": 1,
   "director_intent": {
-    "viewer_promise": "60秒看懂死而复生的白月光为什么让男主一秒破防，并用三个名场面把关系推到婚服送嫁。",
-    "pov": "跟随慕容清峄的认知与反应，让观众和他一起从震惊、发疯走到确认她仍会护他。",
-    "dramatic_question": "她既然装作陌生人，为什么眼神、亲吻和保护都在暴露旧情？",
-    "emotional_start": "荒诞吃瓜式震惊",
-    "emotional_end": "抓马又上头的未完待续",
-    "ending_aftertaste": "明明相爱却要嫁给哥哥的强悬念",
-    "withhold_reveal": "前8秒先揭示准大嫂身份；中段以洗手台和护夫逐步证明旧情；最后才亮婚服。"
+    "viewer_promise": "60秒看懂死而复生的白月光为什么挽着亲哥逼男主当众叫大嫂，又在洗手台狠话强吻、替他挨鞭和凤冠送嫁三场戏里彻底露馅。",
+    "pov": "全程紧贴二少慕容清峄的眼睛：从家宴认出她的荒唐震怒，到洗手台狠话逼问，再到她替自己挨鞭时瞬间看穿她的伪装。",
+    "dramatic_question": "她嘴上死不认账、非要嫁给大哥，为什么眼神闪躲、被强吻不推开、见他挨打还本能冲上去替他挡鞭？",
+    "emotional_start": "前任挽着亲哥现身的抓马暴击",
+    "emotional_end": "明明彼此死死挂念却要亲手送嫁的虐心拉扯",
+    "ending_aftertaste": "两人都知道对方还爱着自己，她却依然穿着凤冠霞帔走向大哥的婚礼",
+    "withhold_reveal": "前8秒先把“死去白月光变成准大嫂”的错位身份砸出来；中段用洗手台强吻和替身挡鞭一点点扒下她的冷漠伪装；最后才亮出凤冠婚服把悬念拉满。"
   },
   "hypotheses": [
     {
       "id": "h1",
-      "spine": "按男主认知递进：复活成大嫂→嘴硬→狠话血吻→本能护夫→婚服送嫁",
-      "opening": "宴会重逢直接叫大嫂",
-      "ending": "婚服对视与离场",
-      "risk": "原声停顿窗口较短时旁白需主动让位"
+      "spine": "按男主扒开伪装的顺序推进：家宴被迫叫大嫂 → 眼神心虚 → 洗手台狠话强吻 → 挨鞭时本能护他 → 凤冠长廊拉手送嫁",
+      "opening": "家宴重逢，当着亲哥的面逼出那声“大嫂”",
+      "ending": "凤冠婚服对视、长廊拉手狂奔与送嫁驻足",
+      "risk": "三处原声名场面留白紧凑，旁白必须在演员开口和挥鞭落点前干净收声"
     }
   ],
   "chosen_hypothesis": "h1",
-  "choice_reason": "用户指定的核心承诺就是先讲清准大嫂关系，再用三个原声/动作锚点递进；该顺序认知成本最低。",
+  "choice_reason": "前8秒直接甩出“白月光死而复生变准大嫂”的身份暴击，再顺着男主试探—逼问—确认心意—送嫁的脉络接三段原声名场面，零背景观众一眼就能看懂。",
   "beats": [
     {
       "beat_id": "b01",
@@ -27,12 +27,12 @@
       "source_start": 448.0,
       "source_end": 452.0,
       "function": "hook",
-      "event": "男主听见女主的新身份方牧兰，骤然认出她",
-      "change": "knowledge: 死去白月光→哥哥身边的准大嫂",
-      "audience_question_in": "她是谁",
-      "audience_question_out": "她为什么装作陌生人",
+      "event": "慕容清峄在家宴上听见大哥介绍未婚妻“方牧兰”，抬头撞见死去三年的任素素那张脸",
+      "change": "墓碑上死去三年的白月光 → 挽着亲哥亮相的准大嫂方牧兰",
+      "audience_question_in": "这个叫方牧兰的女人跟男主什么关系？",
+      "audience_question_out": "死了三年的前任怎么挽着他亲哥回来了？",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "“方牧兰”硬字幕与震惊眼神",
+      "must_keep_moment": "“方牧兰”介绍字幕与慕容清峄瞳孔骤缩的怔住眼神",
       "evidence": [
         "asr",
         "vlm",
@@ -45,12 +45,12 @@
       "source_start": 471.0,
       "source_end": 475.5,
       "function": "hook",
-      "event": "男主被迫当着哥哥面叫她大嫂",
-      "change": "relationship: 白月光→准大嫂称谓落地",
-      "audience_question_in": "她现在站在谁身边",
-      "audience_question_out": "她成了男主准大嫂",
+      "event": "慕容清峄当着大哥的面，咬牙冲她叫出那声“大嫂”",
+      "change": "死死盯着昔日爱人 → 被迫低头改口叫大嫂",
+      "audience_question_in": "他会当场拆穿她吗？",
+      "audience_question_out": "他居然忍着怒火叫出了“大嫂”",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "原声“大嫂”与压抑眼神",
+      "must_keep_moment": "原声“大嫂”与咬紧后槽牙的压抑眼神",
       "evidence": [
         "asr",
         "hard_subtitle"
@@ -62,12 +62,12 @@
       "source_start": 462.16,
       "source_end": 467.0,
       "function": "setup",
-      "event": "叫完大嫂后回闪她避开男主眼神",
-      "change": "emotion: 震惊→彼此心虚",
-      "audience_question_in": "她认出他了吗",
-      "audience_question_out": "眼神已经承认旧情",
+      "event": "任素素听见称呼后缓缓抬眼，撞上他目光的瞬间心虚躲开",
+      "change": "嘴上装作初次见面的陌生人 → 躲闪的眼神当场出卖旧情",
+      "audience_question_in": "她真失忆还是装不认识？",
+      "audience_question_out": "她心里分明有鬼，全在演戏",
       "character_focus": "任素素",
-      "must_keep_moment": "女主缓慢抬眼又回避",
+      "must_keep_moment": "任素素缓慢抬眼对视又仓促移开目光",
       "evidence": [
         "vlm"
       ]
@@ -78,12 +78,12 @@
       "source_start": 1292.0,
       "source_end": 1305.5,
       "function": "escalation",
-      "event": "男主堵住女主说出日日夜夜想她与挫骨扬灰",
-      "change": "power: 女主回避→男主逼问",
-      "audience_question_in": "男主会忍吗",
-      "audience_question_out": "狠话里全是想念",
+      "event": "慕容清峄把她堵在洗手台前，红着眼逼问并咬牙切齿放狠话",
+      "change": "家宴上的隐忍试探 → 洗手台前撕破脸皮贴脸逼问",
+      "audience_question_in": "男主私下能忍住不找她算账吗？",
+      "audience_question_out": "嘴上喊着抽筋扒皮挫骨扬灰，字字句句全是想念",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "完整原声“我日日夜夜地想你…挫骨扬灰”",
+      "must_keep_moment": "完整原声“我好想你，日日夜夜地想你，想把你抽筋扒皮，挫骨扬灰”",
       "evidence": [
         "asr",
         "vlm",
@@ -96,12 +96,12 @@
       "source_start": 1331.5,
       "source_end": 1335.5,
       "function": "turn",
-      "event": "两人在洗手台前接吻",
-      "change": "relationship: 口头敌对→身体记忆失控",
-      "audience_question_in": "真想挫骨扬灰吗",
-      "audience_question_out": "嘴硬但人已吻上去",
+      "event": "狠话刚落，慕容清峄在洗手台前直接低头吻上去，任素素怔住睁眼",
+      "change": "放最狠的威胁 → 下意识吻上去，嘴硬彻底破功",
+      "audience_question_in": "他真下得去手报复她吗？",
+      "audience_question_out": "狠话还没凉透，人已经亲上去了",
       "character_focus": "任素素",
-      "must_keep_moment": "吻与睁眼反应",
+      "must_keep_moment": "低头强吻与任素素睁大眼睛的怔忡反应",
       "evidence": [
         "vlm"
       ]
@@ -112,12 +112,12 @@
       "source_start": 171.5,
       "source_end": 179.0,
       "function": "payoff",
-      "event": "男主受罚时女主冲过去替他挡下攻击并受伤",
-      "change": "relationship: 装陌生→本能护住他",
-      "audience_question_in": "她还爱他吗",
-      "audience_question_out": "身体选择先给了答案",
+      "event": "慕容清峄受家法挨打，任素素不顾一切扑过去用后背替他挡下重击",
+      "change": "死守“方牧兰”的冷漠假面 → 本能飞身替他挨打挂彩",
+      "audience_question_in": "她对他到底还有没有真心？",
+      "audience_question_out": "鞭子落下来那一刻，身体比嘴诚实",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "冲入、挡击、受伤与男主震住",
+      "must_keep_moment": "飞身扑入、替他挨击闷哼与慕容清峄当场震住的表情",
       "evidence": [
         "visual"
       ]
@@ -128,12 +128,12 @@
       "source_start": 521.5,
       "source_end": 529.0,
       "function": "payoff",
-      "event": "事后女主安抚男主并说有我在你别怕",
-      "change": "relationship: 本能保护→亲口安抚",
-      "audience_question_in": "刚才只是冲动吗",
-      "audience_question_out": "关键原声确认她仍在意他",
+      "event": "伤后任素素往他嘴里塞了颗蜜饯，轻声哄他“有我在，你别怕”",
+      "change": "下意识挡伤 → 用三年前哄他的习惯动作与原声彻底露馅",
+      "audience_question_in": "替他挡伤会不会只是场面功夫？",
+      "audience_question_out": "一颗蜜饯加那句“有我在，你别怕”，男主彻底笃定她就是素素",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "完整原声“有我在，你别怕”与蜜饯反应",
+      "must_keep_moment": "完整原声“有我在，你别怕”与喂蜜饯后男主眼眶发红的反应",
       "evidence": [
         "asr",
         "hard_subtitle",
@@ -146,12 +146,12 @@
       "source_start": 1960.0,
       "source_end": 1965.0,
       "function": "turn",
-      "event": "婚服中的女主与男主近距离对视",
-      "change": "risk: 旧情确认→仍要完成婚礼",
-      "audience_question_in": "两人会在一起吗",
-      "audience_question_out": "她仍穿着婚服",
+      "event": "任素素一身凤冠霞帔站在慕容清峄面前，两人近距离死死对视",
+      "change": "刚刚确认彼此心意 → 转头还是披上嫁衣要嫁给他哥",
+      "audience_question_in": "伪装都扒开了，两个人能破镜重圆吗？",
+      "audience_question_out": "她居然还是穿上了嫁给大哥的婚服",
       "character_focus": "任素素",
-      "must_keep_moment": "皇冠婚服与对视",
+      "must_keep_moment": "凤冠婚服特写与两人眼底泛红的对视",
       "evidence": [
         "asr",
         "vlm"
@@ -163,12 +163,12 @@
       "source_start": 1996.0,
       "source_end": 2001.0,
       "function": "escalation",
-      "event": "男主带她穿过婚礼长廊",
-      "change": "action: 克制→公开拉走",
-      "audience_question_in": "他能冷静吗",
-      "audience_question_out": "他直接行动",
+      "event": "慕容清峄攥紧她的手，拉着穿婚服的她一路跑过紫色帷幔长廊",
+      "change": "隐忍对视 → 失控拉起新娘穿过婚礼长廊",
+      "audience_question_in": "他能眼睁睁看她出嫁吗？",
+      "audience_question_out": "他直接攥住新娘的手在长廊里狂奔",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "紫色帷幔中拉着新娘奔跑",
+      "must_keep_moment": "紫色婚礼帷幔间攥着新娘奔跑的跟拍镜头",
       "evidence": [
         "vlm"
       ]
@@ -179,12 +179,12 @@
       "source_start": 2004.0,
       "source_end": 2008.5,
       "function": "payoff",
-      "event": "男主带婚服女主离开并留下失落反应",
-      "change": "emotion: 抢人冲动→未能真正拥有",
-      "audience_question_in": "抢走就能改变关系吗",
-      "audience_question_out": "故事远没结束",
+      "event": "长廊尽头慕容清峄还是松开手送她出嫁，独自停在原地目送",
+      "change": "拉手狂奔的冲动 → 终究只能放手送嫁、留下一地拉扯悬念",
+      "audience_question_in": "他把新娘抢走了吗？",
+      "audience_question_out": "她背负复仇、他追查旧案，这场叔嫂拉扯才刚开始",
       "character_focus": "慕容清峄",
-      "must_keep_moment": "送嫁离场与落寞反应",
+      "must_keep_moment": "松手送嫁离场与慕容清峄独自驻足的落寞眼神",
       "evidence": [
         "vlm"
       ]

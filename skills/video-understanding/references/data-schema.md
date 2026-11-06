@@ -1,10 +1,10 @@
 # 数据格式（中间 JSON）
 
-中间产物保存在本次运行的工作目录 `work_dir/` 下。
+本阶段生成的中间产物统一存放在工作目录 `work_dir/` 下。
 
 ## vlm_analysis.json
 
-每场景的 VLM 分析结果，数组格式：
+逐场景的 VLM 画面观察结果，顶层为数组：
 
 ```json
 [
@@ -12,8 +12,8 @@
     "scene_id": 1,
     "start": 5.0,
     "end": 15.0,
-    "description": "男子闯入房间",
-    "depth_analysis": "角色情绪分析...",
+    "description": "男子推门闯入卧室，神色戒备",
+    "depth_analysis": "两人表面试探，实则都在确认对方有没有露出破绽。",
     "frame_facts": {
       "5.0": ["男子闯入房间, 头发蓬乱表情紧张"],
       "10.0": ["男子俯身盯着床上男孩, 男孩睁眼惊醒"]
@@ -27,13 +27,13 @@
 | `scene_id` | int | 场景编号 |
 | `start` | float | 开始时间（秒） |
 | `end` | float | 结束时间（秒） |
-| `description` | string | 画面简述（≤80字） |
-| `depth_analysis` | string | 深层分析（情绪/关系/潜台词） |
-| `frame_facts` | object | 帧级事实，key 为时间戳字符串 |
+| `description` | string | 画面简述（不超过 80 字） |
+| `depth_analysis` | string | 深层分析（情绪变化、人物关系与潜台词） |
+| `frame_facts` | object | 逐帧观察事实，键为时间戳字符串 |
 
 ## asr_result.json
 
-语音转文字结果：
+语音转写结果数组：
 
 ```json
 [
@@ -41,13 +41,11 @@
 ]
 ```
 
-`start/end` 仅表示送入 MiMo ASR 的固定粗分片窗口。该列表记录粗分窗结果，不能据此声称词级
-时间、准确对白边界或静音证明；空 `text` 的原因未知。
+这里的 `start/end` 只是切分送入 MiMo ASR 的**固定粗分片时间窗**，不代表逐字起止时间或精确对白边界；窗口内 `text` 为空只代表未检出文字（原因未知），绝不能直接当成已证实的纯静音段。
 
 ## asr_timing_evidence.json
 
-ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构。它记录自己描述的是哪一份源视频、
-`audio.wav`（存在时）和 `asr_result.json`（各自的 `size` + `mtime_ns`），并明确当前精度边界：
+与 `asr_result.json` 配套的精度与溯源说明文件（不改动 `asr_result.json` 本身的数组结构）。它记录所绑定的源视频、`audio.wav`（存在时）和 `asr_result.json` 各自的文件大小与纳秒级修改时间（`size` + `mtime_ns`），并写明当前转写的时间精度边界：
 
 ```json
 {
@@ -78,16 +76,11 @@ ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构�
 }
 ```
 
-`status` 可为 `AVAILABLE_COARSE`、`EXPLICITLY_SKIPPED`、`UNAVAILABLE_NO_KEY`、
-`UNAVAILABLE_NO_DURATION`、`FAILED_AUDIO_EXTRACTION`、`FAILED_PROVIDER` 或 `EMPTY_UNKNOWN`。
-sidecar 记录当时参与修正的人名/别名列表（`glossary.names`），人名表变化、所描述的文件被重写
-（size/mtime 不再一致）或 sidecar 缺失，都会使 ASR 缓存失效并重跑 ASR。
-`UNAVAILABLE_NO_DURATION` 与 `EMPTY_UNKNOWN` 是可重试的不可用结果，不作为缓存命中；写作
-brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一致时显示 `MISSING_OR_STALE`。
+`status` 取值范围为 `AVAILABLE_COARSE`、`EXPLICITLY_SKIPPED`、`UNAVAILABLE_NO_KEY`、`UNAVAILABLE_NO_DURATION`、`FAILED_AUDIO_EXTRACTION`、`FAILED_PROVIDER` 或 `EMPTY_UNKNOWN`。该文件还会记下当时参与纠错的人名表（`glossary.names`）；一旦人名表变动、绑定的任一文件被重写（`size` 或 `mtime_ns` 对不上）或该文件缺失，ASR 缓存就会失效并触发重跑。其中 `UNAVAILABLE_NO_DURATION` 与 `EMPTY_UNKNOWN` 属于可重试的未就绪状态，不当作有效缓存复用；生成写稿简报时也会核验该文件并打印当前状态，若缺失或已过期则标为 `MISSING_OR_STALE`。
 
 ## asr_writing_chunks.json
 
-由 CLI 在生成 `agent_narration_brief.md` 时自动写出。它把长 ASR 按句子边界拆成适合 Agent 消化的语义块；中文按字符计数，非 CJK 文本按词数计数，并尽量保留 scene 对齐。
+生成 `agent_narration_brief.md` 时自动写出。它把长篇 ASR 转写按句子边界与场景切点拆成方便写稿消化的语义块（中文按字数统计，非 CJK 语种按词数统计）：
 
 ```json
 [
@@ -107,7 +100,7 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 
 ## silence_periods.json
 
-静音窗口列表（适合放解说）：
+检测出的静音与低能量窗口列表：
 
 ```json
 [
@@ -115,11 +108,11 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 ]
 ```
 
-`has_speech` 标记该窗口是否与检测到的 ASR 语音重叠；下游（pipeline / narration）只把 `has_speech=false` 的窗口当作可放解说的安静窗口。
+`has_speech` 表示该窗口是否与 ASR 检出的对白时间重叠；下游写稿与编排只把 `has_speech=false` 的区间当作可无遮挡插入解说的安静窗口。
 
 ## timeline_fusion.json
 
-由 CLI 在生成 brief 时自动写出。它把 VLM 场景、ASR 对白和静音窗口按时间轴 overlap 合并，减少写稿时手工推断“这一幕有没有对白/能不能插解说”的成本。
+生成写稿简报时自动写出。它把 VLM 场景描述、ASR 对白和静音窗口对齐到同一条时间线上，省去写稿时逐个文件交叉核对“这一幕有没有人说话、哪里能插旁白”的麻烦：
 
 ```json
 [
@@ -141,11 +134,11 @@ brief 会校验 sidecar 并打印当前状态，缺失或与当前文件不一�
 ]
 ```
 
-cut 第二轮（已有 `edited_source.mp4`）时本文件与 `asr_writing_chunks.json` 都在 OUTPUT 时间轴上：被拆到多个片段的场景 `scene_id` 写作 `"3.1"`（0 起的原场景号加片段序号）；VLM 文字里落在场景原片区间内的时间改写成输出时间，落在被剪掉部分的写 `[cut-away moment]`；只被剪进一部分的 ASR 窗口文字换成 `[partial ASR window: only part of it is in the cut, text withheld]`。`scene_id` 一律 0 起，brief 里给人看的场景号从 1 数。
+进入 `cut` 模式第二阶段（目录中已有 `edited_source.mp4`）后，本文件与 `asr_writing_chunks.json` 均切换为剪后成片时间（OUTPUT 时钟）：被拆进多个保留片段的同一原片场景，其 `scene_id` 记为 `"3.1"`（从 0 起算的原场景号加片段序号）；VLM 描述中凡落在保留区间内的原片秒数自动换算为成片输出时间，落在已删除区间的时刻则替换为 `[cut-away moment]`；只被剪进半截的粗分片 ASR 窗口，其文本统一替换为 `[partial ASR window: only part of it is in the cut, text withheld]`。JSON 内的 `scene_id` 一律从 0 起算，而写稿简报里展示给人的场景编号从 1 起算。
 
 ## background_research.json
 
-可选的背景调研结果（由 Agent 使用任意可用搜索/浏览方式整理）：
+可选的项目背景资料（由 Agent 在理解前通过搜索或读取已有文档整理写入）：
 
 ```json
 {
@@ -169,8 +162,8 @@ cut 第二轮（已有 `edited_source.mp4`）时本文件与 `asr_writing_chunks
 }
 ```
 
-> `character_details`、`plot_arcs`、`cultural_notes` 为（可选，新增）字段。仅含 `synopsis`、`characters`、`worldbuilding`、`episode_context` 四个原始字段的旧 JSON 仍然有效。
+> `character_details`、`plot_arcs`、`cultural_notes` 为可选扩展字段；只包含 `synopsis`、`characters`、`worldbuilding`、`episode_context` 四个基础字段的 JSON 同样完全有效。
 
-## 其他产物
+## 其他下游产物
 
-`narration.json`、`narration_lint.json`、`style_card.json`、`packaging_plan.json`、`clip_plan.json`、`clip_plan_validated.json` 由后续的写稿与剪辑阶段读写，本技能既不生成也不校验它们；其格式以本技能生成的 `agent_narration_brief.md` 和编排器的中间产物契约为准。
+`narration.json`、`narration_lint.json`、`style_card.json`、`packaging_plan.json`、`clip_plan.json` 与 `clip_plan_validated.json` 由后续写稿和剪辑阶段负责生成与校验，本技能既不写出也不校验它们；各文件字段规范见 `agent_narration_brief.md` 及编排阶段的数据契约说明。

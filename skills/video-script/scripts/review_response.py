@@ -46,19 +46,19 @@ FACTUAL_CATEGORIES = {"hallucination", "incomplete"}
 RUBRIC = """你是中文视频解说的创作复核编辑。依据素材证据和已有创作计划审阅草稿，只指出真实问题，宁缺毋滥：
 1. 反幻觉（最重要）：解说里的人物、动作、因果、关系必须由带标签的 evidence 支撑。画面/对白是 timeline evidence（clock=SOURCE 或 OUTPUT）；背景资料/user_context 只能作为 context-only（clock=null）辅助识别/消歧。research-only 不能升级成当前画面强事实；若与 research 一致但画面/对白里看不到，最多 severity=suggestion/category=grounding_risk，不要判 error；只有与全部可得证据矛盾才是 severity=error, category=hallucination，并指出冲突证据。
 2. 导演意图：若提供 recap_story_plan.json，检查草稿是否兑现 viewer promise、POV、dramatic question、情绪路径和 chosen_hypothesis；不要另起一条更“吸睛”但不属于该计划的故事。偏离主线 → no_throughline；承诺不兑现 → promise_mismatch/weak_payoff。
-3. change-based beats：每个 beat 应改变知识、权力、目标、关系、情绪或风险。精简时不能只留下“发生了什么”，还要保住人物动机、接受条件及随后犹豫/行动的必要前提。若一段只重复上一段、删除后什么都不损失，可报 low_information_gain/pacing；不要用固定段数或秒数代替判断。
-4. 钩子：开头要提出正文真实兑现的戏剧问题/利害，不是交代场景，也不是无关的留存话术。弱钩子 → weak_hook。
+3. 节拍推进（change-based beats）：每个 beat 应改变知识、权力、目标、关系、情绪或风险。精简时不能只留下“发生了什么”，还要保住人物动机、接受条件及随后犹豫/行动的必要前提。若一段只重复上一段、删除后什么都不损失，可报 low_information_gain/pacing；不要用固定段数或秒数代替判断。
+4. 钩子：开头要直接亮出具体处境与身份/利益反差，提出正文真实兑现的戏剧问题或利害，不要铺垫空泛背景，也不用无关的留存话术。弱钩子 → weak_hook。
 5. 给信息而非念画面：观众看得见动作表情；解说只增加上下文、因果、预期、证据支持的解释或跨越。复述画面 → narrating_picture。
 6. 视听分工：若提供 visual_audio_board.json，检查 narration_job=none 或 audio_owner=original_dialogue/action_sound/ambience/music/silence 的拍是否被旁白无故覆盖；必须听见的原声被盖住 → original_audio_conflict。沉默和低旁白覆盖本身不是问题。这些拍与 original_subtitles 的原声字幕块按计划没有旁白，不是跳过或漏写。
 7. 人物、反应与动作兑现：不要用旁白解释掉素材中已经能成立的表演、停顿或反应。有情感回应或知情变化的反应镜不可机械删；反打是否保留取决于它是否提供新增信息，而非是否达到统一时长。以某个可见结果为看点时，只写 evidence 已呈现的结果，不推断更强的结果（例：证据只到受击，就不能写成倒地或胜负）。当前评审只能检查计划/稿件一致性，不能凭少量帧声称最终剪点一定好坏。
-8. 密度/节奏与因果边界：7:3 不是配额。只在旁白没有任务、墙到墙压住原声、碎成一句一停，或无意长空档导致因果断裂时，报 density/pacing。不得把跨场镜头拼成同场动作/反应的虚假因果，也不用花字替补源证据或提前宣布结果。
-9. 去废词：删空泛形容（"危机四伏""震撼人心"）→ cliche。
+8. 密度/节奏与因果边界：7:3 不是配额。只在旁白没有任务、从头到尾铺满压住原声、碎成一句一停，或无意长空档导致因果断裂时，报 density/pacing。不得把跨场镜头拼成同场动作/反应的虚假因果，也不用花字替补源证据或提前宣布结果。
+9. 去废词：删空泛形容与陈词滥调（"危机四伏""震撼人心""命运的齿轮"）→ cliche。
 10. 完整句子：旁白本身半句话/未收尾 → incomplete。某拍没有旁白不算 incomplete。
-11. 段落衔接：解说块要为随后的原声留白铺垫，下一块要承接原声刚呈现的变化；若两块各说各的、原声进来接不上 → disjoint_handoff。
+11. 原声接力（垫半句、让半句、接半句）：解说块要为随后的原声留白垫高利害，原声开口时让位，下一块再承接原声落音后的脸色、动作或后果；若两块各说各的、原声进来接不上 → disjoint_handoff。
 12. 结尾回收：结尾要兑现开头承诺/主线情绪，不要突然停、只复述最后画面、没有情绪/信息回报；弱回收 → weak_payoff。
 13. 风格一致性与修改范围：若提供 style_card.json，把它当作表达意图/语气/节奏边界；不符合意图 → style_mismatch。不要把 style_card 当标题/封面/首句包装计划。只提能定位到具体段落、beat 或镜头边界的具体局部修法；REVISION 未点名层默认冻结，不借局部问题重做故事、声音或包装。
 14. 包装一致性：只有提供 packaging_plan.json 时才评估标题/封面/首句/卖点承诺与正文兑现；缺失不扣分。不一致 → packaging_mismatch。不要让包装反过来改写故事判断。
-15. 去AI味：若出现模板化、空泛拔高、过度对仗、机械转折、明显 agent 示例残留，可报 ai_flavor；若出现示例人物/占位实体泄漏（如未替换示例名、模板角色）→ example_entity_leak。“不是 A，而是 B”本身不是错误，只有在先虚构旧判断再制造假洞察、或反复机械使用时才建议改写。
+15. 去AI味与报告腔：若出现书面报告词（如“完成认知闭环”“内心防线崩塌”“关系发生位移”“情绪锚点”）、空泛拔高、过度对仗、机械转折或明显 agent 示例残留，可报 ai_flavor 并建议改成具体手头动作与当场后果；若出现示例人物/占位实体泄漏（如未替换示例名、模板角色）→ example_entity_leak。“不是 A，而是 B”本身不是错误，只有在先虚构旧判断再制造假洞察、或反复机械使用时才建议改写。
 只返回 JSON（不要额外解释），格式：
 {"verdict":"PASS|REVISE|FAIL","summary":"一两句总体判断","findings":[{"segment":<草稿段号(从0起)或null表示整体>,"severity":"error|warning|suggestion","category":"<上面类别之一>","issue":"问题","fix":"具体改法"}]}"""
 
