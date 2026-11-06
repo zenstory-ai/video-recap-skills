@@ -28,7 +28,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 ## 通用规则
 
 - `id` 与所在目录名一致，只用小写字母、数字和 `. _ -`；模板目录名为 `v<version>`。
-- 顶层字段严格：出现未列出的字段即报错，避免拼错的字段被静默忽略。
+- 顶层字段严格：出现未列出的字段即报错，避免拼错的字段被直接忽略而不报错。
 - 文件路径相对记录所在目录，解析后必须仍在库根目录内（`..` 越界、绝对路径和指向库外的符号链接都报错）。
   唯一例外是样片可以写绝对路径，因为成片常放在别的盘上。
 - 文件身份是 `{size, mtime_ns}`，不计算内容哈希。
@@ -156,7 +156,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 | `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`：导出物原样加 `written_by` 与 `template {id, version}`，仅写稿 Agent 阅读，没有脚本读取；不核对画布。该位置已有不是 `--project` 写的文件时：与导出物相同则原样保留（暂停提示照常），不同则停止；解除绑定后删掉自己写的副本，调用方自己放的文件不动 |
 | `packaging` | 合成前写出 `work_dir/packaging_layers.json`：每个图层的图片资源第一个文件 + `rect`，由 video-assemble 叠加到成片并写进 `timeline.json` 的 image 轨 |
 
-- 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会静默覆盖。
+- 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会直接覆盖已有设置。
 - 合成前核对字幕与包装模板的画布与实际成片画布；不一致即停止——换画幅要用另一个模板。
 - 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；dub 模式与本地采用三件套不接受 `--project`。
 - 续跑命令只带 `--project`，不重复写出由绑定得到的值，改了绑定后续跑会按新绑定解析。

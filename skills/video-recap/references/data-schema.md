@@ -212,7 +212,7 @@ CLI 不以它们作为渲染硬门禁，也不新增解析服务；建议型解�
 
 ## style_card.json（Agent 撰写，可选/按 brief 要求）
 
-`style_card.json` 是表达层契约：由 Agent 根据 `--style`、`--context`、素材证据、ASR 和用户偏好信号综合撰写。`--style` 是 freeform verbatim guidance（原样自由文本指导），不是枚举、preset、switch，也不是一组可穷举风格名；不要把它翻译成固定档位。它是当前版本的活动契约：用户对声音、节奏、字幕阅读或禁忌提出新反馈后，更新原文件并移除过期偏好，不要只改 `narration.json`。
+`style_card.json` 是表达层契约：由 Agent 根据 `--style`、`--context`、素材证据、ASR 和用户偏好信号综合撰写。`--style` 是 freeform verbatim guidance（原样自由文本指导），不是枚举、preset、switch，也不是一组可穷举风格名；不要把它翻译成固定档位。它是当前生效的表达设定：用户对声音、节奏、字幕阅读或禁忌提出新反馈后，直接更新原文件并移除过期偏好，不要只改 `narration.json`。
 
 这个文件记录声音、节奏、回收意图和证据支撑的表达判断；字段可以随项目增减，下游只把它当 JSON object 读取，不要求固定键名。它不负责标题、封面、首句承诺或卖点包装。
 

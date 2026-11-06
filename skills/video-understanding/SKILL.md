@@ -86,7 +86,7 @@ python3 scripts/understand.py <video> --work-dir <work_dir> [选项]
 | `mimo_video_overview.status.json` | 视频概览状态（未启用时为 `disabled`）；启用成功另写 `mimo_video_overview.json` |
 | `understanding_index.json`、`understanding_index.md` | 全局故事索引（`--no-consolidate` 时不写） |
 | `consolidation.status.json` | 故事索引与 ASR 清洗的运行状态 |
-| `storyboard/source_storyboard.{json,jpg}` | 原片时间线联系表（超页时续写 `_001.jpg` 等）；已有 `clip_plan_validated.json` 时另写 `edited_storyboard.*`；`STORYBOARD=0` 关闭 |
+| `storyboard/source_storyboard.{json,jpg}` | 原片时间线抽帧拼图（超页时续写 `_001.jpg` 等）；已有 `clip_plan_validated.json` 时另写 `edited_storyboard.*`；`STORYBOARD=0` 关闭 |
 | `timeline_fusion.json` | VLM、ASR 与静音信息的统一时间线 |
 | `asr_writing_chunks.json` | 按句界和场景切分的 ASR 写作块 |
 | `agent_narration_brief.md` | Agent 首先阅读的创作简报 |

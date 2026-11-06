@@ -18,7 +18,7 @@ export INDEX_TTS_VOICE=<authorized-voice-name>
 ## 请求契约
 
 请求体固定为 `{"voice": voice, "text": spoken_text}`。当前段 schema 的可选 `emotion`
-以及额外 style、非默认 rate/pitch 控制会显式失败，不会静默忽略。原始合成使用 provider 默认速度，
+以及额外 style、非默认 rate/pitch 控制会直接报错，不会忽略这些参数继续运行。原始合成使用 provider 默认速度，
 不按标点、长度或位置自动计算 rate；这不等于下游放置阶段的端到端 tempo 锁。
 
 ## Receipt 与缓存

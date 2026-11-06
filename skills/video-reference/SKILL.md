@@ -17,7 +17,7 @@ Agent 的角色是**拆片编辑**：先如实记录"这部片子怎么做的"�
 - 对**这部成片**跑出的视频理解产物目录 `U`（建议 `ASR_SEGMENT_SECONDS=5`，窗口越短，旁白语速越准）。
   本技能读取其中可选的 `asr_result.json`、`asr_timing_evidence.json`、`background_research.json`、`understanding_index.json`
   （其 `characters` 的名字、别名与 ASR 提及都进入人名泄漏扫描）；
-  标注时 Agent 还应看故事板 / contact sheet 与 `vlm_analysis.json`。
+  标注时 Agent 还应看故事板（抽帧拼图）与 `vlm_analysis.json`。
 
 没有理解产物也能跑，但旁白语速为空，泄漏扫描只剩 Agent 自己写的 `entities`，check 会给出警告；
 看画面可用 `frames --span 0,<时长> --step 2` 生成的抽帧拼图。

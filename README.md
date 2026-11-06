@@ -151,7 +151,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 },
 ```
 
-每个 beat 记的不是场景摘要，而是"发生了什么变化"、观众带着哪个问题进来、带着哪个问题出去，以及必须保住的具体时刻和证据来源（10 拍节选 1 拍）：
+每个 beat 直接记录"发生了什么变化"、观众进场与离场时分别带着什么问题，以及必须保住的具体时刻和证据来源（10 拍节选 1 拍）：
 
 ```json
 {
@@ -257,7 +257,7 @@ Agent 在剪任何一刀之前先写 [`recap_story_plan.json`](examples/guohuo-6
 }
 ```
 
-[`edit-map.json`](examples/guohuo-60s/edit-map.json) 记下 46 秒那处跳接是怎么修的：不是加溶解或闪白遮掩，而是把原片被删掉的 2001–2004 秒那段同一运动补回来：
+[`edit-map.json`](examples/guohuo-60s/edit-map.json) 记下 46 秒那处跳接的修复方式：直接补回原片被删掉的 2001–2004 秒同段连续运动，不靠溶解或闪白遮掩：
 
 ```json
 {
@@ -388,7 +388,7 @@ flowchart LR
 把 /path/to/english.mp4 翻译成中文配音，保留原说话人的声音。我有权使用这段视频，说话人同意克隆其声音。
 ```
 
-这是实验功能，替换原始台词而不是叠加解说；当前支持单说话人整轨替换，不分离背景音乐。源视频音频会发给 MiMo ASR 转写，原说话人约 10 秒的声音会作为参考发给 MiMo 克隆音色，所以运行需要 `--confirm-voice-rights`：只在你有权使用该视频、且说话人同意被克隆声音时确认。
+这是实验功能，直接替换原始台词，不叠加解说；当前支持单说话人整轨替换，不分离背景音乐。源视频音频会发给 MiMo ASR 转写，原说话人约 10 秒的声音会作为参考发给 MiMo 克隆音色，所以运行需要 `--confirm-voice-rights`：只在你有权使用该视频、且说话人同意被克隆声音时确认。
 
 **同一个系列复用字幕样式、音色、BGM 与包框：**
 
@@ -454,13 +454,13 @@ MIT，见 [LICENSE](LICENSE)。
 
 ## ZenStory AI 项目
 
-本项目由 [ZenStory AI](https://zenstory.ai/zh) 维护——一组开源、面向 agent 的故事创作、改编与生产工具（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）。同组织项目：
+本项目由 [ZenStory AI](https://zenstory.ai/zh) 维护——一套开源的 Agent 故事创作、改编与生产工具（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）。同组织项目：
 
 | 项目 | 用途 |
 | --- | --- |
 | [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | 网文写作 skill 包：扫榜、拆文、写作、去AI味、封面图 |
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI 短剧 / 漫剧创作 skill 合集：剧本、资产、分镜、图片/视频提示词、独立审查 |
-| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 面向原著改编、指定运行环境构建与运行证据 QA 的 agent skills |
+| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 小说改编游戏 skill 合集：原著拆解、目标运行环境构建与实机运行验收 |
 | [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 将支持的视频文件制作成中文解说，可选导出可编辑的剪映/CapCut 草稿（本仓库） |
 | [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 社区插件，提供小说、短剧、游戏和视频解说工作台 |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | 对话即创作的 AI 小说写作工作台（[app.zenstory.ai](https://app.zenstory.ai)） |
