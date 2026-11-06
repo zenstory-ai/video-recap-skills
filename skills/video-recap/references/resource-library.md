@@ -1,38 +1,35 @@
 # 资源库、模板与样片
 
-资源库是你自己的目录，与素材库共用同一个根目录（`--material-library-dir` / `VIDEO_RECAP_MATERIAL_LIBRARY_DIR`）。
-仓库不内置任何真实 BGM、音效、音色、字体或包装；合成示例见仓库的 `examples/resource-library/`。
+资源库归用户自己维护，与素材库共用同一个根目录（通过 `--material-library-dir` 或 `VIDEO_RECAP_MATERIAL_LIBRARY_DIR` 指定）。仓库不内置任何真实 BGM、音效、音色、字体或包装素材；可运行的合成演示见 `examples/resource-library/`。
 
 ```text
 <library>/
   library.json                                     # {"schema": "video-recap.library.v1", "name": "…"}
-  materials/…                                      # 理解分析库（见 data-schema.md），不变
-  resources/<kind>/<id>/resource.json (+ 文件)
+  materials/…                                      # 视频理解分析缓存（见 data-schema.md）
+  resources/<kind>/<id>/resource.json (+ 资源文件)
   templates/<kind>/<id>/v<version>/template.json
   samples/<id>/sample.json (+ 样片文件，或指向库外的绝对路径)
 ```
 
-只读工具（本技能目录下）：
+本技能目录下提供三个只读查询命令：
 
 ```bash
-python3 scripts/library.py --library-dir <library> check          # 有错误时退出码 1；--json 输出机器可读报告
+python3 scripts/library.py --library-dir <library> check          # 存在错误时退出码为 1；加 --json 输出机器可读报告
 python3 scripts/library.py --library-dir <library> list [--kind bgm]
 python3 scripts/library.py --library-dir <library> show <id|id@vN>
 ```
 
-浏览资源、模板与样片（含图片、音频与样片预览）可用只读 dashboard：`python3 scripts/dashboard_server.py --root <library 或其上层目录>`。
+也可以启动只读看板浏览资源、模板与样片（支持图片、音频与样片预览）：`python3 scripts/dashboard_server.py --root <library 或其上层目录>`。
 
-这三个查询命令不写库。新增或修改记录时直接编辑 JSON，再跑 `check`。**错误**表示该条目不能用；**警告**表示能用但需要人看一眼
-（授权未确认、声音授权未确认、样片不在本机、模板采用后资源文件已变化）。
+以上查询命令都不改写资源库。新增或修改条目时直接编辑 JSON，再跑 `check` 校验。**错误（error）**表示该条目无法投入使用；**警告（warning）**表示可以使用但需要人工复核（例如版权或声音授权未确认、样片文件不在本机、模板采纳后底层资源文件发生过变动）。
 
 ## 通用规则
 
-- `id` 与所在目录名一致，只用小写字母、数字和 `. _ -`；模板目录名为 `v<version>`。
-- 顶层字段严格：出现未列出的字段即报错，避免拼错的字段被直接忽略而不报错。
-- 文件路径相对记录所在目录，解析后必须仍在库根目录内（`..` 越界、绝对路径和指向库外的符号链接都报错）。
-  唯一例外是样片可以写绝对路径，因为成片常放在别的盘上。
-- 文件身份是 `{size, mtime_ns}`，不计算内容哈希。
-- 派生文件（归一化 WAV、转码片段）只出现在 work_dir，不回写为资源。
+- `id` 必须与所在目录名一致，只能使用小写字母、数字和 `. _ -`；模板版本目录命名为 `v<version>`。
+- 顶层字段受严格校验：出现未定义的字段直接报错，防止拼写错误被静默忽略。
+- 资源与模板内的文件路径相对于记录所在目录解析，且解析后的真实路径必须留在资源库根目录内（`..` 越界、绝对路径和指向库外的符号链接都会报错）。唯一例外是样片记录可以填写库外绝对路径，方便直接指向存放在外部磁盘上的成片。
+- 文件身份只比对 `{size, mtime_ns}`，不计算内容哈希。
+- 运行中生成的派生文件（如归一化 WAV、转码片段）只写入 `work_dir`，不会回写进资源库。
 
 ## 资源 `resource.json`
 
@@ -50,15 +47,14 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-| `kind` | 文件 | 额外字段 |
+| `kind` | 必需文件 | 额外字段 |
 |---|---|---|
 | `bgm` / `sfx` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | — |
-| `voice` | 可选参考音频 | `voice.provider` ∈ `mimo-tts` / `fish-audio` / `index-tts`，以及 `voice.voice_id` 或一个参考音频；有参考音频时必须写 `consent.status` ∈ `unknown` / `granted` / `denied` |
+| `voice` | 可选参考音频 | `voice.provider` ∈ `mimo-tts` / `fish-audio` / `index-tts`，并填写 `voice.voice_id` 或附带一个参考音频；附带参考音频时必须填写 `consent.status` ∈ `unknown` / `granted` / `denied` |
 | `font` | 至少一个字体文件（ttf / otf / ttc） | 可选 `font.family`、`font.index` |
-| `image` | 至少一个图片（png / jpg / webp），用于 logo、包框、片尾卡 | — |
+| `image` | 至少一张图片（png / jpg / webp），用于角标、包框或片尾卡 | — |
 
-`license.status` ∈ `unknown` / `owned` / `licensed` / `restricted`，只能由人填写；工具不会因为文件放在库里就认为有授权。
-`unknown` 与 `restricted` 在 `check` 中是警告。
+`license.status` ∈ `unknown` / `owned` / `licensed` / `restricted`，必须由人工填写；工具不会因为文件放进了资源库就默认已获授权。`unknown` 与 `restricted` 在 `check` 时会报出警告。
 
 ## 模板 `template.json`
 
@@ -82,39 +78,29 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-- 模板只对 `canvas` 声明的画布有效；换画幅就是新模板，不自动缩放套用。
-- 任何带 `provenance` 的参数都要有 `value`，`provenance` ∈ `measured`（从成片实测）/ `fitted`（反复调出来的）/
-  `specified`（人直接给的数值）/ `unknown`。编辑器面板上的读数不是像素，按 `specified` 或 `unknown` 记。
-- 引用资源写 `{"resource": "<id>"}`：`params.font` 必须指向 `font` 资源，图层的 `image` 必须指向 `image` 资源。
-- `subtitle_style` 需要 `params.font`（`resource` 或 `family`）、`params.size_px` 与 `params.max_chars`（每行最多字数，用最长一行在这块画布上校准）；
-  `size_px × max_chars` 超过画布宽减去两侧各 40px 默认边距时报错。可选 `outline_px`、`shadow_px`、`primary_color`、`outline_color`、`max_lines`、`band`，其他参数名报错；`params.band.value` 若给出，需满足
-  `0 <= y_top < y_bot <= canvas.height`。
-- `packaging` 需要非空 `params.layers`，每层有唯一 `name`、`image` 引用与画布内的整数 `rect {x, y, width, height}`；
-  可选 `params.safe_rect`。
-- `production_reference` 见下一节。
-- `status` ∈ `draft` / `adopted` / `retired`。`adopted` 必须有 `adoption.date`（YYYY-MM-DD）、`by`、`statement`（用户原话）
-  与 `scope`。可选 `adoption.resources` 记录采用时所用资源文件的身份：
+- 模板只对 `canvas` 声明的画布尺寸生效；更换画幅必须新建模板，不会自动按比例缩放。
+- 凡带 `provenance` 的参数都必须包含 `value`，且 `provenance` ∈ `measured`（从成片画面实测）/ `fitted`（调试校准得出）/ `specified`（人工直接指定）/ `unknown`。剪辑软件面板上的字号读数不等于实际像素高，应记为 `specified` 或 `unknown`。
+- 引用库内资源时写 `{"resource": "<id>"}`：`params.font` 必须指向 `font` 资源，包装图层的 `image` 必须指向 `image` 资源。
+- `subtitle_style` 必须包含 `params.font`（填 `resource` 或 `family`）、`params.size_px` 与 `params.max_chars`（按该画布能容纳的最长单行字数校准）；当 `size_px × max_chars` 超过画布宽度减去左右各 40px 默认边距时报错。可选参数为 `outline_px`、`shadow_px`、`primary_color`、`outline_color`、`max_lines`、`band`，出现其他参数名直接报错；若给出 `params.band.value`，需满足 `0 <= y_top < y_bot <= canvas.height`。
+- `packaging` 必须提供非空 `params.layers`，每个图层包含唯一 `name`、`image` 资源引用以及完全落在画布内的整数 `rect {x, y, width, height}`；可选 `params.safe_rect`。
+- `production_reference` 模板见下一节。
+- `status` ∈ `draft` / `adopted` / `retired`。状态为 `adopted` 时必须填写 `adoption.date`（YYYY-MM-DD）、`by`、`statement`（用户确认原话）与 `scope`。可选 `adoption.resources` 记录采纳当下底层资源文件的大小与修改时间：
 
   ```json
   "resources": {"frame-demo": [{"path": "resources/image/frame-demo/frame-demo.png", "size": 6063, "mtime_ns": 0}]}
   ```
 
-  之后文件的大小或修改时间变化，`check` 给出 `changed_since_adoption` 警告：重新采用，或出一个新版本。
-  修改时间是本机事实，把库拷到另一台机器会让所有快照都显示为已变化。
+  此后若资源文件的大小或修改时间发生变化，`check` 会报 `changed_since_adoption` 警告，提醒重新确认采纳或发布新版本模板。由于修改时间属于本机文件系统属性，把资源库复制到另一台机器后，所有快照都会提示已变化。
 
-### 参考模板 `production_reference`
+### 制作参考模板 `production_reference`
 
-把 video-reference 导出的 `production_reference.json`（只含方法与数值，不含原片事实）登记成可版本化、需采纳的模板：
+把 `video-reference` 导出的 `production_reference.json`（仅含可迁移方法与实测数值，不含原片剧情与人名）登记为带版本、需确认采纳的模板：
 
-1. `mkdir -p templates/production_reference/<id>/v1`，把导出物原样复制进去，文件名保持 `production_reference.json`。
-2. 写 `template.json`：`params` 恰好是 `{"reference": {"path": "production_reference.json"}}`；`canvas` 从导出物复制，仅作信息，
-   绑定时不核对画布。
-3. 写 `samples/<id>/sample.json` 指向原成片，`demonstrates` / `not_reusable` 写人看的摘要；含事实的完整拆解不进库。
-4. `library.py check`：导出物的 `schema` 必须是 `video-reference.production.v1`，`methods` 非空且每条有合法 `dimension` 与 `rule`，
-   任何层级出现 `source_facts`、`labels`、`evidence`、`entities`、`statement`、`from`、`path` 键都报错（与参考技能导出时的复扫同一组键）。
-5. 用户确认后把 `status` 改为 `adopted` 并用用户原话写 `adoption`。之后要改内容就出 `v2`，不改已采纳的版本。
-
-上述库查询命令只读，登记与采纳由操作者编辑 JSON。
+1. 创建 `templates/production_reference/<id>/v1` 目录，把导出的 `production_reference.json` 原样复制进去，保持文件名不变。
+2. 编写 `template.json`：`params` 固定写 `{"reference": {"path": "production_reference.json"}}`；`canvas` 从导出物复制，仅作信息展示，项目绑定时不校验画布尺寸。
+3. 编写 `samples/<id>/sample.json` 指向原成片，在 `demonstrates` 与 `not_reusable` 中写明供人查阅的摘要；包含原片事实的完整拆解稿留在本地工作目录，不进资源库。
+4. 运行 `library.py check`：导出物的 `schema` 必须为 `video-reference.production.v1`，`methods` 非空且每条包含合法 `dimension` 与 `rule`；任意层级只要出现 `source_facts`、`labels`、`evidence`、`entities`、`statement`、`from`、`path` 键即报错（与参考技能导出时的防泄漏复扫规则一致）。
+5. 用户确认后，将 `status` 改为 `adopted` 并在 `adoption` 中记录用户原话。后续如需调整方法，新建 `v2` 目录，不直接修改已采纳的版本。
 
 ## 样片 `sample.json`
 
@@ -131,8 +117,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-样片是证据，不是模板：`demonstrates` 写它示范了什么，`not_reusable` 写不能照搬什么（人物、字幕内容、时间码……）。
-`templates` 用 `id@vN` 指回它所示范的模板版本。
+样片是核对模板效果的实物依据，不是模板本身：`demonstrates` 写明它示范了哪些版式或节奏特征，`not_reusable` 写明哪些具体内容（人物、台词字幕、时间点等）绝不能照搬，`templates` 用 `id@vN` 指回它所对应的模板版本。
 
 ## 项目绑定 `recap_project.json`
 
@@ -145,23 +130,21 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-`python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 在任何阶段开始前解析绑定：`library` 相对项目文件；
-模板必须是 `adopted`；资源与模板必须通过 `check`。解析结果只以各阶段已有的设置下发，阶段技能不读资源库：
+运行 `python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 时，编排器会在进入任何阶段前先解析项目绑定：`library` 路径相对于项目文件解析，所引用的模板状态必须为 `adopted`，且涉及的资源与模板都必须通过 `check`。解析结果会转换为各阶段既有的命令行参数或环境变量下发，各阶段技能本身不直接读取资源库：
 
-| 绑定 | 下发为 |
+| 绑定项 | 下发方式 |
 |---|---|
-| `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，字体资源 → 再加 `SUBTITLE_FONT_FILE` |
+| `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布宽高，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（转成 ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，若引用字体资源则同时设置 `SUBTITLE_FONT_FILE` |
 | `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |
-| `bgm` | `BGM_PATH` ← 该资源的第一个文件 |
-| `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`：导出物原样加 `written_by` 与 `template {id, version}`，仅写稿 Agent 阅读，没有脚本读取；不核对画布。该位置已有不是 `--project` 写的文件时：与导出物相同则原样保留（暂停提示照常），不同则停止；解除绑定后删掉自己写的副本，调用方自己放的文件不动 |
-| `packaging` | 合成前写出 `work_dir/packaging_layers.json`：每个图层的图片资源第一个文件 + `rect`，由 video-assemble 叠加到成片并写进 `timeline.json` 的 image 轨 |
+| `bgm` | `BGM_PATH` ← 该资源下的第一个音频文件 |
+| `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`（保留导出物原内容并附上 `written_by` 与 `template {id, version}`），仅供写稿 Agent 阅读，无任何脚本消费，也不校验画布。若该路径已有非 `--project` 生成的文件：内容与导出物一致则原样保留，不一致则直接报错中止；解除绑定后只删除编排器自己写出的副本，不碰调用方手动放置的文件 |
+| `packaging` | 合成前写出 `work_dir/packaging_layers.json`（包含每个图层的首个图片文件路径与 `rect`），由 `video-assemble` 叠加到成片画面并同步写入 `timeline.json` 的 image 轨 |
 
-- 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会直接覆盖已有设置。
-- 合成前核对字幕与包装模板的画布与实际成片画布；不一致即停止——换画幅要用另一个模板。
-- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；dub 模式与本地采用三件套不接受 `--project`。
-- 续跑命令只带 `--project`，不重复写出由绑定得到的值，改了绑定后续跑会按新绑定解析。
+- 若命令行或环境变量已显式传入某项配置，且与项目绑定解析出的值不一致，程序会在启动前报错中止并指明冲突项，绝不静默覆盖。
+- 合成前会核对字幕模板、包装模板的画布尺寸与成片实际画布是否一致；尺寸不符立即中止，换画幅必须绑定对应画幅的模板。
+- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；`dub` 模式和本地采用三件套路径不接受 `--project`。
+- 暂停打印的续跑命令只携带 `--project`，不把绑定展开成一长串散装参数；中途修改 `recap_project.json` 后续跑，会按新绑定重新解析。
 
 ## 运行记录
 
-每次 full / cut 合成后，`work_dir/resource_lock.json` 记下这次用到的原片、音色、BGM 与字幕字体，并对上资源库里的登记和授权状态；
-格式见 `data-schema.md` 的 resource_lock.json 一节。
+每次 `full` 或 `cut` 合成结束后，`work_dir/resource_lock.json` 都会记录本轮实际使用的原片、音色、BGM 与字幕字体，并关联资源库里的登记项与授权状态；字段定义见 `data-schema.md` 的 `resource_lock.json` 一节。

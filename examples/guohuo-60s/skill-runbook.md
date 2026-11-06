@@ -1,10 +1,10 @@
-# 用仓库 Skills 复现这个案例
+# 使用本仓库 Skills 复现《这一秒过火》案例
 
-本复现说明供 Agent 使用仓库 Skills 重建案例的选段、声音与包装流程。先按[仓库 README](../../README.md) 完成技能、依赖与服务配置，再将本例目录复制到私有工作目录。后续数据调整与渲染均在副本中完成，公开采用版保留作对照。
+本操作手册供 Agent 调用仓库内的 Skills 重建本案例的选段、配音、混音与透明包装流程。动手前请先按[仓库 README](../../README.md) 配好环境变量与依赖，并将 `examples/guohuo-60s` 复制到独立的私有工作目录中操作，保持仓库内的公开基线文件原样不动。
 
-## 可复制的任务请求
+## 一键复现提示词（Prompt）
 
-把 `assets.example.json` 复制为工作区外的私有 `assets.json`，只填写你有权使用的素材路径，然后把下面请求交给已安装本仓库 Skills 的 Agent：
+先将 `assets.example.json` 复制为工作区外的私有 `assets.json`，填入你合法持有的分集视频与音效文件路径，然后把下面这段任务指令发给已加载本仓库 Skills 的 Agent：
 
 ```text
 使用 video-recap Skill，把 assets.json 中 episode-02、episode-03、episode-06、episode-21
@@ -25,81 +25,56 @@ Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级 conform 里
 正常速度完整观看最终文件，逐接点播放，并只听声音复核；再做解码、规格、音频 stream-copy 和小于 10 MB 的交付检查。
 ```
 
-## Agent 应走的 Skill 阶段
+## 分阶段执行细节
 
-### 1. `video-understanding`
+### 1. 多源视频理解（`video-understanding`）
 
-由 `video-recap` 编排多源理解，生成每集的 ASR、VLM、scene、silence、fusion、contact sheet 与稳定 `source_id`。理解阶段的公开产物仅保留 `background_research.json` 和脱敏后的 `multi_source_manifest.json`；复现时必须使用新素材重新生成理解证据，不能把公开时间码当作对不同片源也成立。
+由 `video-recap` 编排多集视频理解，依次生成每集的 ASR 转写、VLM 帧分析、切点、静音区间、融合片段、故事板拼图及固定 `source_id`。仓库仅公开 [`background_research.json`](background_research.json) 与脱敏后的 [`multi_source_manifest.json`](multi_source_manifest.json)；复现时必须对实际片源重新跑出理解数据，不能假定不同版本片源的片头时长或时间轴分毫不差。
 
-把 `background_research.json` 放在项目 `work_dir` 下即可：recap 会在每集理解前把它复制到 `sources/<source_id>/`。
+只需把 `background_research.json` 放在项目根 `work_dir` 下，编排器就会在分析每一集前自动将其同步到 `sources/<source_id>/`。
 
-ASR 默认按 15 秒一窗（`ASR_SEGMENT_SECONDS`）给出粗时间，按窗内字数比例推出的句末锚点可能与画面上的硬字幕差几秒，理解阶段会把它标成 `unverified` 并写出误差范围。cut 把句末锚点和安静窗口当作安全边界（只含语气词或 ASR 杂音的窗口不算讲话），靠未验证锚点放行的边界记为 `unverified_sentence_boundary`，要亲自播放确认；仍被 `unsafe_clip_sentence_boundary` 挡下的边界，按 `qc.boundary_status.sentence_checks` 挪到可用锚点，必要时换入点或删块，不要绕过校验。
+注意：ASR 默认按 15 秒一窗（`ASR_SEGMENT_SECONDS`）输出粗粒度时间段，按窗内字数比例折算出的句末锚点可能与画面硬字幕存在几秒偏差，理解阶段会将其标记为 `unverified` 并给出误差范围。剪辑阶段把句末锚点和实测静音窗作为安全切点边界（仅含语气词或杂音的窗口不算说话区间）；凡依赖 `unverified` 锚点放行的切点都会记为 `unverified_sentence_boundary`，必须原速回看确认没有切碎台词。若某处边界仍被 `unsafe_clip_sentence_boundary` 拦下，请对照 `qc.boundary_status.sentence_checks` 给出的 `nearest_safe` 秒数挪动入出点，切勿强行绕过门禁。
 
-### 2. `video-script` pass 1（DIRECTED）
+### 2. 第一阶段选段（`video-script` Pass 1，`DIRECTED` 模式）
 
-读取新生成的 brief，同时把这些文件作为已采用基线：
+读取新生成的创作简报，同时将以下四份公开文件作为已确认的创作基线：
 
-- `recap_story_plan.json`
-- `visual_audio_board.json`
-- `style_card.json`
-- `clip_plan.json`
+- [`recap_story_plan.json`](recap_story_plan.json)
+- [`visual_audio_board.json`](visual_audio_board.json)
+- [`style_card.json`](style_card.json)
+- [`clip_plan.json`](clip_plan.json)
 
-如果新运行生成的 `source_id` 不同，Agent 根据私有 `assets.json` 与新 `multi_source_manifest.json` 做一一映射。只有素材版本或时间轴不同才重新定位 IN / OUT；不要为了满足 CREATE 模板虚构第二套故事假设。
+如果新生成的 `source_id` 命名与公开示例不同，按私有 `assets.json` 与新 `multi_source_manifest.json` 的映射关系替换工作副本中的 `source_id` 即可。除非你手头的片源版本与原版存在时间轴偏移，否则直接沿用基线里的原片时间码，无需重新发散第二套故事方案。
 
-### 3. `video-cut`
+### 3. 执行初剪（`video-cut`）
 
-让 Skill 校验边界并生成新的 `clip_plan_validated.json` 和 `edited_source.mp4`。切镜头分数（`scene-change score`）用于提供候选接点，Agent 仍要播放检查每个接点。公开案例不分发项目运行时的 validated plan；`picture-conform.json` 是后续项目级修订记录，不能覆盖新运行的 Skill 校验结果。
+运行剪辑阶段校验句界并生成 `clip_plan_validated.json` 与 `edited_source.mp4`。切点分数（scene-change score）仅用于提示可疑接点，Agent 仍需逐个播放核对。公开目录不附带运行时生成的 `clip_plan_validated.json`；目录内的 [`picture-conform.json`](picture-conform.json) 是终审返修阶段的局部微调记录，不要拿它直接覆盖 `video-cut` 的原生校验结果。
 
-### 4. `video-script` pass 2 → `video-voiceover` → `video-assemble`
+### 4. 二阶段写稿、配音与母版合成（`video-script` Pass 2 → `video-voiceover` → `video-assemble`）
 
-按剪后输出时间线写 `narration.json`，再由 voiceover 使用 Fish Audio 生成旁白，由 assemble 放置音频、在旁白期间压低原声，并生成字幕和母版。复现时显式选择 `--tts-provider fish-audio`；公开案例的 TTS 来源只标记为 Fish Audio，运行时元数据不入库。
+对照剪后输出时间线放入 [`narration.json`](narration.json)，调用 `video-voiceover`（显式传 `--tts-provider fish-audio`）生成 7 段解说语音，再由 `video-assemble` 完成音频铺轨、原声闪避（ducking）与母版合成。由于本案例使用 Remotion 透明层渲染字幕，运行 `recap.py` 时需加上 `--no-burn-subtitles`，避免母版先烧进一层 ASS 字幕、外层又叠一套 Remotion 字幕（[`assembly_manifest.json`](assembly_manifest.json) 中记录的正是 `burn_subtitles: false`）。
 
-recap 默认启用解说字幕烧录。使用本例的 Remotion 字幕条时，给 recap 加 `--no-burn-subtitles`，避免母版已烧录字幕又叠一套字幕；本例 `assembly_manifest.json` 记录的就是 `burn_subtitles: false`。
+本案例的 7 段解说词字数约为各自时间窗保守推荐字数的 `1.5–2.3` 倍。在 `cut` 模式第二阶段，`validate --mode cut_output` 只会将超字数记为 `over_budget` 警告而不会阻断；但如果复现时换用了语速较慢的音色，某段音频可能会塞不下时间窗：
 
-公开的 7 个解说块都比各自时间窗的推荐字数多 1.5–2.3 倍。cut 第二阶段的 `validate --mode cut_output` 只把这记成 `over_budget` warning，校验能通过；但新声音的语速不同，某块可能装不下：
+- 默认模式下，配音阶段保留完整音频并记日志；若合成阶段在安全倍率内温和提速后仍装不下，会在编码前报 `no_safe_fit` 阻断，并指明超窗段号与所需的 `needed_tempo_factor`，此时只需精简该段词句或微调时间窗即可；
+- 若显式传入 `--preserve-approved-text` 锁死原文，超窗段落会在配音阶段直接报错停机；
+- 严禁靠硬切语音尾音或无上限倍速把长音频硬塞进窄窗口。
 
-- voiceover 保留原稿只记日志；assemble 有界提速仍放不下时在视频编码前以 `no_safe_fit` 阻断，错误里写明段号与 `needed_tempo_factor`，据此改短这一块或放宽时间窗后重跑；
-- 要原样保留采用稿时给 recap 加 `--preserve-approved-text`，装不下即在配音阶段失败，处理方式相同；
-- 不要用裁尾或继续提速来硬塞。
+若复现时使用了不同音色或语速，请按新跑出的真实落盘音频重新生成字幕条，切勿直接拿公开的 [`captions.json`](captions.json) 硬套在新音频上冒充同步。
 
-复现时保留选段与叙事节奏，并按实际声音校准时间。若声音或语速不同：
+此外，公开历史产物中记录的 `ducking_narr_weight` 为 `2.4`，而当前版本 `video-assemble` 已将该权重固定为 `1.5`；如需完全复刻当时的压音深度，可在项目级后期混音中微调并重新听审。
 
-- 保持每段的叙事任务和连续思路；
-- 让 Skill 重新适配实际音频，不裁尾；
-- 按新运行中实际放置的音频重新生成字幕 cue；
-- 不直接复用本例 `captions.json` 冒充同步。
+### 5. 叠加项目级 Remotion 透明包装
 
-公开的 `timeline.json`、`assembly_manifest.json` 和 `assembly_qc.json` 记录采用版的轨道结构、音频放置和 `verdict` / `blocking_codes`。原运行未记录当前新增的 `audio_mode`、`narration_input_binding` 等字段，复现时不要替历史产物补写；新成片按新运行生成的 `assembly_qc.json` 与 `final_qc.json` 检查。
+拿到验收通过的音画锁定母版后，再进入 `remotion/` 制作透明包装层：
 
-本例混音记录的 `ducking_narr_weight` 是 2.4，当前 video-assemble 固定为 1.5，且没有开关可改，所以旁白压过原声的比例不能原样复现；需要时在项目级混音里调整，并重新听审。
+1. **同步字幕与总帧数**：在工作副本下运行 `python3 remotion/sync_overlay.py --srt <work_dir>/subtitles.srt --master <锁定母版.mp4>`。脚本会读取 `subtitles.srt`（已按实际落盘语音切好短句）重建 `remotion/src/captions.json`，并根据母版时长与 `remotion/src/overlay.json` 中的 `fps`（本例为 `25fps`）将 `durationInFrames` 更新为 `round(秒数 × fps)`。若任何字幕、片名窗口或花字超出母版总时长，脚本会列出越界项并以退出码 `1` 告警。如需同步更新外层目录的 `captions.json`，可追加 `--out captions.json`。
+2. **看片校准片名与花字落点**：对照新母版画面，检查 `remotion/src/overlay.json` 中的片名显示窗口 `title.windows`（本例为 `0.18–9.75` 秒与 `42.2–50.3` 秒）以及 `flowerCues` 四条花字的起止秒数、文案与坐标。`sync_overlay.py` 只负责检查时间是否越界，花字具体卡在哪个眼神或动作上仍需人工看片拍板。
+3. **抽帧检查版式**：在 `remotion/` 目录下执行 `npm install` 与 `npm run typecheck`，先用 `npx remotion still src/index.tsx RecapOverlay <png> --frame=<n>` 抽取片头、亮场、暗场、人物近景和最长字幕帧检查可读性。
+4. **渲染透明序列并合入母版**：执行 `npm run render:overlay` 渲染出完整的透明 PNG 序列，再用 ffmpeg 将透明层叠加到音画锁定母版上，音频流直接 `-c:a copy` 无损复制。若源片分辨率、帧率或色彩空间尚不符合 `1920×1080`、`25fps`、`BT.709 limited` 的交付要求，可在叠加透明层的同一次 ffmpeg 命令中一并完成缩放、帧率对齐与色彩标记转换。
 
-### 5. `video-assemble` 的项目级 Remotion 包装
+### 6. 终审返修（`REVISION`：恢复尾段连续运动）
 
-内容母版通过后才读取 `remotion/`：
+对照 [`revision-log.json`](revision-log.json) 中的修改清单（`change_set`）、锁定清单（`frozen_set`）与验收要求（`verification`），在保持解说词、原声、音效、字幕时序、片名与花字全部冻结的前提下，按 [`edit-map.json`](edit-map.json) 与 [`picture-conform.json`](picture-conform.json) 修复 42 秒后的两处画面接点（去掉 `42.08` 秒处的尾帧定格、补回 `2001–2004` 秒被剪断的长廊连续跟拍）。
 
-1. 在本例的工作副本下，用 `remotion/sync_overlay.py` 将这次运行的字幕和母版时长同步到透明层：`python3 remotion/sync_overlay.py --srt <work_dir>/subtitles.srt --master <锁定母版.mp4>`。它从 assemble 写出的 `subtitles.srt`（cue 已按实际 placed audio 拆分）重建 `remotion/src/captions.json`，按母版时长和 `remotion/src/overlay.json` 中的 `fps`，将 `durationInFrames` 设为 `round(秒数 × fps)`，本例为 25fps；字幕、片名窗口或花字落到母版之外时列出来并以退出码 1 结束（文件照常写出）。`remotion/src/captions.json` 每次都会重写；要同步更新目录下公开的 `captions.json` 时再加一个 `--out captions.json`，它是额外写的一份副本，不会替代 Remotion 读取的那份。只有 `--duration <秒>` 而没有母版文件也可以。
-2. 看新母版重新放置 `remotion/src/overlay.json` 里的创作项：`title.text` 与 `title.windows`（本例 0.18–9.75 秒、42.2–50.3 秒），`flowerCues` 四条花字的起止秒、文字与位置。工具只检查它们是否越界，不替你挪：花字要落在对应的镜头上，靠看片决定。TSX 里没有时间或文字常量；也可以不改仓库里的文件，把 `{"captions": [...], "overlay": {...}}` 写成一份 JSON，渲染时用 `--props=<文件>` 传入，时长随 props 一起变。
-3. 抽检开头、亮背景、暗背景、人物近景和最长字幕。
-4. 在 `remotion/` 里 `npm install`，可先 `npm run typecheck` 做类型检查，再 `npm run render:overlay` 渲染完整透明层（需要 Remotion 下载的无头 Chrome；先用 `npx remotion still src/index.tsx RecapOverlay <png> --frame=<n>` 抽几帧看字幕、片名和花字），由本项目自己叠到锁定母版。`package.json` 只锁定了直接依赖，`package-lock.json` 不入库，传递依赖版本可能与原运行不同。
-5. 包装合成时 stream-copy 已通过的音频；复核字幕边界、片名安全区和花字信息增量。
-
-这是 `video-assemble` Skill 的可选包装路径，Remotion 是本案例的项目级实现；渲染与合成都在项目里完成，
-`video-assemble` 只负责锁定母版，不提供逐帧前景合成命令。
-
-本例交付要求 1920×1080、恒定 25fps 和 BT.709 limited。video-cut 已按输出帧网格剪辑，cut / assemble 也会写入色彩标记；输出可能保留源片已声明的非 BT.709 色彩，不能当作统一转成 BT.709 的保证。video-assemble 的 `OUTPUT_MAX_HEIGHT` 只限制输出高度，不会放大到指定画布。
-
-先核对新母版的画幅、帧率和色彩。需要调整时，在项目级叠透明层的同一次 ffmpeg 合成中完成缩放、帧率或实际色彩转换，并核对交付标记；音频仍直接复制，完成后重新检查时长、接点和音画同步。
-
-### 6. REVISION：看片反馈后 conform / 再剪
-
-读取 `revision-log.json` 的 `change_set`、`frozen_set` 和 `verification`。最终采用版只解冻画面连续性：
-
-- `edit-map.json` 说明看片发现了什么。
-- `picture-conform.json` 给出接受后的源时间和输出帧映射，方便 Agent 精确执行项目 revision。
-- `delivery-qc.json` 给出最终交付的参考规格和质量，不替代新文件的实测 QC。压缩到 10 MB 以下所需的视频码率随成片时长变化，按新时长和 stream-copy 的音频码率重算，不要照抄本例的码率。
-
-如果新素材、配音或切点改变了时间线，Agent 应保持修订意图，重新计算成片秒点；不要照抄本例的 42.08 秒切点。
-
-## 复现范围
-
-在使用合法输入、保持片源时间轴一致并按目标环境重新校准声音与字体后，可以复现选段、叙事节奏、原声留白、字幕/片名/花字包装、后期 conform 和压缩结构。媒体与声音资源由复现者依法提供，仓库只负责 Skills 契约和公开创作产物。
+修完后按原速从头到尾通看最终成片，逐个回放接点，闭眼纯听一遍全片混音，最后对照 [`delivery-qc.json`](delivery-qc.json) 核验解码完整性、音画同步与小于 10 MB 的交付体积（若复现成片时长与原版不同，请按新时长重新折算目标视频码率）。

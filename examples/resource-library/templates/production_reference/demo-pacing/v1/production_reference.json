@@ -91,9 +91,9 @@
     {
       "id": "m1",
       "dimension": "audio_visual",
-      "rule": "旁白段用短镜头推进信息，原声段放长镜头让整句台词落地",
-      "applies_when": "对白冲突强、需旁白补前情的剧集解说",
-      "avoid_when": "主要靠动作声承载的段落",
+      "rule": "旁白段用精炼短镜推进前情，原声段放长镜头让角色把整句狠话或反应演透",
+      "applies_when": "对白交锋激烈、又需要旁白穿插交代前因后果的剧情解说",
+      "avoid_when": "纯靠连续动作声推进的打斗或追逐段落",
       "applies_to": "visual_audio_board",
       "targets": {
         "narration_cuts_per_min": {
@@ -105,8 +105,8 @@
     {
       "id": "m2",
       "dimension": "narrative_structure",
-      "rule": "先用旁白交代身份，再让第一段原声冲突接管",
-      "applies_when": "主角身份需要一句话交代的单集解说",
+      "rule": "开场先用一句旁白点破人物处境与身份反差，紧接着尽早放出第一段原声冲突立住现场感",
+      "applies_when": "主角身份错位需要一句话点破的单集解说",
       "applies_to": "story_plan",
       "targets": {
         "first_original": {
@@ -157,8 +157,8 @@
     {
       "id": "m3",
       "dimension": "pacing",
-      "rule": "整体保持中速切换，不靠快切制造紧张",
-      "applies_when": "对白驱动的剧情",
+      "rule": "全片保持沉稳的镜头切换，靠人物眼神和台词张力抓人，不靠碎切硬凑紧张感",
+      "applies_when": "以对手戏和情绪拉扯为主的剧情片段",
       "applies_to": "clip_plan",
       "targets": {
         "shot_median_s": {
@@ -170,15 +170,15 @@
     {
       "id": "m4",
       "dimension": "shots_editing",
-      "rule": "声音归属切换尽量落在画面切点上",
-      "applies_when": "旁白与原声交替的段落",
+      "rule": "旁白与原声的交接点尽量卡在画面硬切点上，借镜头切换自然带出声音换手",
+      "applies_when": "旁白与角色原声频繁交替的段落",
       "applies_to": "clip_plan"
     },
     {
       "id": "m5",
       "dimension": "narration_subtitles",
-      "rule": "单行字幕，原声台词加直角引号区分旁白",
-      "applies_when": "旁白与原声台词都上字幕时",
+      "rule": "字幕保持单行干净排版，角色原声台词统一加上「」引号与解说词区分",
+      "applies_when": "解说旁白与角色原声台词共用同一条底部字幕带时",
       "applies_to": "style_card"
     }
   ],

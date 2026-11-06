@@ -19,6 +19,7 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- **吸收高留存叙事案例写法，全面去译腔并润色技能、文档与案例文案。** 用 `prose-gap-polish` 五步法清理七个技能与参考文档中的英文直译词、自造黑话与嵌套长句；在 `video-script`、理解简报 `builder.py` 与评审 `review_response.py` 中落地“具体处境 + 身份/利益反差起手”、“手头动作 + 当场后果替代公文总结词”、“原声前后垫半句、让半句、接半句”及真人口播呼吸感规范与正反对比示例；重写 `examples/guohuo-60s/` 策划、分镜声画板、剪辑理由、风格卡与复盘文档中的模板复读句（锁死已发布成片的实读音频与字幕时序不变），并打磨 `docs/` 与 `README.md` 中的教学案例文案。七个 ClawHub 技能包各升一个补丁号并同步 `video-recap` 伴随依赖。
 - **七个 SKILL.md 的 `description` 改成单行。** 原来的 `description: >` 折叠块在 OpenClaw 只认单行键值的退路解析器下读不到完整描述；现在每条都是一行，文字与原折叠块解析后的值完全相同。新增测试要求 `description` 非空、不是 `>` / `|` 块、不超过 1024 字符。七个 ClawHub 包各升一个补丁号（video-recap 仍为 blocked，伴随依赖同步到新版本）。
 
 ## [0.6.2] - 2026-10-03
