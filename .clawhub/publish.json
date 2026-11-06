@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "dea6c5615ab1da3f017708a3f06d49d8c5fcf2cc8a48f1aebf676b2e3840c28a",
+      "packageDigest": "04a64857ea7c725a3ae8cdf0d4475e71103964e846802c62c35c2e85cea7bd62",
       "path": "skills/video-assemble",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.11"
+      "version": "1.0.12"
     },
     {
       "catalogMigration": true,
@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "ecb82a5464e46b5c187454327d933a487c5c43f7758c4bdbf37d224ac67d339b",
+      "packageDigest": "efd995c671ba251cbb0c7bed1a032d424be2e47158367e9f6408ada655ca57d7",
       "path": "skills/video-cut",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -78,7 +78,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.8"
+      "version": "1.0.9"
     },
     {
       "categories": [
@@ -134,7 +134,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "dc94f4b7432cdaf8d412acee957da8d84dc7468ed17283a5370792653873ee77",
+      "packageDigest": "2490c9c17c6ad00c9b683a88c09820ba293e8a9207c24d0531c8c34977c63c5f",
       "path": "skills/video-reference",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -155,7 +155,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.4"
+      "version": "1.0.5"
     },
     {
       "catalogMigration": true,
@@ -171,7 +171,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "f63d45923343e2970d9f77b357c2e1b1e92f4f9581f7c06638f68acc8d963ad8",
+      "packageDigest": "a740e8b8dfa297217adcfa132c02a9ed1d693556e42a8cc3c04fc595636001d7",
       "path": "skills/video-script",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -190,7 +190,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.8"
+      "version": "1.0.9"
     },
     {
       "catalogMigration": true,
@@ -206,7 +206,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "6b78d986f9fe74db79bffa44042b4b79778fd617aee18f3589786c5e2e7b5164",
+      "packageDigest": "0b7103faeb49a744c9ab1fc5a7644266cb4c3c40b1d3d2ee8bb354b422d0172c",
       "path": "skills/video-understanding",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -227,7 +227,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.9"
+      "version": "1.0.10"
     },
     {
       "catalogMigration": true,
@@ -243,7 +243,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "fc737311d68a35db435e47493674284a7882029d0288db6b006114d629ae8b50",
+      "packageDigest": "10f46820b07ef7f84a566f9334fe32504cac65587428ba7f449b7fed5930eba7",
       "path": "skills/video-voiceover",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -264,7 +264,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.10"
+      "version": "1.0.11"
     }
   ]
 }

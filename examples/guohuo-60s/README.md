@@ -16,13 +16,13 @@ video-understanding
 
 公开产物清单见 [`workflow-manifest.json`](workflow-manifest.json)。这个 demo 展示以下可复用的创作与交付方法：
 
-- 先用 `recap_story_plan.json` 锁定观众承诺、POV、戏剧问题和 change-based beats。
+- 先用 `recap_story_plan.json` 锁定观众承诺、POV、戏剧问题和按变化推进的分拍（change-based beats）。
 - 用 `visual_audio_board.json` 决定每拍由画面、原声、动作声还是旁白主导。
 - TTS 以完整思路为块，字幕再按实际朗读时间拆成短 cue；两者不互相绑死。
 - scene-change score 和抽帧只用于定位问题，最终以真实播放接点为准。
 - 对短时间内密集的 scene 候选先区分原片切点和人工拼接点：无关原片镜头整段删，相关短镜头扩展到完整动作/反应，人工切点优先恢复同源连续运动或合并片段。
 - 包装在画面、声音和字幕时序锁定后完成；花字只补情绪，不重复字幕信息。
-- 修复不自然接点时优先恢复原片连续运动，而不是叠加溶解、闪白或其他遮掩。
+- 修复不自然接点时优先恢复原片连续运动，不用溶解、闪白等转场遮掩。
 
 复现时按 [`skill-runbook.md`](skill-runbook.md) 使用 `video-recap` Skill；有效迭代链见 [`iteration-notes.md`](iteration-notes.md)。
 
@@ -71,7 +71,7 @@ Agent 按 [`skill-runbook.md`](skill-runbook.md) 走到 `video-assemble` 的可�
 
 `revision-log.json` 记录每轮建议、修改项和冻结项，`edit-map.json` 说明看片确认的接点，`picture-conform.json` 描述最终接受的项目级再剪结果；复现时仍由 Skill 生成 `clip_plan` / `clip_plan_validated`。
 
-这类问题不应沉淀成“某一秒特殊处理”的核心代码补丁。可复用规则是：检测工具负责指出候选边界，播放负责判定；同一源镜头被人工切断时，优先恢复源连续性；收到建议后只解冻相关层，再分别验证修改项和冻结项。
+这类问题不应写成“针对某一秒特殊处理”的核心代码补丁。可复用规则是：检测工具负责指出候选边界，播放负责判定；同一源镜头被人工切断时，优先恢复源连续性；收到建议后只解冻相关层，再分别验证修改项和冻结项。
 
 ## 内容审核结论
 
