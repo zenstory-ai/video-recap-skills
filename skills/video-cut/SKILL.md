@@ -75,8 +75,7 @@ beat_id | function | change | POV | preferred moment | 入点 reason | 出点 re
 ```bash
 python3 scripts/cut.py <video> --work-dir <work_dir> [--clip-plan <clip_plan.json>] \
   [--sources-manifest <sources.json>] [--target-duration 10m] [--allow-overlap] \
-  [--allow-duration-drift] [--normalize-only] \
-  [--review-shots [--shot-scene-threshold 0.35] [--shot-roi X Y W H]]
+  [--allow-duration-drift] [--normalize-only]
 ```
 
 - `--clip-plan`：剪辑计划路径，默认 `<work_dir>/clip_plan.json`。
@@ -85,7 +84,6 @@ python3 scripts/cut.py <video> --work-dir <work_dir> [--clip-plan <clip_plan.jso
 - `--target-duration`：目标时长。实际时长与目标之比在 0.85–1.15 之外记 warning，在 0.60–1.40 之外阻断。
 - `--allow-duration-drift`：只放行时长偏差阻断（记为 `allowed: true` 的 warning），不放行句界或必保证据阻断。
 - `--normalize-only`：只标准化、吸附并检查计划，写出 `clip_plan_validated.json` 后退出，不渲染。
-- `--review-shots`：在渲染或复用的 `edited_source.mp4` 上召回短镜与密集切点候选，只报告、不修复；`--shot-scene-threshold` 是召回阈值（默认 0.35，不是验收标准），`--shot-roi` 只扫描该像素矩形（有黑边或包装时用），不裁画面。
 
 cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.json` 的 `qc.blocking`，每项带 `code`：
 
@@ -97,7 +95,6 @@ cut 阻断时以非零状态退出，并把原因写入 `clip_plan_validated.jso
 
 - `clip_plan_validated.json`：标准化片段，包含 `clip_id`、`source_start/end`、`output_start/end`、`duration` 与 `frame_count`（该片段渲染的帧数）。`qc.frame_grid` 记录输出帧率 `output_frame_rate`（单源沿用源帧率，多源用画布帧率，NTSC 写成 `30000/1001`）、总帧数与各源帧率；每次帧对齐的前后时间写在 `qc.boundary_status.frame_snaps`。
 - `edited_source.mp4`：按计划拼接后的恒定帧率短视频，帧数等于 `qc.frame_grid.frame_count`。
-- `shot_review.json`：仅 `--review-shots` 开启后生成的实际视频短镜/密集切镜候选；不会更改计划。
 
 下游把 `edited_source.mp4` 当作视频，把 Agent 按输出时间写的 `narration.json` 当作旁白。
 
@@ -121,8 +118,8 @@ ffmpeg -i input.mp4 -vf "select='gt(scene,0.35)',showinfo" -an -f null -
 `0.35` 是起始阈值，不是质量判据；大幅运动、闪白和叠化都可能误报。把候选映射回原片 shot 与本次拼接边界后，按上面的来源分类处理，并以正常速度播放决定是否保留。
 
 需要精确到实际帧、检查长区间内部残镜并记录所用计划路径时，使用
-`scripts/shot_review.py` 或 `cut.py --review-shots`（有黑边或包装时加 `--roi` / `--shot-roi`）；
-详见 `references/shot-review.md`。
+`python3 scripts/shot_review.py edited_source.mp4 --plan clip_plan_validated.json --output shot_review.json`
+（有黑边或包装时加 `--roi`）；它只报告候选、不修复，也不改计划，详见 `references/shot-review.md`。
 
 ## 7. 能力边界
 

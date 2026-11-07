@@ -37,13 +37,7 @@ def _format_frame_facts(scene):
 
 
 def _split_text_by_sentence_windows(text, min_chars=500, max_chars=800):
-    """Clipto-style three-tier sentence boundary splitting for long ASR text."""
-    text = re.sub(r"\s+", " ", text).strip()
-    if not text:
-        return []
-    if _text_units(text) <= max_chars:
-        return _sentence_pieces(text)
-
+    """Clipto-style three-tier sentence boundary splitting for one over-long ASR sentence."""
     result = []
     rest = text
     sentence_marks = "。！？!?；;."
@@ -62,11 +56,7 @@ def _split_text_by_sentence_windows(text, min_chars=500, max_chars=800):
                     outside = i
                     break
             cut = outside if outside >= 0 and outside + 1 <= len(rest) else char_max - 1
-        piece = rest[: cut + 1].strip()
-        if not piece:
-            piece = rest[:char_max].strip()
-            cut = char_max - 1
-        result.append(piece)
+        result.append(rest[: cut + 1].strip())
         rest = rest[cut + 1 :].strip()
     if rest:
         result.append(rest)

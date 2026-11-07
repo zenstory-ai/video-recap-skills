@@ -147,7 +147,8 @@ def test_overview_nests_runs_and_ranks_what_needs_attention(site):
     assert runs["show/ep1/sources/src_a"]["parent"] == "show/ep1"
     assert runs["show/ep1"]["project"] == "show"
     assert {p["path"]: p["runs"] for p in overview["projects"]}["show"] == ["show/ep1"]
-    assert [item["kind"] for item in overview["next"]] == ["blocked", "waiting", "waiting"]
+    # badtl is paused; the multi-video child show/ep1/sources/src_a is not a waiting run of its own.
+    assert [item["kind"] for item in overview["next"]] == ["blocked", "waiting", "licence"]
     assert overview["next_severity"] == "danger"
     kinds = {(item["kind"], item.get("code")) for item in overview["attention"]}
     assert {("licence", "license_unknown"), ("binding", "not_adopted"), ("binding", "missing"),
@@ -512,3 +513,30 @@ def test_hand_written_record_fields_are_normalised_before_they_reach_the_page(tm
 
     assert detail["samples"][0]["canvas"] is None
     assert {r["id"]: r["tags"] for r in detail["resources"]}["pulse-demo"] == []
+
+
+def _manifest(path, mode="narration", **settings):
+    _write(path / "recap_run_manifest.json", {
+        "schema_version": 1, "source_video": "/abs/src.mp4", "audio": {"mode": mode}, "settings": settings,
+    })
+
+
+def test_only_runs_that_really_pause_are_waiting(tmp_path):
+    root = tmp_path / "root"
+    _manifest(root / "paused")
+    _manifest(root / "paused_cut", edit_mode="cut")
+    _manifest(root / "mix_paused_cut", mode="source-mix", edit_mode="cut")
+    _manifest(root / "mix_done", mode="source-mix")
+    (root / "mix_done" / "recap_x.mp4").write_bytes(b"x")
+    _manifest(root / "project")
+    (root / "project" / "narration.json").write_text("[]", encoding="utf-8")
+    _manifest(root / "project" / "sources" / "src_a")
+    _manifest(root / "lib" / "materials" / "ep-1" / "artifacts")
+
+    attention = dashboard_data.overview(root.resolve())["attention"]
+
+    waiting = {item["title"]: item for item in attention if item["kind"] == "waiting"}
+    assert set(waiting) == {"paused", "paused_cut", "mix_paused_cut"}
+    assert "narration.json" in waiting["paused"]["ask"]
+    assert "clip_plan.json" in waiting["paused_cut"]["ask"]
+    assert "clip_plan.json" in waiting["mix_paused_cut"]["ask"]

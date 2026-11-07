@@ -210,14 +210,10 @@ def _format_moderation_refusals(scenes_analysis):
         return []
     labels = ", ".join(_scene_number(scene["scene_id"]) for scene in refused[:12])
     more = f" …(+{len(refused) - 12})" if len(refused) > 12 else ""
-    covered = sum(
-        1 for scene in refused if scene.get("description_source") == "mimo_video_overview"
-    )
-    overview_note = f"; {covered} of them are described by the MiMo overview instead" if covered else ""
     return [
         f"- Moderation-refused scenes: {len(refused)}/{len(scenes_analysis)} "
         f"(Scene {labels}{more}) — MiMo refused the frame VLM request, so their frame "
-        f"description is blank and they carry no frame_facts{overview_note}. This is a "
+        f"description is blank and they carry no frame_facts. This is a "
         "content-moderation refusal, not empty footage: ground them in ASR, burned-in "
         "subtitles, or background research, or skip them in cut mode.",
         "",
@@ -304,10 +300,6 @@ def _format_timeline_fusion_for_brief(fusion, max_items=40):
     return lines
 
 
-def _consolidation_model():
-    return CONFIG["vlm_model"]
-
-
 def _load_consolidation(work_dir, scenes_analysis):
     """Load consolidate.py's understanding_index.json only when its provenance matches
     the current vlm_analysis.json and model ({} otherwise)."""
@@ -325,7 +317,7 @@ def _load_consolidation(work_dir, scenes_analysis):
         return {}
     expected = {
         "source": source,
-        "model": _consolidation_model(),
+        "model": CONFIG["vlm_model"],
     }
     if scenes_analysis:
         expected["scene_count"] = len(scenes_analysis)

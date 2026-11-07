@@ -15,8 +15,8 @@ video-understanding 内部有几处只增加分支、不增加能力的代码：
 
 - 删除 `LEGACY_UNVERIFIED`：`asr_timing_evidence.py` 的 `VALID_STATUSES` 去掉它，`_glossary_binding`、`_window_evidence`、`_valid_glossary` 去掉 `legacy` 参数，`validate_asr_timing_evidence` 与 `asr_evidence_summary_for_brief` 去掉 legacy 分支；`_asr_cache_state` 在 sidecar 缺失时返回 `MISS`；runner 只在 `FRESH` 时复用 ASR。旧 build 写下的 legacy sidecar 校验不过，同样是 `MISS`，下次运行重跑 ASR。`write_asr_timing_evidence` 传入该状态会抛 `ValueError`。`references/data-schema.md` 同步删掉这一状态。
 - `understanding_brief._finish_brief(video, work_dir, args, video_duration, *, storyboard_scenes, brief_scenes, asr_result, silence_periods, status, done_label, force)` 承担 storyboard、横幅、brief、storyboard 头和 JSON 状态行。完整运行传检测出的 scenes 给 storyboard、VLM 分析给 brief，状态 `analyzed`；`--brief-only` 两处都传 VLM 分析，状态 `brief_only`、`force=False`。source storyboard 仅在 `scenes.json` 存在时生成（完整运行时它总存在）。输出的日志、JSON 字段与取值不变。
-- runner 先算出 `(status, message, artifacts)`，再只调一次 `_write_consolidation_status`；四种结果（disabled/failed/ok/skipped）的写入内容不变。
-- `lib.py`：`_api_headers(api_key=None)`、`_prepare_api_payload(payload)`；`api_call` 去掉 `api_provider`，保留 `api_url`/`api_key`/`api_env_var`（视频与 ASR 端点靠它们路由）。`_mimo_endpoint` 只剩 `video` 与 `asr`；新增 CONFIG 键 `mimo_video_env_var`，取法与 `mimo_asr_env_var` 相同，401 报错因此点名真正提供 key 的变量。
+- runner 先算出 `(status, message)`，再只调一次 `_write_consolidation_status`；四种结果（disabled/failed/ok/skipped）的写入内容不变。
+- `lib.py`：`_api_headers(api_key=None)`、`_prepare_api_payload(payload)`；`api_call` 去掉 `api_provider`，保留 `api_url`/`api_key`/`api_env_var`（ASR 端点靠它们路由）。当时 `_mimo_endpoint` 只剩 `video` 与 `asr` 并新增 `mimo_video_env_var`，401 报错因此点名真正提供 key 的变量；`video` 端点随 overview 移除后（见 [[2026-11-06-remove-mimo-video-overview]]）`mimo_asr_api_call` 直接调 `api_call`，ASR 的 401 报错同样点名 `MIMO_ASR_API_KEY`。
 - VLM prompt 由 `vlm.vlm_prompt_payload()` 一处构建，`analyze_scenes` 发送它的 `prompt_text`，`understanding_cache._vlm_cache_payload` 用它做缓存键。硬编码兜底删除，模板缺失时抛 `RuntimeError`。builder 放在 `vlm.py` 而不是 `understanding_cache.py`，因为后者已经 import `vlm`。模板路径与内容不变，现有 VLM 缓存不失效。
 - 不在本次范围：`MIMO_VIDEO/ASR/TTS_API_*` 分能力覆盖整体收拢（另一项候选，牵涉 recap 与 voiceover）；`coverage_policy_version` 只存在于 video-script，understanding 里没有副本。
 
@@ -33,7 +33,7 @@ video-understanding 内部有几处只增加分支、不增加能力的代码：
   - understanding 脚本净少约 90 行；ASR 缓存只有 FRESH/MISS 两种结果，Ctrl-C 后不会再把旧转写粘成永久命中。
   - 完整运行与 `--brief-only` 的 brief 收尾只有一份，以后改 brief 参数不会漏改一边。
   - 发送的 VLM prompt 与缓存键按构造一致。
-  - `MIMO_VIDEO_API_KEY` 被拒时报错点名它本身。
+  - 分能力 key 被拒时报错点名它本身。
 - **代价**：
   - 手工删掉 sidecar、或 ASR 重跑被中断的 work_dir，下次运行会多一次 ASR 调用。
   - 进程内调用 `_api_headers`/`_prepare_api_payload`/`api_call` 并传 `api_provider` 的外部脚本会报参数错误；仓库内没有这样的调用方。

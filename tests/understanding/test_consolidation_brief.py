@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -16,8 +17,6 @@ sys.path.insert(
 )
 
 from lib import CONFIG, file_identity  # noqa: E402
-import briefing.context as brief_context  # noqa: E402
-import briefing.inputs as brief_inputs  # noqa: E402
 import briefing.timeline as brief_timeline  # noqa: E402
 from briefing.builder import _duration_label, build_agent_brief  # noqa: E402
 from agent_text import _chunk_asr_for_writing  # noqa: E402
@@ -26,11 +25,7 @@ from briefing.context import (  # noqa: E402
     _load_consolidation,
     assess_understanding_substrate,
 )
-from briefing.inputs import (  # noqa: E402
-    _load_clean_asr,
-    _load_mimo_overview_for_brief,
-    _load_optional_stage_status,
-)
+from briefing.inputs import _load_optional_stage_status  # noqa: E402
 
 SCENES = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
 ASR = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
@@ -59,18 +54,6 @@ def _brief_text(tmp_path, **kwargs):
     return build_agent_brief(SCENES, ASR, SILENCE, 6.0, tmp_path, **kwargs).read_text(
         encoding="utf-8"
     )
-
-
-def _write_clean_asr(work_dir, **overrides):
-    """asr_clean.json with fresh provenance for the ASR fixture; overrides break one field."""
-    (work_dir / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-    payload = {
-        "source": file_identity(work_dir / "asr_result.json"),
-        "model": CONFIG.get("vlm_model", ""),
-        "segments": [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。CLEANED"}],
-        **overrides,
-    }
-    (work_dir / "asr_clean.json").write_text(json.dumps(payload), encoding="utf-8")
 
 
 def test_brief_without_consolidation_uses_raw_asr_and_writes_sidecars(monkeypatch, tmp_path):
@@ -134,14 +117,15 @@ def _write_status(work_dir, name, **fields):
     (work_dir / name).write_text(json.dumps(fields), encoding="utf-8")
 
 
-def test_optional_stage_warnings_surface_failed_overview_and_consolidation(tmp_path):
+def test_optional_stage_warnings_surface_failed_consolidation_only(tmp_path):
+    # A status file an old run left for the removed overview stage is no longer read.
     _write_status(
         tmp_path,
         "mimo_video_overview.status.json",
         stage="mimo_video_overview",
         enabled=True,
         status="failed",
-        message="quota timeout with stack trace that should not be repeated" * 5,
+        message="quota timeout",
         artifact=None,
     )
     _write_status(
@@ -149,46 +133,36 @@ def test_optional_stage_warnings_surface_failed_overview_and_consolidation(tmp_p
         "consolidation.status.json",
         stage="consolidation",
         enabled=True,
-        do_asr=False,
-        do_index=True,
         status="failed",
         message="index api failed",
-        artifacts=[],
     )
 
-    text = _brief_text(tmp_path, mimo_overview_enabled=True)
+    text = _brief_text(tmp_path)
 
     assert "Optional stage warnings" in text
-    assert "mimo_video_overview: failed" in text
+    assert "mimo_video_overview" not in text
     assert "consolidation: failed" in text
-    assert "quota timeout" in text
+    assert "index api failed" in text
 
 
-def test_optional_stage_warnings_flag_missing_enabled_artifacts(tmp_path):
-    _write_status(
-        tmp_path,
-        "mimo_video_overview.status.json",
-        stage="mimo_video_overview",
-        enabled=True,
-        status="ok",
-        message="ok",
-        artifact="mimo_video_overview.json",
-    )
+@pytest.mark.parametrize(
+    "older_keys",
+    [{}, {"do_index": True, "artifacts": ["understanding_index.json"]}],
+    ids=["current", "restored_from_an_older_run"],
+)
+def test_optional_stage_warnings_flag_missing_enabled_artifacts(tmp_path, older_keys):
     _write_status(
         tmp_path,
         "consolidation.status.json",
         stage="consolidation",
         enabled=True,
-        do_asr=False,
-        do_index=True,
         status="ok",
         message="ok",
-        artifacts=["understanding_index.json"],
+        **older_keys,
     )
 
-    text = _brief_text(tmp_path, mimo_overview_enabled=True)
+    text = _brief_text(tmp_path)
 
-    assert "mimo_video_overview: missing_artifact" in text
     assert "consolidation: missing_index" in text
 
 
@@ -198,11 +172,8 @@ def test_optional_stage_warnings_flag_offline_consolidation_skip(tmp_path):
         "consolidation.status.json",
         stage="consolidation",
         enabled=True,
-        do_asr=False,
-        do_index=True,
         status="skipped_no_key",
         message="未设置 MIMO_API_KEY，consolidation（index）未发送请求",
-        artifacts=[],
     )
 
     text = _brief_text(tmp_path)
@@ -211,23 +182,7 @@ def test_optional_stage_warnings_flag_offline_consolidation_skip(tmp_path):
     assert "consolidation: missing_index" not in text
 
 
-def test_optional_brief_loaders_fall_back_on_invalid_json_schema_and_io(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    (tmp_path / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-
-    (tmp_path / "asr_clean.json").write_text("not json", encoding="utf-8")
-    assert _load_clean_asr(tmp_path, ASR) is None
-    (tmp_path / "asr_clean.json").write_text("[]", encoding="utf-8")
-    assert _load_clean_asr(tmp_path, ASR) is None
-
-    (tmp_path / "mimo_video_overview.json").write_text("[]", encoding="utf-8")
-    assert _load_mimo_overview_for_brief(tmp_path, SCENES) is None
-    (tmp_path / "mimo_video_overview.json").unlink()
-    (tmp_path / "mimo_video_overview.json").mkdir()
-    assert _load_mimo_overview_for_brief(tmp_path, SCENES) is None
-
+def test_optional_brief_loaders_fall_back_on_invalid_json_schema_and_io(tmp_path):
     assert _load_optional_stage_status(tmp_path, "missing.status.json") is None
     (tmp_path / "bad.status.json").write_text("[1, 2, 3]", encoding="utf-8")
     assert _load_optional_stage_status(tmp_path, "bad.status.json") is None
@@ -308,85 +263,11 @@ def test_brief_rejects_index_with_stale_provenance(monkeypatch, tmp_path, spoil)
     assert "旧角色" not in text
 
 
-def test_clean_asr_accepted_when_fresh_provenance_timing_ok(tmp_path):
-    _write_clean_asr(tmp_path)
-    got = _load_clean_asr(tmp_path, ASR)
-    assert got is not None and got[0]["text"].endswith("CLEANED")
-
-
-@pytest.mark.parametrize(
-    "overrides",
-    [
-        {"source": {"size": 0, "mtime_ns": 0}},
-        {"model": "old-model"},
-        {"segments": [{"start": 99.0, "end": 100.0, "text": "x"}]},
-    ],
-    ids=["source_identity", "model", "mistimed_span"],
-)
-def test_clean_asr_rejected_on_bad_provenance_or_mistiming(tmp_path, overrides):
-    _write_clean_asr(tmp_path, **overrides)
-    assert _load_clean_asr(tmp_path, ASR) is None
-
-
-def test_clean_asr_absent_is_none(tmp_path):
-    (tmp_path / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-    assert _load_clean_asr(tmp_path, ASR) is None
-
-
-def test_brief_ignores_stale_mimo_overview_when_disabled_or_chunk_mismatch(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", False)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 0.5)
-    (tmp_path / "mimo_video_overview.json").write_text(
-        json.dumps(
-            {
-                "input": "scene_chunks",
-                "content": "STALE MIMO OVERVIEW",
-                "chunks": [
-                    {
-                        "chunk_id": 0,
-                        "scene_id": 99,
-                        "start": 0.0,
-                        "end": 2.0,
-                        "content": "STALE",
-                    }
-                ],
-                "settings": {
-                    "model": CONFIG.get("mimo_video_model")
-                    or CONFIG.get("mimo_model")
-                    or CONFIG.get("vlm_model"),
-                    "mimo_video_fps": CONFIG.get("mimo_video_fps", 2.0),
-                    "mimo_media_resolution": CONFIG.get(
-                        "mimo_media_resolution", "default"
-                    ),
-                    "mimo_video_chunk_max_seconds": 2,
-                    "mimo_video_chunk_min_seconds": 0.5,
-                    "mimo_video_base64_max_mb": CONFIG.get(
-                        "mimo_video_base64_max_mb", 45.0
-                    ),
-                    "mimo_video_prompt": CONFIG.get("mimo_video_prompt", ""),
-                    "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
-
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
-
-
 def test_producer_only_meta_keys_never_reject_a_fresh_index(tmp_path):
     """Producer-private sidecar keys are ignored; the brief only checks source/model."""
     index = {"characters": [{"name": "甲"}], "relationships": [], "plot_points": [], "entities": []}
     _write_index_with_meta(tmp_path, index, producer_cache_key="opaque")
     assert _load_consolidation(tmp_path, SCENES) == index
-    _write_clean_asr(tmp_path, producer_cache_key="opaque")
-    assert _load_clean_asr(tmp_path, ASR) is not None
 
 
 def test_brief_repairs_a_legacy_index_with_split_characters(tmp_path):
@@ -713,43 +594,7 @@ def test_build_agent_brief_research_directive_when_context_without_research(
     )  # already researched -> directive gone
 
 
-def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 20.0)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 1.0)
-    chunks = [
-        {
-            "chunk_id": 0,
-            "scene_id": 0,
-            "start": 0.0,
-            "end": 3.0,
-            "content": "这是 MiMo 对分片汇总的故事线概览。",
-        }
-    ]
-    overview = {
-        "input": "scene_chunks",
-        "content": "这是 MiMo 对分片汇总的故事线概览。",
-        "reasoning_content": "内部推理",
-        "chunks": chunks,
-        "settings": brief_inputs._mimo_video_settings(),
-    }
-    _write_json(tmp_path / "mimo_video_overview.json", overview)
-    _set_brief_mode(monkeypatch, "full")
-
-    text = _agent_brief_text(
-        [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "场景"}],
-        [],
-        [],
-        3.0,
-        tmp_path,
-    )
-    assert "MiMo scene-chunk video overview" in text
-    assert "这是 MiMo 对分片汇总的故事线概览。" in text
-    assert "内部推理" not in text
-
-
 def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
     _set_brief_mode(monkeypatch, "full")
     asr = [{"start": 0.0, "end": 1.0, "text": "原始对白"}]
     _write_json(tmp_path / "asr_result.json", asr)
@@ -961,15 +806,6 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
     )
     asr_payload = [{"start": 101.0, "end": 105.0, "text": "输出一到五秒对白。"}]
     _write_json(tmp_path / "asr_result.json", asr_payload)
-    _write_json(
-        tmp_path / "asr_clean.json",
-        {
-            "segments": [{"start": 101.0, "end": 105.0, "text": "清洗后一到五秒对白。"}],
-            "source": file_identity(tmp_path / "asr_result.json"),
-            "model": brief_context._consolidation_model(),
-        },
-    )
-
     text = _agent_brief_text(
         [
             {
@@ -993,7 +829,7 @@ def test_cut_pass2_agent_brief_writes_output_time_evidence(monkeypatch, tmp_path
 
     assert chunks[0]["start"] == pytest.approx(1.0)
     assert chunks[0]["end"] == pytest.approx(5.0)
-    assert chunks[0]["text"] == "清洗后一到五秒对白。"
+    assert chunks[0]["text"] == "输出一到五秒对白。"
     assert fusion[0]["time_range"] == [0.0, 10.0]
     assert fusion[0]["dialogue_segments"][0]["start"] == pytest.approx(1.0)
     assert fusion[0]["dialogue_segments"][0]["end"] == pytest.approx(5.0)
@@ -1122,6 +958,26 @@ def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path)
     assert (mapped["expected_time"], mapped["source_expected_time"]) == (3.5, 103.5)
 
 
+def test_cut_output_speech_spans_keep_raw_text_for_a_partial_window(tmp_path):
+    """The partial-window marker is brief prose. In speech_spans it would turn an
+    interjection-only window into dialogue for the lint and the mix, which read this text."""
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {"clips": [{"source_start": 100.0, "source_end": 110.0,
+                    "output_start": 0.0, "output_end": 10.0}]},
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(tmp_path / "speech_boundary_anchors.json", {"sentence_anchors": []})
+    _write_json(tmp_path / "asr_result.json", [{"start": 108.0, "end": 112.0, "text": "嗯"}])
+
+    brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
+
+    output = json.loads(
+        (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )
+    assert output["speech_spans"] == [{"start": 8.0, "end": 10.0, "text": "嗯"}]
+
+
 @pytest.mark.parametrize(
     "validated_plan, match",
     [
@@ -1144,6 +1000,20 @@ def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path)
             "non-finite clip span",
             id="non_finite_clip_span",
         ),
+        pytest.param(
+            {
+                "clips": [
+                    {
+                        "source_start": 100.0,
+                        "source_end": 110.0,
+                        "output_start": 0.0,
+                        "output_end": 10.0,
+                    }
+                ],
+            },
+            "stale clip_plan_validated.json",
+            id="stale_validated_plan",
+        ),
     ],
 )
 def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
@@ -1153,6 +1023,9 @@ def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
     (tmp_path / "edited_source.mp4").write_bytes(b"edited")
     if validated_plan is not None:
         _write_json(tmp_path / "clip_plan_validated.json", validated_plan)
+    if match.startswith("stale"):
+        _write_json(tmp_path / "clip_plan.json", {"clips": []})
+        os.utime(tmp_path / "clip_plan_validated.json", ns=(1, 1))
 
     with pytest.raises(SystemExit, match=match):
         build_agent_brief(

@@ -34,10 +34,9 @@ def _entry_codes(work_dir, start):
     return [item["code"] for item in report["errors"] if "source_sentence" in item["code"]]
 
 
-def test_full_mode_lint_reads_asr_clean_like_cut_and_assemble(tmp_path):
-    # Raw ASR heard only "啊！" in 15-30s; consolidation recovered a real line there.
-    # video-cut and video-assemble read asr_clean.json, so the lint must reach the same
-    # verdict instead of passing an entry assemble later blocks as unsafe_entry.
+def test_full_mode_lint_ignores_an_old_clean_transcript_left_behind(tmp_path):
+    # Raw ASR heard only "啊！" in 15-30s. Lint, cut and assemble all read raw ASR now, so a
+    # leftover asr_clean.json from a removed run cannot change this verdict for one of them.
     _write_json(
         tmp_path / "asr_result.json",
         [{"start": 0.0, "end": 15.0, "text": "真实对白。"}, {"start": 15.0, "end": 30.0, "text": "啊！"}],
@@ -51,7 +50,7 @@ def test_full_mode_lint_reads_asr_clean_like_cut_and_assemble(tmp_path):
             {"start": 15.0, "end": 30.0, "text": "救我！"},
         ]},
     )
-    assert _entry_codes(tmp_path, 20.0) == ["interrupts_source_sentence"]
+    assert _entry_codes(tmp_path, 20.0) == []
 
 
 def test_full_mode_evidence_drops_blank_text_rows(tmp_path):

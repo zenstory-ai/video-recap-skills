@@ -3,177 +3,88 @@
 import json
 from pathlib import Path
 
+from lib import read_json_object
 
-AUDIO_MODES = ("narration", "source-mix", "adopted-packet-copy")
+
+AUDIO_MODES = ("narration", "source-mix")
+
+# The delivery family (frozen sound, strict adoption, explicit subtitle track) was removed;
+# v0.6.2 is the fallback. These names stay only so an old work_dir fails instead of silently
+# resuming through another route.
+REMOVED_AUDIO_MODE = "adopted-packet-copy"
+_REMOVED_DELIVERY_ARTIFACTS = (
+    "subtitle_track.json",
+    "subtitle_track_validation.json",
+    "audio_mix_binding.json",
+    ".narration_input_snapshots",
+    ".explicit_audio_mix",
+)
 
 _TTS_OPTIONS = frozenset({
     "--tts-provider",
     "--mimo-tts-voice",
     "--voice-ref",
     "--allow-partial-tts",
-    "--preserve-approved-text",
-    "--review-narration",
-    "--no-review-narration",
-    "--require-narration-review",
 })
-
-_LOCAL_ADOPTION_OPTIONS = (
-    ("tts_meta", "--tts-meta"),
-    ("narration_adoption", "--narration-adoption"),
-    ("audio_mix_adoption", "--audio-mix-adoption"),
-)
-
-_LOCAL_ADOPTION_CONFLICTS = _TTS_OPTIONS | frozenset({
-    "--export-jianying",
-    "--jianying-bundle-media",
-    "--jianying-no-bundle-media",
-})
-
 
 def uses_narration(args):
     return args.audio_mode == "narration"
 
 
-def uses_local_adoption(args):
-    return all(getattr(args, field) is not None for field, _ in _LOCAL_ADOPTION_OPTIONS)
-
-
-def needs_voiceover(args):
-    return uses_narration(args) and not uses_local_adoption(args)
-
-
 def audio_binding(args):
-    binding = {
+    return {
         "mode": args.audio_mode,
-        "selected_stream_index": args.audio_stream_index,
+        # Constant: resume compares this record against the manifest of older runs.
+        "selected_stream_index": 0,
     }
-    if uses_local_adoption(args):
-        binding["local_adoption"] = {
-            field: {"path": str(Path(getattr(args, field)).resolve())}
-            for field, _ in _LOCAL_ADOPTION_OPTIONS
-        }
-    return binding
 
 
-def _resolve_local_file(parser, value, option):
-    path = Path(value).expanduser().resolve()
-    if not path.is_file():
-        parser.error(f"{option} does not exist or is not a file: {path}")
-    return str(path)
-
-
-def validate_local_adoption(parser, args):
-    """Validate and resolve the assembly-only local adoption boundary."""
-    supplied = [getattr(args, field) is not None for field, _ in _LOCAL_ADOPTION_OPTIONS]
-    if any(supplied) and not all(supplied):
-        parser.error("--tts-meta, --narration-adoption and --audio-mix-adoption are all-or-none")
-    if not all(supplied):
-        return
-    if args.edit_mode != "full" or args.audio_mode != "narration":
-        parser.error("local audio adoption requires --edit-mode full and --audio-mode narration")
-    if args.audio_stream_index != 0:
-        parser.error("local audio adoption requires --audio-stream-index 0")
-    if len(args.video) != 1:
-        parser.error("local audio adoption requires exactly one input video")
-    if args.work_dir is None:
-        parser.error("local audio adoption requires explicit --work-dir")
-    conflicts = sorted(set(args._explicit_options).intersection(_LOCAL_ADOPTION_CONFLICTS))
-    if conflicts:
-        parser.error("local audio adoption cannot use: " + ", ".join(conflicts))
-    for field, option in _LOCAL_ADOPTION_OPTIONS:
-        setattr(args, field, _resolve_local_file(parser, getattr(args, field), option))
-
-    work_dir = Path(args.work_dir).expanduser().resolve()
-    if work_dir.exists():
-        parser.error("local audio adoption requires a new --work-dir")
-    output_dir = (
-        Path(args.output_dir).expanduser().resolve()
-        if args.output_dir is not None else work_dir.parent
-    )
-    # Pre-run guard only: mirrors the assembler's `recap_<stem>.mp4` naming so an existing
-    # delivery is refused before work starts. The authoritative published path is read back
-    # from the child's assembly_manifest.json after the run.
-    delivery = output_dir / f"recap_{Path(args.video[0]).stem}.mp4"
-    if delivery.exists():
-        parser.error(f"local audio adoption will not overwrite delivery: {delivery}")
-    args.work_dir = str(work_dir)
-    args.output_dir = str(output_dir)
-
-    # Ambient authoring configuration is irrelevant because this route never synthesizes
-    # or reviews narration. Explicit forms were rejected above.
-    args.tts_provider = "auto"
-    args.mimo_tts_voice = None
-    args.voice_ref = None
-
-
-def load_local_assembly_evidence(work_dir):
-    """Load the assembler's binding records for the adopted local bundle."""
+def reject_removed_dub_workdir(work_dir):
+    """A work_dir left by the removed dub mode must not silently resume as another mode."""
     work_dir = Path(work_dir)
     try:
-        return {
-            name: json.loads((work_dir / filename).read_text(encoding="utf-8"))
-            for name, filename in (
-                ("assembly", "assembly_manifest.json"),
-                ("narration", "narration_input_binding.json"),
-                ("mix", "audio_mix_binding.json"),
-            )
-        }
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise SystemExit("assembler did not publish readable local adoption evidence") from exc
-
-
-def _same_file(declared, expected):
-    return Path(declared).resolve() == Path(expected).resolve()
-
-
-def verify_local_assembly_evidence(evidence, manifest):
-    """The child bindings must reference the same adoption files and picture recap ran with."""
-    try:
-        local = manifest["audio"]["local_adoption"]
-        narration = evidence["narration"]
-        mix = evidence["mix"]
-        matches = (
-            _same_file(narration["adoption"]["path"], local["narration_adoption"]["path"])
-            and _same_file(narration["adoption"]["tts_meta"]["path"], local["tts_meta"]["path"])
-            and _same_file(mix["adoption"]["path"], local["audio_mix_adoption"]["path"])
-            and _same_file(mix["picture"]["path"], manifest["source_video"])
-        )
-    except (KeyError, TypeError):
-        matches = False
-    if not matches:
-        raise SystemExit("assembler bindings do not match the local adoption manifest")
-
-
-def owned_local_delivery(evidence):
-    """Return a stable ownership token only when all child reports bind the published file."""
-    try:
-        expected = Path(evidence["assembly"]["final_output"]).resolve()
-    except (KeyError, TypeError) as exc:
+        manifest = json.loads((work_dir / "recap_run_manifest.json").read_text(encoding="utf-8"))
+        edit_mode = manifest["settings"]["edit_mode"]
+    except (OSError, ValueError, KeyError, TypeError):
+        edit_mode = None
+    if edit_mode == "dub" or any(
+        (work_dir / name).exists()
+        for name in ("dub_transcript.json", "dub_script.json", "dub_manifest.json")
+    ):
         raise SystemExit(
-            "assembly manifest does not declare final_output; cannot own the delivery"
-        ) from exc
-    try:
-        declared = [
-            Path(evidence["narration"]["final_output"]["path"]).resolve(),
-            Path(evidence["mix"]["final_output"]["path"]).resolve(),
-        ]
-    except (KeyError, TypeError):
-        return None
-    if declared != [expected, expected] or not expected.is_file():
-        return None
-    stat = expected.stat()
-    return {"path": expected, "device": stat.st_dev, "inode": stat.st_ino}
+            f"{work_dir} 是已移除的 dub 模式留下的工作目录，不能续跑；"
+            "请使用新的 --work-dir，仍需英译中克隆配音请使用 v0.6.2"
+        )
 
 
-def remove_owned_local_delivery(token):
-    if token is None:
-        return
-    path = token["path"]
-    if not path.is_file():
-        return
-    stat = path.stat()
-    if (stat.st_dev, stat.st_ino) == (token["device"], token["inode"]):
-        path.unlink()
+def removed_route_message(what):
+    return (
+        f"{what} 属于已移除的声音定稿交付路线（adopted-packet-copy、narration/audio-mix adoption、"
+        "subtitle_track）；请使用新的 --work-dir 走当前路线，仍需这些路线请使用 v0.6.2"
+    )
+
+
+def reject_removed_delivery_workdir(work_dir):
+    """A work_dir left by a removed delivery route must not silently resume as another route.
+
+    A malformed file reads as absent: it is not evidence of a removed route."""
+    work_dir = Path(work_dir)
+    for name in _REMOVED_DELIVERY_ARTIFACTS:
+        if (work_dir / name).exists():
+            raise SystemExit(removed_route_message(str(work_dir / name)))
+    binding_path = work_dir / "narration_input_binding.json"
+    if (read_json_object(binding_path) or {}).get("identity_status") == "BOUND_TO_ADOPTION":
+        raise SystemExit(removed_route_message(str(binding_path)))
+    for name in ("assembly_manifest.json", "assembly_qc.json"):
+        if (read_json_object(work_dir / name) or {}).get("audio_mode") == REMOVED_AUDIO_MODE:
+            raise SystemExit(removed_route_message(str(work_dir / name)))
+    manifest = read_json_object(work_dir / "recap_run_manifest.json") or {}
+    audio = manifest.get("audio")
+    if "local_adoption_run" in manifest or (
+        isinstance(audio, dict)
+        and (audio.get("mode") == REMOVED_AUDIO_MODE or "local_adoption" in audio)
+    ):
+        raise SystemExit(removed_route_message(str(work_dir / "recap_run_manifest.json")))
 
 
 def reject_unbound_narration_workdir(work_dir, args):
@@ -192,48 +103,16 @@ def reject_unbound_narration_workdir(work_dir, args):
 
 def validate_audio_routing(parser, args):
     """Reject combinations the current pipeline cannot execute truthfully."""
-    validate_local_adoption(parser, args)
     mode = args.audio_mode
-    stream = args.audio_stream_index
-    if stream < 0:
-        parser.error("--audio-stream-index must be a non-negative integer")
-    if args.edit_mode == "dub" and mode != "narration":
-        parser.error("--edit-mode dub cannot be combined with a non-narration --audio-mode")
     # index-tts + MiMo voice/--voice-ref is rejected once, in recap_runner.main, after the
     # ambient VOICE_REF/MIMO_TTS_VOICE have been folded in.
-    if args.tts_provider == "index-tts" and args.edit_mode == "dub":
-        parser.error("--edit-mode dub does not support --tts-provider index-tts")
     if mode == "narration":
-        if stream != 0:
-            parser.error("narration currently requires --audio-stream-index 0")
         return
 
     conflicts = sorted(set(args._explicit_options).intersection(_TTS_OPTIONS))
     if conflicts:
         detail = ", ".join(conflicts)
-        parser.error(f"--audio-mode {mode} cannot use TTS/strict narration options: {detail}")
-    if args.edit_mode == "cut" and stream != 0:
-        parser.error("cut audio modes currently require --audio-stream-index 0")
-    if args.export_jianying and stream != 0:
-        parser.error("JianYing export currently requires --audio-stream-index 0")
+        parser.error(f"--audio-mode {mode} cannot use TTS/narration options: {detail}")
     # Environment defaults are irrelevant once source audio owns the run. Normalizing
     # prevents an invalid ambient provider from leaking into later state or continuation.
     args.tts_provider = "auto"
-
-
-def extend_assemble_args(cli_args, args):
-    mode = args.audio_mode
-    stream = args.audio_stream_index
-    if mode != "narration":
-        cli_args += ["--audio-mode", mode]
-    if stream != 0:
-        cli_args += ["--audio-stream-index", str(stream)]
-    return cli_args
-
-
-def reject_unsupported_subtitle_track(work_dir, args):
-    if args.audio_mode == "source-mix" and (Path(work_dir) / "subtitle_track.json").exists():
-        raise SystemExit(
-            "source-mix 当前不能绑定显式 subtitle_track.json；请使用新的 work_dir，"
-            "或选择 adopted-packet-copy"
-        )

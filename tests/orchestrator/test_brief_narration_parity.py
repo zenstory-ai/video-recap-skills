@@ -126,19 +126,15 @@ def _top_level_literal(path, name):
     raise AssertionError(f"{path}: missing top-level constant {name}")
 
 
-def test_asr_span_tol_matches_across_files():
-    paths = {
-        ROOT / "skills/video-understanding/scripts/consolidate.py",
-        UNDERSTANDING_SCRIPTS / "briefing" / "inputs.py",
-    }
-    values = {
-        str(path.relative_to(ROOT)): _top_level_literal(path, "_ASR_SPAN_TOL")
-        for path in paths
-    }
-
-    assert set(values.values()) == {0.05}, (
-        f"_ASR_SPAN_TOL drifted across files: {values}"
-    )
+def test_removed_delivery_artifacts_match_across_skills():
+    values = [
+        _top_level_literal(ROOT / "skills" / rel, "_REMOVED_DELIVERY_ARTIFACTS")
+        for rel in (
+            "video-recap/scripts/recap_source.py",
+            "video-assemble/scripts/assembly_contract.py",
+        )
+    ]
+    assert values[0] == values[1]
 
 
 def _top_level_definitions(path, names):

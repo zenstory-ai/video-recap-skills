@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：dub 模式已移除，见 `.agents/notes/implemented/simplification/2026-11-06-remove-dub-mode.md`。`review.py` 也已移除，见 [[2026-11-06-remove-narration-review-chain]]，video-script 的脚本现在不联网，§2 改写成这一事实。远程调用逐路径披露的规则仍然有效。
+
 关联：[ClawHub 分发](2026-10-03-clawhub-distribution.md)。
 
 ## Problem
@@ -20,7 +22,7 @@ ClawHub 的 LLM 安全扫描把两个包标为 suspicious（高置信），挡�
 
 ## Decision
 
-- video-script SKILL.md：frontmatter 描述加一行外发说明；新增 `## 2. 远程调用与数据外发`（其后章节顺延一号），写明 `review.py` 是唯一联网脚本、发往 `<MIMO_API_URL>/chat/completions`（按 key 类型的默认地址、`MIMO_API_KEY`、`MIMO_MODEL`），只发文字：`narration.json` 全文、选定时间段内的 VLM 描述与 `frame_facts` 文字和对白转写、`background_research.json` 摘录、四份策划文件各前 3000 字与原声字幕文字，不发视频、帧图片或音频；单独使用时只在显式执行时运行，编排入口默认在 TTS 前跑一次，用 `--no-review-narration` / `REVIEW_NARRATION=0` 关闭（严格评审开启时关闭无效）；评审是建议型、只写报告；`validate.py` 与 lint 只在本地运行。能力边界节重复一句。
+- video-script SKILL.md：frontmatter 描述加一行外发说明；新增 `## 2. 远程调用与数据外发`（其后章节顺延一号），写明 `review.py` 是唯一联网脚本、发往 `<MIMO_API_URL>/chat/completions`（按 key 类型的默认地址、`MIMO_API_KEY`、`MIMO_MODEL`），只发文字：`narration.json` 全文、选定时间段内的 VLM 描述与 `frame_facts` 文字和对白转写、`background_research.json` 摘录、四份策划文件各前 3000 字与原声字幕文字，不发视频、帧图片或音频；单独使用时只在显式执行时运行，编排入口默认在 TTS 前跑一次，用 `--no-review-narration` 关闭（严格评审开启时关闭无效；当时另有 `REVIEW_NARRATION=0`，后来移除，见 [[2026-11-06-remove-env-twins-of-run-flags]]）；评审是建议型、只写报告；`validate.py` 与 lint 只在本地运行。能力边界节重复一句。
 - `review.py`（`review_runner.main`）在没有 `MIMO_API_KEY` 时直接退出，不构造也不发送请求。只加在 CLI 入口，函数级 `review_narration` 不变。
 - video-voiceover SKILL.md：frontmatter 描述加外发说明与 dub 范围；新增 `## 2. 远程服务与数据外发`，用一张表逐路径写服务、凭据和发送内容（MiMo TTS、`--voice-ref` 克隆、Fish Audio、自托管 IndexTTS、dub 的 MiMo ASR 与 voiceclone）；新增 `## 8. 实验性 dub 配音（英译中、克隆原声）`，写触发方式、确认门禁、外发内容、权利与同意、确定性门禁和本地产物；原运行规则里的 dub 门禁条目并入该节。
 - `dub.py` 新增必填确认 `--confirm-voice-rights`：两个阶段缺少它都在抽取音频和任何请求之前退出，错误信息写明会把什么发给 MiMo ASR 与 voiceclone、什么情况下才可确认。
@@ -47,4 +49,4 @@ ClawHub 的 LLM 安全扫描把两个包标为 suspicious（高置信），挡�
 
 - `tests/voiceover/test_dub.py`：两个阶段缺确认时 `dub.main()` 以 `VOICE_RIGHTS_REQUIRED` 退出且阶段函数未被调用；带确认时调用对应阶段。
 - `tests/orchestrator/test_strict_final_qc.py`：dub 缺确认时 argparse 退出码 2、错误里有参数名和 MiMo ASR/voiceclone、`work_dir` 未创建、未启动子进程；非 dub 模式传确认报错；带确认时 prepare/render 两次调用都转发该参数，续跑命令里带它。
-- `tests/script/test_review.py`：`MIMO_API_KEY` 为空时 `review_runner.main()` 退出、没有任何请求、不写评审产物。
+- `tests/script/test_review.py`（已随评审链删除）：`MIMO_API_KEY` 为空时 `review_runner.main()` 退出、没有任何请求、不写评审产物。

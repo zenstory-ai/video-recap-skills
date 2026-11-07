@@ -4,28 +4,20 @@ import json
 
 from pathlib import Path
 
-from asr_timing_evidence import EVIDENCE_FILENAME, validate_asr_timing_evidence
+from asr_timing_evidence import (
+    EVIDENCE_FILENAME,
+    _identity as _artifact_identity,
+    validate_asr_timing_evidence,
+)
 from extract import FRAME_TIME_CONVENTION_VERSION
 from lib import (
     CONFIG,
     file_identity,
-    is_usable_overview_chunk,
-    log,
     offline_ignored_settings,
 )
 
 
 from vlm import vlm_prompt_payload
-
-
-def _fresh(out, *inputs):
-    out = Path(out)
-    if not out.exists():
-        return False
-    ins = [Path(p) for p in inputs if p and Path(p).exists()]
-    if not ins:
-        return out.stat().st_size > 0
-    return out.stat().st_mtime >= max(p.stat().st_mtime for p in ins)
 
 
 def _artifact_meta_path(artifact_path):
@@ -41,12 +33,6 @@ def _video_input(video_path):
     """The source video as a cache input: resolved path plus {size, mtime_ns}, so two
     different files written in the same timestamp tick never share a stage output."""
     return {"path": str(Path(video_path).resolve()), **file_identity(video_path)}
-
-
-def _artifact_identity(path):
-    """{size, mtime_ns} of an input artifact, or None when it does not exist."""
-    path = Path(path)
-    return file_identity(path) if path.exists() else None
 
 
 def _without_settings(meta, keys):
@@ -94,109 +80,17 @@ def _remove_stage_meta(artifact_path):
     _artifact_meta_path(artifact_path).unlink(missing_ok=True)
 
 
-def _short_status_message(message, limit=240):
-    """Compact optional-stage messages for sidecars; no tracebacks or bulky payloads."""
-    text = " ".join(str(message or "").split())
-    return text[:limit]
-
-
-def _write_optional_stage_status(work_dir, filename, payload):
-    path = Path(work_dir) / filename
-    safe = dict(payload)
-    safe["message"] = _short_status_message(safe.get("message", ""))
-    path.write_text(json.dumps(safe, ensure_ascii=False, indent=2), encoding="utf-8")
-    return path
-
-
-def _write_mimo_overview_status(
-    work_dir, status, message="", artifact=None, *, enabled=None
-):
-    return _write_optional_stage_status(
-        work_dir,
-        "mimo_video_overview.status.json",
-        {
-            "stage": "mimo_video_overview",
-            "enabled": bool(CONFIG["mimo_video_overview"])
-            if enabled is None
-            else bool(enabled),
-            "status": status,
-            "message": message,
-            "artifact": artifact,
-        },
+def _write_consolidation_status(work_dir, status, message, *, enabled):
+    """The message is compacted: no tracebacks or bulky payloads in the sidecar."""
+    payload = {
+        "stage": "consolidation",
+        "enabled": enabled,
+        "status": status,
+        "message": " ".join(str(message).split())[:240],
+    }
+    (Path(work_dir) / "consolidation.status.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-
-
-def _merge_overview_into_scenes(scenes, overview_path):
-    """Make the MiMo video-overview the PRIMARY per-scene description when present.
-
-    The frame VLM still provides `frame_facts` (timestamped grounding) and `depth_analysis`;
-    this only replaces the per-scene `description` with the motion-aware video-overview analysis,
-    keeping the original frame description under `frame_description` for provenance/fallback.
-    Scenes whose overview chunk was missing or moderation-rejected keep the frame description.
-
-    In-memory only — `vlm_analysis.json` on disk stays the pure frame-VLM product, so the VLM
-    cache stays coherent and the merge is re-derived (frames + overview) every run. Because
-    `frame_facts` is untouched, `assess_understanding_substrate` (which grades on frame_facts +
-    ASR) cannot regress; richer descriptions can only help.
-    """
-    if not Path(overview_path).exists():
-        return scenes
-    overview = _load_json(overview_path)
-    by_scene = {}
-    for chunk in overview["chunks"]:
-        content = chunk["content"].strip()
-        if is_usable_overview_chunk(content):
-            by_scene.setdefault(chunk["scene_id"], []).append(content)
-    if not by_scene:
-        return scenes
-    enriched = 0
-    for scene in scenes:
-        contents = by_scene.get(scene["scene_id"])
-        if not contents:
-            continue
-        scene.setdefault("frame_description", scene.get("description", ""))
-        scene["description"] = "\n".join(contents)
-        scene["description_source"] = "mimo_video_overview"
-        enriched += 1
-    if enriched:
-        log(
-            f"已用 MiMo 视频概览增强 {enriched} 个场景的描述（逐帧 frame_facts 保留作锚点）"
-        )
-    return scenes
-
-
-def _write_consolidation_status(
-    work_dir,
-    status,
-    message="",
-    artifacts=None,
-    *,
-    enabled=True,
-    do_asr=False,
-    do_index=True,
-):
-    return _write_optional_stage_status(
-        work_dir,
-        "consolidation.status.json",
-        {
-            "stage": "consolidation",
-            "enabled": bool(enabled),
-            "do_asr": bool(do_asr),
-            "do_index": bool(do_index),
-            "status": status,
-            "message": message,
-            "artifacts": list(artifacts or []),
-        },
-    )
-
-
-def _present_consolidation_artifacts(work_dir):
-    work_dir = Path(work_dir)
-    return [
-        name
-        for name in ("understanding_index.json", "asr_clean.json")
-        if (work_dir / name).exists()
-    ]
 
 
 def _scene_cache_payload(video_path):
@@ -231,18 +125,10 @@ def _asr_cache_payload(video_path, *, skip_asr=False):
     }
 
 
-# Sidecars written before 0.6.1 recorded whether an ASR key was set. Key presence is not an
-# output setting: a missing key only meant the run wrote an UNAVAILABLE_NO_KEY placeholder,
-# which the evidence status below already refuses to reuse.
-_LEGACY_ASR_SETTINGS = ("mimo_asr_api_key_present",)
-
-
 def _asr_cache_state(artifact_path, expected_meta, video_path):
     """Classify an ASR cache without upgrading stale evidence into new authority."""
     artifact_path = Path(artifact_path)
-    ignored = _LEGACY_ASR_SETTINGS + offline_ignored_settings(
-        CONFIG.get("mimo_asr_api_key"), "mimo_asr_api_url"
-    )
+    ignored = offline_ignored_settings(CONFIG.get("mimo_asr_api_key"), "mimo_asr_api_url")
     if not _stage_cache_valid(artifact_path, expected_meta, ignore_settings=ignored):
         return "MISS"
     evidence_path = artifact_path.parent / EVIDENCE_FILENAME

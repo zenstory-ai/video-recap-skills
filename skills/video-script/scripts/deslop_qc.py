@@ -82,7 +82,7 @@ def _load_original_subtitles(work_dir: Path | None) -> list[dict[str, Any]]:
 
 
 def _style_card_issue(work_dir: Path | None) -> dict[str, Any] | None:
-    """A missing or empty style_card.json is always advisory, never a render blocker."""
+    """A missing, empty or malformed style_card.json is always advisory, never a render blocker."""
     if work_dir is None:
         return None
     path = work_dir / "style_card.json"
@@ -94,7 +94,10 @@ def _style_card_issue(work_dir: Path | None) -> dict[str, Any] | None:
             "index": None,
             "message": "style_card.json is absent; legacy/migration workspaces may continue, but new expression-special runs should author it",
         }
-    data = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = None
     if not isinstance(data, dict) or not data:
         return {
             "severity": "advisory",
@@ -112,14 +115,11 @@ def _add_issue(bucket: list[dict[str, Any]], severity: str, code: str, source: s
     bucket.append(issue)
 
 
-def analyze_deslop_qc(narration: list[dict[str, Any]], *, work_dir: str | Path | None = None, original_subtitles: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+def analyze_deslop_qc(narration: list[dict[str, Any]], *, work_dir: str | Path | None = None) -> dict[str, Any]:
     """Return a structured report; never mutates or rewrites input text."""
     work_path = Path(work_dir) if work_dir is not None else None
     segments = _normalise_segments(narration, source="narration")
-    if original_subtitles is None:
-        segments.extend(_load_original_subtitles(work_path))
-    else:
-        segments.extend(_normalise_segments(original_subtitles, source="original_subtitles"))
+    segments.extend(_load_original_subtitles(work_path))
 
     blockers: list[dict[str, Any]] = []
     advisories: list[dict[str, Any]] = []

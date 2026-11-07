@@ -29,20 +29,14 @@ def manifest_args(**overrides):
         "style": "纪录片",
         "edit_mode": "full",
         "audio_mode": "narration",
-        "audio_stream_index": 0,
         "target_duration": None,
         "skip_asr": False,
-        "mimo_video_overview": False,
         "consolidate": True,
-        "consolidate_asr": False,
-        "review_narration": None,
-        "require_narration_review": False,
         "allow_duration_drift": False,
         "mimo_tts_voice": None,
         "tts_provider": "auto",
         "voice_ref": None,
         "allow_partial_tts": False,
-        "preserve_approved_text": False,
         "burn_subtitles": None,
         "subtitle_y_top": None,
         "subtitle_y_bot": None,
@@ -54,9 +48,6 @@ def manifest_args(**overrides):
         "use_materials": False,
         "save_materials": False,
         "require_final_qc": False,
-        "tts_meta": None,
-        "narration_adoption": None,
-        "audio_mix_adoption": None,
         "_explicit_options": frozenset(),
         "_argv": [],
     }
@@ -92,13 +83,6 @@ def write_cut_output(work, clips=None, **qc_overrides):
     )
 
 
-def write_review_output(work):
-    """Leave behind what review.py writes on success (review_runner writes both)."""
-    review = {"verdict": "PASS", "summary": "", "findings": []}
-    (work / "narration_review.json").write_text(json.dumps(review), encoding="utf-8")
-    (work / "narration_review.md").write_text("# review\n", encoding="utf-8")
-
-
 def write_voiceover_output(work):
     """Leave behind what voiceover.py writes on success."""
     (work / "tts_meta.json").write_text(json.dumps({"segments": []}), encoding="utf-8")
@@ -107,9 +91,9 @@ def write_voiceover_output(work):
 def stub_child_run(work, final_output=None, calls=None, **handlers):
     """Build a recap_runner._run replacement.
 
-    Records ``(skill, script, argv)`` into ``calls``, writes what cut.py / review.py /
-    voiceover.py / assemble.py leave behind, and lets a test override any script by its
-    stem (``review=lambda cli: ...``); a handler's return value is passed back to the runner.
+    Records ``(skill, script, argv)`` into ``calls``, writes what cut.py / voiceover.py /
+    assemble.py leave behind, and lets a test override any script by its stem
+    (``voiceover=lambda cli: ...``); a handler's return value is passed back to the runner.
     """
 
     def fake_run(skill, script, *cli_args):
@@ -121,8 +105,6 @@ def stub_child_run(work, final_output=None, calls=None, **handlers):
             return handler(cli)
         if script == "cut.py":
             write_cut_output(work)
-        elif script == "review.py":
-            write_review_output(work)
         elif script == "voiceover.py":
             write_voiceover_output(work)
         elif script == "assemble.py":
@@ -167,7 +149,7 @@ def seed_multi_work(tmp_path, args, narration=None):
     work.mkdir()
     records = recap_runtime._build_multi_source_records(videos, args)
     recap_runtime._write_multi_source_manifest(work, records)
-    recap_runtime._write_project_run_manifest(work, videos, args, records)
+    recap_runtime._write_project_run_manifest(work, args, records)
     (work / "clip_plan.json").write_text(
         json.dumps(
             {"clips": [{"source_id": records[0]["source_id"], "start": 0, "end": 1}]}

@@ -17,7 +17,6 @@ from assemble_constants import (
     _MIN_READABLE_SECONDS,
     _SUBTITLE_CLOSING_QUOTES,
 )
-from subtitles.track_binding import bound_subtitle_entries
 from subtitles.core import (
     _bracketed_original_chunks,
     _subtitle_entries,
@@ -31,57 +30,31 @@ def _has_user_subtitles(work_dir):
     )
 
 
-def _source_subtitle_mask_policy(work_dir=None):
-    """Explicit source-subtitle mask policy and trigger facts for visual QC/cache keys.
+def _source_subtitle_mask():
+    """Whether the source-subtitle mask runs, and why, for visual QC and the manifest.
 
-    Older builds treated ``MASK_SOURCE_SUBTITLES=True`` as an ambient default black
-    band. The visual contract now requires an explicit policy, so a bare truthy
-    legacy flag is represented as ``legacy_implicit`` and blocks the visual gate
-    instead of silently masking picture information.
+    Masking is opt-in (MASK_SOURCE_SUBTITLES, or a measured --subtitle-y-top/bot band) and
+    needs burned recap subtitles: a mask-only band would hide captions without replacing them.
     """
     burn = CONFIG["burn_subtitles"]
-    raw_policy = CONFIG["source_subtitle_mask_policy"]
-    legacy_flag = CONFIG["mask_source_subtitles"]
-    allowed = {"off", "opt_in", "safe", "forced"}
-    declared = CONFIG["source_subtitle_mask_policy_declared"] or raw_policy in {"opt_in", "safe", "forced"}
-    implicit = False
-    if legacy_flag and not declared:
-        raw_policy = "legacy_implicit"
-        implicit = True
-    elif raw_policy not in allowed:
-        implicit = True
-    user_subtitles = _has_user_subtitles(work_dir)
-    active = False
-    trigger = "policy_off"
-    reason = "source subtitle masking disabled by explicit policy"
-    if raw_policy == "off":
-        active = False
-    elif raw_policy in {"opt_in", "forced"}:
-        active = legacy_flag
-        trigger = "burn_subtitles_and_legacy_mask_flag"
-        reason = "explicit policy permits masking only with burned recap subtitles"
-    elif raw_policy == "safe":
-        active = legacy_flag or user_subtitles
-        trigger = "safe_policy_with_burned_subtitles"
-        reason = "safe policy masks only when recap subtitles are burned and an original-subtitle source is declared"
+    requested = CONFIG["mask_source_subtitles"]
+    active = requested and burn
+    if not requested:
+        trigger = "mask_off"
+        reason = "source subtitle masking not requested"
+    elif burn:
+        trigger = "burned_subtitles"
+        reason = "masking runs only with burned recap subtitles"
+    elif CONFIG["burn_subtitles_degraded"]:
+        trigger = "burn_subtitles_degraded"
+        reason = (
+            "subtitle burn-in degraded to the .srt sidecar; a mask-only black band is "
+            "forbidden without burned recap subtitles"
+        )
     else:
-        active = False
-        trigger = "implicit_or_invalid_policy"
-        reason = "mask_source_subtitles requires explicit SOURCE_SUBTITLE_MASK_POLICY"
-    if not burn and active:
-        active = False
-        if CONFIG["burn_subtitles_degraded"]:
-            trigger = "burn_subtitles_degraded"
-            reason = (
-                "subtitle burn-in degraded to the .srt sidecar; a mask-only black band is "
-                "forbidden without burned recap subtitles"
-            )
-        else:
-            trigger = "burn_subtitles_disabled"
-            reason = "mask-only black band is forbidden without burned recap subtitles"
+        trigger = "burn_subtitles_disabled"
+        reason = "mask-only black band is forbidden without burned recap subtitles"
     return {
-        "policy": raw_policy,
-        "declared": bool(declared and raw_policy in allowed),
         "active": bool(active),
         "scope": (
             "measured_source_subtitle_band"
@@ -91,9 +64,6 @@ def _source_subtitle_mask_policy(work_dir=None):
         "trigger": trigger,
         "reason": reason,
         "burn_subtitles": burn,
-        "legacy_mask_flag": legacy_flag,
-        "user_subtitles_present": user_subtitles,
-        "blocking": implicit,
     }
 
 
@@ -289,7 +259,7 @@ def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration):
     delivering = CONFIG["burn_subtitles"] or bool(CONFIG["burn_subtitles_degraded"])
     if not (delivering
             and CONFIG["subtitle_original_in_gaps"]
-            and (_source_subtitle_mask_covers_gaps(work_dir) or _has_user_subtitles(work_dir))):
+            and (_source_subtitle_mask_covers_gaps() or _has_user_subtitles(work_dir))):
         return []
     gaps = _narration_gap_windows(tts_segments, video_duration)
     if not gaps:
@@ -418,17 +388,14 @@ def _sentence_subspan(seg, sentence):
 def _combined_subtitle_entries(narration, work_dir, video_duration):
     """Narration subtitle entries plus original-dialogue entries in the gaps, sorted by start.
     Original entries are confined to narration gaps, so they never overlap narration entries."""
-    bound = bound_subtitle_entries(work_dir, video_duration)
-    if bound is not None:
-        return bound
     entries = _subtitle_entries(narration)
     entries.extend(_original_gap_subtitle_entries(narration, work_dir, video_duration))
     entries.sort(key=lambda x: (x["start"], x["end"]))
     return entries
 
 
-def _source_subtitle_mask_covers_gaps(work_dir=None):
+def _source_subtitle_mask_covers_gaps():
     """Whether the effective source mask hides hardcoded subtitles outside narration."""
-    if not _source_subtitle_mask_policy(work_dir)["active"]:
+    if not _source_subtitle_mask()["active"]:
         return False
     return CONFIG["subtitle_mask_opacity"] >= 1.0 - 1e-9 and CONFIG["source_subtitle_mask_timing"] == "all"

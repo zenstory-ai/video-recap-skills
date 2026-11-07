@@ -1,4 +1,4 @@
-"""Deterministic clean-up of the model-written understanding index (consolidate.py Pass B).
+"""Deterministic clean-up of the model-written understanding index (consolidate.py).
 
 Two defects seen in real indexes are repaired here, after the model reply is parsed:
 

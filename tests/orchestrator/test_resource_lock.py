@@ -121,6 +121,15 @@ def test_voice_without_an_id_is_not_credited_to_a_reference_voice(tmp_path):
     assert _by_role(lock)["voice"]["library"] is None
 
 
+def test_a_list_shaped_manifest_never_fails_the_lock(tmp_path):
+    """A finished render's record must not crash on a run manifest that is valid JSON of the wrong shape."""
+    (tmp_path / "recap_run_manifest.json").write_text('["not an object"]', encoding="utf-8")
+
+    lock = resource_lock.write_resource_lock(tmp_path)
+
+    assert lock["resources"] == []
+
+
 def test_a_malformed_library_record_never_fails_the_lock(tmp_path):
     lib = _library(tmp_path)
     template = lib / "templates/subtitle_style/clean-white/v1/template.json"

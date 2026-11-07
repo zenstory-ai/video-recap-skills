@@ -39,3 +39,20 @@ def test_run_tts_engine_retries_then_raises_and_cleans_partial(monkeypatch, tmp_
 
     assert len(calls) == 2          # retried tts_retries times
     assert not output.exists()      # partial output cleaned up
+
+
+def test_mimo_tts_request_uses_the_configured_timeout(monkeypatch):
+    import io
+    import lib
+
+    seen = {}
+
+    def fake_urlopen(request, timeout):
+        seen["timeout"] = timeout
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setitem(lib.CONFIG, "tts_timeout", 7)
+    monkeypatch.setattr(lib.urllib.request, "urlopen", fake_urlopen)
+
+    assert lib.mimo_tts_api_call({"model": "m", "messages": []}) == {}
+    assert seen["timeout"] == 7

@@ -10,7 +10,6 @@ from storyboard import (
     _frame_index,
     build_edited_storyboard,
     build_source_storyboard,
-    work_dir_relative_pages,
 )
 
 
@@ -31,42 +30,15 @@ def _storyboard_sample_policy():
     }
 
 
-def _relocated(payload):
-    """A cached storyboard whose stored paths still name the work_dir it was written in.
-
-    Sidecars written before 0.6.1 stored absolute page paths; a copied work_dir hits the
-    cache (identities are size + mtime) and would otherwise point the brief at the original
-    directory. Paths are re-derived from file names, so the copy names its own pages."""
-    if not isinstance(payload, dict):
-        return payload
-    payload = dict(payload)
-    payload["page_images"] = work_dir_relative_pages(payload.get("page_images"))
-    if payload.get("edited_video_path"):
-        payload["edited_video_path"] = "edited_source.mp4"  # the only edited output there is
-    return payload
-
-
-def _reuse_cached_storyboard(json_path, meta, label):
-    """The cached storyboard with work_dir-relative paths, or None when it is unreadable.
-
-    A legacy sidecar with absolute paths is rewritten (and re-stamped) once, so the JSON on
-    disk names this work_dir's pages too. Advisory: never raises."""
+def _reuse_cached_storyboard(json_path, label):
+    """The cached storyboard, or None when it is unreadable. Advisory: never raises."""
     try:
         cached = _load_json(json_path)
     except (OSError, ValueError):
         log(f"storyboard {label} 缓存命中但文件损坏，重建")
         return None
-    relocated = _relocated(cached)
-    if relocated != cached:
-        try:
-            json_path.write_text(
-                json.dumps(relocated, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            _write_stage_meta(json_path, meta)
-        except OSError as exc:
-            log(f"storyboard {label} 路径改写失败（忽略）: {exc}")
     log(f"storyboard 跳过 {label}（缓存匹配）")
-    return relocated
+    return cached
 
 
 def _edited_storyboard_meta(clip_plan_validated_json, frames_manifest_path):
@@ -130,7 +102,7 @@ def _generate_source_storyboard(
         "sample_policy": _storyboard_sample_policy(),
     }
     if not force and _stage_cache_valid(json_path, meta):
-        cached = _reuse_cached_storyboard(json_path, meta, "source")
+        cached = _reuse_cached_storyboard(json_path, "source")
         if cached is not None:
             return cached
     result = build_source_storyboard(work_dir, video_path, scenes, CONFIG["fps"])
@@ -139,21 +111,19 @@ def _generate_source_storyboard(
     return result
 
 
-def _multi_source_frame_sets(work_dir, plan_sources, clips=None):
+def _multi_source_frame_sets(work_dir, plan_sources, clips):
     """{source_id: {paths, numbers, fps, source_path}} for a multi-source validated plan.
 
     Each source's frames live in its own work_dir (`sources.<id>.source_work_dir`, relative to
     the project work_dir) at the fps recorded in that source's frames manifest — sources of
     different lengths are extracted at different fps. A source without frames is left out, and
-    so is one no clip in `clips` uses (when given): it would not appear on the sheet, yet it
-    would enter the cache key.
+    so is one no clip in `clips` uses: it must not take an S<n> label, be listed under `sources`,
+    set the tile size or enter the cache key.
     """
-    used = None if clips is None else {
-        clip.get("source_id") for clip in clips if isinstance(clip, dict)
-    }
+    used = {clip.get("source_id") for clip in clips if isinstance(clip, dict)}
     frame_sets = {}
     for source_id, source in plan_sources.items():
-        if used is not None and source_id not in used:
+        if source_id not in used:
             continue
         if not isinstance(source, dict):
             log(f"storyboard edited：来源 {source_id} 不是对象，跳过")
@@ -226,7 +196,7 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
         )
     json_path = Path(work_dir) / "storyboard" / "edited_storyboard.json"
     if not force and _stage_cache_valid(json_path, meta):
-        cached = _reuse_cached_storyboard(json_path, meta, "edited")
+        cached = _reuse_cached_storyboard(json_path, "edited")
         if cached is not None:
             return cached
     result = build_edited_storyboard(
@@ -239,8 +209,6 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
 
 
 _STORYBOARD_HEADING = "## Storyboard（先看 storyboard 再写；路径相对 work_dir）"
-# Also matches the pre-0.6.1 heading (no "路径相对 work_dir"), so a re-run replaces it too.
-_STORYBOARD_HEADING_PREFIX = "## Storyboard（先看 storyboard 再写"
 
 
 def _write_edited_storyboard_only(video, work_dir):
@@ -310,7 +278,7 @@ def _prepend_storyboard_brief_header(
         lines.append("")
         header = "\n".join(lines) + "\n"
         existing = brief_path.read_text(encoding="utf-8") if brief_path.exists() else ""
-        if existing.startswith(_STORYBOARD_HEADING_PREFIX):
+        if existing.startswith(_STORYBOARD_HEADING):
             # Re-running on the same brief replaces the earlier header instead of stacking.
             end = existing.find("\n\n", existing.find("\n") + 2)
             existing = existing[end + 2:] if end >= 0 else ""

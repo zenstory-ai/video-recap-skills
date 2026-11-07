@@ -66,7 +66,6 @@ def _mock_run_cmd_makes_output(monkeypatch):
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("storyboard.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
     monkeypatch.setattr("storyboard.get_video_duration", lambda v: 30.0)
     return calls
 
@@ -298,29 +297,17 @@ def test_cache_hit_corrupt_sidecar_rebuilds_without_traceback(monkeypatch, tmp_p
 
 
 def test_copied_work_dir_storyboard_names_its_own_pages(monkeypatch, tmp_path):
-    """A cache hit in a copied work_dir must not point at the original directory, including a
-    legacy sidecar that stored absolute page paths."""
+    """A cache hit in a copied work_dir must not point at the original directory."""
     generate, builds = _cached_source_storyboard(monkeypatch, tmp_path)
     first = generate()
     assert first["page_images"] == ["storyboard/source_storyboard.jpg"]
-
-    json_path = tmp_path / "storyboard" / "source_storyboard.json"
-    legacy = json.loads(json_path.read_text(encoding="utf-8"))
-    legacy["page_images"] = ["/elsewhere/original_work_dir/storyboard/source_storyboard.jpg"]
-    json_path.write_text(json.dumps(legacy), encoding="utf-8")
-    meta_path = json_path.with_name(json_path.name + ".meta.json")
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.pop("artifact")
-    understanding_storyboard._write_stage_meta(json_path, meta)  # as the old build stamped it
 
     reused = generate()
 
     assert builds["n"] == 1  # cache hit, no rebuild
     assert reused["page_images"] == ["storyboard/source_storyboard.jpg"]
-    on_disk = json.loads(json_path.read_text(encoding="utf-8"))
+    on_disk = json.loads((tmp_path / "storyboard" / "source_storyboard.json").read_text(encoding="utf-8"))
     assert on_disk["page_images"] == ["storyboard/source_storyboard.jpg"]
-    assert generate()["page_images"] == ["storyboard/source_storyboard.jpg"]
-    assert builds["n"] == 1  # the rewrite re-stamped the sidecar, so it still hits
 
 
 # ── graceful None on no-frames / run_cmd failure / font-probe raise ───────────
@@ -333,7 +320,6 @@ def _no_frames(monkeypatch, tmp_path):
 def _run_cmd_fails(monkeypatch, tmp_path):
     _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
     _with_font(monkeypatch)
-    monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
     monkeypatch.setattr(
         "storyboard.run_cmd",
         lambda cmd, **kwargs: CompletedProcess(cmd, 1, stdout="", stderr="ffmpeg boom"),
@@ -403,8 +389,7 @@ def test_edited_storyboard_skipped_without_validated_plan(tmp_path):
 
 
 def test_copied_work_dir_edited_storyboard_names_its_own_pages(monkeypatch, tmp_path):
-    """The edited storyboard's cache hit relocates a legacy sidecar too: absolute page paths
-    and an absolute edited_video_path become work_dir-relative, without a rebuild."""
+    """The edited storyboard stores work_dir-relative paths, so a cache hit names its own pages."""
     _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
     monkeypatch.setitem(CONFIG, "storyboard", True)
     monkeypatch.setitem(CONFIG, "fps", 2.0)
@@ -430,16 +415,6 @@ def test_copied_work_dir_edited_storyboard_names_its_own_pages(monkeypatch, tmp_
     assert first["page_images"] == ["storyboard/edited_storyboard.jpg"]
     assert first["edited_video_path"] == "edited_source.mp4"
 
-    json_path = tmp_path / "storyboard" / "edited_storyboard.json"
-    legacy = json.loads(json_path.read_text(encoding="utf-8"))
-    legacy["page_images"] = ["/elsewhere/original_work_dir/storyboard/edited_storyboard.jpg"]
-    legacy["edited_video_path"] = "/elsewhere/original_work_dir/edited_source.mp4"
-    json_path.write_text(json.dumps(legacy), encoding="utf-8")
-    meta_path = json_path.with_name(json_path.name + ".meta.json")
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.pop("artifact")
-    understanding_storyboard._write_stage_meta(json_path, meta)  # as the old build stamped it
-
     reused = generate()
 
     assert builds["n"] == 1  # cache hit, no rebuild
@@ -448,10 +423,8 @@ def test_copied_work_dir_edited_storyboard_names_its_own_pages(monkeypatch, tmp_
         "edited_video_path": "edited_source.mp4",
     }
     assert {k: reused[k] for k in expected} == expected
-    on_disk = json.loads(json_path.read_text(encoding="utf-8"))
+    on_disk = json.loads((tmp_path / "storyboard" / "edited_storyboard.json").read_text(encoding="utf-8"))
     assert {k: on_disk[k] for k in expected} == expected
-    assert {k: generate()[k] for k in expected} == expected
-    assert builds["n"] == 1  # the rewrite re-stamped the sidecar, so it still hits
 
 
 def test_brief_header_branches_on_labels_burned(tmp_path):
@@ -635,11 +608,11 @@ def test_edited_storyboard_only_points_an_existing_brief_at_the_sheet_once(
     assert status["page_images"]
 
 
-def test_storyboard_brief_header_replaces_the_pre_relative_paths_heading(tmp_path):
-    """A brief carrying the older heading (no "路径相对 work_dir") is replaced, not stacked."""
+def test_storyboard_brief_header_replaces_its_earlier_header(tmp_path):
+    """Re-running on a brief that already carries the header replaces it, not stacks it."""
     brief = tmp_path / "agent_narration_brief.md"
     brief.write_text(
-        "## Storyboard（先看 storyboard 再写）\n\n"
+        "## Storyboard（先看 storyboard 再写；路径相对 work_dir）\n\n"
         "- 成片(output)时间线 storyboard: /old/work/storyboard/edited_storyboard.jpg\n\n"
         "# Brief\n\nbody\n",
         encoding="utf-8",
@@ -682,7 +655,9 @@ def test_real_ffmpeg_multi_source_sheet_letterboxes_mixed_frame_sizes(monkeypatc
     _fill_real_frames(tmp_path, (("src_a", "64x36", "yuvj444p"), ("src_b", "36x64", "yuvj420p")))
     monkeypatch.setitem(CONFIG, "storyboard_columns", 6)
     _no_font(monkeypatch)
-    frame_sets = understanding_storyboard._multi_source_frame_sets(tmp_path, plan["sources"])
+    frame_sets = understanding_storyboard._multi_source_frame_sets(
+        tmp_path, plan["sources"], plan["clips"]
+    )
 
     result = storyboard.build_edited_storyboard(
         tmp_path, "a.mp4", plan, 2.0, source_frames=frame_sets

@@ -285,7 +285,7 @@ def _word_grams(text, size):
 def _mention_names(value):
     """Names one aliases/asr_mentions entry contributes.
 
-    The model writes plain strings; video-understanding's deterministic ASR/research fallback writes
+    The model writes plain strings. Indexes from earlier video-understanding runs also hold
     {text, evidence_id, matched_aliases} dicts, whose names are the matched aliases (the text is the
     ASR window, already in the source-text corpus). Anything else contributes nothing."""
     if isinstance(value, str):

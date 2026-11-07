@@ -69,8 +69,7 @@ owner 的约束：必须是按需能力，不能重新长成每次生产都要�
 ## Consequences
 
 - **默认路径**：没有变化。recap 不调用它，不加参数，不加 QC；有没有 `production_reference.json`，所有阶段的代码行为都一样（守卫测试保证没有脚本读取它）。
-- **谁读取产物**：只有写稿 Agent（prose 指引）。`reference_methods` 是 story plan 的可选字段，没有代码读取；
-  建议型评审会把 story plan 整体放进上下文，因此能看到这个字段，但不据此判定。
+- **谁读取产物**：只有写稿 Agent（prose 指引）。`reference_methods` 是 story plan 的可选字段，没有代码读取。
 - **Agent 表面增量**：1 个 skill（SKILL.md 约 8.7K 字节，只在调用时加载），frontmatter description 约 150 字常驻；
   video-script SKILL.md 多 3 行，video-recap SKILL.md 多 4 行；新增 1 个 CLI。脚本约 1,354 行（6 个模块，最大 527 行），测试 102 个用例。
 - **代价与盲区**：

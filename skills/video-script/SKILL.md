@@ -1,6 +1,6 @@
 ---
 name: video-script
-description: 对已完成分析的视频进行导演与剪辑策划，再写带时间戳的中文解说并校验；也处理已有短片的 宣发标题、花字修订和外部文案回填。普通策划输入 work_dir 的 agent_narration_brief.md 与 vlm_analysis.json；文案返修输入当前成片的工程与内容证据。策划输出 recap_story_plan.json、visual_audio_board.json、 可选 style_card.json、cut 模式需要的 clip_plan.json，以及通过校验的 narration.json；仅宣发文案任务交付提案或回填既有包装计划。 外发说明：只有建议型评审 review.py 联网，它把旁白稿全文与理解证据、策划文件的文字摘录发到 MiMo chat 接口 （MIMO_API_KEY / MIMO_API_URL，不发视频、图片或音频）；单独使用时只在显式执行时运行，端到端编排默认在 TTS 前运行一次， 可用 --no-review-narration / REVIEW_NARRATION=0 关闭（严格评审开启时除外）；validate.py 与 lint 仅在本地运行。 触发词：解说词、写解说、视频旁白、宣发标题、花字修订、文案回填、 narration script、写稿、解说文案、剪辑思路、导演思路。
+description: 对已完成分析的视频进行导演与剪辑策划，再写带时间戳的中文解说并校验；也处理已有短片的 宣发标题、花字修订和外部文案回填。普通策划输入 work_dir 的 agent_narration_brief.md 与 vlm_analysis.json；文案返修输入当前成片的工程与内容证据。策划输出 recap_story_plan.json、visual_audio_board.json、 可选 style_card.json、cut 模式需要的 clip_plan.json，以及通过校验的 narration.json；仅宣发文案任务交付提案或回填既有包装计划。 外发说明：本技能的脚本不联网，validate.py 与 lint 只在本地运行。 触发词：解说词、写解说、视频旁白、宣发标题、花字修订、文案回填、 narration script、写稿、解说文案、剪辑思路、导演思路。
 ---
 
 ## 1. 定位
@@ -23,36 +23,22 @@ Agent 先记录简洁决定，再写时间线产物。`validate.py` 负责对理
 
 ### 1.1 创作控制模式
 
-先根据用户要求和 `work_dir` 判断本轮创作控制模式。它与 `full|cut|dub` 渲染模式分别选择：
+先根据用户要求和 `work_dir` 判断本轮创作控制模式。它与 `full|cut` 渲染模式分别选择：
 
 - **CREATE**：首次创作。比较至少两个真正可行的故事/剪辑假设后再选择。
 - **DIRECTED**：用户已指定结构、镜头、台词或表达。忠实落实，不为满足“创作流程”虚构替代方案。
 - **REVISION**：用户针对已有版本看片修改。最新反馈是当前事实来源；未点名部分默认冻结。
 
-REVISION 先明确本轮修改项与冻结项，再编辑对应层：表达、口语节奏、字幕反馈更新 `style_card.json`；镜头、入出点、表演和声音分工更新 `visual_audio_board.json`；只有观众承诺、POV、主线或 beat 改变时才更新 `recap_story_plan.json`。被删除的镜头、原声或文案也要从相关计划中删除，不能保留过期锚点。不要把看片修改重新做成一次 CREATE。
+REVISION 先明确本轮修改项与冻结项，修法要定位到 beat、镜头边界或句子，再编辑对应层：表达、口语节奏、字幕反馈更新 `style_card.json`；镜头、入出点、表演和声音分工更新 `visual_audio_board.json`；只有观众承诺、POV、主线或 beat 改变时才更新 `recap_story_plan.json`。被删除的镜头、原声或文案也要从相关计划中删除，不能保留过期锚点。不要把看片修改重新做成一次 CREATE。
 
 ## 2. 远程调用与数据外发
 
-本技能只有一个脚本会联网：`review.py`（§7.1 的建议型语义评审）。其余全部在本地运行：`validate.py` 及其 lint、去 AI 味检查只读写 `work_dir` 里的文件，不发任何网络请求；策划与写稿由 Agent 直接读写 `work_dir` 完成。
+本技能的脚本不发任何网络请求，也不需要 `MIMO_API_KEY`：`validate.py` 及其 lint、去 AI 味检查只读写 `work_dir` 里的文件；策划与写稿由 Agent 直接读写 `work_dir` 完成。旁白稿不会由本技能发给 MiMo 或其他服务。
 
-`review.py` 发给谁：
+两处外发不属于这里的脚本，需要时分别看待：
 
-- MiMo 的 OpenAI 兼容 chat 接口 `<MIMO_API_URL>/chat/completions`，用 `MIMO_API_KEY` 认证，模型为 `MIMO_MODEL`（默认 `mimo-v2.5`）。未设 `MIMO_API_URL` 时，按量计费 key 发往 `https://api.xiaomimimo.com/v1`，`tp-` 开头的 Token Plan key 发往 `MIMO_TOKEN_PLAN_CLUSTER` 选定的 token-plan 集群（默认 `https://token-plan-cn.xiaomimimo.com/v1`）。
-- 未设 `MIMO_API_KEY` 时直接退出，不构造也不发送任何请求。
-
-`review.py` 发送什么（只有文字，不发视频、帧图片或音频文件）：
-
-- `narration.json` 全部旁白段的时间与文字。
-- 理解索引的文字证据：开头、中段、结尾、长空档与各旁白时间窗附近选出的时间段内，`vlm_analysis.json` 的场景描述与 `frame_facts` 文字，以及对白转写（有 `asr_clean.json` 时用它，否则 `asr_result.json`）。
-- `background_research.json` 的梗概、角色、关系与剧情线摘录。
-- 存在时附上 `packaging_plan.json`、`recap_story_plan.json`、`visual_audio_board.json`、`style_card.json`（各截前 3000 字）和 `original_subtitles.json` 的原声字幕文字。
-- 内容较长时分块，每块一次请求；返回的意见只写回本地 `narration_review.json` / `narration_review.md`。
-
-何时运行、怎样关闭：
-
-- 单独使用本技能时，`review.py` 只在用户或 Agent 显式执行它时运行；不执行它就没有任何外发。用户不希望稿件离开本机时，不要运行它，改为人工复核后直接跑 `validate.py`。
-- 端到端编排默认在 TTS 前自动调用一次这项评审，失败不阻断；关闭方式是编排入口的 `--no-review-narration` 或环境变量 `REVIEW_NARRATION=0`。若同时开启了严格评审（`--require-narration-review` 或 `REQUIRE_NARRATION_REVIEW=1`），评审必须运行，关闭开关不生效。
-- 评审是建议型的：只写报告，从不改写 `narration.json`；是否修改由 Agent 或用户决定。
+- 按 `references/research-guide.md` 补充调研时，检索由 Agent 所在环境的工具发起；不希望查询内容外发时跳过这一步。
+- 配音阶段会把旁白文字发给所选 TTS 服务，发什么、发给谁、怎样关闭见配音技能自己的说明。
 
 ## 3. 读取素材并确认状态
 
@@ -61,11 +47,9 @@ REVISION 先明确本轮修改项与冻结项，再编辑对应层：表达、�
 - `work_dir/agent_narration_brief.md`：场景、时长、安静窗口与字数预算。
 - `asr_writing_chunks.json`：长对白的写作分块。
 - `timeline_fusion.json`：判断某段是否有对白或静音槽。
-- `vlm_analysis.json` / `asr_result.json`：核对具体画面与原声证据；有 `asr_clean.json` 时以它的文本为准（lint、评审、剪辑和合成都读它）。
+- `vlm_analysis.json` / `asr_result.json`：核对具体画面与原声证据（lint、剪辑和合成读同一份转写）。
 - brief 顶部列出的故事板（抽帧拼图）：不要只依赖场景摘要；反应、走位、静止和台词前后的具体时刻常常更重要。
 - `production_reference.json`（仅当 `work_dir` 里有）：另一部成片拆出的可迁移方法与节奏数值，用法见 §4。
-
-full 模式使用原片时间。cut 模式第一阶段只写 `clip_plan.json`；`edited_source.mp4` 产生后，第二阶段才按输出时间写 `narration.json`。
 
 写任何创作产物前，直接读取 `work_dir` 判断当前阶段：
 
@@ -178,6 +162,7 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 | `pause_after_ms` | 段后停顿，默认 250ms |
 | `overlaps_speech` | 是否与原对白重叠；连续铺底窗口通常为 `true`，真正静音槽才为 `false` |
 | `emotion` | 整个解说块的 MiMo TTS 情绪/语气标签 |
+| `visual_overlays` | 可选的画面文字叠加数组，每项 `{type, text}`，`type` 只支持 `top_title`、`inline_label_or_callout`，其他类型不会渲染（lint 报 `unsupported_visual_overlay_type` 警告）；可选 `start` / `end`（默认沿用本段时间）及 `anchor`、`x`、`y`、`max_width`、`style`；需要带 drawtext 的 ffmpeg |
 
 ### 5.1 写作规则
 
@@ -212,46 +197,26 @@ full 模式直接按原片时间写；cut 第二阶段先查看 `edited_source.m
 
 ## 6. 创作自审
 
-在调用 LLM 评审前做以下**反事实检查**：
-
-1. 删除每个 beat：若因果、人物、情绪或承诺没有损失，就删除。
-2. 比较说话者/动作与倾听者/反应：保留更符合 POV 和情绪的时刻。
-3. 静音旁白：画面与原声仍应承载可见行动、人物行为和关键情绪。
-4. 只听声音：旁白应形成可听懂的主线，而不是画面字幕。
-5. 把旁白换成原声或沉默：若场景自身更有力量，就让出声音所有权。
-6. 检查开头问题是否真实，结尾是否回答或转化它。
-7. 检查相邻短句能否合成一个连续思路；字幕分行不得成为 TTS 断句理由。
-
-只记录并优先修复 1–3 个回报最高的问题；先改结构，再润色句子。
+写完初稿后，按 `references/creative-editing-playbook.md` 的「观众复核」做反事实检查，只记录并优先修复 1–3 个回报最高的问题；先改结构，再润色句子。另外检查相邻短句能否合成一个连续思路；字幕分行不得成为 TTS 断句理由。
 
 REVISION 还要逐项确认：用户点名的问题已经改变，未点名的冻结项没有意外变化，相关 `style_card.json` / `visual_audio_board.json` 中不存在旧镜头或旧表达。除非用户要求备选版本，不额外扩展新方向。
 
-## 7. 评审与校验
+## 7. 自检与校验
 
-### 7.1 建议型语义评审
+### 7.1 Agent 自检
 
-```bash
-python3 scripts/review.py --work-dir <work_dir>   # 会联网：外发内容与关闭方式见 §2
-```
+`validate.py` 只查时间、字数、声音归属和格式，不判断旁白说得对不对，下面的问题没有任何脚本替你把关。TTS 前逐段核对 `narration.json`，有问题就改稿后重看；每次返修后重做一遍。cut 第二阶段的旁白是输出时间，先按 `clip_plan_validated.json` 映射回原片时间，再对照证据。
 
-评审会自动识别 cut 模式，并在存在已校验剪辑计划时按输出时间线核对；`--timeline source` 可强制使用原片时间。打开 `narration_review.md`，逐项处理 `error`，尤其是 `category=hallucination`。
+1. **证据支撑**：每段里的人物、动作、因果和关系，都能在对应时间的 `vlm_analysis.json` 或 `asr_result.json` 里找到依据。
+2. **不编情节**：`background_research.json` 和用户背景只帮助识别人物、消除歧义，不能当成当前画面发生的事。证据只到受击，就不写倒地或胜负；不把跨场镜头拼成同场的动作与反应。
+3. **原声拍**：`visual_audio_board.json` 中 `narration_job` 为 `none`、或 `audio_owner` 不是旁白的拍，不被旁白盖住。这些拍和 `original_subtitles.json` 的字幕块没有旁白是计划内的，不算漏写。
+4. **承诺兑现**：开头提出的问题、`recap_story_plan.json` 的观众承诺、POV 和情绪路径在正文与结尾都得到回收，没有另起一条更吸睛的主线。
+5. **信息增量**：只复述画面、删掉也不损失什么的段落，删除或改写。
+6. **衔接**：引出原声的那块要让观众想听，原声之后的那块要接住它造成的变化。
+7. **去套话**：删“危机四伏”“震撼人心”这类空泛形容、模板化拔高、过度对仗，以及没替换的示例人物名。
+8. **风格与包装**：有 `style_card.json` 或 `packaging_plan.json` 时，语气和承诺与它们一致；不让包装反过来改写故事。
 
-重复修改并评审，直到：
-
-- `verdict` 为 `PASS` 且没有 `error`；或
-- 对仍保留的问题做明确 override。
-
-覆盖决定追加到 `work_dir/narration_review_override.md`：
-
-```markdown
-### 覆盖记录 — <date>
-- 问题：segment 4 / category=hallucination
-- 评审意见：“他早已知情”缺少画面/对白依据
-- 决定：KEEP — 该事实来自用户提供的当前集背景，而非未来剧情
-- 签署：<agent/human>
-```
-
-`review.py` 本身只写报告，默认调用策略为建议型、失败开放；若调用方显式开启严格评审，事实矛盾、残句、解析失败或评审不可用可在 TTS 前阻断。覆盖记录只用于审计，`review.py` / `validate.py` 不读取它。
+用户提供的事实可以保留，但不要写得像是画面证据。仍有依据不足却决定保留的说法，交付时明确告诉用户。
 
 ### 7.2 确定性硬校验
 
@@ -267,5 +232,4 @@ python3 scripts/validate.py --work-dir <work_dir> --mode full
 ## 8. 能力边界
 
 - 不运行 ASR / VLM，不合成 TTS，不渲染视频；只消费视频理解索引。
-- 唯一的远程调用是 `review.py` 的 MiMo 文字评审（见 §2）；`validate.py` 与 lint 只在本地运行。
 - 平台研究仅用于明确的宣发任务；不替代当前片内事实，也不默认改变解说和剪辑。

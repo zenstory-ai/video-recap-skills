@@ -2,6 +2,8 @@
 
 Status: implemented
 
+取代本篇关于“已采用声音”家族留在 `scripts/adoption/`的决定：[移除声音定稿交付路线](../simplification/2026-11-06-remove-delivery-family.md)。`briefing/` 的归组仍然有效。
+
 ## Problem
 
 `docs/production-boundaries.md` 把 source_score、pair_media、compose_foreground、narration/audio-mix adoption、

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+取代本篇关于帧钟 helper 进 `adoption/av_clock.py`、换画面走 `adopted-packet-copy`的决定：[移除声音定稿交付路线](../simplification/2026-11-06-remove-delivery-family.md)。`pair_media` / `compose_foreground` 的删除仍然有效。
+
 ## Problem
 
 [[2026-09-21-adoption-family-stays-in-skill-as-subpackage]] 把 `pair_media.py`（把独立画面与已采用 AAC 音轨按流复制配对成 `paired.mp4`）和 `compose_foreground.py`（把调用方渲染好的 RGBA PNG 序列与可选片尾卡叠到锁定母版，音频逐包核对不变）作为顶层入口留在 video-assemble。两者都来自同事交付补丁的吸收（git 5923ced、6166bb6、be527e3），只能手写计划 JSON 后在命令行单独调用：编排器、recap、assemble 默认路径都不调用它们。代码约 510 行、参考文档约 190 行、测试约 700 行，其中 `test_compose_foreground` 与 `test_pair_media` 约占 assemble 测试组 30% 的耗时。`compose_foreground` 的"末尾恰好一张片尾卡"结构是单个项目的残留。

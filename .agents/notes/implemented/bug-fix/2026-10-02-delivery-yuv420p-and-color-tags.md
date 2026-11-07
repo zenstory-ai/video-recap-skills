@@ -19,7 +19,7 @@ Status: implemented
 - cut：`build_edited_source_video` 在 concat 输出后接 `[v]setparams=...[vtagged]`，映射 `[vtagged]` 并加同样的输出参数。多来源时每段先在各自的归一化滤镜里转成 yuv420p，RGB 源在这一步就用 `scale=out_color_matrix=bt709:out_range=tv` 显式转换（否则混入 YUV 源时 `format=yuv420p` 会用 BT.601 矩阵，实测纯红 Y=81/Cb=90），因此比较标记时去掉 `from_rgb`；各源标记一致就用它，不一致就按 BT.709 标记并打日志（一条拼接画面只能有一个标签）。这里"不一致时只改标记"已被 [[2026-10-03-mixed-source-colour-conversion]] 取代：现在每段显式转换矩阵和范围。每个来源只 ffprobe 一次，同一结果既选转换方式也算标记。
 - 显式 adopted 混音的 `packet_identity` 比较去掉四个色彩字段：未标记的画面流复制后多了 BT.709 标签，包与时钟没变，仍应报 `EXACT`。`explicit-audio-mix.md` 写明这一点。
 - cut 的 `edited_source_render_cache_payload` 带 `picture_rules: "yuv420p-color-tags-v2"`（`cut_contract.EDITED_SOURCE_PICTURE_RULES`），升级前缓存的无标记 `edited_source.mp4` 因此重新剪辑，不会被最终渲染当成未标记源改标 BT.709。这些规则再变时要改这个版本串。
-- 范围：这条保证覆盖 assemble 的四条输出路径和 cut 的 `edited_source.mp4`。dub 模式（video-voiceover `dub.py` 的 `_mux`）仍 `-c:v copy` 原样复制源画面，不做 yuv420p 与色彩标记归一化，只加了 copy 安全的 `-movflags +faststart`；dub 是实验模式，输入多是已能播放的成片，归一化留到需要时再加（届时按函数级副本加平行测试）。
+- 范围：这条保证覆盖 assemble 的输出路径和 cut 的 `edited_source.mp4`。（dub 模式已移除，见 [[2026-11-06-remove-dub-mode]]；声音定稿路线已移除，见 [[2026-11-06-remove-delivery-family]]。）当时 dub 模式（video-voiceover `dub.py` 的 `_mux`）仍 `-c:v copy` 原样复制源画面，不做 yuv420p 与色彩标记归一化，只加了 copy 安全的 `-movflags +faststart`；dub 是实验模式，输入多是已能播放的成片，归一化留到需要时再加（届时按函数级副本加平行测试）。
 
 ## Alternatives considered
 

@@ -15,7 +15,7 @@
 - **结构上限**：每个脚本模块不超过 800 行，skill 内 import 图无环（`tests/orchestrator/test_test_suite_architecture.py`）。
 - **运行时只用 Python 标准库和 ffmpeg / ffprobe**，README 承诺不需要 `pip install`；最低 Python 3.10（README），CI 用 3.12。
 - **创作产物归 Agent**：`clip_plan.json`、`narration.json` 等由 Agent 写，脚本只准备 brief、做确定性校验、执行 TTS 与渲染（`architecture/2026-05-18-agent-owned-narration-cli-mechanical.md`）。
-- **远程调用必须写明**：任何把数据发出本机的路径，都要在对应 `SKILL.md` 写清发什么、发给谁、怎样关闭；dub 克隆原声必须显式 `--confirm-voice-rights`，没有环境变量形式（`process/2026-10-03-remote-call-disclosure-and-dub-consent.md`）。
+- **远程调用必须写明**：任何把数据发出本机的路径，都要在对应 `SKILL.md` 写清发什么、发给谁、怎样关闭（`process/2026-10-03-remote-call-disclosure-and-dub-consent.md`；dub 已移除，见 `simplification/2026-11-06-remove-dub-mode.md`）。
 - **SKILL.md frontmatter 单行键值**：`description` 写成一行，不用 `>` / `|` 块，不超过 1024 字符（`test_plugin_manifest.py` 守）。
 
 ## 验证

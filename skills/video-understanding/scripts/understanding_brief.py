@@ -4,7 +4,7 @@ import json
 
 from pathlib import Path
 
-from lib import CONFIG, log, load_background_research
+from lib import log, load_background_research
 from asr_timing_evidence import asr_evidence_summary_for_brief
 
 
@@ -12,20 +12,15 @@ from detect import ensure_speech_boundary_anchors
 
 
 from briefing.builder import build_agent_brief
-from briefing.context import assess_understanding_substrate, normalize_background_research
+from briefing.context import _clip_text, assess_understanding_substrate, normalize_background_research
 
 
-from understanding_cache import _load_json, _merge_overview_into_scenes
+from understanding_cache import _load_json
 from understanding_storyboard import (
     _generate_edited_storyboard,
     _generate_source_storyboard,
     _prepend_storyboard_brief_header,
 )
-
-
-def _clip_text(text, limit):
-    value = " ".join(str(text or "").split()).strip()
-    return value[:limit]
 
 
 def _research_context(work_dir):
@@ -123,9 +118,6 @@ def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
         work_dir
     )
     ensure_speech_boundary_anchors(work_dir, asr_result)
-    overview_path = Path(work_dir) / "mimo_video_overview.json"
-    if CONFIG["mimo_video_overview"]:
-        scenes = _merge_overview_into_scenes(scenes, overview_path)
 
     _finish_brief(
         video, work_dir, args, video_duration,
@@ -173,8 +165,6 @@ def _finish_brief(
         video_duration,
         work_dir,
         args.style,
-        mimo_overview_enabled=CONFIG["mimo_video_overview"],
-        mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
     )
     # C1: prepend a storyboard header to the returned brief file, pointing the agent at the sheet(s).

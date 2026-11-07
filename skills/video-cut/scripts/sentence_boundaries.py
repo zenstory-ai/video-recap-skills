@@ -126,17 +126,12 @@ def _dialogue_speech_spans(rows):
 
 
 def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
-    """Merged ASR dialogue spans (asr_clean.json wins over asr_result.json).
+    """Merged dialogue spans from asr_result.json.
 
     Only used to decide whether an unsafe edge blocks; a missing transcript means unchecked.
     """
-    rows = []
-    for filename in ("asr_clean.json", "asr_result.json"):
-        path = _find_source_artifact(work_dir, filename, source_id, source_work_dir)
-        if path is not None:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            rows = payload["segments"] if filename == "asr_clean.json" else payload
-            break
+    path = _find_source_artifact(work_dir, "asr_result.json", source_id, source_work_dir)
+    rows = json.loads(path.read_text(encoding="utf-8")) if path is not None else []
     return _dialogue_speech_spans(row for row in rows if row["text"].strip())
 
 

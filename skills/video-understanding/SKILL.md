@@ -32,15 +32,15 @@ description: 把视频分析为结构化理解索引：场景检测、ASR 转写
 export MIMO_API_KEY=***
 ```
 
-ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。`--mimo-video-overview` 可开启按场景块的视频概览。未设置 key 时重跑会复用已缓存的转写、画面分析、概览与故事索引（key 决定的默认 endpoint 不参与比对）；需要请求模型的 consolidation 记为 `skipped_no_key`，不发请求。缓存对不上（例如复制 work_dir 时没保留文件时间）而已有转写时，运行停下并保留转写：用 `cp -p` / `cp -Rp` / `rsync -t` 保留时间重新复制，或设置 key 后重跑（会重新转写）。不要用 `--skip-asr` 绕过，它会把现有转写替换成 `[]`。
+ASR 使用 `mimo-v2.5-asr`；VLM 使用 `mimo-v2.5`。`--skip-asr` 可跳过对白转写，但完整理解仍需要 `MIMO_API_KEY` 运行 VLM。未设置 key 时重跑会复用已缓存的转写、画面分析与故事索引（key 决定的默认 endpoint 不参与比对）；需要请求模型的 consolidation 记为 `skipped_no_key`，不发请求。缓存对不上（例如复制 work_dir 时没保留文件时间）而已有转写时，运行停下并保留转写：用 `cp -p` / `cp -Rp` / `rsync -t` 保留时间重新复制，或设置 key 后重跑（会重新转写）。不要用 `--skip-asr` 绕过，它会把现有转写替换成 `[]`。
 
 若 `work_dir/background_research.json` 存在，本技能会把剧情梗概和角色名折入 VLM 上下文；`--context` 可补充一条简短提示。
 
 ### 远程调用与本地读取
 
-ASR 把分窗音频发给 MiMo ASR；逐场景 VLM 把代表帧、帧时间和分析提示发给 MiMo；启用 `--mimo-video-overview` 时，还会把按场景截取的视频片段发给 MiMo 视频模型。故事索引汇总和可选 ASR 清洗发送的是画面描述、转写与背景资料文字。
+ASR 把分窗音频发给 MiMo ASR；逐场景 VLM 把代表帧、帧时间和分析提示发给 MiMo，不发视频片段。故事索引汇总发送的是画面描述、转写与背景资料文字。
 
-请求使用 MiMo 的 chat 接口。`MIMO_API_URL` 可指定地址；ASR 与视频概览可分别用 `MIMO_ASR_API_URL`、`MIMO_VIDEO_API_URL` 覆盖，凭据同样支持各自的 key。未覆盖时，按量 key 使用 `https://api.xiaomimimo.com/v1`，Token Plan key 使用 `MIMO_TOKEN_PLAN_CLUSTER` 选择的集群。逐场景帧分析与汇总使用 `MIMO_API_KEY`。
+请求使用 MiMo 的 chat 接口。`MIMO_API_URL` 可指定地址；ASR 可用 `MIMO_ASR_API_URL` 覆盖，凭据同样支持 `MIMO_ASR_API_KEY`。未覆盖时，按量 key 使用 `https://api.xiaomimimo.com/v1`，Token Plan key 使用 `MIMO_TOKEN_PLAN_CLUSTER` 选择的集群。逐场景帧分析与汇总使用 `MIMO_API_KEY`。
 
 `--skip-asr` 只关闭音频转写，`--no-consolidate` 只关闭索引汇总；它们不会关闭 VLM。需要只在本地处理已有产物时，使用 `--brief-only` 或 `--edited-storyboard-only`，这两条路径不调用 API。
 
@@ -62,12 +62,10 @@ python3 scripts/understand.py <video> --work-dir <work_dir> [选项]
 | `--edit-mode full\|cut` | 不设 | 写进简报的 recap 模式；`cut` 时按剪后时长估算旁白预算，已有 `edited_source.mp4` 时句末锚点改用剪后时间 |
 | `--target-duration` | 不设 | 写进简报的 cut 目标时长；尚无 `clip_plan_validated.json` 时用它估算旁白预算 |
 | `--skip-asr` | 关 | 不转写对白，把 `asr_result.json` 写成 `[]`（已有转写会被覆盖），ASR 证据标为显式跳过 |
-| `--mimo-video-overview` | 关 | 按场景块运行 MiMo 视频概览，并作为逐场景主描述 |
 | `--force` | 关 | 忽略缓存，全部重算 |
 | `--brief-only` | 关 | 只用现有产物重建 `agent_narration_brief.md`，不抽帧、不调 API |
 | `--edited-storyboard-only` | 关 | 只按 `clip_plan_validated.json` 写剪后时间线 `storyboard/edited_storyboard.*`，并在已有的 `agent_narration_brief.md` 顶部加 storyboard 指引；多源计划（带 `sources`）从各来源 `source_work_dir` 的 `frames/` 按其 `frames_manifest.json` 的 fps 取帧，tile 标 `S1`/`S2`…；不抽帧、不调 API，故事板生成失败只记日志。与 `--brief-only` 互斥 |
-| `--consolidate` / `--no-consolidate` | 开 | 生成全局故事索引 `understanding_index.*` |
-| `--consolidate-asr` | 关 | 另外清洗 ASR 文本，写 `asr_clean.json` |
+| `--consolidate` / `--no-consolidate` | 开 | 生成全局故事索引 `understanding_index.json` |
 
 ## 5. 输出契约
 
@@ -79,13 +77,12 @@ python3 scripts/understand.py <video> --work-dir <work_dir> [选项]
 | `scenes.json` | 场景切点、起止时间与时长 |
 | `audio.wav` | 16 kHz 单声道音频，供 ASR、静音检测与句末锚点使用 |
 | `asr_result.json` | `[{start, end, text}]` 时间戳对白 |
-| `asr_timing_evidence.json` | ASR 可用性状态、粗窗口精度、glossary 前后文本，以及它所描述的源视频/音频/结果文件（路径存在性 + size/mtime） |
+| `asr_timing_evidence.json` | ASR 可用性状态、粗窗口精度、每个窗口的观测文本与 `glossary_modified` 标记，以及它所描述的源视频/音频/结果文件（路径存在性 + size/mtime） |
 | `silence_periods.json` | `[{start, end, duration, has_speech}]` 安静窗口 |
 | `speech_boundary_anchors.json` | ASR 句末标点对齐到短停顿的句末锚点；缺音频或 ASR 时 `status: unavailable` |
 | `vlm_analysis.json` | 逐场景描述、深层分析与 `frame_facts` |
-| `mimo_video_overview.status.json` | 视频概览状态（未启用时为 `disabled`）；启用成功另写 `mimo_video_overview.json` |
-| `understanding_index.json`、`understanding_index.md` | 全局故事索引（`--no-consolidate` 时不写） |
-| `consolidation.status.json` | 故事索引与 ASR 清洗的运行状态 |
+| `understanding_index.json` | 全局故事索引（`--no-consolidate` 时不写） |
+| `consolidation.status.json` | 故事索引的运行状态 |
 | `storyboard/source_storyboard.{json,jpg}` | 原片时间线抽帧拼图（超页时续写 `_001.jpg` 等）；已有 `clip_plan_validated.json` 时另写 `edited_storyboard.*`；`STORYBOARD=0` 关闭 |
 | `timeline_fusion.json` | VLM、ASR 与静音信息的统一时间线 |
 | `asr_writing_chunks.json` | 按句界和场景切分的 ASR 写作块 |

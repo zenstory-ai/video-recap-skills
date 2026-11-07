@@ -173,61 +173,6 @@ def test_successful_process_missing_frame_clock_is_not_a_good_scan(monkeypatch):
         shot_review.detect_scene_pts("ignored", 0.35)
 
 
-@pytest.mark.parametrize("normalize_only", [False, True])
-@pytest.mark.parametrize("threshold", [None, 0.08])
-@pytest.mark.parametrize("roi", [None, [2, 4, 32, 32]])
-def test_cut_cli_opt_in_reviews_actual_cut_not_plan_only(tmp_path, monkeypatch, normalize_only, threshold, roi):
-    import cut_cli
-    import media_geometry
-    video = tmp_path / "source.mp4"
-    video.write_bytes(b"source")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "clip_plan.json").write_text('[{"start":0,"end":4}]', encoding="utf-8")
-    monkeypatch.setitem(cut_cli.CONFIG, "scene_cut_snap", False)
-    monkeypatch.setitem(cut_cli.CONFIG, "snap_clip_line_end", False)
-    monkeypatch.setattr(cut_cli, "get_video_duration", lambda _: 4)
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _: media_geometry._geometry_from_stream(
-        {"width": 64, "height": 64, "r_frame_rate": "24/1"}))
-    monkeypatch.setattr(cut_cli, "build_edited_source_video", lambda a, b, c, d: d.write_bytes(b"edited"))
-    scans = []
-    monkeypatch.setattr(shot_review, "write_scan", lambda *a, **k: scans.append((a, k)))
-    args = ["cut.py", str(video), "--work-dir", str(work), "--review-shots"]
-    if normalize_only:
-        args.append("--normalize-only")
-    if threshold is not None:
-        args.extend(["--shot-scene-threshold", str(threshold)])
-    if roi is not None:
-        args.extend(["--shot-roi", *map(str, roi)])
-    monkeypatch.setattr(sys, "argv", args)
-    cut_cli.main()
-    if normalize_only:
-        assert scans == []
-    else:
-        options = {"plan_path": work / "clip_plan_validated.json"}
-        if threshold is not None:
-            options["threshold"] = threshold
-        if roi is not None:
-            options["roi"] = roi
-        assert scans == [((work / "edited_source.mp4", work / "shot_review.json"),
-                          options)]
-
-
-@pytest.mark.parametrize('options', [
-    ['--shot-roi', '0', '0', '32', '32'],
-    ['--review-shots', '--shot-roi', '-1', '0', '32', '32'],
-    ['--review-shots', '--shot-roi', '0', '0', '0', '32'],
-])
-def test_bad_cut_roi_option_fails_before_loading_source(tmp_path, monkeypatch, options):
-    import cut_cli
-    monkeypatch.setattr(sys, 'argv', ['cut.py', str(tmp_path / 'absent.mp4'),
-                                     '--work-dir', str(tmp_path / 'work'), *options])
-    with pytest.raises(SystemExit) as exc:
-        cut_cli.main()
-    assert exc.value.code == 2
-    assert not (tmp_path / 'work').exists()
-
-
 def test_corrupt_meta_invalidates_verified_old_report_not_unknown_file(tmp_path):
     video, _, plan, _ = bound_fixture(tmp_path)
     Path(str(video) + ".meta.json").write_text("broken", encoding="utf-8")

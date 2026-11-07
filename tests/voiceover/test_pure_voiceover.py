@@ -365,8 +365,6 @@ def test_cleanup_partial_outputs_only_replaces_audio_suffix(tmp_path):
     output_wav.write_bytes(b"partial-wav")
     expected_mp3 = tts_dir / "narr_000.mp3"
     expected_mp3.write_bytes(b"partial-mp3")
-    cache = Path(str(output_wav) + ".cache.json")
-    cache.write_text("{}", encoding="utf-8")
 
     unrelated = tmp_path / "job.mp3" / "tts_segments" / "narr_000.mp3"
     unrelated.parent.mkdir(parents=True)
@@ -376,7 +374,6 @@ def test_cleanup_partial_outputs_only_replaces_audio_suffix(tmp_path):
 
     assert not output_wav.exists()
     assert not expected_mp3.exists()
-    assert not cache.exists()
     assert unrelated.read_bytes() == b"do-not-delete"
 
 
@@ -742,31 +739,6 @@ def test_tts_rms_normalization_passes_through_a_silent_block(tmp_path):
         "peak_after": 0.0,
         "gain_db": 0.0,
     }
-
-
-@pytest.mark.parametrize("old", [
-    "not json", {}, [], {"version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64},
-])
-def test_unusable_per_index_sidecar_from_an_earlier_version_is_a_plain_miss(monkeypatch, tmp_path, old):
-    """A per-index sidecar from before the content-addressed store (any schema, even
-    unreadable) is never read: the block re-synthesizes once and the sidecar is removed."""
-    narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
-    tts_dir = tmp_path / "tts_segments"
-    tts_dir.mkdir()
-    wav = tts_dir / "narr_000.wav"
-    wav.write_bytes(b"stale")
-    legacy = tts_cache.legacy_sidecar_path(wav)
-    legacy.write_text(old if isinstance(old, str) else json.dumps(old), encoding="utf-8")
-    monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
-    calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
-    monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0)
-
-    segments, _engine, failures = synthesize_tts(narration, tmp_path)
-
-    assert calls == ["重新生成。"]
-    assert failures == [] and segments[0]["audio_path"] == str(wav)
-    assert wav.read_bytes() == b"fresh"
-    assert not legacy.exists()
 
 
 @pytest.mark.parametrize(

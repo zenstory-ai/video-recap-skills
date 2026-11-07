@@ -14,7 +14,7 @@ sys.path.insert(
 from lib import CONFIG  # noqa: E402
 from briefing.builder import build_agent_brief  # noqa: E402
 from briefing.timeline import (  # noqa: E402
-    _remap_asr_to_output_for_brief,
+    _remap_segments_to_output_for_brief,
     _remap_prose_times_for_brief,
 )
 
@@ -106,9 +106,10 @@ def test_partial_window_rule_keeps_text_covered_across_a_seam():
         {"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0},
         {"source_start": 20.0, "source_end": 30.0, "output_start": 10.0, "output_end": 20.0},
     ]
-    rows = _remap_asr_to_output_for_brief(
+    rows = _remap_segments_to_output_for_brief(
         [{"start": 15.0, "end": 25.0, "text": "整句都在。"}, {"start": 28.0, "end": 31.0, "text": ""}],
         spans,
+        withhold_partial=True,
     )
     assert [(row["start"], row["end"], row["text"]) for row in rows] == [
         (5.0, 10.0, "整句都在。"),

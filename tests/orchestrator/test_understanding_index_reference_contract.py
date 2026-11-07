@@ -17,15 +17,20 @@ REFERENCE_SCRIPTS = ROOT / "skills" / "video-reference" / "scripts"
 
 PRODUCE = """
 import json, sys
-from consolidate import _apply_deterministic_asr_research_fallback
-research = {"characters": {"范闲": "主角"},
-            "character_details": {"五竹": {"aliases": ["五竹叔"], "role": "护卫"}}}
-asr = [{"start": 0.0, "end": 4.0, "text": "五竹叔你等等我"},
-       {"start": 4.0, "end": 8.0, "text": "范闲你给我站住"}]
-model_index = {"characters": [{"name": "五竹", "aliases": [], "asr_mentions": ["抱五竹筐突围的蒙眼护卫"]}]}
-index = _apply_deterministic_asr_research_fallback(model_index, asr_result=asr, background_research=research)
-with open(sys.argv[1], "w", encoding="utf-8") as fh:
-    json.dump(index, fh, ensure_ascii=False)
+from pathlib import Path
+import consolidate
+work = Path(sys.argv[1])
+def write(name, payload):
+    (work / name).write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+write("vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 8, "description": "夜路"}])
+write("asr_result.json", [{"start": 0.0, "end": 4.0, "text": "五竹叔你等等我"},
+                          {"start": 4.0, "end": 8.0, "text": "范闲你给我站住"}])
+write("background_research.json", {"characters": {"范闲": "主角"},
+                                   "character_details": {"五竹": {"aliases": ["五竹叔"], "role": "护卫"}}})
+consolidate.CONFIG["api_key"] = "test-key"
+reply = '{"characters":[{"name":"五竹","aliases":[],"asr_mentions":["抱五竹筐突围的蒙眼护卫"]}]}'
+consolidate.api_call = lambda payload: {"choices": [{"message": {"content": reply}}]}
+consolidate.consolidate_index(work)
 """
 
 CONSUME = """
@@ -47,11 +52,10 @@ def _run(scripts_dir, code, *args):
 
 
 def test_reference_name_scan_reads_the_index_consolidate_writes(tmp_path):
+    _run(UNDERSTANDING_SCRIPTS, PRODUCE, str(tmp_path))
     index_path = tmp_path / "understanding_index.json"
-    _run(UNDERSTANDING_SCRIPTS, PRODUCE, str(index_path))
     index = json.loads(index_path.read_text(encoding="utf-8"))
-    mentions = {c["name"]: c["asr_mentions"] for c in index["characters"]}
-    assert any(isinstance(m, dict) and m.get("matched_aliases") for m in mentions["五竹"]), mentions
+    assert index["characters"][0]["asr_mentions"] == ["抱五竹筐突围的蒙眼护卫"]
 
     names = json.loads(_run(REFERENCE_SCRIPTS, CONSUME, str(index_path)))
 

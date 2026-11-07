@@ -163,9 +163,7 @@ def test_glossary_keeps_observed_and_post_glossary_text(monkeypatch, tmp_path):
     assert result == [{"start": 0.0, "end": 3.0, "text": "她叫叶轻眉"}]
     window = _read_evidence(tmp_path)["windows"][0]
     assert window["observed_text"] == "她叫叶青眉"
-    assert window["post_glossary_text"] == "她叫叶轻眉"
     assert window["glossary_modified"] is True
-    assert window["text_availability"] == "AVAILABLE"
     assert _read_evidence(tmp_path)["glossary"] == {"names": ["叶轻眉"], "name_count": 1}
 
 
@@ -181,7 +179,6 @@ def test_empty_provider_text_is_unknown_not_proven_silence_and_not_cached(
     assert asr.transcribe_audio(video, tmp_path)[0]["text"] == ""
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "EMPTY_UNKNOWN"
-    assert evidence["windows"][0]["text_availability"] == "UNAVAILABLE_UNKNOWN"
     assert "silence" not in evidence["windows"][0]
     # one all-empty run must not become a permanent cache hit
     assert _cache_state_after_meta(tmp_path, video) == "MISS"
@@ -280,6 +277,24 @@ def test_sidecar_rejects_changed_bound_artifact(tmp_path, changed):
     assert not validate_asr_timing_evidence(evidence_path, video, result_path)
 
 
+def test_sidecar_written_with_the_old_window_fields_stays_valid(tmp_path):
+    """Rejecting an old sidecar would make the user pay to transcribe again."""
+    video, result_path, evidence_path = _valid_available_evidence(tmp_path)
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    payload["windows"] = [{
+        "index": 0,
+        "start": 0.0,
+        "end": 1.0,
+        "text_availability": "AVAILABLE",
+        "observed_text": "hello",
+        "post_glossary_text": "hello",
+        "glossary_modified": False,
+    }]
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert validate_asr_timing_evidence(evidence_path, video, result_path)
+
+
 def test_glossary_change_invalidates_fresh_corrected_cache(tmp_path):
     research = tmp_path / "background_research.json"
     research.write_text(
@@ -306,22 +321,17 @@ def test_glossary_change_invalidates_fresh_corrected_cache(tmp_path):
     "mutate",
     [
         lambda p: p.update({"schema_version": True}),
-        lambda p: p.update({"extra": "not allowed"}),
         lambda p: p.update({"source_video": True}),
         lambda p: p.update({"asr_result": {"size": 1, "mtime_ns": 1}}),
         lambda p: p["glossary"].update({"name_count": 99}),
-        lambda p: p["windows"][0].update({"start": True}),
-        lambda p: p.update({"status": "EMPTY_UNKNOWN"}),
-        lambda p: p.update({"audio": None}),
-        lambda p: p["windows"][0].update(
-            {"observed_text": "different", "glossary_modified": False}
-        ),
-        lambda p: p["windows"][0].update(
-            {"observed_text": "different", "glossary_modified": True}
-        ),
+        lambda p: p.update({"audio": {"size": 1, "mtime_ns": 1}}),
+        lambda p: p.update({"status": "FAILED_PROVIDER"}),
+        lambda p: p.update({"status": ["AVAILABLE_COARSE"]}),
+        lambda p: p.update({"windows": {}}),
+        lambda p: p["windows"][0].pop("glossary_modified"),
     ],
 )
-def test_strict_sidecar_schema_and_status_consistency(tmp_path, mutate):
+def test_sidecar_must_match_its_bindings_and_window_shape(tmp_path, mutate):
     video, result_path, evidence_path = _valid_available_evidence(tmp_path)
     payload = json.loads(evidence_path.read_text(encoding="utf-8"))
     mutate(payload)
@@ -340,7 +350,6 @@ def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
         [],
         2.0,
         tmp_path,
-        mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(tmp_path, video),
     ).read_text(encoding="utf-8")
     assert "ASR timing evidence" in text
@@ -396,20 +405,6 @@ def test_offline_rerun_reuses_a_transcript_made_with_a_key(monkeypatch, tmp_path
     # With a key the endpoint is compared again: a different provider endpoint re-transcribes.
     monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "sk-other")
     assert _asr_cache_state(result_path, _asr_cache_payload(video), video) == "MISS"
-
-
-def test_legacy_sidecar_with_key_presence_flag_stays_fresh(monkeypatch, tmp_path):
-    """Forward-compat guard: a sidecar written before the flag was dropped must stay a hit.
-
-    This passes on the pre-fix code too (its payload carried the flag), so it is not evidence
-    for the offline fix; test_offline_rerun_reuses_a_transcript_made_with_a_key is."""
-    video, result_path, _evidence = _valid_available_evidence(tmp_path)
-    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
-    meta = _asr_cache_payload(video)
-    legacy = json.loads(json.dumps(meta))
-    legacy["settings"]["mimo_asr_api_key_present"] = True
-    _write_stage_meta(result_path, legacy)
-    assert _asr_cache_state(result_path, meta, video) == "FRESH"
 
 
 def test_no_key_placeholder_is_never_a_cache_hit(monkeypatch, tmp_path):

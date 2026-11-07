@@ -67,35 +67,6 @@ def test_completion_helper_gates_before_success_and_default_stays_advisory(
     assert "仅报告，不阻断" in output
 
 
-def test_local_adoption_route_strict_failure_exits_before_success(
-    monkeypatch, tmp_path, capsys
-):
-    video = tmp_path / "picture.mp4"
-    video.write_bytes(b"picture")
-    work = tmp_path / "local-work"
-    final = tmp_path / "local-final.mp4"
-    args = Namespace(
-        output_dir=str(tmp_path), tts_meta="tts.json",
-        narration_adoption="narration.json", audio_mix_adoption="mix.json",
-        burn_subtitles=False, subtitle_y_top=None, subtitle_y_bot=None,
-        require_final_qc=True, material_library_dir=None,
-    )
-    manifest = {"source_video": str(video), "audio": "audio-id"}
-    monkeypatch.setattr(recap_runner, "_write_run_manifest", lambda *_: manifest)
-    monkeypatch.setattr(recap_runner, "_run", lambda *_: None)
-    monkeypatch.setattr(recap_runner, "load_local_assembly_evidence", lambda *_: {})
-    monkeypatch.setattr(recap_runner, "owned_local_delivery", lambda *_: None)
-    monkeypatch.setattr(recap_runner, "verify_local_assembly_evidence", lambda *_: None)
-    monkeypatch.setattr(recap_runner, "_read_assembly_output", lambda *_: final)
-    monkeypatch.setattr(
-        recap_runner, "_write_final_qc_reports", lambda *_: _summary(final=False)
-    )
-
-    with pytest.raises(SystemExit):
-        recap_runner._run_local_adoption(video, work, args)
-    assert "✅ 完成" not in capsys.readouterr().out
-
-
 def test_multi_cut_route_strict_failure_exits_before_success(
     monkeypatch, tmp_path, capsys
 ):
@@ -147,105 +118,90 @@ def test_continuation_preserves_strict_flag_without_analysis_settings_change(
     assert recap_runtime._analysis_settings(strict) == recap_runtime._analysis_settings(baseline)
 
 
-def test_strict_dub_rejected_before_work_or_probe(monkeypatch, tmp_path, capsys):
-    work = tmp_path / "must-not-exist"
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "recap.py", str(tmp_path / "missing.mp4"), "--work-dir", str(work),
-            "--edit-mode", "dub", "--require-final-qc",
-        ],
-    )
-    monkeypatch.setattr(
-        recap_runner, "_coerce_videos",
-        lambda *_: (_ for _ in ()).throw(AssertionError("video probe reached")),
-    )
+def _no_child_work(monkeypatch):
     monkeypatch.setattr(
         recap_runner, "_run",
         lambda *_: (_ for _ in ()).throw(AssertionError("child work reached")),
     )
-    with pytest.raises(SystemExit) as exc:
-        recap_runner.main()
-    assert exc.value.code == 2
-    assert "--require-final-qc" in capsys.readouterr().err
-    assert not work.exists()
 
 
-def test_legacy_dub_without_strict_flag_still_prepares_and_renders(
-    monkeypatch, tmp_path, capsys
-):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"source")
-    work = tmp_path / "dub-work"
-    calls = []
-    monkeypatch.setattr(recap_runner, "_run", lambda *args: calls.append(args))
-    argv = [
-        "recap.py", str(video), "--work-dir", str(work), "--edit-mode", "dub",
-        "--no-burn-subtitles", "--confirm-voice-rights",
-    ]
+@pytest.mark.parametrize("via_env", [False, True])
+def test_removed_dub_mode_is_rejected_by_name(monkeypatch, tmp_path, capsys, via_env):
+    """An old shell's EDIT_MODE=dub must not silently run full either."""
+    work = tmp_path / "must-not-exist"
+    _no_child_work(monkeypatch)
+    argv = ["recap.py", str(tmp_path / "input.mp4"), "--work-dir", str(work)]
+    if via_env:
+        monkeypatch.setenv("EDIT_MODE", "dub")
+    else:
+        monkeypatch.delenv("EDIT_MODE", raising=False)
+        argv += ["--edit-mode", "dub"]
     monkeypatch.setattr(sys, "argv", argv)
-    recap_runner.main()
-    assert calls == [
-        (
-            "video-voiceover", "dub.py", "--stage", "prepare", "--video",
-            str(video.resolve()), "--work-dir", str(work.resolve()),
-            "--confirm-voice-rights",
-        )
-    ]
-    resume_line = next(
-        line for line in capsys.readouterr().out.splitlines() if "写完后重跑继续" in line
-    )
-    assert "--confirm-voice-rights" in resume_line
-
-    (work / "dub_script.json").write_text("[]", encoding="utf-8")
-    calls.clear()
-    recap_runner.main()
-    assert calls == [
-        (
-            "video-voiceover", "dub.py", "--stage", "render", "--video",
-            str(video.resolve()), "--work-dir", str(work.resolve()),
-            "--confirm-voice-rights",
-        )
-    ]
-    assert "✅ 配音完成" in capsys.readouterr().out
-
-
-def test_dub_without_voice_rights_confirmation_stops_before_any_work(
-    monkeypatch, tmp_path, capsys
-):
-    """dub sends source audio to MiMo ASR and clones the speaker: no confirmation, no run."""
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"source")
-    work = tmp_path / "must-not-exist"
-    monkeypatch.setattr(
-        recap_runner, "_run",
-        lambda *_: (_ for _ in ()).throw(AssertionError("child work reached")),
-    )
-    monkeypatch.setattr(
-        sys, "argv",
-        ["recap.py", str(video), "--work-dir", str(work), "--edit-mode", "dub"],
-    )
     with pytest.raises(SystemExit) as exc:
         recap_runner.main()
     assert exc.value.code == 2
-    err = capsys.readouterr().err
-    assert "--confirm-voice-rights" in err
-    assert "MiMo ASR" in err and "voiceclone" in err
+    expected = "环境变量 EDIT_MODE 已移除" if via_env else "dub 模式已移除"
+    assert expected in capsys.readouterr().err
     assert not work.exists()
 
 
-def test_voice_rights_confirmation_is_rejected_outside_dub(monkeypatch, tmp_path, capsys):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"source")
+def test_removed_voice_rights_flag_is_unrecognized(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("EDIT_MODE", raising=False)
+    _no_child_work(monkeypatch)
     monkeypatch.setattr(
         sys, "argv",
-        ["recap.py", str(video), "--work-dir", str(tmp_path / "w"), "--confirm-voice-rights"],
+        ["recap.py", str(tmp_path / "input.mp4"), "--confirm-voice-rights"],
     )
     with pytest.raises(SystemExit) as exc:
         recap_runner.main()
     assert exc.value.code == 2
-    assert "only applies to --edit-mode dub" in capsys.readouterr().err
+    assert "unrecognized arguments: --confirm-voice-rights" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("edit_mode_args", [[], ["--edit-mode", "cut"]])
+@pytest.mark.parametrize(
+    ("filename", "content"),
+    [
+        ("recap_run_manifest.json", json.dumps({"settings": {"edit_mode": "dub"}})),
+        ("dub_transcript.json", "{}"),
+        ("dub_script.json", "[]"),
+        ("dub_manifest.json", "{}"),
+    ],
+)
+def test_old_dub_work_dir_is_not_resumed_as_another_mode(
+    monkeypatch, tmp_path, filename, content, edit_mode_args
+):
+    video = tmp_path / "input.mp4"
+    video.write_bytes(b"source")
+    work = tmp_path / "old-dub-work"
+    work.mkdir()
+    (work / filename).write_text(content, encoding="utf-8")
+    monkeypatch.delenv("EDIT_MODE", raising=False)
+    _no_child_work(monkeypatch)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap.py", str(video), "--work-dir", str(work), "--no-burn-subtitles", *edit_mode_args],
+    )
+    with pytest.raises(SystemExit, match="已移除的 dub 模式"):
+        recap_runner.main()
+
+
+def test_old_dub_work_dir_is_not_reused_for_multi_video(monkeypatch, tmp_path):
+    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
+    for video in videos:
+        video.write_bytes(video.stem.encode())
+    work = tmp_path / "old-dub-work"
+    work.mkdir()
+    (work / "dub_script.json").write_text("[]", encoding="utf-8")
+    monkeypatch.delenv("EDIT_MODE", raising=False)
+    _no_child_work(monkeypatch)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap.py", *map(str, videos), "--edit-mode", "cut", "--work-dir", str(work),
+         "--no-burn-subtitles"],
+    )
+    with pytest.raises(SystemExit, match="已移除的 dub 模式"):
+        recap_runner.main()
 
 
 def _minimal_env():
@@ -356,17 +312,3 @@ os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
     assert "✅ 完成" in advisory.stdout
     assert "仅报告，不阻断" in advisory.stdout
     assert json.loads((default_work / "final_qc.json").read_text(encoding="utf-8"))["ok"] is False
-
-
-def test_doctor_rejects_the_dub_only_voice_rights_flag(monkeypatch, capsys):
-    """The flag is dub-only everywhere, including the --doctor early return."""
-    monkeypatch.delenv("EDIT_MODE", raising=False)
-    monkeypatch.setattr(
-        recap_runner, "_run",
-        lambda *_: (_ for _ in ()).throw(AssertionError("doctor must not run")),
-    )
-    monkeypatch.setattr(sys, "argv", ["recap.py", "--doctor", "--confirm-voice-rights"])
-    with pytest.raises(SystemExit) as exc:
-        recap_runner.main()
-    assert exc.value.code == 2
-    assert "--confirm-voice-rights only applies to --edit-mode dub" in capsys.readouterr().err

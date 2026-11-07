@@ -14,7 +14,7 @@ Status: implemented
   设置推出（MiMo 预置音色、参考音频克隆、Fish reference id、index-tts 音色）。旧文件没有该字段时按只知道 `engine` 处理。
 - video-recap 新增 `scripts/resources/lock.py`（2026-10-02 前为顶层 `scripts/resource_lock.py`）：full / cut（含本地采用路径）合成完成后、写 post_render QC 之前，从已有产物汇总
   `source_video` / `voice` / `bgm` / `subtitle_font` 写成 `work_dir/resource_lock.json`（`video-recap.resource-lock.v1`）。
-  它只读产物，不改变任何渲染；dub 模式不写。
+  它只读产物，不改变任何渲染。dub 模式当时不写，该模式已移除（[[2026-11-06-remove-dub-mode]]）。
 - 配置了资源库（`--material-library-dir` / `VIDEO_RECAP_MATERIAL_LIBRARY_DIR`）时，用 `library.scan_library()` 按解析后的文件路径
   对上登记，音色没有文件时按 provider + voice_id 对上；对上的条目带出 `license` 与 `consent`。
 - `attention` 列出 `license_unknown` / `license_restricted`、参考音频的 `consent_*`、以及配置了库却未登记的 `unregistered`，

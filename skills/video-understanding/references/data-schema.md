@@ -68,11 +68,7 @@ ASR 的独立证据 sidecar，不改变 `asr_result.json` 的既有数组结构�
   },
   "windows": [{
     "index": 0,
-    "start": 0.0,
-    "end": 3.5,
-    "text_availability": "AVAILABLE",
     "observed_text": "她叫叶青眉",
-    "post_glossary_text": "她叫叶轻眉",
     "glossary_modified": true
   }]
 }

@@ -40,38 +40,14 @@ def _counting_api(monkeypatch, reply):
     return calls
 
 
-# ── Pass A: parse_clean_response (timing preserved by construction) ────────────
-
-def test_parse_clean_preserves_spans_and_applies_cleaned_text():
-    asr = [{"start": 0.0, "end": 5.0, "text": "你给我站住"}, {"start": 5.0, "end": 9.0, "text": "我不会放手"}]
-    resp = '```json\n{"segments":[{"i":0,"text":"你给我站住！","speaker":"男"},{"i":1,"text":"我不会放手。"}]}\n```'
-    out = consolidate.parse_clean_response(resp, asr)
-    assert [s["start"] for s in out] == [0.0, 5.0]      # spans untouched
-    assert [s["end"] for s in out] == [5.0, 9.0]
-    assert out[0]["text"] == "你给我站住！" and out[0]["speaker"] == "男"
-    assert out[1]["text"] == "我不会放手。"
-
-
-def test_parse_clean_rejects_count_mismatch_and_garbage():
-    asr = [{"start": 0, "end": 5, "text": "a"}, {"start": 5, "end": 9, "text": "b"}]
-    # garbage -> original unchanged
-    assert consolidate.parse_clean_response("not json", asr) == asr
-    # count mismatch (1 != 2) -> original unchanged
-    assert consolidate.parse_clean_response('{"segments":[{"i":0,"text":"x"}]}', asr) == asr
-
-
 # ── Pass B: index ─────────────────────────────────────────────────────────────
 
-def test_parse_index_normalizes_v2_shape():
-    """Garbage and partial JSON both normalize to the four list keys + schema_version 2;
+def test_index_from_reply_normalizes_v2_shape():
+    """Partial JSON normalizes to the four list keys + schema_version 2;
     research_glossary entries are forced to support=context_only."""
-    r = consolidate.parse_index_response('garbage no json')
-    assert {k: r[k] for k in ("characters", "relationships", "plot_points", "entities")} == {"characters": [], "relationships": [], "plot_points": [], "entities": []}
-    assert r["schema_version"] == 2 and r["research_glossary"] == []
-
-    r2 = consolidate.parse_index_response(
-        '{"characters":[{"name":"A"}],"plot_points":["p1"],'
-        '"research_glossary":[{"name":"叶轻眉","support":"direct"}]}'
+    r2 = consolidate._index_from_reply(
+        {"characters": [{"name": "A"}], "plot_points": ["p1"],
+         "research_glossary": [{"name": "叶轻眉", "support": "direct"}]}
     )
     assert r2["schema_version"] == 2
     assert r2["characters"][0]["name"] == "A" and r2["plot_points"] == ["p1"]
@@ -80,7 +56,7 @@ def test_parse_index_normalizes_v2_shape():
 
 
 def test_build_index_messages_includes_frame_facts_asr_and_research_glossary():
-    # frame_facts is a DICT {ts: [actions]} (guards against the review.py list-shape bug)
+    # frame_facts is a DICT {ts: [actions]}
     vlm = [{"scene_id": 0, "start": 0, "end": 5, "description": "门口对峙",
             "frame_facts": {"2.0": ["男子握紧拳头"], "4.0": ["女子后退一步"]}}]
     vlm_only = consolidate.build_index_messages(vlm)[0]["content"]
@@ -93,15 +69,6 @@ def test_build_index_messages_includes_frame_facts_asr_and_research_glossary():
     )[0]["content"]
     assert "[asr:0" in content and "叶青眉留下了线索" in content
     assert "support=context_only" in content and "叶轻眉" in content and "aliases=叶青眉" in content
-
-
-def test_build_clean_messages_includes_transcript():
-    asr = [{"start": 0, "end": 5, "text": "第一句对白"}]
-    content = consolidate.build_clean_messages(asr)[0]["content"]
-    assert "第一句对白" in content
-    assert "相邻两段" in content
-    assert "分段音频窗口互不重叠" in content
-    assert "真的很难。难得让人想放弃" in content
 
 
 # ── drivers (mocked api) ──────────────────────────────────────────────────────
@@ -119,47 +86,7 @@ def test_consolidate_index_writes_artifacts(monkeypatch, tmp_path):
     assert meta["scene_count"] == 1
     assert meta["model"] == consolidate.CONFIG.get("vlm_model", "")
     assert meta["prompt"] == consolidate.INDEX_PROMPT
-    md = (tmp_path / "understanding_index.md").read_text(encoding="utf-8")
-    assert "张三" in md and "匕首" in md
-
-
-def test_consolidate_transcript_writes_provenance_and_preserves_spans(monkeypatch, tmp_path):
-    asr = [{"start": 0.0, "end": 5.0, "text": "你给我站住"}]
-    _write_json(tmp_path, "asr_result.json", asr)
-    monkeypatch.setattr("consolidate.api_call", lambda payload: _fake('{"segments":[{"i":0,"text":"你给我站住！"}]}'))
-    out = consolidate.consolidate_transcript(tmp_path)
-    assert out["source"] == file_identity(tmp_path / "asr_result.json")
-    assert out["model"] == consolidate.CONFIG.get("vlm_model", "")
-    assert out["prompt"] == consolidate.CLEAN_PROMPT
-    assert out["postprocess_version"] == consolidate.ASR_CLEAN_POSTPROCESS_VERSION
-    assert out["segments"][0]["start"] == 0.0 and out["segments"][0]["end"] == 5.0
-    assert out["segments"][0]["text"] == "你给我站住！"
-
-
-def test_consolidate_transcript_preserves_legitimate_boundary_repetition(
-    monkeypatch, tmp_path
-):
-    asr = [
-        {"start": 0.0, "end": 15.0, "text": "这件事真的很难。"},
-        {"start": 15.0, "end": 30.0, "text": "难得让人想放弃。"},
-    ]
-    _write_json(tmp_path, "asr_result.json", asr)
-    monkeypatch.setattr(
-        "consolidate.api_call",
-        lambda _payload: _fake(
-            '{"segments":['
-            '{"i":0,"text":"这件事真的很难。"},'
-            '{"i":1,"text":"难得让人想放弃。"}'
-            "]}"
-        ),
-    )
-
-    out = consolidate.consolidate_transcript(tmp_path)
-
-    assert [row["text"] for row in out["segments"]] == [
-        "这件事真的很难。",
-        "难得让人想放弃。",
-    ]
+    assert not (tmp_path / "understanding_index.md").exists()
 
 
 def _unlink_meta(tmp_path):
@@ -185,13 +112,15 @@ def _change_asr(tmp_path):
     _write_json(tmp_path, "asr_result.json", [{"start": 0, "end": 1, "text": "第二版"}])
 
 
-def _change_asr_clean(tmp_path):
-    _write_json(tmp_path, "asr_clean.json", {"segments": [{"start": 0, "end": 1, "text": "第二版"}]})
+def _unlink_index(tmp_path):
+    """restore_material prunes the index but keeps its meta; users also delete it to rebuild."""
+    (tmp_path / "understanding_index.json").unlink()
+    assert (tmp_path / "understanding_index.json.meta.json").exists()
 
 
 @pytest.mark.parametrize(
     "invalidate",
-    [_unlink_meta, _drop_prompt, _change_vlm, _change_research, _change_asr, _change_asr_clean],
+    [_unlink_meta, _unlink_index, _drop_prompt, _change_vlm, _change_research, _change_asr],
     ids=lambda fn: fn.__name__.strip("_"),
 )
 def test_consolidate_index_is_idempotent_until_provenance_or_inputs_change(
@@ -200,7 +129,6 @@ def test_consolidate_index_is_idempotent_until_provenance_or_inputs_change(
     """A fresh index skips the API; losing provenance or rewriting any input recomputes."""
     _write_json(tmp_path, "vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 5, "description": "first"}])
     _write_json(tmp_path, "asr_result.json", [{"start": 0, "end": 1, "text": "第一版"}])
-    _write_json(tmp_path, "asr_clean.json", {"segments": [{"start": 0, "end": 1, "text": "第一版"}]})
     _write_json(tmp_path, "background_research.json", {"characters": {"甲": "第一版"}})
     calls = _counting_api(
         monkeypatch,
@@ -225,59 +153,60 @@ def test_consolidate_index_is_idempotent_until_provenance_or_inputs_change(
 
 def test_consolidate_graceful_when_inputs_absent(tmp_path):
     # no vlm_analysis.json / asr_result.json -> no crash, returns empty-ish
-    res = consolidate.consolidate(tmp_path, do_asr=True, do_index=True)
-    assert res.get("index") is None and res.get("asr_clean") is None
+    assert consolidate.consolidate_index(tmp_path) is None
 
 
-def test_consolidate_runs_asr_cleanup_before_index_when_both_requested(monkeypatch, tmp_path):
-    order = []
-
-    def clean(_work_dir):
-        order.append("asr")
-        return {"segments": [{"text": "clean"}]}
-
-    def index(_work_dir):
-        order.append("index")
-        return {"characters": []}
-
-    monkeypatch.setattr(consolidate, "consolidate_transcript", clean)
-    monkeypatch.setattr(consolidate, "consolidate_index", index)
-
-    result = consolidate.consolidate(tmp_path, do_asr=True, do_index=True)
-
-    assert order == ["asr", "index"]
-    assert result == {
-        "asr_clean": {"segments": [{"text": "clean"}]},
-        "index": {"characters": []},
-        "skipped_no_key": [],
-    }
+def _meta_from_before_the_transcript_removal(tmp_path, asr_clean):
+    """The sidecar a pre-removal run wrote: `inputs.asr_clean` is that file's identity or null."""
+    meta_path = tmp_path / "understanding_index.json.meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert meta["inputs"]["asr_clean"] is None
+    meta["inputs"]["asr_clean"] = asr_clean
+    meta_path.write_text(json.dumps(meta), encoding="utf-8")
 
 
-def test_consolidate_recomputes_asr_clean_when_model_or_prompt_meta_missing(monkeypatch, tmp_path):
-    _write_json(tmp_path, "asr_result.json", [{"start": 0.0, "end": 5.0, "text": "你给我站住"}])
-    calls = _counting_api(monkeypatch, lambda n: f'{{"segments":[{{"i":0,"text":"第{n}次"}}]}}')
-    first = consolidate.consolidate_transcript(tmp_path)
-    assert first["segments"][0]["text"] == "第1次"
+def _index_with_leftover_clean_transcript(monkeypatch, tmp_path):
+    _write_json(tmp_path, "vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 5, "description": "d"}])
+    _write_json(tmp_path, "asr_result.json", [{"start": 0, "end": 1, "text": "原始转写"}])
+    prompts = []
 
-    payload = json.loads((tmp_path / "asr_clean.json").read_text(encoding="utf-8"))
-    payload.pop("model")
-    (tmp_path / "asr_clean.json").write_text(json.dumps(payload), encoding="utf-8")
-    second = consolidate.consolidate_transcript(tmp_path)
+    def fake(payload):
+        prompts.append(payload["messages"][0]["content"])
+        return _fake(f'{{"characters":[{{"name":"第{len(prompts)}次"}}],"relationships":[],"plot_points":[],"entities":[]}}')
 
-    assert calls["n"] == 2
-    assert second["segments"][0]["text"] == "第2次"
+    monkeypatch.setattr("consolidate.api_call", fake)
+    consolidate.consolidate_index(tmp_path)
+    _write_json(tmp_path, "asr_clean.json", {"segments": [{"start": 0, "end": 1, "text": "清洗旧稿"}]})
+    return prompts
 
 
-def test_index_v2_deterministic_asr_mentions_when_llm_omits(monkeypatch, tmp_path):
+def test_old_index_built_from_raw_asr_stays_cached_with_a_leftover_clean_transcript(monkeypatch, tmp_path):
+    prompts = _index_with_leftover_clean_transcript(monkeypatch, tmp_path)
+    _meta_from_before_the_transcript_removal(tmp_path, None)
+
+    consolidate.consolidate_index(tmp_path)
+
+    assert len(prompts) == 1
+
+
+def test_old_index_built_from_the_clean_transcript_is_rebuilt_from_raw_asr(monkeypatch, tmp_path):
+    prompts = _index_with_leftover_clean_transcript(monkeypatch, tmp_path)
+    _meta_from_before_the_transcript_removal(tmp_path, {"size": 1, "mtime_ns": 1})
+
+    rebuilt = consolidate.consolidate_index(tmp_path)
+
+    assert rebuilt["characters"][0]["name"] == "第2次"
+    assert "原始转写" in prompts[1] and "清洗旧稿" not in prompts[1]
+
+
+def test_index_fills_research_glossary_but_adds_no_characters(monkeypatch, tmp_path):
     _write_json(tmp_path, "vlm_analysis.json", [{"scene_id": 0, "start": 0, "end": 5, "description": "无人名画面"}])
     _write_json(tmp_path, "asr_result.json", [{"start": 1, "end": 2, "text": "叶青眉留下线索"}])
     _write_json(tmp_path, "background_research.json", {"character_details": {"叶轻眉": {"aliases": ["叶青眉"], "role": "关键人物"}}})
     monkeypatch.setattr("consolidate.api_call", lambda payload: _fake('{"characters":[],"relationships":[],"plot_points":[],"entities":[],"research_glossary":[]}'))
     idx = consolidate.consolidate_index(tmp_path)
-    char = idx["characters"][0]
-    assert char["name"] == "叶轻眉"
-    assert char["asr_mentions"][0]["evidence_id"] == "asr:0"
-    assert "asr:0" in char["evidence_ids"]
+    assert idx["characters"] == []
+    assert idx["research_glossary"][0]["aliases"] == ["叶青眉"]
     assert idx["research_glossary"][0]["support"] == "context_only"
 
 
@@ -323,7 +252,7 @@ def test_index_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path):
         consolidate.consolidate_index(tmp_path)
 
     assert len(seen) == 2
-    for name in ("understanding_index.json", "understanding_index.json.meta.json", "understanding_index.md"):
+    for name in ("understanding_index.json", "understanding_index.json.meta.json"):
         assert not (tmp_path / name).exists()
 
 
@@ -336,18 +265,6 @@ def test_index_unparseable_reply_raises_without_retry(monkeypatch, tmp_path):
 
     assert len(seen) == 1
     assert not (tmp_path / "understanding_index.json").exists()
-
-
-def test_asr_clean_cut_off_twice_raises_and_writes_nothing(monkeypatch, tmp_path):
-    _write_json(tmp_path, "asr_result.json", [{"start": 0.0, "end": 5.0, "text": "你给我站住"}])
-    truncated = '{"segments":[{"i":0,"text":"你给'
-    seen = _scripted_api(monkeypatch, [(truncated, "length"), (truncated, "length")])
-
-    with pytest.raises(consolidate.ConsolidateIncomplete, match="consolidate\\(asr\\)"):
-        consolidate.consolidate_transcript(tmp_path)
-
-    assert seen == [consolidate._CLEAN_MAX_TOKENS, consolidate._CLEAN_MAX_TOKENS * 2]
-    assert not (tmp_path / "asr_clean.json").exists()
 
 
 # ── deterministic index repairs (index_normalize) ─────────────────────────────
@@ -600,10 +517,12 @@ def test_a_string_alias_is_one_alias_not_its_characters():
     assert report["merged_characters"] == 1
 
 
-def test_parse_index_response_reads_a_string_alias_as_a_list():
-    out = consolidate.parse_index_response(
-        '{"characters":[{"name":"王大锤","aliases":"老王"}],"relationships":[],'
-        '"plot_points":[],"entities":[]}'
+def test_normalize_index_reads_a_string_alias_as_a_list():
+    from index_normalize import normalize_index
+
+    out, _ = normalize_index(
+        {"characters": [{"name": "王大锤", "aliases": "老王"}], "relationships": [],
+         "plot_points": [], "entities": []}
     )
     assert out["characters"][0]["aliases"] == ["老王"]
 

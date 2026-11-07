@@ -1,32 +1,9 @@
 """Shared constants for the self-contained video-assemble skill."""
 
-from fractions import Fraction
-import math
-
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 ASSEMBLY_QC = "assembly_qc.json"
 VISUAL_QC = "visual_qc.json"
 VISUAL_OVERLAYS = "visual_overlays.json"
-
-# The picture codecs every packet/frame clock proof in this skill accepts.
-SUPPORTED_PICTURE_CODECS = frozenset({"h264", "hevc"})
-
-# The one exact output audio clock every explicit-sound artifact in this skill uses.
-OUTPUT_SAMPLE_RATE = 48_000
-
-
-def frame_clock_samples(frame, fps, rate=OUTPUT_SAMPLE_RATE):
-    """Project an exact frame boundary of a video clock onto the output sample clock.
-
-    Broadcast rates such as 30000/1001 put frame boundaries between whole samples, so
-    the exact Fraction position is rounded half-up once, here. Every sample bound in
-    the skill - a segment edge and the whole-picture `total_samples` alike - is this
-    single projection, so an integral clock is unchanged and a fractional one stays
-    consistent across the explicit-sound tools.
-    """
-    exact = Fraction(int(frame) * rate, 1) / Fraction(fps)
-    return math.floor(exact + Fraction(1, 2))
-
 
 FILTER_SCRIPT_THRESHOLD_BYTES = 8000
 

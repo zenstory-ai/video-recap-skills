@@ -298,7 +298,7 @@ def test_missing_assembly_manifest_without_explicit_output_is_a_blocker(tmp_path
 
 def test_full_run_ignores_a_corrupt_leftover_preflight_ledger(monkeypatch, tmp_path):
     """preflight_qc.json is no longer written or read: a corrupt copy from an older run
-    used to crash the narration path at pre_tts, after the paid review call."""
+    used to crash the narration path at pre_tts, after paid model calls."""
     video, work = seed_full_work(tmp_path)
     (work / "preflight_qc.json").write_text("stale-not-json", encoding="utf-8")
     final = tmp_path / "recap_video.mp4"
@@ -316,3 +316,31 @@ def test_full_run_ignores_a_corrupt_leftover_preflight_ledger(monkeypatch, tmp_p
     assert [script for _, script, _ in calls][-1] == "assemble.py"
     assert (work / "preflight_qc.json").read_text(encoding="utf-8") == "stale-not-json"
     assert _assert_valid(json.loads((work / "final_qc.json").read_text(encoding="utf-8")))
+
+
+def _rendered_with_tts_meta(work, tts_meta):
+    (work / "assembly_manifest.json").write_text(
+        json.dumps({"final_output": str(work / "recap_x.mp4")}), encoding="utf-8"
+    )
+    (work / "tts_meta.json").write_text(json.dumps(tts_meta), encoding="utf-8")
+
+
+def test_partial_tts_is_a_warning_to_relay_and_clean_tts_is_not(tmp_path):
+    _rendered_with_tts_meta(tmp_path, {"partial": True, "failures": [{"index": 1}, {"index": 4}]})
+    warnings = final_qc.build_final_qc(tmp_path)["metadata"]["warnings"]
+    assert [(w["code"], w["failure_count"]) for w in warnings] == [("partial_tts", 2)]
+    assert "2 段" in warnings[0]["message"]
+    # Another file than the one assemble rendered inherits nothing.
+    assert final_qc.build_final_qc(tmp_path, final_output=tmp_path / "other.mp4")["metadata"]["warnings"] == []
+
+    _rendered_with_tts_meta(tmp_path, {"partial": False, "failures": []})
+    assert final_qc.build_final_qc(tmp_path)["metadata"]["warnings"] == []
+
+
+def test_partial_tts_left_over_does_not_warn_on_a_source_mix_render(tmp_path):
+    (tmp_path / "assembly_manifest.json").write_text(
+        json.dumps({"final_output": str(tmp_path / "recap_x.mp4"), "audio_mode": "source-mix"}),
+        encoding="utf-8",
+    )
+    (tmp_path / "tts_meta.json").write_text(json.dumps({"partial": True, "failures": [{}]}), encoding="utf-8")
+    assert final_qc.build_final_qc(tmp_path)["metadata"]["warnings"] == []

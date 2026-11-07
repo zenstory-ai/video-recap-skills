@@ -94,19 +94,12 @@ def env_float(name, default, *, minimum=None):
     return _env_number(name, default, float, minimum)
 
 
-# Single MiMo credential powers ASR + VLM. Per-capability overrides
-# (MIMO_VIDEO_API_KEY / MIMO_ASR_API_KEY and their *_API_URL forms)
-# are optional and fall back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-
+# Single MiMo credential powers ASR + VLM. The ASR overrides (MIMO_ASR_API_KEY /
+# MIMO_ASR_API_URL) are optional and fall back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-
 # route to the Token-Plan cluster base URL; pay-as-you-go keys use api.xiaomimimo.com.
 _mimo_api_key = os.environ.get("MIMO_API_KEY", "")
-_mimo_video_api_key = os.environ.get("MIMO_VIDEO_API_KEY", "") or _mimo_api_key
 _mimo_asr_api_key = os.environ.get("MIMO_ASR_API_KEY", "") or _mimo_api_key
 _raw_api_url = os.environ.get("MIMO_API_URL") or default_mimo_api_url(is_mimo_token_plan_key(_mimo_api_key))
-_raw_mimo_video_api_url = (
-    os.environ.get("MIMO_VIDEO_API_URL")
-    or os.environ.get("MIMO_API_URL")
-    or default_mimo_api_url(is_mimo_token_plan_key(_mimo_video_api_key))
-)
 _raw_mimo_asr_api_url = (
     os.environ.get("MIMO_ASR_API_URL")
     or os.environ.get("MIMO_API_URL")
@@ -119,40 +112,24 @@ CONFIG = {
     "api_env_var": "MIMO_API_KEY",
     "mimo_api_url": normalize_api_url(_raw_api_url),
     "mimo_api_key": _mimo_api_key,
-    "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
-    "mimo_video_api_key": _mimo_video_api_key,
-    "mimo_video_env_var": "MIMO_VIDEO_API_KEY" if os.environ.get("MIMO_VIDEO_API_KEY") else "MIMO_API_KEY",
     "mimo_asr_api_url": normalize_api_url(_raw_mimo_asr_api_url),
     "mimo_asr_api_key": _mimo_asr_api_key,
     "mimo_asr_env_var": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
-    "mimo_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
-    "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "vlm_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "mimo_asr_model": os.environ.get("MIMO_ASR_MODEL", DEFAULT_MIMO_ASR_MODEL),
     "mimo_asr_language": os.environ.get("MIMO_ASR_LANGUAGE", "auto"),  # auto | zh | en
-    "mimo_asr_base64_max_mb": env_float("MIMO_ASR_BASE64_MAX_MB", 10.0, minimum=1.0),
+    "mimo_asr_base64_max_mb": 10.0,
     # ASR 分段窗口秒数。越小 → 长视频的对白时间戳越精细（默认 15s）。旧值 180s 会把 >3min
     # 视频的对白塌缩成一个时间戳，既让 brief 无法定位对白，又触发 detect.py 的粗粒度跳过，
     # 使 overlaps_speech/安静窗口判断失真。代价是更多 ASR 调用；ASR 慢时可调大。
     "asr_segment_seconds": env_float("ASR_SEGMENT_SECONDS", 15.0, minimum=5.0),
     "scene_threshold": 0.1,
-    "mimo_media_resolution": os.environ.get("MIMO_MEDIA_RESOLUTION", "default"),
-    "mimo_video_overview": env_bool("MIMO_VIDEO_OVERVIEW", False),  # opt-in (--mimo-video-overview / =1); when on it becomes the PRIMARY per-scene description, frames stay the anchor/fallback
-    "mimo_video_fps": env_float("MIMO_VIDEO_FPS", 3.0, minimum=0.1),
-    "mimo_video_chunk_max_seconds": env_float("MIMO_VIDEO_CHUNK_MAX_SECONDS", 20.0, minimum=1.0),
-    "mimo_video_chunk_min_seconds": env_float("MIMO_VIDEO_CHUNK_MIN_SECONDS", 1.0, minimum=0.2),
-    "mimo_video_chunk_timeout": env_int("MIMO_VIDEO_CHUNK_TIMEOUT", 180, minimum=1),
-    "mimo_video_base64_max_mb": env_float("MIMO_VIDEO_BASE64_MAX_MB", 45.0, minimum=1.0),
+    "mimo_media_resolution": "default",  # 只留在 VLM 缓存键里：改掉或删掉都会让已付费的 VLM 缓存失效
     # Per-scene frame VLM sampling — scale frames with scene length instead of a hard cap of 6
     "vlm_seconds_per_frame": env_float("VLM_SECONDS_PER_FRAME", 4.0, minimum=0.5),
     "vlm_max_frames": env_int("VLM_MAX_FRAMES", 16, minimum=3),
     "vlm_max_tokens": env_int("VLM_MAX_TOKENS", 1500, minimum=200),
-    "mimo_video_prompt": os.environ.get(
-        "MIMO_VIDEO_PROMPT",
-        "请用中文分析这个视频分片的主要人物、场景变化、关键动作、情绪走向和剧情冲突，"
-        "重点提取适合写短视频解说的故事线索。不要泛泛复述画面，要标出对后续写稿有用的信息。",
-    ),
-    "mimo_disable_thinking": env_bool("MIMO_DISABLE_THINKING", True),
+    "mimo_disable_thinking": True,
     "fps": 0,  # 0 = 自动（≤60s→2fps, ≤5min→1.5fps, >5min→1fps）
     # Storyboard contact sheets are advisory and generated locally where frames/fps are owned.
     # Keep these keys only in the stage that consumes them; other stages do not read storyboard_*.
@@ -164,7 +141,7 @@ CONFIG = {
     # TTS 语速（字符/秒）。实测 mimo-tts 冰糖音色中位 ~3.9 字/秒，可用 SPEECH_RATE 覆盖
     # 生成解说时使用 speech_rate * safety_margin 作为约束
     "speech_rate": env_float("SPEECH_RATE", 3.9, minimum=0.5),  # 旧值 3.5 系统性偏低 ~10-17%
-    "speech_safety_margin": env_float("SPEECH_SAFETY_MARGIN", 0.85, minimum=0.1),  # 保守系数：TTS 实际语速有 ±20% 波动
+    "speech_safety_margin": 0.85,  # 保守系数：TTS 实际语速有 ±20% 波动
     # Block-coverage targets the brief derives its first-draft block count from
     "narration_coverage_target": 0.7,   # rough first-draft/diagnostic fallback; content-led audio decisions may differ (not a quota)
     "narration_block_seconds": 9.0,     # block cadence used to derive target block count
@@ -193,8 +170,8 @@ CONFIG = {
     "scene_junk_pixel_ratio": env_float("SCENE_JUNK_PIXEL_RATIO", 0.995, minimum=0.0),
     "context_info": "",              # 额外上下文（节目名、角色名等）
     "vlm_workers": env_int("VLM_WORKERS", 8, minimum=1),  # VLM 并行分析线程数
-    "edit_mode": os.environ.get("EDIT_MODE", "full"),  # full | cut
-    "target_duration": os.environ.get("TARGET_DURATION", ""),  # cut 模式目标成片时长，如 10m
+    "edit_mode": "full",  # full | cut；只由 --edit-mode 设置
+    "target_duration": "",  # cut 模式目标成片时长，如 10m；只由 --target-duration 设置
 }
 
 SCRIPT_DIR = Path(__file__).parent
@@ -244,20 +221,11 @@ def load_background_research(work_dir):
         raise ValueError("background_research.json 顶层必须是 JSON 对象（{...}）")
     return data
 
-# MiMo refusal detection, defined once for this skill. Two deliberately different tests:
-#
-# - Narrow (`is_moderation_refusal`): ASR windows and per-scene VLM replies. MiMo answers a
-#   moderated request with the English sentence "The request was rejected because it was
-#   considered high risk" as the reply content. Only the provider's own wording is matched:
-#   a false positive here blanks real dialogue or a real scene description.
-# - Broad (`is_usable_overview_chunk`): only the optional MiMo video overview. A false
-#   positive there just retries the chunk and falls back to the frame description, so it also
-#   rejects generic refusal phrasing ("违规", "content policy", ...) that would be too
-#   aggressive for transcripts.
+# MiMo refusal detection for ASR windows and per-scene VLM replies, defined once for this
+# skill. MiMo answers a moderated request with the English sentence "The request was rejected
+# because it was considered high risk" as the reply content. Only the provider's own wording
+# is matched: a false positive here blanks real dialogue or a real scene description.
 MODERATION_REFUSAL_MARKERS = ("request was rejected", "considered high risk")
-OVERVIEW_REJECTION_MARKERS = MODERATION_REFUSAL_MARKERS + (
-    "high risk", "content policy", "cannot process", "无法处理", "内容审核", "违规",
-)
 
 
 def is_moderation_refusal(text):
@@ -270,12 +238,6 @@ def is_moderation_refusal(text):
     return len(low) <= 200 and all(marker in low for marker in MODERATION_REFUSAL_MARKERS)
 
 
-def is_usable_overview_chunk(content):
-    """A MiMo overview chunk is usable only if it is non-empty and carries no refusal phrasing."""
-    low = str(content or "").strip().lower()
-    return bool(low) and not any(marker in low for marker in OVERVIEW_REJECTION_MARKERS)
-
-
 def offline_ignored_settings(api_key, endpoint_key):
     """Cache-settings keys not compared when no credential is set.
 
@@ -284,15 +246,6 @@ def offline_ignored_settings(api_key, endpoint_key):
     be recomputed without a key anyway: an offline rerun must reuse the paid artifact, not
     discard it. With a key every setting is compared."""
     return () if api_key else (endpoint_key,)
-
-
-def settings_match(cached, current, ignore=()):
-    """True when two cache-settings dicts are equal outside the `ignore` keys."""
-    if not isinstance(cached, dict) or not isinstance(current, dict):
-        return False
-    return {k: v for k, v in cached.items() if k not in ignore} == {
-        k: v for k, v in current.items() if k not in ignore
-    }
 
 
 def file_identity(path):
@@ -356,38 +309,15 @@ def _prepare_api_payload(payload):
         normalized["thinking"] = {"type": "disabled"}
     return normalized
 
-def _mimo_endpoint(kind):
-    """Return per-capability MiMo endpoint settings (video understanding / ASR)."""
-    by_kind = {
-        "video": ("mimo_video_api_url", "mimo_video_api_key", "mimo_video_env_var"),
-        "asr": ("mimo_asr_api_url", "mimo_asr_api_key", "mimo_asr_env_var"),
-    }
-    if kind not in by_kind:
-        raise ValueError(f"Unsupported MiMo endpoint kind: {kind}")
-    url_key, key_key, src_key = by_kind[kind]
-    return {
-        "api_url": CONFIG.get(url_key) or CONFIG.get("mimo_api_url"),
-        "api_key": CONFIG.get(key_key) or CONFIG.get("mimo_api_key"),
-        "api_env_var": CONFIG[src_key],
-    }
-
-def _call_mimo_endpoint(kind, payload, max_retries=10):
-    settings = _mimo_endpoint(kind)
+def mimo_asr_api_call(payload, max_retries=10):
+    """Call the MiMo speech-recognition (ASR) endpoint."""
     return api_call(
         payload,
         max_retries=max_retries,
-        api_url=settings["api_url"],
-        api_key=settings["api_key"],
-        api_env_var=settings["api_env_var"],
+        api_url=CONFIG["mimo_asr_api_url"] or CONFIG["mimo_api_url"],
+        api_key=CONFIG["mimo_asr_api_key"] or CONFIG["mimo_api_key"],
+        api_env_var=CONFIG["mimo_asr_env_var"],
     )
-
-def mimo_video_api_call(payload, max_retries=10):
-    """Call the MiMo video-understanding endpoint."""
-    return _call_mimo_endpoint("video", payload, max_retries=max_retries)
-
-def mimo_asr_api_call(payload, max_retries=10):
-    """Call the MiMo speech-recognition (ASR) endpoint."""
-    return _call_mimo_endpoint("asr", payload, max_retries=max_retries)
 
 def api_call(payload, max_retries=8, *, api_url=None, api_key=None, api_env_var=None):
     """调用 OpenAI-compatible API，带重试。

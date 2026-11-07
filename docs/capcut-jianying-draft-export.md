@@ -19,7 +19,7 @@ Agent 会自动完成理解、方案、剪辑、写稿、配音和合成，不�
 
 ## 导出剪映草稿
 
-组装阶段（`video-assemble`）用 `--export-jianying` 或环境变量 `EXPORT_JIANYING=1` 把 `timeline.json` 导成草稿。草稿里有：
+组装阶段（`video-assemble`）用 `--export-jianying` 把 `timeline.json` 导成草稿。草稿里有：
 
 | 轨道 | 内容 |
 |---|---|

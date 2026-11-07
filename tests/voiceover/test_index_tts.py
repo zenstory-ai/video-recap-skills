@@ -367,7 +367,6 @@ def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "index_tts_endpoint", "http://host/tts")
     monkeypatch.setitem(CONFIG, "index_tts_voice", "voice-a")
     monkeypatch.setitem(CONFIG, "tts_segment_normalize", False)
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
     monkeypatch.setitem(CONFIG, "allow_partial_tts", False)
     audio = _wav_bytes()
     calls = []
@@ -385,7 +384,6 @@ def test_index_receipt_survives_sidecar_cache_hit(monkeypatch, tmp_path):
     second, _, _ = voiceover.synthesize_tts(narration, tmp_path)
 
     assert len(calls) == 1
-    assert first[0]["authored_text"] == second[0]["authored_text"] == "批准全文。"
     assert first[0]["spoken_text"] == second[0]["spoken_text"] == "批准全文。"
     receipt = second[0]["provider_receipt"]
     assert receipt == {"provider": "index-tts", "requested_voice": "voice-a"}

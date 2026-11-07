@@ -54,6 +54,17 @@ def test_missing_style_card_is_advisory_and_never_gates(tmp_path):
     assert report["deslop_qc"]["ok"] is True
 
 
+def test_invalid_json_style_card_is_advisory_and_lint_still_reports(tmp_path):
+    (tmp_path / "style_card.json").write_text("{oops", encoding="utf-8")
+
+    report = lint_narration([
+        {"start": 0.0, "end": 3.0, "narration": "正常解说。"},
+    ], work_dir=tmp_path)
+
+    assert report["ok"] is True
+    assert "malformed_style_card" in {item["code"] for item in report["deslop_qc"]["advisories"]}
+
+
 def test_deslop_qc_is_report_only_with_blocker_advisory_split(tmp_path):
     (tmp_path / "style_card.json").write_text('{"voice":"冷静"}', encoding="utf-8")
 

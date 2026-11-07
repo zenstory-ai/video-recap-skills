@@ -1,7 +1,6 @@
 """Write and validate honest timing/provenance evidence for coarse MiMo ASR."""
 
 import json
-import math
 import os
 import tempfile
 from pathlib import Path
@@ -20,15 +19,6 @@ VALID_STATUSES = {
     "FAILED_PROVIDER",
     "EMPTY_UNKNOWN",
 }
-_TOP_KEYS = {
-    "schema_version", "status", "source_video", "audio", "asr_result",
-    "glossary", "precision", "windows",
-}
-_WINDOW_KEYS = {
-    "index", "start", "end", "text_availability", "observed_text",
-    "post_glossary_text", "glossary_modified",
-}
-_GLOSSARY_KEYS = {"names", "name_count"}
 _PRECISION = {
     "window_timing": "COARSE_SEGMENT_WINDOWS",
     "dialogue_boundaries": "NOT_VERIFIED",
@@ -93,11 +83,7 @@ def _window_evidence(observed_segments, final_segments):
         final_text = str(final.get("text") or "")
         windows.append({
             "index": index,
-            "start": final.get("start"),
-            "end": final.get("end"),
-            "text_availability": "AVAILABLE" if final_text else "UNAVAILABLE_UNKNOWN",
             "observed_text": observed_text,
-            "post_glossary_text": final_text,
             "glossary_modified": None if observed_text is None else observed_text != final_text,
         })
     return windows
@@ -127,121 +113,36 @@ def write_asr_timing_evidence(
     return path
 
 
-def _is_int(value):
-    return isinstance(value, int) and not isinstance(value, bool)
-
-
-def _is_number(value):
-    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-
-
-def _is_identity(value):
-    return (
-        isinstance(value, dict) and set(value) == {"size", "mtime_ns"}
-        and _is_int(value["size"]) and _is_int(value["mtime_ns"])
-    )
-
-
-def _valid_glossary(payload, work_dir):
-    if not isinstance(payload, dict) or set(payload) != _GLOSSARY_KEYS:
-        return False
-    return payload == _glossary_binding(work_dir) and _is_int(payload.get("name_count"))
-
-
-def _valid_status_relationships(status, result, audio):
-    texts = [str(segment.get("text") or "") for segment in result]
-    if status == "AVAILABLE_COARSE":
-        return bool(result) and any(texts) and _is_identity(audio)
-    if status == "EMPTY_UNKNOWN":
-        return bool(result) and not any(texts) and _is_identity(audio)
-    if status == "UNAVAILABLE_NO_DURATION":
-        return result == [] and _is_identity(audio)
-    if status in {"EXPLICITLY_SKIPPED", "UNAVAILABLE_NO_KEY"}:
-        return audio is None and result == []
-    return False
-
-
 def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
     """Return whether a sidecar still describes the current source/audio/result files
-    (by size + mtime_ns) and the limited timing it claims."""
+    (by size + mtime_ns) and glossary. It is not a content check: a hand-edited sidecar whose
+    bindings still match stays valid."""
     evidence_path = Path(evidence_path)
-    result_path = Path(asr_result_path)
     try:
         evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
-        result = json.loads(result_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return False
-    if not isinstance(evidence, dict) or set(evidence) != _TOP_KEYS:
-        return False
-    if not isinstance(result, list) or not all(isinstance(item, dict) for item in result):
-        return False
-    if not _is_int(evidence.get("schema_version")) or evidence["schema_version"] != SCHEMA_VERSION:
+    if not isinstance(evidence, dict) or evidence.get("schema_version") != SCHEMA_VERSION:
         return False
     status = evidence.get("status")
-    if status not in VALID_STATUSES or status.startswith("FAILED_"):
-        return False
-    if evidence.get("precision") != _PRECISION:
+    if not isinstance(status, str) or status not in VALID_STATUSES or status.startswith("FAILED_"):
         return False
     source_identity = _identity(video_path)
-    result_identity = _identity(result_path)
-    if not _is_identity(source_identity) or evidence.get("source_video") != source_identity:
+    if source_identity is None or evidence.get("source_video") != source_identity:
         return False
-    if not _is_identity(result_identity) or evidence.get("asr_result") != result_identity:
+    result_identity = _identity(asr_result_path)
+    if result_identity is None or evidence.get("asr_result") != result_identity:
         return False
     audio = evidence.get("audio")
-    if audio is not None and not _is_identity(audio):
+    if audio is not None and audio != _identity(evidence_path.parent / "audio.wav"):
         return False
-    if not _valid_status_relationships(status, result, audio):
+    if evidence.get("glossary") != _glossary_binding(evidence_path.parent):
         return False
-    if not _valid_glossary(evidence.get("glossary"), evidence_path.parent):
-        return False
-
-    if audio is not None:
-        audio_path = evidence_path.parent / "audio.wav"
-        if audio != _identity(audio_path):
-            return False
-        try:
-            audio_meta = json.loads(
-                (evidence_path.parent / "audio.wav.meta.json").read_text(encoding="utf-8")
-            )
-        except (OSError, ValueError, TypeError):
-            return False
-        if not isinstance(audio_meta, dict):
-            return False
-        if audio_meta.get("source_video_identity") != source_identity:
-            return False
-
+    # asr_evidence_summary_for_brief reads these; a broken shape is a miss, not a crash.
     windows = evidence.get("windows")
-    if not isinstance(windows, list) or len(windows) != len(result):
-        return False
-    any_modified = False
-    for index, (window, segment) in enumerate(zip(windows, result)):
-        if not isinstance(window, dict) or set(window) != _WINDOW_KEYS:
-            return False
-        start, end = segment.get("start"), segment.get("end")
-        text = str(segment.get("text") or "")
-        observed = window.get("observed_text")
-        modified = window.get("glossary_modified")
-        if not _is_number(start) or not _is_number(end) or end <= start:
-            return False
-        if (
-            not _is_int(window.get("index")) or window["index"] != index
-            or not _is_number(window.get("start")) or not _is_number(window.get("end"))
-            or window["start"] != start or window["end"] != end
-            or not isinstance(window.get("post_glossary_text"), str)
-            or window["post_glossary_text"] != text
-            or window.get("text_availability") != ("AVAILABLE" if text else "UNAVAILABLE_UNKNOWN")
-        ):
-            return False
-        if (
-            not isinstance(observed, str) or not isinstance(modified, bool)
-            or modified != (observed != text)
-        ):
-            return False
-        any_modified = any_modified or modified is True
-    if any_modified and evidence["glossary"]["name_count"] == 0:
-        return False
-    return True
+    return isinstance(windows, list) and all(
+        isinstance(window, dict) and "glossary_modified" in window for window in windows
+    )
 
 
 def asr_evidence_summary_for_brief(work_dir, video_path):

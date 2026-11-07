@@ -260,8 +260,8 @@ def _render_warnings(work_dir: Path, final_output: Path | None) -> list[dict[str
     degraded to the .srt sidecar because ffmpeg lacks libass (from visual_qc.json).
 
     Only relayed when assembly_manifest.json says video-assemble rendered `final_output`:
-    a mode that delivers without it (dub) would otherwise inherit a stale visual_qc.json
-    left in the work_dir by an earlier full/cut run."""
+    checking any other file would otherwise inherit a stale visual_qc.json left in the
+    work_dir by an earlier run."""
     manifest = read_json_object(work_dir / "assembly_manifest.json") or {}
     rendered = manifest.get("final_output")
     if final_output is None or not isinstance(rendered, str) or \
@@ -269,9 +269,19 @@ def _render_warnings(work_dir: Path, final_output: Path | None) -> list[dict[str
         return []
     data = read_json_object(work_dir / "visual_qc.json")
     warnings = (data or {}).get("warnings")
-    if not isinstance(warnings, list):
-        return []
-    return [dict(item) for item in warnings if isinstance(item, Mapping) and item.get("code")]
+    relayed = [dict(item) for item in warnings if isinstance(item, Mapping) and item.get("code")] \
+        if isinstance(warnings, list) else []
+    tts_meta = read_json_object(work_dir / "tts_meta.json") or {}
+    if tts_meta.get("partial") is True and manifest.get("audio_mode") != "source-mix":
+        failures = tts_meta.get("failures")
+        count = len(failures) if isinstance(failures, list) else None
+        relayed.append({
+            "code": "partial_tts",
+            "failure_count": count,
+            "message": f"--allow-partial-tts：{count if count is not None else '部分'} 段旁白配音失败，"
+                       "成片缺这些段，只适合预览，不要直接发布",
+        })
+    return relayed
 
 
 def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
