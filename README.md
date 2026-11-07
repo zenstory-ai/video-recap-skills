@@ -342,7 +342,7 @@ flowchart LR
 |---|---|---|
 | [`video-recap`](skills/video-recap/) | 编排器与环境自检；日常端到端制作用它 | `视频` → `recap_<名>.mp4` |
 | [`video-understanding`](skills/video-understanding/) | 场景检测 · 抽帧 · ASR（`mimo-v2.5-asr`）· VLM（`mimo-v2.5`）· 时间轴融合 · 生成创作 brief | `视频` → `scenes / asr_result / vlm_analysis / silence_periods / timeline_fusion / agent_narration_brief.md` |
-| [`video-script`](skills/video-script/) | 导演 / 故事 / 画面 / 声音方案，解说写作，建议型评审与 lint；只做策划或写稿时单独调用 | `brief + 索引` → `recap_story_plan.json + visual_audio_board.json + [clip_plan.json] + narration.json` |
+| [`video-script`](skills/video-script/) | 导演 / 故事 / 画面 / 声音方案，解说写作，Agent 自检与 lint；只做策划或写稿时单独调用 | `brief + 索引` → `recap_story_plan.json + visual_audio_board.json + [clip_plan.json] + narration.json` |
 | [`video-cut`](skills/video-cut/) | 片段计划 → 拼剪成片；剪辑模式先剪后配，解说按成片时间轴写 | `clip_plan.json + 视频` → `edited_source.mp4` |
 | [`video-voiceover`](skills/video-voiceover/) | 合成解说音频（MiMo `mimo-v2.5-tts` / Fish Audio `s2.1-pro-free`） | `narration.json` → `tts_segments/ + tts_meta.json` |
 | [`video-assemble`](skills/video-assemble/) | 混音 · 压低原声 · 渲染字幕 · 多轨时间线 · 可选导出剪映 | `视频 + tts_meta` → `recap_<名>.mp4 + subtitles.srt/.ass + timeline.json` |
@@ -381,14 +381,6 @@ flowchart LR
 ```
 
 参考音频会发送给 MiMo 用于合成，只在获得音色所有者授权时使用。
-
-**英语视频译成中文并保留原说话人的声音：**
-
-```text
-把 /path/to/english.mp4 翻译成中文配音，保留原说话人的声音。我有权使用这段视频，说话人同意克隆其声音。
-```
-
-这是实验功能，直接替换原始台词，不叠加解说；当前支持单说话人整轨替换，不分离背景音乐。源视频音频会发给 MiMo ASR 转写，原说话人约 10 秒的声音会作为参考发给 MiMo 克隆音色，所以运行需要 `--confirm-voice-rights`：只在你有权使用该视频、且说话人同意被克隆声音时确认。
 
 **同一个系列复用字幕样式、音色、BGM 与包框：**
 

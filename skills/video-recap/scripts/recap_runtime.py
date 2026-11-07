@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 import materials as material_lib
-from lib import env_bool, env_int, ffmpeg_has_subtitles_filter, file_identity, load_json, material_id_for
+from lib import env_bool, ffmpeg_has_subtitles_filter, file_identity, load_json, material_id_for
 from recap_source import audio_binding
 
 BUNDLE = Path(__file__).resolve().parents[2]  # the skills/ directory
@@ -28,12 +28,6 @@ def _run(skill, script, *cli_args):
     res = subprocess.run(cmd, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if res.returncode != 0:
         raise SystemExit(f"{skill}/{script} 失败 (exit {res.returncode})")
-
-
-def _optional_env_int(name):
-    """lib.env_int with -1 as the documented "unset" sentinel."""
-    value = env_int(name, None)
-    return None if value == -1 else value
 
 
 def _read_video_duration_or_raise(path):
@@ -66,11 +60,6 @@ def _read_video_duration_or_raise(path):
 # width (or, rotated, the row scale the renderer converts exactly). Same value as the
 # renderer's and the measuring tool's copies (parity-tested).
 SUBTITLE_BAND_SAR_TOLERANCE = 0.02
-
-
-def _probe_display_height_or_raise(path, *, require_near_square_pixels=False):
-    """Return ffmpeg's display-coordinate height, accounting for rotation and SAR."""
-    return _probe_display_size_or_raise(path, require_near_square_pixels=require_near_square_pixels)[1]
 
 
 def _probe_display_size_or_raise(path, *, require_near_square_pixels=False):
@@ -129,16 +118,12 @@ def _analysis_settings(args):
         "edit_mode": args.edit_mode,
         "target_duration": args.target_duration,
         "skip_asr": bool(args.skip_asr),
-        "mimo_video_overview": bool(args.mimo_video_overview),
+        # Frozen at False: restore_material compares these settings by equality, so dropping a
+        # retired key would turn every saved material into a paid re-analysis.
+        "mimo_video_overview": False,
         "consolidate": bool(args.consolidate),
-        "consolidate_asr": bool(args.consolidate_asr),
+        "consolidate_asr": False,
     }
-
-
-def _coerce_videos(video_or_videos):
-    if isinstance(video_or_videos, (list, tuple)):
-        return [Path(v).resolve() for v in video_or_videos]
-    return [Path(video_or_videos).resolve()]
 
 
 def _run_manifest_payload(video, args):
@@ -154,12 +139,8 @@ def _run_manifest_payload(video, args):
 # Settings main() can take from the environment rather than argv, with their no-env value.
 # A resume shell may not carry the same environment, so the resume argv pins them.
 _ENV_FILLED = (
-    ("edit_mode", "full"),
-    ("target_duration", None),
     ("tts_provider", "auto"),
     ("voice_ref", None),
-    ("subtitle_y_top", None),
-    ("subtitle_y_bot", None),
 )
 
 
@@ -180,17 +161,20 @@ def _resume_argv(work_dir, args):
     return argv
 
 
-def _write_run_manifest(work_dir, video, args):
-    payload = {**_run_manifest_payload(video, args), "argv": _resume_argv(work_dir, args)}
+def _write_manifest_with_argv(work_dir, payload, args):
     (work_dir / RUN_MANIFEST).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps({**payload, "argv": _resume_argv(work_dir, args)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    return payload
+
+
+def _write_run_manifest(work_dir, video, args):
+    _write_manifest_with_argv(work_dir, _run_manifest_payload(video, args), args)
 
 
 def _build_multi_source_records(videos, args):
     records = []
-    for video in _coerce_videos(videos):
+    for video in videos:
         identity = file_identity(video)
         records.append(
             {
@@ -207,7 +191,7 @@ def _build_multi_source_records(videos, args):
     return records
 
 
-def _multi_run_manifest_payload(videos, args, source_records):
+def _multi_run_manifest_payload(args, source_records):
     return {
         "schema_version": 2,
         "mode": "multi_source",
@@ -221,20 +205,13 @@ def _multi_run_manifest_payload(videos, args, source_records):
             }
             for s in source_records
         ],
-        "source_videos": [str(v) for v in _coerce_videos(videos)],
         "settings": _analysis_settings(args),
         "audio": audio_binding(args),
     }
 
 
-def _write_project_run_manifest(work_dir, videos, args, source_records):
-    payload = {
-        **_multi_run_manifest_payload(videos, args, source_records),
-        "argv": _resume_argv(work_dir, args),
-    }
-    (work_dir / RUN_MANIFEST).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def _write_project_run_manifest(work_dir, args, source_records):
+    _write_manifest_with_argv(work_dir, _multi_run_manifest_payload(args, source_records), args)
 
 
 def _write_multi_source_manifest(work_dir, source_records):
@@ -295,9 +272,8 @@ def _preflight_burn_subtitles(args):
     lacks libass. An explicit request fails fast here, since otherwise the run only dies at
     the final assemble `-vf subtitles=` step. The default burn only warns: assemble then
     delivers the .srt sidecar and records `subtitle_burn_degraded` in visual_qc.json, which
-    final_qc.json carries in metadata.warnings. Dub renders through its own script, which
-    never burns subtitles, so it is exempt."""
-    if args.edit_mode == "dub" or not _burn_subtitles_intended(args):
+    final_qc.json carries in metadata.warnings."""
+    if not _burn_subtitles_intended(args):
         return
     if not _ffmpeg_present_but_cannot_burn():
         return

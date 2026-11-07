@@ -15,9 +15,6 @@
     },
     "video_filters": {
       "mask_source_subtitles": false,
-      "source_subtitle_mask_policy": "off",
-      "source_subtitle_mask_policy_declared": false,
-      "source_subtitle_mask_policy_trigger": "policy_off",
       "source_subtitle_mask_ratio": null,
       "source_subtitle_mask_timing": null,
       "subtitle_mask_opacity": null,
@@ -39,7 +36,6 @@
       "duck_fade_seconds": 0.3,
       "duck_bridge_seconds": 1.5,
       "ducking_narr_weight": 2.4,
-      "ducking_orig_volume": 0.3,
       "idle_orig_volume": 1.0,
       "speech_ducking_volume": 0.2,
       "zone_ducking_volume": 0.12,

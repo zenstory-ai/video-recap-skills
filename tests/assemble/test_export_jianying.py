@@ -398,6 +398,37 @@ def test_exporter_skips_empty_audio_track():
     ]  # empty audio track dropped
 
 
+def test_exporter_uses_base_gain_as_clip_volume_without_keyframes():
+    """source-mix timelines carry only base_gain; the draft must play the clip at that level."""
+    tl = {
+        "schema_version": 2,
+        "canvas": {"width": 100, "height": 100, "fps": 30},
+        "duration": 5.0,
+        "tracks": [
+            {
+                "kind": "video",
+                "name": "video",
+                "clips": [
+                    {
+                        "source_path": "/s.mp4",
+                        "source_start": 0.0,
+                        "source_end": 5.0,
+                        "timeline_start": 0.0,
+                        "timeline_end": 5.0,
+                        "audio": {
+                            "role": "original",
+                            "base_gain": 0.25,
+                            "volume_keyframes": [],
+                        },
+                    }
+                ],
+            },
+        ],
+    }
+    content, _m, _n = build_draft(tl, new_id=_counter_ids(), probe=_fake_probe)
+    assert content["tracks"][0]["segments"][0]["volume"] == 0.25
+
+
 def test_core_assemble_does_not_import_exporter():
     # The exporter must stay optional: importing the render path must NOT pull it in.
     # Run in a clean interpreter so we don't perturb this process's already-imported modules.

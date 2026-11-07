@@ -59,7 +59,6 @@ recap 默认启用解说字幕烧录。使用本例的 Remotion 字幕条时，�
 公开的 7 个解说块都比各自时间窗的推荐字数多 1.5–2.3 倍。cut 第二阶段的 `validate --mode cut_output` 只把这记成 `over_budget` warning，校验能通过；但新声音的语速不同，某块可能装不下：
 
 - voiceover 保留原稿只记日志；assemble 有界提速仍放不下时在视频编码前以 `no_safe_fit` 阻断，错误里写明段号与 `needed_tempo_factor`，据此改短这一块或放宽时间窗后重跑；
-- 要原样保留采用稿时给 recap 加 `--preserve-approved-text`，装不下即在配音阶段失败，处理方式相同；
 - 不要用裁尾或继续提速来硬塞。
 
 复现时保留选段与叙事节奏，并按实际声音校准时间。若声音或语速不同：
@@ -69,7 +68,7 @@ recap 默认启用解说字幕烧录。使用本例的 Remotion 字幕条时，�
 - 按新运行中实际放置的音频重新生成字幕 cue；
 - 不直接复用本例 `captions.json` 冒充同步。
 
-公开的 `timeline.json`、`assembly_manifest.json` 和 `assembly_qc.json` 记录采用版的轨道结构、音频放置和 `verdict` / `blocking_codes`。原运行未记录当前新增的 `audio_mode`、`narration_input_binding` 等字段，复现时不要替历史产物补写；新成片按新运行生成的 `assembly_qc.json` 与 `final_qc.json` 检查。
+公开的 `timeline.json`、`assembly_manifest.json` 和 `assembly_qc.json` 记录采用版的轨道结构、音频放置和 `verdict` / `blocking_codes`。原运行未记录当前新增的 `audio_mode` 等字段，复现时不要替历史产物补写；新成片按新运行生成的 `assembly_qc.json` 与 `final_qc.json` 检查。
 
 本例混音记录的 `ducking_narr_weight` 是 2.4，当前 video-assemble 固定为 1.5，且没有开关可改，所以旁白压过原声的比例不能原样复现；需要时在项目级混音里调整，并重新听审。
 

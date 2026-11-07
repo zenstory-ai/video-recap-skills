@@ -1,66 +1,38 @@
 #!/usr/bin/env python3
 """video-understanding consolidation / 整理 (index build-up).
 
-Optional, synchronous, in-pipeline. Two independent LLM passes over the video's own signal:
-  - Pass B (index, default): roll up per-scene vlm_analysis into a global
-    character / relationship / plot index -> understanding_index.json (+ .md).
-  - Pass A (asr cleanup, opt-in): clean/punctuate/lightly speaker-attribute the raw run-on
-    ASR text -> asr_clean.json. Timing is preserved BY CONSTRUCTION: the model returns cleaned
-    TEXT per segment index only; each segment's original start/end is re-attached here, so a
-    cleanup pass can never shift the timing-bearing spans downstream chunking depends on.
+Optional, synchronous, in-pipeline. One LLM pass over the video's own signal rolls up
+per-scene vlm_analysis into a global character / relationship / plot index ->
+understanding_index.json.
 
-Both passes are idempotent (a fresh artifact is reused); a failure raises and the runner
+The pass is idempotent (a fresh artifact is reused); a failure raises and the runner
 records it in consolidation.status.json. A cut-off or non-JSON model reply is a failure too
-(ConsolidateIncomplete), never an empty artifact reported as done. Mirrors review.py's pure-seam + thin-driver shape so it is
-unit-testable with a mocked api_call. NON-required: the pipeline runs unchanged without it.
+(ConsolidateIncomplete), never an empty artifact reported as done. A pure seam + thin driver,
+so it is unit-testable with a mocked api_call. NON-required: the pipeline runs unchanged without it.
 """
 
-import argparse
 import json
 import re
 from pathlib import Path
 
-from lib import CONFIG, log, api_call, file_identity, load_background_research
-from index_normalize import coerce_character_aliases, normalize_index, scenes_end
-from understanding_cache import _fresh
-
-# Shared tolerance for the per-segment span check. The brief-side gate inlines the SAME
-# literal (it cannot import this module without breaking the brief/narration byte-parity).
-# Keep both in sync. Consolidate preserves spans exactly, so this only guards hand-edited files.
-_ASR_SPAN_TOL = 0.05
-ASR_CLEAN_POSTPROCESS_VERSION = 2
+from lib import CONFIG, log, api_call, load_background_research
+from index_normalize import normalize_index, scenes_end
+from understanding_cache import _artifact_identity, _artifact_meta_path
 
 # Output budgets. A 5-min recap's index ran past 3000 tokens and came back cut off
 # (finish_reason=length); a cut-off reply parses to nothing, so it must never be written as
 # a finished artifact. One retry doubles the budget; a second cut-off raises.
-_CLEAN_MAX_TOKENS = 8000
 _INDEX_MAX_TOKENS = 8000
 _RETRY_BUDGET_FACTOR = 2
 
 
 class ConsolidateIncomplete(RuntimeError):
-    """The model reply was cut off or is not JSON; nothing was written for that pass."""
+    """The model reply was cut off or is not JSON; nothing was written."""
 
 
 class ConsolidateNoKey(RuntimeError):
-    """A pass needs the model but no API key is set; nothing was sent or written."""
+    """The pass needs the model but no API key is set; nothing was sent or written."""
 
-
-def _require_api_key(label):
-    """Offline runs reuse fresh artifacts; a pass that would call the model skips instead of
-    sending an unauthenticated request that can only 401."""
-    if not CONFIG["api_key"]:
-        log(f"consolidate({label}): 未设置 {CONFIG['api_env_var']}，跳过（不发送请求）")
-        raise ConsolidateNoKey(label)
-
-CLEAN_PROMPT = """你在清洗中文视频的 ASR 逐段转写。对【每一段】做：补标点、修明显同音/错别字、（能判断时）在句首轻标说话人，让长段连读文本变成清晰可读的句子。
-铁律：
-- 不要合并或拆分段落，输出段数必须与输入完全一致，顺序一致。
-- 不要改时间，不要输出 start/end（时间由程序保留）。
-- 只清洗 text，不要增删事实、不要脑补画面。
-- 必须把相邻两段连起来检查标点是否连续；切窗处不是自然句尾时，不要凭单段补句号。
-- 分段音频窗口互不重叠。相邻段首尾字面相同可能是合法复沓（例如“真的很难。难得让人想放弃”），不能仅凭文字相同删除任何一边的词；没有音频重叠证据时保留各段词汇内容。
-只返回 JSON：{"segments":[{"i":0,"text":"清洗后的文本","speaker":"可选说话人"}, ...]}，i 为输入段的下标。"""
 
 INDEX_SCHEMA_VERSION = 2
 
@@ -79,50 +51,6 @@ INDEX_PROMPT = """你在根据逐场景画面分析、ASR对白、background_res
 
 
 # ── pure seams (no I/O; unit-testable) ────────────────────────────────────────
-
-
-def build_clean_messages(asr_result):
-    lines = []
-    for i, seg in enumerate(asr_result or []):
-        lines.append(f"{i}. {seg['text'].strip()}")
-    user = f"{CLEAN_PROMPT}\n\n## 逐段转写（共 {len(lines)} 段）\n" + "\n".join(lines)
-    return [{"role": "user", "content": user}]
-
-
-def parse_clean_response(text, asr_result):
-    """Zip cleaned TEXT onto the original segments (start/end preserved by construction).
-    Returns the original asr_result UNCHANGED on any parse / shape / count problem."""
-    base = list(asr_result or [])
-    if not base:
-        return asr_result
-    data = _extract_json(text)
-    if not isinstance(data, dict):
-        return asr_result
-    segs = data.get("segments")
-    if not isinstance(segs, list) or len(segs) != len(base):
-        return asr_result  # count mismatch -> reject wholesale (idempotent no-op)
-    by_index = {}
-    for item in segs:
-        if isinstance(item, dict) and isinstance(item.get("i"), int):
-            by_index[item["i"]] = item
-    if len(by_index) != len(base):
-        return asr_result
-    out = []
-    for i, seg in enumerate(base):
-        cleaned = by_index.get(i, {})
-        new_text = str(cleaned.get("text", "")).strip() or seg["text"]
-        merged = {"start": seg["start"], "end": seg["end"], "text": new_text}
-        speaker = str(cleaned.get("speaker", "")).strip()
-        if speaker:
-            merged["speaker"] = speaker
-        out.append(merged)
-    return out
-
-
-def _input_identity(work_dir, name):
-    """{size, mtime_ns} of one input artifact, or None when it is absent."""
-    path = Path(work_dir) / name
-    return file_identity(path) if path.exists() else None
 
 
 def _research_glossary_from_context(background_research):
@@ -164,134 +92,8 @@ def _research_glossary_from_context(background_research):
     return glossary
 
 
-def _dialogue_source(asr_result, asr_clean):
-    """asr_clean.json segments when present (consolidate's own output), else raw asr_result rows."""
-    return asr_clean["segments"] if asr_clean else (asr_result or [])
-
-
-def _dialogue_segments_for_index(asr_result=None, asr_clean=None):
-    out = []
-    for i, seg in enumerate(_dialogue_source(asr_result, asr_clean)):
-        text = seg["text"].strip()
-        if not text:
-            continue
-        out.append(
-            {
-                "id": f"asr:{i}",
-                "start": seg["start"],
-                "end": seg["end"],
-                "text": text,
-            }
-        )
-    return out
-
-
-def _stable_unique(values):
-    seen = set()
-    out = []
-    for value in values or []:
-        key = (
-            json.dumps(value, ensure_ascii=False, sort_keys=True)
-            if isinstance(value, dict)
-            else str(value)
-        )
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(value)
-    return out
-
-
-def _apply_deterministic_asr_research_fallback(
-    index, asr_result=None, asr_clean=None, background_research=None
-):
-    """Guarantee ASR/research mentions survive even when the LLM omits them.
-
-    The LLM still owns synthesis, but cacheable deterministic fields make ASR contribution
-    observable: aliases/names from background_research are matched against ASR/asr_clean text
-    and written to characters[*].asr_mentions/evidence_ids without inventing relationships or
-    plot facts. Research remains context_only via research_glossary.
-    """
-    index = dict(index or {})
-    for key in (
-        "characters",
-        "relationships",
-        "plot_points",
-        "entities",
-        "research_glossary",
-    ):
-        index.setdefault(key, [])
-    glossary = index.get("research_glossary") or _research_glossary_from_context(
-        background_research
-    )
-    if not glossary:
-        glossary = _research_glossary_from_context(background_research)
-    for item in glossary:
-        if isinstance(item, dict):
-            item["support"] = "context_only"
-    index["research_glossary"] = glossary
-
-    segments = _dialogue_segments_for_index(asr_result=asr_result, asr_clean=asr_clean)
-    char_by_name = {}
-    for c in index.get("characters") or []:
-        if isinstance(c, dict) and str(c.get("name", "")).strip():
-            char_by_name[str(c.get("name")).strip()] = c
-    for g in glossary:
-        if not isinstance(g, dict):
-            continue
-        name = str(g.get("name", "")).strip()
-        aliases = [str(a).strip() for a in (g.get("aliases") or []) if str(a).strip()]
-        terms = [t for t in [name, *aliases] if t]
-        if not terms:
-            continue
-        matches = []
-        evidence_ids = []
-        for seg in segments:
-            text = seg["text"]
-            hit_terms = [term for term in terms if term and term in text]
-            if hit_terms:
-                matches.append(
-                    {
-                        "text": text,
-                        "evidence_id": seg["id"],
-                        "matched_aliases": hit_terms,
-                    }
-                )
-                evidence_ids.append(seg["id"])
-        if not matches:
-            continue
-        char = char_by_name.get(name)
-        if char is None:
-            char = {
-                "name": name or matches[0]["matched_aliases"][0],
-                "description": "",
-                "aliases": aliases,
-                "visual_descriptions": [],
-                "asr_mentions": [],
-                "research_role": str(g.get("role", "")).strip(),
-                "evidence_ids": [],
-                "confidence": "medium",
-            }
-            index["characters"].append(char)
-            char_by_name[char["name"]] = char
-        char.setdefault("aliases", [])
-        char["aliases"] = _stable_unique(list(char.get("aliases") or []) + aliases)
-        char.setdefault("asr_mentions", [])
-        char["asr_mentions"] = _stable_unique(
-            list(char.get("asr_mentions") or []) + matches
-        )
-        char.setdefault("evidence_ids", [])
-        char["evidence_ids"] = _stable_unique(
-            list(char.get("evidence_ids") or []) + evidence_ids
-        )
-        if not char.get("research_role"):
-            char["research_role"] = str(g.get("role", "")).strip()
-        char.setdefault("confidence", "medium")
-    return index
-
-
 def build_index_messages(
-    vlm_analysis, asr_result=None, asr_clean=None, background_research=None
+    vlm_analysis, asr_result=None, background_research=None
 ):
     lines = []
     for i, scene in enumerate(vlm_analysis or []):
@@ -309,7 +111,7 @@ def build_index_messages(
                 fact_txt = " | 帧实: " + "；".join(a for a in actions[:6] if a)
         lines.append(f"[visual:{i} 场景{sid} {start:.0f}-{end:.0f}s] {desc}{fact_txt}")
     asr_lines = []
-    for i, seg in enumerate(_dialogue_source(asr_result, asr_clean)):
+    for i, seg in enumerate(asr_result or []):
         text = seg["text"].strip()
         if not text:
             continue
@@ -327,7 +129,7 @@ def build_index_messages(
     user = (
         f"{INDEX_PROMPT}\n\n"
         f"## 逐场景画面分析（共 {len(lines)} 段）\n" + "\n".join(lines) + "\n\n"
-        f"## ASR / cleaned dialogue（共 {len(asr_lines)} 段）\n"
+        f"## ASR dialogue（共 {len(asr_lines)} 段）\n"
         + ("\n".join(asr_lines) or "(无)")
         + "\n\n"
         "## Research glossary（clock=null/context_only，不得升级为当前剧情事实）\n"
@@ -336,17 +138,8 @@ def build_index_messages(
     return [{"role": "user", "content": user}]
 
 
-def parse_index_response(text):
-    data = _extract_json(text)
-    if not isinstance(data, dict):
-        return {
-            "schema_version": INDEX_SCHEMA_VERSION,
-            "characters": [],
-            "relationships": [],
-            "plot_points": [],
-            "entities": [],
-            "research_glossary": [],
-        }
+def _index_from_reply(data):
+    """The index fields of a parsed model reply: lists only, research kept as context."""
     out = {"schema_version": INDEX_SCHEMA_VERSION}
     for key in (
         "characters",
@@ -357,63 +150,10 @@ def parse_index_response(text):
     ):
         val = data.get(key)
         out[key] = val if isinstance(val, list) else []
-    out["characters"] = coerce_character_aliases(out["characters"])
     for item in out["research_glossary"]:
         if isinstance(item, dict):
             item["support"] = "context_only"
     return out
-
-
-def format_index_md(index):
-    out = ["# Understanding index (from consolidate.py)", ""]
-    chars = index.get("characters") or []
-    if chars:
-        out.append("## Characters")
-        for c in chars:
-            if isinstance(c, dict):
-                out.append(
-                    f"- **{c.get('name', '?')}** — {c.get('description', '')}".rstrip()
-                )
-            else:
-                out.append(f"- {c}")
-        out.append("")
-    rels = index.get("relationships") or []
-    if rels:
-        out.append("## Relationships")
-        for r in rels:
-            if isinstance(r, dict):
-                out.append(
-                    f"- {r.get('a', '?')} — {r.get('relation', '?')} — {r.get('b', '?')}"
-                )
-            else:
-                out.append(f"- {r}")
-        out.append("")
-    plot = index.get("plot_points") or []
-    if plot:
-        out.append("## Plot spine")
-        for i, p in enumerate(plot):
-            out.append(f"{i + 1}. {p.get('text', p) if isinstance(p, dict) else p}")
-        out.append("")
-    ents = index.get("entities") or []
-    if ents:
-        out.append("## Entities")
-        for e in ents:
-            out.append(f"- {e.get('name', e) if isinstance(e, dict) else e}")
-        out.append("")
-    glossary = index.get("research_glossary") or []
-    if glossary:
-        out.append("## Research glossary (context_only)")
-        for g in glossary:
-            if isinstance(g, dict):
-                aliases = "/".join(g.get("aliases") or [])
-                alias_txt = f" ({aliases})" if aliases else ""
-                out.append(
-                    f"- {g.get('name', '?')}{alias_txt}: {g.get('role', '')} [{g.get('support', 'context_only')}]"
-                )
-            else:
-                out.append(f"- {g}")
-        out.append("")
-    return "\n".join(out).rstrip() + "\n"
 
 
 def _extract_json(text):
@@ -430,21 +170,18 @@ def _extract_json(text):
         return None
 
 
-def _index_meta_path(work_dir):
-    return Path(work_dir) / "understanding_index.json.meta.json"
-
-
 def _index_meta(work_dir, vlm_analysis):
     """Provenance of understanding_index.json: `source` (vlm_analysis.json identity) + `model`
     are what brief consumers check; the other inputs and the prompt text are the producer's
-    own rebuild gate."""
+    own rebuild gate. `asr_clean` stays null: the cleaned transcript is gone, and an index an
+    old run built from one must not match while one built from raw ASR keeps matching."""
     return {
         "schema_version": INDEX_SCHEMA_VERSION,
-        "source": _input_identity(work_dir, "vlm_analysis.json"),
+        "source": _artifact_identity(work_dir / "vlm_analysis.json"),
         "inputs": {
-            "asr_result": _input_identity(work_dir, "asr_result.json"),
-            "asr_clean": _input_identity(work_dir, "asr_clean.json"),
-            "background_research": _input_identity(work_dir, "background_research.json"),
+            "asr_result": _artifact_identity(work_dir / "asr_result.json"),
+            "asr_clean": None,
+            "background_research": _artifact_identity(work_dir / "background_research.json"),
         },
         "scene_count": len([s for s in (vlm_analysis or []) if isinstance(s, dict)]),
         "model": CONFIG["vlm_model"],
@@ -452,15 +189,8 @@ def _index_meta(work_dir, vlm_analysis):
     }
 
 
-def _write_index_meta(work_dir, vlm_analysis):
-    _index_meta_path(work_dir).write_text(
-        json.dumps(_index_meta(work_dir, vlm_analysis), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-
-
 def _index_cache_matches(work_dir, vlm_analysis):
-    meta_path = _index_meta_path(work_dir)
+    meta_path = _artifact_meta_path(work_dir / "understanding_index.json")
     if not meta_path.exists():
         return False
     try:
@@ -481,42 +211,6 @@ def _load(work_dir, name):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def consolidate_transcript(work_dir):
-    work_dir = Path(work_dir)
-    asr_result = _load(work_dir, "asr_result.json")
-    if not asr_result:
-        log("consolidate(asr): 无 asr_result.json，跳过")
-        return None
-    out_path = work_dir / "asr_clean.json"
-    if _fresh(out_path, work_dir / "asr_result.json"):
-        existing = _load(work_dir, "asr_clean.json") or {}
-        if (
-            existing.get("source") == _input_identity(work_dir, "asr_result.json")
-            and existing.get("model") == CONFIG["vlm_model"]
-            and existing.get("prompt") == CLEAN_PROMPT
-            and existing.get("postprocess_version") == ASR_CLEAN_POSTPROCESS_VERSION
-        ):
-            log("consolidate(asr): asr_clean.json 已最新，跳过")
-            return existing
-    _require_api_key("asr")
-    content = _complete_json_reply(
-        "asr", build_clean_messages(asr_result), _CLEAN_MAX_TOKENS
-    )
-    segments = parse_clean_response(content, asr_result)
-    payload = {
-        "source": _input_identity(work_dir, "asr_result.json"),
-        "model": CONFIG["vlm_model"],
-        "prompt": CLEAN_PROMPT,
-        "postprocess_version": ASR_CLEAN_POSTPROCESS_VERSION,
-        "segments": segments,
-    }
-    out_path.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    log(f"consolidate(asr): 写出 asr_clean.json（{len(segments)} 段）")
-    return payload
-
-
 def consolidate_index(work_dir):
     work_dir = Path(work_dir)
     vlm_analysis = _load(work_dir, "vlm_analysis.json")
@@ -524,9 +218,7 @@ def consolidate_index(work_dir):
         log("consolidate(index): 无 vlm_analysis.json，跳过")
         return None
     out_path = work_dir / "understanding_index.json"
-    if _fresh(out_path, work_dir / "vlm_analysis.json") and _index_cache_matches(
-        work_dir, vlm_analysis
-    ):
+    if out_path.exists() and _index_cache_matches(work_dir, vlm_analysis):
         cached = _load(work_dir, "understanding_index.json")
         repaired = _normalized_index(cached, vlm_analysis) if isinstance(cached, dict) else cached
         if repaired != cached:
@@ -535,27 +227,24 @@ def consolidate_index(work_dir):
             _store_index(work_dir, repaired, vlm_analysis)
         log("consolidate(index): understanding_index.json 已最新，跳过")
         return repaired
-    _require_api_key("index")
+    if not CONFIG["api_key"]:
+        # Offline runs reuse a fresh index; a pass that would call the model skips instead of
+        # sending an unauthenticated request that can only 401.
+        log(f"consolidate(index): 未设置 {CONFIG['api_env_var']}，跳过（不发送请求）")
+        raise ConsolidateNoKey()
     asr_result = _load(work_dir, "asr_result.json") or []
-    asr_clean = _load(work_dir, "asr_clean.json") or {}
     background_research = load_background_research(work_dir)
-    content = _complete_json_reply(
-        "index",
+    reply = _complete_json_reply(
         build_index_messages(
             vlm_analysis,
             asr_result=asr_result,
-            asr_clean=asr_clean,
             background_research=background_research,
         ),
         _INDEX_MAX_TOKENS,
     )
-    index = parse_index_response(content)
-    index = _apply_deterministic_asr_research_fallback(
-        index,
-        asr_result=asr_result,
-        asr_clean=asr_clean,
-        background_research=background_research,
-    )
+    index = _index_from_reply(reply)
+    if not index["research_glossary"]:
+        index["research_glossary"] = _research_glossary_from_context(background_research)
     index = _normalized_index(index, vlm_analysis)
     _store_index(work_dir, index, vlm_analysis)
     log(
@@ -576,31 +265,12 @@ def _normalized_index(index, vlm_analysis):
 
 
 def _store_index(work_dir, index, vlm_analysis):
-    (work_dir / "understanding_index.json").write_text(
-        json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8"
+    out_path = work_dir / "understanding_index.json"
+    out_path.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    _artifact_meta_path(out_path).write_text(
+        json.dumps(_index_meta(work_dir, vlm_analysis), ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    _write_index_meta(work_dir, vlm_analysis)
-    (work_dir / "understanding_index.md").write_text(
-        format_index_md(index), encoding="utf-8"
-    )
-
-
-def consolidate(work_dir, do_asr=False, do_index=True):
-    """Default = index-only (Pass B, zero timing risk). Pass A (asr) is opt-in.
-
-    Failures propagate; understanding_runner catches them and writes the "failed" status.
-    A pass that needs the model while no key is set is listed under "skipped_no_key"."""
-    result = {"skipped_no_key": []}
-    passes = [("asr", "asr_clean", consolidate_transcript)] if do_asr else []
-    if do_index:
-        passes.append(("index", "index", consolidate_index))
-    for label, key, run in passes:
-        try:
-            result[key] = run(work_dir)
-        except ConsolidateNoKey:
-            result[key] = None
-            result["skipped_no_key"].append(label)
-    return result
 
 
 def _response_text(resp):
@@ -613,8 +283,8 @@ def _response_text(resp):
         return "", None
 
 
-def _complete_json_reply(label, messages, max_tokens):
-    """Call the model and return a reply that is complete JSON, or raise ConsolidateIncomplete.
+def _complete_json_reply(messages, max_tokens):
+    """Call the model and return the parsed JSON object, or raise ConsolidateIncomplete.
 
     A cut-off reply (finish_reason=length) is retried once with a larger budget; an
     unparseable reply is not retried (a bigger budget would not fix it)."""
@@ -632,41 +302,17 @@ def _complete_json_reply(label, messages, max_tokens):
         )
         if finish == "length":
             if attempt == 0:
-                log(f"consolidate({label}): 输出被截断（max_tokens={budget}），加大预算重试一次")
+                log(f"consolidate(index): 输出被截断（max_tokens={budget}），加大预算重试一次")
                 budget *= _RETRY_BUDGET_FACTOR
                 continue
             raise ConsolidateIncomplete(
-                f"consolidate({label}): 输出被截断（finish_reason=length，"
+                "consolidate(index): 输出被截断（finish_reason=length，"
                 f"max_tokens={budget}），未写出结果"
             )
-        if not isinstance(_extract_json(content), dict):
+        data = _extract_json(content)
+        if not isinstance(data, dict):
             raise ConsolidateIncomplete(
-                f"consolidate({label}): 模型返回的不是可解析的 JSON"
+                "consolidate(index): 模型返回的不是可解析的 JSON"
                 f"（finish_reason={finish}），未写出结果"
             )
-        return content
-
-
-def main():
-    ap = argparse.ArgumentParser(
-        description="Consolidate the understanding index (and optionally clean ASR)."
-    )
-    ap.add_argument("--work-dir", required=True)
-    ap.add_argument("--asr", action="store_true", help="also run Pass A (ASR cleanup)")
-    ap.add_argument("--no-index", action="store_true", help="skip Pass B (index)")
-    args = ap.parse_args()
-    res = consolidate(args.work_dir, do_asr=args.asr, do_index=not args.no_index)
-    print(
-        json.dumps(
-            {
-                "status": "skipped_no_key" if res["skipped_no_key"] else "consolidated",
-                "index": bool(res.get("index")),
-                "asr_clean": bool(res.get("asr_clean")),
-            },
-            ensure_ascii=False,
-        )
-    )
-
-
-if __name__ == "__main__":
-    main()
+        return data

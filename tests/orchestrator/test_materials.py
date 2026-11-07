@@ -1,6 +1,16 @@
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+import pytest
 
 import materials
+import recap_cli
+import recap_runtime
+import recap_timeline
 from lib import material_id_for, source_id_for
 
 IDENTITY = {"size": 1234, "mtime_ns": 1_700_000_000_000_000_000}
@@ -38,6 +48,7 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
+    (work / "asr_result.json").write_text(json.dumps([{"text": "raw"}]), encoding="utf-8")
     (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "clean"}]}), encoding="utf-8")
     (work / "understanding_index.json").write_text(json.dumps({
         "characters": [{"name": "英雄"}], "relationships": [], "plot_points": [],
@@ -52,7 +63,8 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     assert (mdir / "material.json").exists()
     assert (mdir / "material.md").exists()
     assert (mdir / "artifacts" / "scenes.json").exists()
-    assert (mdir / "artifacts" / "asr_clean.json").exists()
+    assert (mdir / "artifacts" / "asr_result.json").exists()
+    assert not (mdir / "artifacts" / "asr_clean.json").exists()
     assert not (mdir / "artifacts" / "audio.wav").exists()
     assert not (mdir / "artifacts" / "secret.json").exists()
     lines = (lib / "materials_index.jsonl").read_text(encoding="utf-8").splitlines()
@@ -73,7 +85,6 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
     (work / "asr_result.json").write_text(json.dumps([{"text": "hello"}]), encoding="utf-8")
-    (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "hello。"}]}), encoding="utf-8")
     video = tmp_path / "ep.mp4"
     meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
 
@@ -97,7 +108,6 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     )
     assert ok["restored"] is True
     assert (dest / "asr_result.json").exists()
-    assert (dest / "asr_clean.json").exists()
 
 
 def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_not(tmp_path):
@@ -107,7 +117,7 @@ def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_n
     work = tmp_path / "work"
     work.mkdir()
     status = {
-        "stage": "consolidation", "enabled": True, "do_asr": False, "do_index": True,
+        "stage": "consolidation", "enabled": True, "do_index": True,
         "status": "failed", "message": "MiMo timeout", "artifacts": [],
     }
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
@@ -223,30 +233,6 @@ def test_redact_text_leaves_plain_words_but_strips_token_shapes():
     assert "ghp_" not in materials._redact_text("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
 
 
-def test_restore_overwrite_false_does_not_prune_then_lose_staged_file(tmp_path):
-    """FF-B: prune_stale_allowed + overwrite=False must NOT prune a staged file and then skip
-    restoring it. The staged file is preserved; only true (non-staged) stale orphans are pruned."""
-    lib = tmp_path / "library"
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    (seed / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    meta = materials.save_material(lib, seed, tmp_path / "ep.mp4", IDENTITY, SETTINGS)
-
-    dest = tmp_path / "dest"
-    dest.mkdir()
-    (dest / "scenes.json").write_text(json.dumps([{"keep": "existing"}]), encoding="utf-8")  # staged name, present
-    (dest / "vlm_analysis.json").write_text(json.dumps({"stale": 1}), encoding="utf-8")        # non-staged orphan
-
-    res = materials.restore_material(lib, dest, source_path=tmp_path / "ep.mp4", source_identity=IDENTITY,
-                                     settings=SETTINGS, material_id=meta["material_id"], overwrite=False)
-
-    assert (dest / "scenes.json").exists(), "staged file must survive (not pruned-then-skipped)"
-    assert json.loads((dest / "scenes.json").read_text(encoding="utf-8")) == [{"keep": "existing"}]
-    assert not (dest / "vlm_analysis.json").exists(), "true stale orphan is pruned"
-    assert "vlm_analysis.json" in res["pruned_artifacts"]
-    assert "scenes.json" not in res["pruned_artifacts"]
-
-
 def test_save_material_reconciles_orphan_artifacts_on_resave(tmp_path):
     """FF-C: re-saving with fewer artifacts removes the orphan from artifacts/ so the on-disk
     set matches material.json (no stale blob lingering for greps)."""
@@ -283,3 +269,220 @@ def test_save_material_refreshes_malformed_existing_metadata(tmp_path):
 
     assert refreshed["created_at"] == "2026-02-01T00:00:00Z"
     assert refreshed["updated_at"] == "2026-02-01T00:00:00Z"
+
+
+# The exact settings dict a run with default flags recorded before --mimo-video-overview and
+# --consolidate-asr were removed. Written out by hand: it must not follow _analysis_settings.
+_SETTINGS_BEFORE_FLAG_REMOVAL = {
+    "context": "",
+    "scene_threshold": None,
+    "style": "纪录片",
+    "edit_mode": "full",
+    "target_duration": None,
+    "skip_asr": False,
+    "mimo_video_overview": False,
+    "consolidate": True,
+    "consolidate_asr": False,
+}
+
+
+def _material_saved_before_flag_removal(lib, video, settings):
+    """A library entry as the previous release wrote it, asr_clean.json artifact included."""
+    mid = material_id_for(video, IDENTITY)
+    artifacts = lib / "materials" / mid / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "asr_result.json").write_text(
+        json.dumps([{"start": 0.0, "end": 1.0, "text": "原始转写"}]), encoding="utf-8")
+    (artifacts / "asr_clean.json").write_text(
+        json.dumps({"segments": [{"start": 0.0, "end": 1.0, "text": "清洗旧稿"}]}), encoding="utf-8")
+    listed = [{"name": name, "path": f"artifacts/{name}", "bytes": 1}
+              for name in ("asr_clean.json", "asr_result.json")]
+    (lib / "materials" / mid / "material.json").write_text(json.dumps({
+        "material_id": mid, "source_path": str(video.resolve()),
+        "source_video_identity": IDENTITY, "settings": settings,
+        "updated_at": "2026-10-03T00:00:00Z", "artifacts": listed,
+    }), encoding="utf-8")
+    return mid
+
+
+def test_entry_saved_before_the_flag_removal_still_restores(tmp_path):
+    video = tmp_path / "ep.mp4"
+    lib = tmp_path / "library"
+    mid = _material_saved_before_flag_removal(lib, video, _SETTINGS_BEFORE_FLAG_REMOVAL)
+    _, args = recap_cli.parse_args([str(video)])
+    settings = recap_runtime._analysis_settings(args)
+    assert settings == _SETTINGS_BEFORE_FLAG_REMOVAL
+
+    dest = tmp_path / "dest"
+    restored = materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY, settings=settings, material_id=mid,
+    )
+
+    assert restored["restored"] is True
+    assert sorted(restored["artifacts"]) == ["asr_clean.json", "asr_result.json"]
+    # The restored leftover is inert: readers take the raw transcript.
+    assert [row["text"] for row in recap_timeline._source_speech_rows(dest)] == ["原始转写"]
+
+
+def test_entry_listing_the_removed_markdown_index_still_restores(tmp_path):
+    video = tmp_path / "ep.mp4"
+    lib = tmp_path / "library"
+    mid = _material_saved_before_flag_removal(lib, video, _SETTINGS_BEFORE_FLAG_REMOVAL)
+    entry = lib / "materials" / mid
+    (entry / "artifacts" / "understanding_index.md").write_text("# 旧索引", encoding="utf-8")
+    meta = json.loads((entry / "material.json").read_text(encoding="utf-8"))
+    meta["artifacts"].append(
+        {"name": "understanding_index.md", "path": "artifacts/understanding_index.md", "bytes": 1})
+    (entry / "material.json").write_text(json.dumps(meta), encoding="utf-8")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "narration.json").write_text("[]", encoding="utf-8")
+
+    restored = materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY,
+        settings=_SETTINGS_BEFORE_FLAG_REMOVAL, material_id=mid,
+    )
+
+    assert restored["restored"] is True
+    assert (dest / "understanding_index.md").read_text(encoding="utf-8") == "# 旧索引"
+    assert (dest / "narration.json").read_text(encoding="utf-8") == "[]"
+
+
+def test_entry_analyzed_with_a_removed_feature_on_is_reanalyzed(tmp_path):
+    video = tmp_path / "ep.mp4"
+    lib = tmp_path / "library"
+    mid = _material_saved_before_flag_removal(
+        lib, video, {**_SETTINGS_BEFORE_FLAG_REMOVAL, "consolidate_asr": True})
+    _, args = recap_cli.parse_args([str(video)])
+
+    restored = materials.restore_material(
+        lib, tmp_path / "dest", source_path=video, source_identity=IDENTITY,
+        settings=recap_runtime._analysis_settings(args), material_id=mid,
+    )
+
+    assert restored == {"restored": False, "reason": "settings mismatch", "material_id": mid}
+
+
+def _restore(lib, dest, video, meta):
+    return materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY, settings=SETTINGS,
+        material_id=meta["material_id"],
+    )
+
+
+def test_agent_research_survives_a_restore_from_an_entry_without_research(tmp_path):
+    lib, seed, dest, video = tmp_path / "library", tmp_path / "seed", tmp_path / "dest", tmp_path / "ep.mp4"
+    seed.mkdir()
+    dest.mkdir()
+    (seed / "scenes.json").write_text("[]", encoding="utf-8")
+    meta = materials.save_material(lib, seed, video, IDENTITY, SETTINGS)
+    (dest / "background_research.json").write_text('{"story": "agent"}', encoding="utf-8")
+
+    restored = _restore(lib, dest, video, meta)
+
+    assert restored["pruned_artifacts"] == []
+    assert json.loads((dest / "background_research.json").read_text(encoding="utf-8")) == {"story": "agent"}
+
+
+def test_restore_keeps_newer_agent_research_and_replaces_older(tmp_path):
+    lib, seed, dest, video = tmp_path / "library", tmp_path / "seed", tmp_path / "dest", tmp_path / "ep.mp4"
+    seed.mkdir()
+    dest.mkdir()
+    (seed / "background_research.json").write_text('{"story": "saved"}', encoding="utf-8")
+    meta = materials.save_material(lib, seed, video, IDENTITY, SETTINGS)
+    saved = lib / "materials" / meta["material_id"] / "artifacts" / "background_research.json"
+    mine = dest / "background_research.json"
+    mine.write_text('{"story": "agent"}', encoding="utf-8")
+
+    os.utime(mine, ns=(saved.stat().st_mtime_ns + 10**9, saved.stat().st_mtime_ns + 10**9))
+    _restore(lib, dest, video, meta)
+    assert json.loads(mine.read_text(encoding="utf-8")) == {"story": "agent"}
+
+    os.utime(mine, ns=(saved.stat().st_mtime_ns - 10**9, saved.stat().st_mtime_ns - 10**9))
+    _restore(lib, dest, video, meta)
+    assert json.loads(mine.read_text(encoding="utf-8")) == {"story": "saved"}
+
+
+def _save_analyzed(lib, seed, video):
+    seed.mkdir()
+    (seed / "scenes.json").write_text(
+        json.dumps([{"scene_id": 0, "start": 0.0, "end": 1.0, "duration": 1.0}]), encoding="utf-8")
+    (seed / "vlm_analysis.json").write_text(
+        json.dumps([{"scene_id": 0, "start": 0.0, "end": 1.0, "description": "门开了"}]), encoding="utf-8")
+    (seed / "asr_result.json").write_text("[]", encoding="utf-8")
+    (seed / "understanding_index.json").write_text(json.dumps({
+        "characters": [{"name": "老王", "description": "门卫"}], "relationships": [],
+        "plot_points": [], "entities": [], "research_glossary": [],
+    }), encoding="utf-8")
+    (seed / "consolidation.status.json").write_text(json.dumps({
+        "stage": "consolidation", "enabled": True, "status": "ok", "message": "",
+    }), encoding="utf-8")
+    return materials.save_material(lib, seed, video, IDENTITY, SETTINGS)
+
+
+def test_restore_binds_the_index_to_the_restored_analysis(tmp_path):
+    lib, dest, video = tmp_path / "library", tmp_path / "dest", tmp_path / "ep.mp4"
+    meta = _save_analyzed(lib, tmp_path / "seed", video)
+
+    _restore(lib, dest, video, meta)
+
+    sidecar = json.loads((dest / "understanding_index.json.meta.json").read_text(encoding="utf-8"))
+    stat = (dest / "vlm_analysis.json").stat()
+    assert sidecar["source"] == {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+    assert sidecar["scene_count"] == 1
+    assert sidecar["model"] == materials.CONFIG["vlm_model"]
+
+
+@pytest.mark.parametrize("status", ["failed", "disabled", None])
+def test_restore_does_not_vouch_for_an_index_without_an_ok_status(tmp_path, status):
+    """A stale index left by a failed rerun must not gain provenance through a restore."""
+    lib, seed, dest, video = tmp_path / "library", tmp_path / "seed", tmp_path / "dest", tmp_path / "ep.mp4"
+    meta = _save_analyzed(lib, seed, video)
+    saved_status = lib / "materials" / meta["material_id"] / "artifacts" / "consolidation.status.json"
+    if status is None:
+        saved_status.unlink()
+        material_json = saved_status.parent.parent / "material.json"
+        record = json.loads(material_json.read_text(encoding="utf-8"))
+        record["artifacts"] = [a for a in record["artifacts"] if a["name"] != "consolidation.status.json"]
+        material_json.write_text(json.dumps(record), encoding="utf-8")
+        # A leftover "ok" in the reused work_dir is pruned, so it cannot vouch either.
+        dest.mkdir()
+        (dest / "consolidation.status.json").write_text(json.dumps({"status": "ok"}), encoding="utf-8")
+    else:
+        saved_status.write_text(json.dumps({"stage": "consolidation", "status": status}), encoding="utf-8")
+
+    assert _restore(lib, dest, video, meta)["restored"] is True
+
+    assert (dest / "understanding_index.json").exists()
+    assert not (dest / "understanding_index.json.meta.json").exists()
+
+
+def test_restore_without_an_index_writes_no_sidecar(tmp_path):
+    lib, seed, dest, video = tmp_path / "library", tmp_path / "seed", tmp_path / "dest", tmp_path / "ep.mp4"
+    seed.mkdir()
+    (seed / "vlm_analysis.json").write_text("[]", encoding="utf-8")
+    meta = materials.save_material(lib, seed, video, IDENTITY, SETTINGS)
+    _restore(lib, dest, video, meta)
+    assert not (dest / "understanding_index.json.meta.json").exists()
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="requires media tools")
+def test_brief_rebuilt_after_a_restore_keeps_the_story_index(tmp_path):
+    """The rebuild cut pass 2 runs: understand.py --brief-only over a restored work_dir."""
+    video = tmp_path / "ep.mp4"
+    subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=12:d=1",
+                    "-c:v", "libx264", str(video)], check=True, capture_output=True)
+    lib, dest = tmp_path / "library", tmp_path / "dest"
+    meta = _save_analyzed(lib, tmp_path / "seed", video)
+    _restore(lib, dest, video, meta)
+
+    understand = Path(__file__).resolve().parents[2] / "skills/video-understanding/scripts/understand.py"
+    result = subprocess.run(
+        [sys.executable, str(understand), str(video), "--work-dir", str(dest), "--brief-only"],
+        capture_output=True, text=True, encoding="utf-8", timeout=120,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+    )
+    assert result.returncode == 0, result.stderr
+    brief = (dest / "agent_narration_brief.md").read_text(encoding="utf-8")
+    assert "## Understanding index" in brief and "老王" in brief
+    assert "missing_index" not in brief

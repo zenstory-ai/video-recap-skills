@@ -232,7 +232,7 @@ def test_markdown_references_are_local_and_resolve_inside_each_skill():
                     pytest.fail(f"{markdown_path}: reference escapes its skill: {reference}")
                 assert resolved.is_file(), (markdown_path, reference)
 
-            # A bare script name such as `review.py` still denotes an implementation
+            # A bare script name such as `validate.py` still denotes an implementation
             # reference. It must resolve in this skill's own scripts directory rather
             # than silently relying on a sibling with a matching filename.
             for script_name in re.findall(r"`([A-Za-z0-9_.-]+\.py)`", text):

@@ -17,7 +17,6 @@ import subtitles.render as subtitle_render  # noqa: E402
 def _burn_on(monkeypatch):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "all")
     monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 1.0)
     monkeypatch.setitem(CONFIG, "subtitle_original_in_gaps", True)
@@ -96,7 +95,6 @@ def test_original_gap_entries_gated_off(monkeypatch, tmp_path):
     # burn off
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_original_in_gaps", True)
     assert source_subtitles._original_gap_subtitle_entries([], tmp_path, 10.0) == []
     # not masking → source subs already show, so we must NOT add ours
@@ -105,7 +103,6 @@ def test_original_gap_entries_gated_off(monkeypatch, tmp_path):
     assert source_subtitles._original_gap_subtitle_entries([], tmp_path, 10.0) == []
     # explicit override off
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_original_in_gaps", False)
     assert source_subtitles._original_gap_subtitle_entries([], tmp_path, 10.0) == []
 
@@ -438,3 +435,7 @@ def test_asr_multi_sentence_entry_is_split(monkeypatch, tmp_path):
     # the two sentences are placed in different gaps (one before, one after the narration window)
     assert any(e["end"] <= 5.0 + 1e-6 for e in entries)
     assert any(e["start"] >= 5.4 - 1e-6 for e in entries)
+
+
+def test_no_narration_and_no_dialogue_yields_no_subtitle_entries(tmp_path):
+    assert source_subtitles._combined_subtitle_entries([], tmp_path, 6) == []

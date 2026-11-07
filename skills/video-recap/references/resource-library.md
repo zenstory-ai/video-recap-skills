@@ -158,7 +158,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
 - 你已经显式设置的参数或环境变量与绑定不一致时，运行在开始前停止并指出是哪一项，不会直接覆盖已有设置。
 - 合成前核对字幕与包装模板的画布与实际成片画布；不一致即停止——换画幅要用另一个模板。
-- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；dub 模式与本地采用三件套不接受 `--project`。
+- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定。
 - 续跑命令只带 `--project`，不重复写出由绑定得到的值，改了绑定后续跑会按新绑定解析。
 
 ## 运行记录

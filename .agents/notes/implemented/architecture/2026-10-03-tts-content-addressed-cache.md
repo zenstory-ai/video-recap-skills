@@ -2,20 +2,22 @@
 
 Status: implemented
 
+后续决定：其中的旧版本迁移已移除，见 [[2026-11-06-remove-old-migrations-and-unreached-seams]]。
+
 ## Problem
 
 voiceover 的段缓存是每段一个 `narr_NNN.wav.cache.json` sidecar，键里有 `segment_index`、`start`、`end`、`pause_after_ms`。assemble 报 `no_safe_fit` 时建议删掉或改短一段，删掉第 k 段后，k 之后每一段的序号都减一，缓存全部不命中，没改过的段被重新请求 TTS 并重新计费（Fish Audio 按次收费，MiMo 也要等）。插入一段同理。时间窗也在键里，只挪动时间不改文字同样重合成，而时间窗根本不影响合成出来的音频。
 
 ## Decision
 
-- 新模块 video-voiceover `scripts/tts_cache.py`：条目在 `tts_segments/cache/<sha256 前 32 位>.wav` + `.json`。键是 `voiceover._tts_segment_cache_inputs(engine, seg, text, rate, pitch)`：引擎、实读文本、`provider_request`（`_provider_prosody_request`：供应商实际收到的语气部分，见下）、`tts_settings_payload`（供应商/模型/声线/参考音频身份/归一化等），严格模式另加策略名与原稿；不含段序号与时间窗。sidecar 记 `settings`（整份键，取出后再比一次相等）、缓存 WAV 的 `{size, mtime_ns}`、`spoken_text`、`audio_duration`、`normalization`、`provider_receipt`。自己写的 sidecar 解析不了照旧报 `TTS 缓存 sidecar 损坏`。
+- 新模块 video-voiceover `scripts/tts_cache.py`：条目在 `tts_segments/cache/<sha256 前 32 位>.wav` + `.json`。键是 `voiceover._tts_segment_cache_inputs(engine, seg, text, rate, pitch)`：引擎、实读文本、`provider_request`（`_provider_prosody_request`：供应商实际收到的语气部分，见下）、`tts_settings_payload`（供应商/模型/声线/参考音频身份/归一化等）；不含段序号与时间窗。sidecar 记 `settings`（整份键，取出后再比一次相等）、缓存 WAV 的 `{size, mtime_ns}`、`spoken_text`、`audio_duration`、`normalization`、`provider_receipt`。自己写的 sidecar 解析不了照旧报 `TTS 缓存 sidecar 损坏`。
 - 下游读的仍是 `narr_NNN.wav`（`tts_meta.json` 的 `audio_path` 不变）。命中时 `tts_cache.materialize` 把它换成指向条目的硬链接（同目录临时名 + `os.replace`；`os.link` 失败时 `shutil.copy2` 复制）；已是同一文件（samefile）就不动，其余一律重新链接或复制：`{size, mtime_ns}` 分不清同一时间戳刻度内写入的两段等长音频，按身份跳过曾让删段后的槽位留着上一段的声音。新合成的段在归一化之后 `tts_cache.store` 把它链进缓存（临时名取身份再 `os.replace`，并发写同一键时 sidecar 与 WAV 不一致只会安全地不命中）。
 - 因为 `narr_NNN.wav` 可能与缓存共用 inode，`_synthesize_segment` 在调用引擎前先删掉它，供应商永远写新文件，不会原地改写别段的缓存音频。有人原地改写了 `narr_NNN.wav` 时缓存 WAV 的身份随之改变，下次不命中、重新合成；只是替换了这个文件则从缓存恢复。
 - 语速/音高仍按位置计算（首段 +5%，末段 -5%，倒数第二段 -2%），但键里记的是它们变成的供应商请求，不是原始的 `+5%` 字符串：MiMo 记 `{"instruction": _mimo_tts_style_instruction(rate, pitch, emotion)}`，语速只在 ≥+6% 或 ≤-3% 时改变措辞，音高只分零与非零；Fish Audio 记 `{"speed": fish_speed(rate)}`（`providers/fish_audio.py` 里请求体用的同一个函数），它不接收音高和情绪；index-tts 没有段级控制，记 `{}`。删段让某段从 +5% 变成倒数第二段的 -2% 时，MiMo 的指令不变，不重新合成；变成末段（-5%，“语速略慢”）才重合成；Fish 两种情况都重合成。
 - 复用时 `tts_rate_offset` 取这一段当前位置算出的名义语速，不取缓存那次合成时的：同一请求的新合成也会记当前语速，复用与新合成的结果一致；`_check_segment_window` 与 `tts_meta.json` 用的都是它。sidecar 因此不再记 `tts_rate_offset`。
-- 时间窗不在键里，所以严格模式（`--preserve-approved-text`）在复用时按当前时间窗重新做 `enforce_duration`：`_check_segment_window` 同时服务合成与复用两条路径；探测阶段抛出的 `ApprovedTextDurationError` 记进 `failures`，与合成阶段的冲突走同一个 `_finish_tts` 汇总后抛出。不在严格模式时，复用也记同一条“超出预算”日志。
-- 不迁移旧缓存：旧的 `narr_NNN.wav.cache.json` 不再读取，`_cleanup_partial_tts_outputs`（`tts_cache.legacy_sidecar_path`）在该段重新合成时删掉它。0.6.0 的缓存键含 `tts_dynamic_params`，本版本已删掉这个键（见 [[2026-10-02-drop-unreachable-ducking-modes-and-tts-dynamic-switch]]），旧缓存反正命中不了。
-- 测试：`tests/voiceover/test_tts_content_cache.py` 覆盖删中间段零调用且各 `narr_NNN.wav` 内容对上新序号、插入+改写只调用两段、删末段后 MiMo 只重合成指令变了的那段且复用段记新位置的语速、Fish 每个数值 speed 变了的段都重合成、键对 MiMo 的 +5%/-2% 相同而 +6%/-3%/情绪不同、对 Fish 的音高与情绪不敏感、挪时间窗零调用、严格模式复用到放不下的窗口不调用即失败、`narr_NNN.wav` 与缓存同 inode、替换文件从缓存恢复而原地改写触发重合成、等长且同 mtime 的另一段音频不会被当成已就位；`test_pure_voiceover.py` 钉住任何形态的旧 sidecar 都只是一次未命中并被删除。
+- 时间窗不在键里，所以复用时按当前时间窗重新检查：`_check_segment_window` 同时服务合成与复用两条路径，超窗记同一条“超出预算”日志。
+- 不迁移旧缓存：旧的 `narr_NNN.wav.cache.json` 不再读取，当时 `_cleanup_partial_tts_outputs` 还会在该段重新合成时删掉它，这条清理后来移除，旧文件留在磁盘上不再被读（见 [[2026-11-06-remove-old-migrations-and-unreached-seams]]）。0.6.0 的缓存键含 `tts_dynamic_params`，本版本已删掉这个键（见 [[2026-10-02-drop-unreachable-ducking-modes-and-tts-dynamic-switch]]），旧缓存反正命中不了。
+- 测试：`tests/voiceover/test_tts_content_cache.py` 覆盖删中间段零调用且各 `narr_NNN.wav` 内容对上新序号、插入+改写只调用两段、删末段后 MiMo 只重合成指令变了的那段且复用段记新位置的语速、Fish 每个数值 speed 变了的段都重合成、键对 MiMo 的 +5%/-2% 相同而 +6%/-3%/情绪不同、对 Fish 的音高与情绪不敏感、挪时间窗零调用、复用到放不下的窗口不调用也不失败（交给 assemble）、`narr_NNN.wav` 与缓存同 inode、替换文件从缓存恢复而原地改写触发重合成、等长且同 mtime 的另一段音频不会被当成已就位；当时 `test_pure_voiceover.py` 钉住任何形态的旧 sidecar 都只是一次未命中并被删除，这条用例随清理一起移除。
 
 ## Alternatives considered
 

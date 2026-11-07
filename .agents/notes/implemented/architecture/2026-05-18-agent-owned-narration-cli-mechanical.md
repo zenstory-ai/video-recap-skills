@@ -2,19 +2,21 @@
 
 Status: implemented
 
+dub 译稿与 dub lint 随 dub 模式移除，见 [[2026-11-06-remove-dub-mode]]。
+
 ## Problem
 
 早期流水线由 CLI 自己调 LLM 生成最终解说（zone/fill 混合模式、bigram 去重、自动对齐重写），质量靠一堆 case-by-case 启发式撑着。谁对成片负责说不清：Agent 拿不到创作权，代码又承担不了创作判断，用户反馈"解说冷"时只能继续堆规则。
 
 ## Decision
 
-`narration.json`、剪辑计划 `clip_plan.json`、dub 译稿 `dub_script.json`，以及 `recap_story_plan.json` / `visual_audio_board.json` 一律由 Agent 编写；仓库脚本只准备产物（理解索引、`agent_narration_brief.md`）、做确定性校验（`validate.py` / `narration_lint.py`、dub lint）、执行 TTS 与合成。编排器 `recap.py` 走到需要创作产物的位置就暂停并打印要写的文件，Agent 写好后重复同一条命令继续。
+`narration.json`、剪辑计划 `clip_plan.json`，以及 `recap_story_plan.json` / `visual_audio_board.json` 一律由 Agent 编写；仓库脚本只准备产物（理解索引、`agent_narration_brief.md`）、做确定性校验（`validate.py` / `narration_lint.py`）、执行 TTS 与合成。编排器 `recap.py` 走到需要创作产物的位置就暂停并打印要写的文件，Agent 写好后重复同一条命令继续。
 
 must / never：
 
 - 新增创作环节时，先给 Agent 写 brief 和一个确定性校验器，never 让 CLI 生成最终文案或替 Agent 选片段。
-- 两份创作计划 JSON 是 Agent 与建议型评审的工作记录，不是渲染门禁；渲染只校验当前阶段硬输入（`clip_plan.json` / `narration.json`）。
-- 硬门禁只能是确定性检查（`validate.py`、`assembly_qc.json`、dub lint）。LLM 评审（`review.py`；MiMo QC 已删除，见 [[2026-10-02-delete-mimo-qc]]）默认建议型、失败开放；只有调用方显式 `--require-narration-review` 时，事实矛盾、残句、解析失败或评审不可用才在 TTS 前阻断，文笔类意见永远不阻断。
+- 两份创作计划 JSON 是 Agent 的工作记录，不是渲染门禁；渲染只校验当前阶段硬输入（`clip_plan.json` / `narration.json`）。
+- 硬门禁只能是确定性检查（`validate.py`、`assembly_qc.json`）。LLM 评审已全部移除（MiMo QC 见 [[2026-10-02-delete-mimo-qc]]，解说评审见 [[2026-11-06-remove-narration-review-chain]]），语义判断由 Agent 自检和人看片负责。
 - 编排器不是无人值守调度器，不向任何平台发布。
 
 来源：3843c39、b739126、2ae220e (#47)、d104333 (#27)、727a8a5 (#49)、468182c (#63)

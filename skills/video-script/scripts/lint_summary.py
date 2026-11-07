@@ -16,8 +16,6 @@ _HINTS = {
     "source_sentence_anchors_unavailable": "挪走或删掉这块，或重新生成含句尾锚点的语音证据",
     "time_overlap": "调整时间窗，让两块不重叠",
     "out_of_order": "按 start 从小到大排列各块",
-    "outside_clip_plan": "把这块挪进某个选中片段的时间范围",
-    "ambiguous_source_clip": "给这块写 source_clip_id",
     "em_dash": "删掉破折号，改用逗号、句号或把句子拆开",
     "placeholder_leakage": "把示例占位（如【主角】）换成真实人名或内容",
     "slot_too_short": "放宽时间窗，或把这块并进相邻块",
@@ -25,7 +23,6 @@ _HINTS = {
     "outside_scene": "核对时间，确认这块对应哪段画面",
     "crosses_scene_boundary": "把这块收进所在场景，或在场景切换处拆成两块",
     "visual_beat_too_broad": "拆块或收紧时间窗，让旁白贴着当前画面",
-    "crosses_clip_boundary": "把这块收进所在片段，超出部分会被裁掉",
     "no_original_blocks": "在几个强原声时刻不写旁白，让原声满音量播放",
     "under_narrated": "确认每个长空档都有意交给原声；只在有明确解说任务时加块",
     "no_original_breaks": "在块之间留几个多秒的空档给原声",
@@ -108,9 +105,6 @@ _WARNING_DETAILS = {
     "visual_beat_too_broad": lambda e: (
         f"{_window(e)} 共 {_seconds(e.get('duration'))}，"
         f"跨过 {e.get('frame_fact_count', '?')} 个画面锚点"
-    ),
-    "crosses_clip_boundary": lambda e: (
-        f"{_window(e)} 超出所在片段 {_seconds(e.get('clip_start'))}-{_seconds(e.get('clip_end'))}"
     ),
     "no_original_blocks": lambda e: (
         f"旁白覆盖率 {_ratio(e.get('narration_coverage'))}，超过上限 {_ratio(e.get('coverage_max'))}"

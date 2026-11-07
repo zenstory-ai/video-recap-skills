@@ -30,7 +30,7 @@ video-recap 带着一个可选的 MiMo 多模态 QC：`--mimo-qc pre-assemble|po
 ## Consequences
 
 - 收益：recap 脚本少约 1,300 行（含 lib 与 stage_qc），orchestrator 测试少约 900 行；`recap.py --help` 少两个 flag；QC 契约和 dashboard 只认确定性产物；每次运行开头不再需要清理陈旧文件。
-- 代价：这是 breaking 变更——脚本或别名里写了 `--mimo-qc` 的调用会直接报错退出，需要删掉该参数；设了 `MIMO_QC` 环境变量的用户不会收到任何提示，只是不再有 `mimo_qc.json`。想要模型看片意见的人只能用解说评审（`review.py`）或 Agent 自己看成片，暂时没有基于抽帧的成片级多模态评审。
+- 代价：这是 breaking 变更——脚本或别名里写了 `--mimo-qc` 的调用会直接报错退出，需要删掉该参数；设了 `MIMO_QC` 环境变量的用户不会收到任何提示，只是不再有 `mimo_qc.json`。想要模型看片意见的人当时只能用解说评审（`review.py`，后来也已移除，见 [[2026-11-06-remove-narration-review-chain]]）或 Agent 自己看成片，没有基于抽帧的成片级多模态评审。
 - 是否在默认路径：否（原来就默认关闭）。谁读取产物：删除前只有 `final_qc` 元数据汇总和 dashboard 卡片，都不影响结论。删除信号：本篇即删除。agent 表面增量：负两个 flag、三个环境变量、一个入口脚本。
 
 ## Verification

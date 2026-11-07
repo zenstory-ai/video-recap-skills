@@ -1,7 +1,6 @@
 """Orchestrator preflight: on an ffmpeg without the libass `subtitles` filter, recap.py must
 reject an EXPLICIT burn request BEFORE any understand/VLM/ASR/TTS spend, let the default
-burn degrade to the .srt sidecar with a warning, and surface the advisory narration review
-to the user at delivery."""
+burn degrade to the .srt sidecar with a warning."""
 
 import json
 import shutil
@@ -72,12 +71,6 @@ def test_preflight_default_burn_degrades_to_sidecar_with_warning(monkeypatch, ca
     assert "subtitle_burn_degraded" in out and ".srt" in out
 
 
-def test_preflight_skips_dub_which_never_burns(monkeypatch):
-    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
-    monkeypatch.setattr(recap, "_ffmpeg_present_but_cannot_burn", lambda: True)
-    recap._preflight_burn_subtitles(_args(edit_mode="dub"))  # must not raise
-
-
 def test_preflight_ok_when_can_burn(monkeypatch):
     monkeypatch.delenv("BURN_SUBTITLES", raising=False)
     monkeypatch.setattr(recap, "_ffmpeg_present_but_cannot_burn", lambda: False)
@@ -107,39 +100,6 @@ def test_cannot_burn_only_when_ffmpeg_is_present_without_the_filter(
     monkeypatch.setattr(shutil, "which", lambda _n: ffmpeg_path)
     monkeypatch.setattr(recap, "ffmpeg_has_subtitles_filter", lambda: has_filter)
     assert recap._ffmpeg_present_but_cannot_burn() is expected
-
-
-def test_review_pointer_prints_verdict(tmp_path, capsys):
-    (tmp_path / "narration_review.md").write_text("# review", encoding="utf-8")
-    (tmp_path / "narration_review.json").write_text(
-        json.dumps(
-            {
-                "verdict": "REVISE",
-                "findings": [{"severity": "error"}, {"severity": "warning"}],
-            }
-        ),
-        encoding="utf-8",
-    )
-    recap_timeline._print_narration_review_pointer(tmp_path)
-    out = capsys.readouterr().out
-    assert "REVISE" in out
-    assert "narration_review.md" in out
-    assert "error 1" in out
-
-
-def test_review_pointer_silent_when_review_did_not_run(tmp_path, capsys):
-    """review_ran=False (disabled/failed) prints nothing, even with stale artifacts around."""
-    (tmp_path / "narration_review.md").write_text("# stale", encoding="utf-8")
-    recap_timeline._print_narration_review_pointer(tmp_path, review_ran=False)
-    assert capsys.readouterr().out == ""
-
-
-def test_review_pointer_reads_the_review_by_contract_when_it_ran(tmp_path):
-    """review_ran=True means video-script wrote narration_review.json; a corrupt one raises."""
-    (tmp_path / "narration_review.md").write_text("# review", encoding="utf-8")
-    (tmp_path / "narration_review.json").write_text("{ not json", encoding="utf-8")
-    with pytest.raises(ValueError):
-        recap_timeline._print_narration_review_pointer(tmp_path)
 
 
 # ── drawtext overlays: authored content fails fast, before TTS ─────────────────────────
@@ -213,7 +173,7 @@ def test_deliver_runs_overlay_preflight_before_tts(tmp_path, monkeypatch):
     monkeypatch.setattr(recap_runner, "_narrate", _narrate)
     args = Namespace(resolved_project=None, audio_mode="narration")
     with pytest.raises(SystemExit, match="drawtext missing"):
-        recap_runner._deliver(tmp_path, args, tmp_path / "in.mp4", "in", timeline=None)
+        recap_runner._deliver(tmp_path, args, tmp_path / "in.mp4", "in")
 
 
 # ── degraded burn is reported, never a plain success ─────────────────────────────────
@@ -235,7 +195,7 @@ def test_finish_prints_degraded_subtitle_warning_and_sidecar(tmp_path, capsys):
 
 
 def test_finish_ignores_sidecar_from_a_stale_manifest(tmp_path, capsys):
-    """A dub run writes no assembly_manifest.json; an earlier run's must not be quoted."""
+    """An earlier run's assembly_manifest.json must not be quoted for a different output."""
     import recap_stage_qc
 
     (tmp_path / "assembly_manifest.json").write_text(
@@ -244,7 +204,7 @@ def test_finish_ignores_sidecar_from_a_stale_manifest(tmp_path, capsys):
         encoding="utf-8",
     )
     result = {"final_qc": {"ok": True, "blocker_count": 0, "warnings": []}}
-    recap_stage_qc._print_render_warnings(result, tmp_path, tmp_path / "dub_new.mp4")
+    recap_stage_qc._print_render_warnings(result, tmp_path, tmp_path / "other_new.mp4")
     assert "recap_old.srt" not in capsys.readouterr().out
 
 
@@ -266,6 +226,6 @@ def test_final_qc_carries_visual_qc_warnings_in_metadata(tmp_path):
     assert report["metadata"]["warnings"] == [warning]
     assert report["ok"] is False  # missing output still blocks; the warning never does
     assert all(f["code"] != "subtitle_burn_degraded" for f in report["findings"])
-    # A different final output (e.g. dub, which writes no manifest) gets no stale warning.
-    stale = final_qc.build_final_qc(tmp_path, final_output=tmp_path / "dub_x.mp4")
+    # A different final output gets no stale warning.
+    stale = final_qc.build_final_qc(tmp_path, final_output=tmp_path / "other_x.mp4")
     assert stale["metadata"]["warnings"] == []

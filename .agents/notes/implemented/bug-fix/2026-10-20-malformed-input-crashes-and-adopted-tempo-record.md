@@ -2,6 +2,8 @@
 
 Status: implemented
 
+采用配音的 tempo 记录随 [移除声音定稿交付路线](../simplification/2026-11-06-remove-delivery-family.md) 一起消失；其余畸形输入修复仍然有效。
+
 ## Problem
 
 一次只读审计在 v0.6.0 代码上发现六个缺陷；对照当前 main 复现后，多视频 `clip_plan_identity` 与多源句界连续拼接两项已被修复（后者见 #167 的 `_continuous_source_join` 相邻 clip_id 判定），仍存在四项：

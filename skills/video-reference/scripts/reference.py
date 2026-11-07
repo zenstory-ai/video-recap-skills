@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """On-demand production reference from a finished video: measure → (agent looks + labels) → check → export.
 
-    python3 scripts/reference.py measure <video> --work-dir U [--hard-score 10] [--soft-score 4] [--no-scale]
+    python3 scripts/reference.py measure <video> --work-dir U [--hard-score 10] [--soft-score 4]
     python3 scripts/reference.py frames  <video> --work-dir U (--review | --longest N | --span A,B [--step S])
     python3 scripts/reference.py check   --work-dir U [--json]
     python3 scripts/reference.py export  --work-dir U --out <dir>/production_reference.json
@@ -46,7 +46,6 @@ def main(argv=None):
                            help="scdet 分数达到它就算切点")
     p_measure.add_argument("--soft-score", type=float, default=DEFAULT_SOFT_SCORE,
                            help="达到它且是 ±0.3s 内的孤立峰才算切点；被压下的进入待复核窗口")
-    p_measure.add_argument("--no-scale", action="store_true", help="scdet 前不缩放到 320 宽")
     p_frames = sub.add_parser("frames", help="拼帧图看画面：待复核窗口、最长镜头或任意时间段")
     p_frames.add_argument("video")
     p_frames.add_argument("--work-dir", required=True)
@@ -66,8 +65,7 @@ def main(argv=None):
 
     try:
         if args.command == "measure":
-            payload = measure(args.video, args.work_dir, hard=args.hard_score, soft=args.soft_score,
-                              scaled=not args.no_scale)
+            payload = measure(args.video, args.work_dir, hard=args.hard_score, soft=args.soft_score)
             shots, loudness = payload["shots"], payload.get("loudness") or {}
             print(f"镜头 {shots['count']} 个，中位 {shots['median_s']}s，{shots['cuts_per_min']} 切/分钟；"
                   f"整体响度 {loudness.get('integrated_lufs')} LUFS；待复核窗口 {len(shots['review_windows'])} 个")

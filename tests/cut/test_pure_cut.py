@@ -128,20 +128,20 @@ def test_cut_main_keeps_sentence_gate_when_line_snapping_is_disabled(monkeypatch
     video.write_bytes(b"v")
     clip = {"start": 3.0, "end": 7.0}
     argv = ["cut.py", str(video), "--work-dir", str(tmp_path), "--normalize-only"]
-    asr = json.dumps({"segments": [{"start": 0.0, "end": 10.0, "text": "完整原声句子。"}]})
+    asr = json.dumps([{"start": 0.0, "end": 10.0, "text": "完整原声句子。"}])
 
     if multi_source:
         clip["source_id"] = "a"
         source_work = tmp_path / "sources" / "a"
         source_work.mkdir(parents=True)
-        (source_work / "asr_clean.json").write_text(asr, encoding="utf-8")
+        (source_work / "asr_result.json").write_text(asr, encoding="utf-8")
         manifest = tmp_path / "sources.json"
         manifest.write_text(json.dumps({"sources": [{
             "source_id": "a", "source_path": str(video), "source_work_dir": "sources/a", "duration": 10.0,
         }]}), encoding="utf-8")
         argv.extend(["--sources-manifest", str(manifest)])
     else:
-        (tmp_path / "asr_clean.json").write_text(asr, encoding="utf-8")
+        (tmp_path / "asr_result.json").write_text(asr, encoding="utf-8")
         monkeypatch.setattr(cut_cli, "get_video_duration", lambda _path: 10.0)
 
     (tmp_path / "clip_plan.json").write_text(json.dumps({"clips": [clip]}), encoding="utf-8")

@@ -54,7 +54,6 @@ _foreign_under_narration_volume = 0.05  # original volume under narration when s
 CONFIG = {
     "fade_ms": 120,  # 每段 TTS 淡入淡出(ms)；过大会让紧凑的句子一顿一顿，120ms 防爆音又不发闷
     "ducking_narr_weight": 1.5,
-    "ducking_orig_volume": 0.3,  # 解说时原声基准音量；仅在 beat 无放置信息时兜底
     "zone_ducking_volume": env_float("ZONE_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.12, minimum=0.0),  # 解说时原声压低到的音量
     "idle_orig_volume": env_float("IDLE_ORIG_VOLUME", 1.0, minimum=0.0),  # 解说块之间的"原声块"音量：默认满音量(1.0)，让精彩原声整段放出来，不被压低（用户要求解说成块、原声也成块）
@@ -62,7 +61,7 @@ CONFIG = {
     "duck_bridge_seconds": env_float("DUCK_BRIDGE_SECONDS", 1.5, minimum=0.0),  # 仅把间隔小于此值的相邻解说窗口并成一段压低；超过则视为作者特意留的"原声块"，原声放回满音量。默认 1.5s：解说块内部连续压低，块与块之间的留白放出满音量原声。该值只控制短间隔合并，不设定旁白/原声配额。调大→更连续铺底、原声块更少；调小→更碎
     "bgm_path": os.environ.get("BGM_PATH", "").strip(),  # 背景音乐文件(可选)，留空则不加 BGM
     "source_video": "",  # 剪辑模式下的原始视频，只由 assemble.py --source-video 设置；用于时间线/剪映导出引用原片片段
-    "export_jianying": env_bool("EXPORT_JIANYING", False),  # 渲染后可选导出剪映草稿(默认关；与核心解耦)
+    "export_jianying": False,  # 渲染后可选导出剪映草稿(默认关；与核心解耦)
     "jianying_draft_dir": os.environ.get("JIANYING_DRAFT_DIR", "").strip(),  # 剪映草稿输出父目录(留空=work_dir)
     "jianying_bundle_media": env_bool("JIANYING_BUNDLE_MEDIA", True),  # 默认开：macOS 剪映沙箱读不到外部路径，须把素材拷进草稿目录
     "bgm_volume": env_float("BGM_VOLUME", 0.18, minimum=0.0),  # BGM 铺底音量
@@ -71,18 +70,13 @@ CONFIG = {
     "narration_cumulative_tempo_max": 1.35,  # TTS rate × 全局 atempo × 段内 atempo 的累计上限
     "narration_cumulative_tempo_hard_max": 1.40,  # QC/阻断硬上限
     "tts_segment_tempo_max": 1.20,  # 兼容旧段内 atempo 上限；实际会被累计预算收紧
-    "mask_source_subtitles": env_bool("MASK_SOURCE_SUBTITLES", False),  # 遮挡原片烧录字幕；必须配合显式 SOURCE_SUBTITLE_MASK_POLICY
-    "source_subtitle_mask_policy_declared": bool(os.environ.get("SOURCE_SUBTITLE_MASK_POLICY", "").strip()),
-    "source_subtitle_mask_policy": (
-        os.environ.get("SOURCE_SUBTITLE_MASK_POLICY", "").strip().lower()
-        or "off"
-    ),  # off | opt_in | safe | forced；MASK_SOURCE_SUBTITLES alone is legacy implicit and QC-blocking
+    "mask_source_subtitles": env_bool("MASK_SOURCE_SUBTITLES", False),  # 遮挡原片烧录字幕；还需要烧录解说字幕，否则不遮
     "source_subtitle_mask_ratio": env_float("SOURCE_SUBTITLE_MASK_RATIO", 0.14, minimum=0.0),  # 底部遮挡比例
     "source_subtitle_mask_timing": os.environ.get("SOURCE_SUBTITLE_MASK_TIMING", "narration").strip().lower(),  # all | narration；增强版默认仅解说时遮罩
     "subtitle_mask_opacity": min(1.0, env_float("SUBTITLE_MASK_OPACITY", 0.6, minimum=0.0)),  # 0=透明，1=全黑；增强版默认半透明
     "subtitle_mask_padding": env_int("SUBTITLE_MASK_PADDING", 4, minimum=0),
-    "subtitle_y_top": env_int("SUBTITLE_Y_TOP", -1, minimum=-1),  # 自动旋转后的显示画布坐标；top/bot 同时有效时贴合原字幕带
-    "subtitle_y_bot": env_int("SUBTITLE_Y_BOT", -1, minimum=-1),
+    "subtitle_y_top": -1,  # 只由 --subtitle-y-top/bot 设置；自动旋转后的显示画布坐标，top/bot 同时有效时贴合原字幕带
+    "subtitle_y_bot": -1,
     # 段落内把句子紧贴上一句实际收尾播放，句间间隔稳定≤tight_pause，杜绝"一句解说一段空白"的卡顿
     "narration_run_gap_seconds": 1.6,  # 作者留白超过此值=新段落（让精彩原声透出）；小于则视为同一连续段落
     "narration_tight_pause_seconds": 0.35,  # 段落内句间固定间隔(秒)

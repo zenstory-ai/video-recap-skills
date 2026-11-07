@@ -4,6 +4,7 @@ import argparse
 
 
 import json
+import os
 
 from pathlib import Path
 
@@ -16,11 +17,7 @@ from detect import detect_scenes, detect_silence_periods, ensure_speech_boundary
 from asr import transcribe_audio
 from asr_timing_evidence import write_asr_timing_evidence
 
-from vlm import (
-    analyze_scenes,
-    analyze_video_overview,
-    mimo_video_overview_cache_fresh,
-)
+from vlm import analyze_scenes
 
 from understanding_brief import (
     _finish_brief,
@@ -33,8 +30,6 @@ from understanding_cache import (
     _asr_cache_state,
     _frames_cache_valid,
     _load_json,
-    _merge_overview_into_scenes,
-    _present_consolidation_artifacts,
     _remove_stage_meta,
     _scene_cache_payload,
     _silence_cache_payload,
@@ -42,7 +37,6 @@ from understanding_cache import (
     _vlm_cache_payload,
     _write_consolidation_status,
     _write_frames_manifest,
-    _write_mimo_overview_status,
     _write_stage_meta,
 )
 
@@ -92,7 +86,6 @@ def main():
         help="cut-mode target duration to document in the writing brief",
     )
     ap.add_argument("--skip-asr", action="store_true")
-    ap.add_argument("--mimo-video-overview", action="store_true")
     ap.add_argument(
         "--force", action="store_true", help="ignore cached artifacts and recompute"
     )
@@ -113,14 +106,13 @@ def main():
         "--consolidate",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="build the global understanding story index (Pass B); default ON, --no-consolidate to skip",
-    )
-    ap.add_argument(
-        "--consolidate-asr",
-        action="store_true",
-        help="also clean the ASR transcript (Pass A)",
+        help="build the global understanding story index; default ON, --no-consolidate to skip",
     )
     args = ap.parse_args()
+    # Removed after v0.6.2. Refused for one release: an unread EDIT_MODE=cut would silently write a full brief.
+    for name, flag in (("EDIT_MODE", "--edit-mode"), ("TARGET_DURATION", "--target-duration")):
+        if os.environ.get(name):
+            ap.error(f"环境变量 {name} 已移除：请从环境里删掉它，改传 {flag}")
     if args.brief_only and args.edited_storyboard_only:
         ap.error("--brief-only and --edited-storyboard-only are mutually exclusive")
 
@@ -141,8 +133,6 @@ def main():
         CONFIG["edit_mode"] = args.edit_mode
     if args.target_duration is not None:
         CONFIG["target_duration"] = args.target_duration
-    if args.mimo_video_overview:
-        CONFIG["mimo_video_overview"] = True
 
     video_duration = get_video_duration(video)
     if CONFIG["fps"] <= 0:
@@ -248,109 +238,30 @@ def main():
         vlm_analysis = analyze_scenes(scenes, frames, work_dir, resume=not args.force)
         _write_stage_meta(vlm_json, vlm_meta)
 
-    # Step 4.1: optional MiMo scene-chunk video understanding
-    overview_path = work_dir / "mimo_video_overview.json"
-    if CONFIG["mimo_video_overview"]:
-        if not CONFIG["mimo_video_api_key"] and mimo_video_overview_cache_fresh(
-            overview_path, video, scenes
-        ):
-            log("未设置 MIMO_API_KEY，复用已缓存的 MiMo 分片视频概览")
-            _write_mimo_overview_status(
-                work_dir, "cached", "未设置 MIMO_API_KEY，复用缓存", overview_path.name
-            )
-        elif not CONFIG["mimo_video_api_key"]:
-            log("跳过 MiMo 分片视频概览：未设置 MIMO_API_KEY")
-            overview_path.unlink(missing_ok=True)
-            _write_mimo_overview_status(
-                work_dir,
-                "skipped_no_key",
-                "未设置 MIMO_API_KEY，MiMo 分片视频概览未运行",
-                None,
-            )
-        elif mimo_video_overview_cache_fresh(overview_path, video, scenes):
-            log("跳过 MiMo 分片视频概览（缓存匹配）")
-            _write_mimo_overview_status(
-                work_dir, "cached", "缓存匹配", overview_path.name
-            )
-        else:
-            overview_path.unlink(missing_ok=True)
-            try:
-                overview = analyze_video_overview(video, work_dir, scenes)
-            except Exception as e:
-                log(f"MiMo 分片视频概览失败（忽略）: {e}")
-                _write_mimo_overview_status(work_dir, "failed", e, None)
-            else:
-                if overview:
-                    _write_mimo_overview_status(
-                        work_dir, "ok", "MiMo 分片视频概览完成", overview_path.name
-                    )
-                else:
-                    _write_mimo_overview_status(
-                        work_dir, "failed", "MiMo 分片视频概览未产出有效 artifact", None
-                    )
-    else:
-        overview_path.unlink(missing_ok=True)
-        _write_mimo_overview_status(
-            work_dir, "disabled", "MiMo 分片视频概览未启用", None, enabled=False
-        )
-
-    # Make the video-overview the primary per-scene description (frame_facts stay the anchor).
-    # No-op/revert when overview is absent, so disabling it cleanly returns to frame descriptions.
-    vlm_analysis = _merge_overview_into_scenes(vlm_analysis, overview_path)
-
     # optional consolidation (整理): build the understanding index before the brief folds it in
-    enabled = bool(args.consolidate or args.consolidate_asr)
-    status, message, artifacts = "disabled", "consolidation 未启用", []
+    enabled = bool(args.consolidate)
+    status, message = "disabled", "consolidation 未启用"
     if enabled:
-        from consolidate import consolidate
+        from consolidate import ConsolidateNoKey, consolidate_index
 
-        failure = None
-        result = {}
         try:
-            result = consolidate(
-                work_dir, do_asr=args.consolidate_asr, do_index=args.consolidate
+            consolidate_index(work_dir)
+        except ConsolidateNoKey:
+            status, message = (
+                "skipped_no_key",
+                f"未设置 {CONFIG['api_env_var']}，consolidation（index）未发送请求",
             )
         except Exception as e:
             log(f"consolidate 跳过（忽略）: {e}")
-            failure = e
-        artifacts = _present_consolidation_artifacts(work_dir)
-        no_key = result.get("skipped_no_key") or []
-        if failure is not None:
-            status, message = "failed", failure
+            status, message = "failed", e
         else:
-            expected = []
-            skipped = []
-            if args.consolidate and "index" not in no_key:
-                if vlm_analysis:
-                    expected.append("understanding_index.json")
-                else:
-                    skipped.append("无 vlm_analysis，跳过 index")
-            if args.consolidate_asr and "asr" not in no_key:
-                if asr_result:
-                    expected.append("asr_clean.json")
-                else:
-                    skipped.append("无 ASR 文本，跳过 ASR 清洗")
-            missing = [name for name in expected if name not in artifacts]
-            if missing:
-                status, message = "failed", f"未产出预期 artifact: {', '.join(missing)}"
-            elif no_key:
-                status, message = (
-                    "skipped_no_key",
-                    f"未设置 {CONFIG['api_env_var']}，consolidation（{', '.join(no_key)}）未发送请求",
-                )
-            elif expected:
-                status, message = "ok", "consolidation 完成"
+            if not vlm_analysis:
+                status, message = "skipped", "无 vlm_analysis，跳过 index"
+            elif not (work_dir / "understanding_index.json").exists():
+                status, message = "failed", "未产出预期 artifact: understanding_index.json"
             else:
-                status, message = "skipped", "；".join(skipped) or "无可整理输入"
-    _write_consolidation_status(
-        work_dir,
-        status,
-        message,
-        artifacts,
-        enabled=enabled,
-        do_asr=args.consolidate_asr,
-        do_index=args.consolidate,
-    )
+                status, message = "ok", "consolidation 完成"
+    _write_consolidation_status(work_dir, status, message, enabled=enabled)
 
     _finish_brief(
         video, work_dir, args, video_duration,

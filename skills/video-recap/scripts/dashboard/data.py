@@ -148,12 +148,6 @@ def library_detail(root: Path, rel: str) -> dict:
 
 
 # --- projects & bindings -----------------------------------------------------------------
-def _resolve_ref(role: str, ref, index) -> dict:
-    row = _check_ref(role, ref, index)
-    row["severity"] = "ok" if row["status"] == "ok" else "danger"
-    return row
-
-
 def _check_ref(role: str, ref, index) -> dict:
     row = {"role": role, "ref": ref, "target": None}
     if not isinstance(ref, str) or not ref.strip():
@@ -213,7 +207,8 @@ def _project(root: Path, rel: str, cache: dict) -> dict:
     rows = []
     for role, value in (bindings.items() if isinstance(bindings, dict) else []):
         for ref in (value if isinstance(value, list) else [value]):
-            rows.append(_resolve_ref(role, ref, index))
+            row = _check_ref(role, ref, index)
+            rows.append({**row, "severity": "ok" if row["status"] == "ok" else "danger"})
     return {**base, "name": data.get("name") or base["name"], "schema": data.get("schema"),
             "error": "bindings 必须是 object" if bindings is not None and not isinstance(bindings, dict) else None,
             "library": {"raw": raw, "path": str(lib_dir) if lib_dir else None, "found": found,
@@ -271,6 +266,18 @@ def run_detail(root: Path, rel: str) -> dict:
 
 
 # --- overview ----------------------------------------------------------------------------
+def _really_waiting(run) -> bool:
+    """next_pause only looks at file presence: a source-mix run never writes narration.json, a
+    multi-video child waits on nothing of its own, and a saved material's artifacts dir is no run."""
+    pause = run["next_pause"]
+    if not pause or run["parent"] is not None:
+        return False
+    if run["audio_mode"] != "narration" and pause["artifact"] != "clip_plan.json":
+        return False
+    parts = PurePosixPath(run["path"]).parts
+    return not (len(parts) >= 3 and parts[-3] == "materials" and parts[-1] == "artifacts")
+
+
 def _attention(libraries, reports, projects, runs) -> list:
     items = []
     for lib in libraries:
@@ -307,7 +314,7 @@ def _attention(libraries, reports, projects, runs) -> list:
             items.append({"kind": "blocked", "title": run["path"],
                           "message": f"QC 共 {run['blockers']} 个阻断项", "href": _href("run", run["path"], "qc"),
                           "ask": f"请查看 {run['work_dir']} 的 QC 阻断项，修复后重新合成。"})
-        if run["next_pause"]:
+        if _really_waiting(run):
             artifact = run["next_pause"]["artifact"]
             view = "cut" if artifact == "clip_plan.json" else "narration"
             items.append({"kind": "waiting", "title": run["path"],

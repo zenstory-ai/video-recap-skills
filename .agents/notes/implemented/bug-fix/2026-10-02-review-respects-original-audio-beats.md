@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：解说评审已整体移除，见 [[2026-11-06-remove-narration-review-chain]]。“留给原声的拍不算漏写”这条规则现在只在 video-script 的 Agent 自检清单里。
+
 ## Problem
 
 真实运行中，video-script 的建议型评审把一个有意不写旁白、交给原声对白的拍报成"skipped"。评审 prompt 里 `recap_story_plan.json` 和 `visual_audio_board.json` 都经 `_format_json_context` 以缩进 JSON 截取前 3000 字；稍长的计划里靠后的拍连同 `audio_owner` / `narration_job` 一起被截掉，评审只看到故事计划里有这个 beat、草稿在这段时间没有旁白，就当成漏写。`incomplete` 属于事实类，可以是 error，在严格模式下会被当作阻断。

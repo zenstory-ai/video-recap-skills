@@ -41,8 +41,8 @@ def _require_final_qc(result, work_dir):
 def _print_render_warnings(result, work_dir, final_output):
     """Relay non-blocking render warnings (final_qc metadata.warnings) and the subtitle
     sidecar, so a degraded run is never reported as a plain success. The sidecar comes from
-    assembly_manifest.json only when that manifest rendered `final_output` (dub never
-    writes one, so a stale manifest from an earlier run must not be quoted)."""
+    assembly_manifest.json only when that manifest rendered `final_output` (a stale
+    manifest from an earlier run must not be quoted)."""
     codes = (result.get("final_qc") or {}).get("warnings") or []
     manifest = read_json_object(Path(work_dir) / "assembly_manifest.json") or {}
     rendered = manifest.get("final_output")

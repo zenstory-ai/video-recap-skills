@@ -45,7 +45,7 @@ CONFIG = {
     "clip_snap_max_extend": env_float("CLIP_SNAP_MAX_EXTEND", 2.0, min_val=0.0),
     "clip_start_snap_max_prepend": env_float("CLIP_START_SNAP_MAX_PREPEND", 1.8, min_val=0.0),
     "clip_start_snap_max_trim": env_float("CLIP_START_SNAP_MAX_TRIM", 0.35, min_val=0.0),
-    "clip_join_audio_fade_ms": env_float("CLIP_JOIN_AUDIO_FADE_MS", 30.0, min_val=0.0),
+    "clip_join_audio_fade_ms": 30.0,
     # Keep clip boundaries off the ORIGINAL footage's hard cuts: a clip that opens/closes a few
     # tenths of a second from a source shot-change shows a brief sliver of the adjacent shot that
     # then hard-cuts again — a visible 闪烁/flicker at the edit point. Snap source_start forward

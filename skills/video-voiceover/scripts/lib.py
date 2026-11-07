@@ -20,7 +20,6 @@ MIMO_TOKEN_PLAN_API_URLS = {
     "sgp": "https://token-plan-sgp.xiaomimimo.com/v1",
     "ams": "https://token-plan-ams.xiaomimimo.com/v1",
 }
-DEFAULT_MIMO_ASR_MODEL = "mimo-v2.5-asr"  # speech-to-text
 DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts"  # text-to-speech
 DEFAULT_FISH_TTS_API_URL = "https://api.fish.audio/v1/tts"
 DEFAULT_FISH_TTS_MODEL = "s2.1-pro-free"
@@ -85,25 +84,11 @@ def env_float(name, default, *, minimum=None):
     return _env_number(name, default, float, minimum)
 
 
-def env_bool(name, default=False):
-    """Read common boolean env var forms (1/true/yes/y/on, 0/false/no/n/off)."""
-    raw = os.environ.get(name)
-    if raw is None or raw == "":
-        return default
-    text = raw.strip().lower()
-    if text in {"1", "true", "yes", "y", "on"}:
-        return True
-    if text in {"0", "false", "no", "n", "off"}:
-        return False
-    raise ValueError(f"{name} must be a boolean (1/true/yes/on or 0/false/no/off), got {raw!r}")
-
-
-# Single MiMo credential powers ASR + TTS. The TTS override (MIMO_TTS_API_KEY / MIMO_TTS_API_URL)
+# The MiMo credential powers TTS. The TTS override (MIMO_TTS_API_KEY / MIMO_TTS_API_URL)
 # is optional and falls back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-route to
 # the Token-Plan cluster base URL; pay-as-you-go keys use api.xiaomimimo.com.
 _mimo_api_key = os.environ.get("MIMO_API_KEY", "")
 _mimo_tts_api_key = os.environ.get("MIMO_TTS_API_KEY", "") or _mimo_api_key
-_raw_api_url = os.environ.get("MIMO_API_URL") or default_mimo_api_url(is_mimo_token_plan_key(_mimo_api_key))
 _raw_mimo_tts_api_url = (
     os.environ.get("MIMO_TTS_API_URL")
     or os.environ.get("MIMO_API_URL")
@@ -111,12 +96,9 @@ _raw_mimo_tts_api_url = (
 )
 
 CONFIG = {
-    "mimo_api_url": normalize_api_url(_raw_api_url),
-    "mimo_api_key": _mimo_api_key,
     "mimo_tts_api_url": normalize_api_url(_raw_mimo_tts_api_url),
     "mimo_tts_api_key": _mimo_tts_api_key,
     "mimo_tts_env_var": "MIMO_TTS_API_KEY" if os.environ.get("MIMO_TTS_API_KEY") else "MIMO_API_KEY",
-    "mimo_asr_model": os.environ.get("MIMO_ASR_MODEL", DEFAULT_MIMO_ASR_MODEL),
     "mimo_tts_model": os.environ.get("MIMO_TTS_MODEL", DEFAULT_MIMO_TTS_MODEL),
     "mimo_tts_voice": os.environ.get("MIMO_TTS_VOICE", "冰糖"),
     "voice_ref": os.environ.get("VOICE_REF", "").strip(),  # optional arbitrary reference audio for narration voice clone
@@ -129,7 +111,7 @@ CONFIG = {
     "fish_tts_reference_id": os.environ.get(
         "FISH_TTS_REFERENCE_ID", DEFAULT_FISH_TTS_REFERENCE_ID
     ).strip(),
-    "mimo_disable_thinking": env_bool("MIMO_DISABLE_THINKING", True),
+    "mimo_disable_thinking": True,
     "breath_ms": 250,  # 段间呼吸空间(ms)；block recap 块内连贯、块间留原声呼吸
     "narration_speed": env_float("NARRATION_SPEED", 1.15, minimum=0.5),  # 解说整体提速(atempo)，默认回到可懂区间；长片可设 1.0
     "narration_cumulative_tempo_max": 1.35,  # TTS rate × 全局 atempo × 段内 atempo 的累计上限
@@ -139,7 +121,7 @@ CONFIG = {
     "tts_retries": env_int("TTS_RETRIES", 3, minimum=1),  # 单段 TTS 失败重试次数
     # 段音频时长合理性下限语速（字/秒，拉丁词按 1.5）：比它还慢说明 TTS 多读了内容，按失败重试；0 关闭
     "tts_min_speech_rate": env_float("TTS_MIN_SPEECH_RATE", 2.5, minimum=0.0),
-    "allow_partial_tts": env_bool("ALLOW_PARTIAL_TTS", False),
+    "allow_partial_tts": False,
     "tts_segment_normalize": True,  # 单段 TTS RMS 归一，降低段间忽大忽小
     "tts_segment_target_rms_dbfs": -20.0,
     "tts_segment_peak_limit": 0.98,
@@ -254,17 +236,6 @@ def mimo_tts_api_call(payload):
     )
 
 
-def mimo_asr_api_call(payload):
-    """Call the MiMo speech-recognition (ASR) endpoint."""
-    return api_call(
-        payload,
-        max_retries=10,
-        api_url=CONFIG["mimo_api_url"],
-        api_key=CONFIG["mimo_api_key"],
-        api_env_var="MIMO_API_KEY",
-    )
-
-
 def api_call(payload, *, api_url, api_key, api_env_var, max_retries=8):
     """调用 OpenAI-compatible API，带重试。
 
@@ -282,7 +253,7 @@ def api_call(payload, *, api_url, api_key, api_env_var, max_retries=8):
     for attempt in range(max_retries):
         try:
             req = urllib.request.Request(endpoint, data=data, headers=headers)
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=CONFIG["tts_timeout"]) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = _sanitize_api_error(e.read().decode("utf-8", errors="replace"))

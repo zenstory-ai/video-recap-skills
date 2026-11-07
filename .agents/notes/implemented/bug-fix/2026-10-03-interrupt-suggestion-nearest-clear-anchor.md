@@ -12,11 +12,11 @@ Status: implemented
   - 落在 `window` 这个开区间里：`_suggestion_window` 取列表里前一个、后一个数值合法的块（narration 已按时间排序），下界是前一块的 `end` 加 `CONNECTED_HANDOFF_SECONDS`（0.15 秒），上界是后一块的 `start` 减 0.15 秒。块不会越过相邻块：越过去照改就是 `out_of_order`，作者若改成调换顺序，两个故事节拍就反了。
   - 前一块自己也收到了建议时，下界取它原来和建议的 `end` 中较晚的那个（`lint_narration` 按顺序处理，把已给出的 `suggested_start/end` 记在 `suggested_spans`）。这样相邻两块的建议无论照改哪几条都不会重叠或相接，也不会抢到同一个时间窗。
   - 与每个其他块之间都留出大于 0.15 秒的间隔（`_shift_is_clear` 对照所有块原来的位置），既不重叠也不相接（相接就成了 `_has_connected_predecessor` 认的首尾交接，入点检查被跳过，后一块的含义也变了）。
-  - 不超出 `_suggestion_limits` 给的闭区间：cut 模式下是该块唯一匹配的片段（源时间，`source_clip_id` 优先），cut_output 下是 `[0, output_duration]`（`validate.py` 把 `--output-duration` 经 `validate_narration_or_raise(output_duration=...)` 传进来）；full 模式不知道视频时长，只限制不早于 0。
+  - 不超出 `_suggestion_limits` 给的闭区间：cut_output 下是 `[0, output_duration]`（原来的 `--mode cut` 片段限制已随该模式移除，见 [[2026-11-06-remove-validate-cut-lint-mode]]）（`validate.py` 把 `--output-duration` 经 `validate_narration_or_raise(output_duration=...)` 传进来）；full 模式不知道视频时长，只限制不早于 0。
 - 在合格的锚点里取离入点最近的，距离相同取后面的。没有合格锚点时 `suggested_start` 为 `null`。
 - 报告新增 `suggested_end`（平移后的结束时间）与 `max_shift_seconds`；`source_text_tail`、`anchor_confidence`、`anchor_boundary_use` 照旧描述被建议的那个锚点。摘要写 `建议入点 X-Y`，没有建议时写"前后 10 秒内没有能整块挪过去、留在前后两块之间又不与其他块重叠或相接的句尾锚点"；改法改为"把整块（时长不变）挪到建议的时间窗"。
 - 往前的锚点也算：入点 6.10 秒、上一句 5.81 秒说完时，建议 5.81 而不是 8 秒后的下一句；最后一个锚点之后进入讲话区的块，现在会得到那个靠前的锚点，不再是 `null`。
-- 测试（`tests/script/test_pure_script.py`）：参数化用例期待更近的靠前锚点、60 秒外的锚点不算建议；同样近的两个锚点里后面那个正是另一块开头时选前面那个；唯一的锚点在下一块之后时为 `null`，有更远但在空档内的锚点时选它（同一例里第 2 块得到 16-18）；两个相邻的抢话块，第 2 块避开第 1 块的建议位置（13.1 只离 13.0 差 0.1 秒）；下一个锚点会让块与后一块相接时选更早的；cut 模式不挪出片段、cut_output 经 `validate.py` 不超出 `--output-duration`；范围内没有合格锚点时为 `null` 且摘要那一行的确切文字。
+- 测试（`tests/script/test_pure_script.py`）：参数化用例期待更近的靠前锚点、60 秒外的锚点不算建议；同样近的两个锚点里后面那个正是另一块开头时选前面那个；唯一的锚点在下一块之后时为 `null`，有更远但在空档内的锚点时选它（同一例里第 2 块得到 16-18）；两个相邻的抢话块，第 2 块避开第 1 块的建议位置（13.1 只离 13.0 差 0.1 秒）；下一个锚点会让块与后一块相接时选更早的；cut_output 经 `validate.py` 不超出 `--output-duration`；范围内没有合格锚点时为 `null` 且摘要那一行的确切文字。
 
 ## Alternatives considered
 

@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 import library as library_lib
+from lib import read_json_object
 
 PROJECT_FILE = "recap_project.json"
 PROJECT_SCHEMA = "video-recap.project.v1"
@@ -171,6 +172,8 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
             if rid not in resources:
                 raise BindingError(f"{ref} 引用的资源 {rid} 不存在或无效（先运行 library.py check）")
             require_valid(resources[rid], f"{ref} 引用的资源 {rid}")
+        used_templates.append({"role": kind, "id": entry["id"], "version": entry["version"],
+                               "status": entry["status"], "canvas": entry["canvas"]})
         return entry
 
     def resource(kind):
@@ -187,19 +190,9 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
     subtitle = template("subtitle_style")
     if subtitle:
         env.update(_subtitle_env(subtitle, _record(subtitle), resources))
-        used_templates.append({"role": "subtitle_style", "id": subtitle["id"],
-                               "version": subtitle["version"], "status": subtitle["status"],
-                               "canvas": subtitle["canvas"]})
     packaging = template("packaging")
-    if packaging:
-        used_templates.append({"role": "packaging", "id": packaging["id"],
-                               "version": packaging["version"], "status": packaging["status"],
-                               "canvas": packaging["canvas"]})
     reference = template("production_reference")
     if reference:
-        used_templates.append({"role": "production_reference", "id": reference["id"],
-                               "version": reference["version"], "status": reference["status"],
-                               "canvas": reference["canvas"]})
         reference = {"template": {"id": reference["id"], "version": reference["version"]},
                      "payload": json.loads((Path(reference["record"]).parent / library_lib.REFERENCE_FILE)
                                            .read_text(encoding="utf-8"))}
@@ -209,8 +202,6 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         updates.update(voice_updates)
         env.update(voice_env)
     bgm = resource("bgm")
-    if bgm and getattr(args, "audio_mode", "narration") == "adopted-packet-copy":
-        raise BindingError("adopted-packet-copy 冻结原音轨，不能再绑定 BGM；去掉 bindings.bgm 或换声音模式")
     if bgm:
         env["BGM_PATH"] = bgm["files"][0]["path"]
     material_env = environ.get("VIDEO_RECAP_MATERIAL_LIBRARY_DIR", "").strip()
@@ -234,7 +225,6 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         "env": env,
         "arg_updates": updates,
         "templates": used_templates,
-        "resources": [],
         "packaging": packaging and {"record": _record(packaging), "resources": resources},
         "production_reference": reference,
     }
@@ -275,13 +265,6 @@ REFERENCE_COPY = "production_reference.json"
 _WRITTEN_BY = "video-recap --project"
 
 
-def _read_json(path):
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
-
-
 def _ours(data) -> bool:
     return isinstance(data, dict) and data.get("written_by") == _WRITTEN_BY
 
@@ -293,7 +276,7 @@ def _sync_bound_file(work_dir, name, payload) -> None:
     """
     path = Path(work_dir) / name
     if payload is None:
-        if path.exists() and _ours(_read_json(path)):
+        if path.exists() and _ours(read_json_object(path)):
             path.unlink()
         return
     # The marker goes last so a payload key of the same name can never unmark our copy.
@@ -328,7 +311,7 @@ def sync_production_reference(work_dir, resolved) -> None:
     bound = (resolved or {}).get("production_reference")
     path = Path(work_dir) / REFERENCE_COPY
     if bound and path.exists():
-        current = _read_json(path)
+        current = read_json_object(path)
         if not _ours(current):
             if current == bound["payload"]:
                 return
@@ -341,7 +324,7 @@ def sync_production_reference(work_dir, resolved) -> None:
 
 def bound_reference_note(work_dir, resolved=None) -> str | None:
     """The pause-banner line for the bound reference in work_dir (our copy or the caller's identical one)."""
-    data = _read_json(Path(work_dir) / REFERENCE_COPY)
+    data = read_json_object(Path(work_dir) / REFERENCE_COPY)
     bound = (resolved or {}).get("production_reference")
     if _ours(data):
         template = data.get("template") or {}

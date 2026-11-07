@@ -2,6 +2,8 @@
 
 Status: implemented
 
+`_apply_deterministic_asr_research_fallback` 后来移除，新索引的 `asr_mentions` 只有模型写的字符串，见 [[2026-11-06-index-drops-deterministic-asr-fallback]]；`_mention_names` 的字典分支保留，因为已缓存的索引里还有字典。
+
 ## Problem
 
 0.6.1 候选的真实回归里，只要理解运行有 `background_research.json`、ASR 又提到了调研里的名字，`reference.py check` 和 `export` 就以 `TypeError: cannot use 'dict' as a set element` 崩溃。这正是 video-reference 文档要求的输入（泄漏扫描要读 `understanding_index.json` 的角色名、别名和 ASR 提及）。
@@ -14,7 +16,7 @@ Status: implemented
 
 - `reference_check._mention_names` 规定一个 `aliases` / `asr_mentions` 条目贡献哪些名字：字符串原样；字典取 `matched_aliases` 里的字符串（`text` 是 ASR 窗口原文，已经在台词 n-gram 语料里，不当作名字）；其他类型忽略。`name` 也只收字符串。
 - 同一类 `set.update` 还在另外两个入口：`_research_names` 读 `background_research.json` 的 `characters[*].name` 与 `character_details[*].aliases`，`leak_corpus` 读 `asr_timing_evidence.json` 的 `glossary.names`。两处文档形状都是字符串列表，由 Agent 手写，现在只收字符串（`_string_items`），对象、列表、数字忽略；`glossary` 不是对象、调研文件不是对象时不贡献名字。
-- 测试：`tests/reference/test_reference_check.py` 用生产方形状（字符串、带 `matched_aliases` 的字典、缺 `matched_aliases` 的字典、数字、`null` 混排）跑 `run_check`，R6 照常点名；`tests/orchestrator/test_understanding_index_reference_contract.py` 在两个子进程里分别跑 understanding 的 fallback 写出索引、再用 reference 的 `leak_corpus` 读它，钉住跨技能契约；另用对象、列表混入的畸形调研与词表跑 `run_check` 和 `export`，只断言不崩、字符串名字照收。
+- 测试：`tests/reference/test_reference_check.py` 用生产方形状（字符串、带 `matched_aliases` 的字典、缺 `matched_aliases` 的字典、数字、`null` 混排）跑 `run_check`，R6 照常点名；`tests/orchestrator/test_understanding_index_reference_contract.py` 在两个子进程里分别跑 understanding 的 `consolidate_index` 写出索引、再用 reference 的 `leak_corpus` 读它，钉住跨技能契约；另用对象、列表混入的畸形调研与词表跑 `run_check` 和 `export`，只断言不崩、字符串名字照收。
 
 ## Alternatives considered
 
@@ -24,4 +26,4 @@ Status: implemented
 ## Consequences
 
 - 收益：带调研的理解运行上，check / export 不再崩溃，确定性补写的别名（如「老滕」）也进入名字扫描。
-- 代价：reference 现在显式依赖 `matched_aliases` 这个键名；理解阶段改名时，契约测试会先失败。
+- 代价：reference 现在显式依赖 `matched_aliases` 这个键名。理解阶段已不再写这个键（见 [[2026-11-06-index-drops-deterministic-asr-fallback]]），字典分支只服务缓存里的旧索引，只有 `tests/reference/test_reference_check.py` 的手写 fixture 覆盖它，契约测试现在只产出字符串。

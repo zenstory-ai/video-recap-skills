@@ -1,14 +1,12 @@
 """Command-line orchestration for the video-cut skill."""
 
 import json
-import math
 import os
 
 
 from pathlib import Path
 
 from lib import CONFIG, get_video_duration, log
-import shot_review
 
 from cut_contract import (
     SOURCES_MANIFEST_SHAPE,
@@ -100,32 +98,11 @@ def main():
         "without rendering",
     )
     parser.add_argument(
-        "--review-shots", action="store_true",
-        help="scan actual rendered/reused video for internal short-shot and dense-cut candidates; never repair",
-    )
-    parser.add_argument(
-        "--shot-scene-threshold", type=float, default=None,
-        help="explicit scene recall threshold for --review-shots (default 0.35; not an acceptance criterion)",
-    )
-    parser.add_argument(
-        "--shot-roi", nargs=4, type=int, metavar=("X", "Y", "WIDTH", "HEIGHT"),
-        help="scan only this pixel rectangle with --review-shots; never crop the rendered video",
-    )
-    parser.add_argument(
         "--allow-duration-drift",
         action="store_true",
         help="do not block when validated clip duration is far from --target-duration",
     )
     args = parser.parse_args()
-    if args.shot_scene_threshold is not None and (
-        not args.review_shots or not math.isfinite(args.shot_scene_threshold)
-        or not 0 <= args.shot_scene_threshold <= 1
-    ):
-        parser.error("--shot-scene-threshold requires --review-shots and a finite value in [0,1]")
-    if args.shot_roi is not None and (
-        not args.review_shots or min(args.shot_roi[:2]) < 0 or min(args.shot_roi[2:]) <= 0
-    ):
-        parser.error("--shot-roi requires --review-shots, nonnegative X/Y and positive WIDTH/HEIGHT")
 
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
@@ -263,17 +240,6 @@ def main():
             args.video, validated_plan, work_dir, edited_source_path
         )
     _write_validated_plan(plan_path, validated_plan, raw_plan_paths)
-
-    if args.review_shots:
-        review_options = {"plan_path": work_dir / "clip_plan_validated.json"}
-        if args.shot_scene_threshold is not None:
-            review_options["threshold"] = args.shot_scene_threshold
-        if args.shot_roi is not None:
-            review_options["roi"] = args.shot_roi
-        shot_review.write_scan(
-            edited_source_path, work_dir / "shot_review.json",
-            **review_options,
-        )
 
     log(
         f"剪辑模式: {len(validated_plan['clips'])} 个片段 → {validated_plan['total_duration']:.1f}s"

@@ -15,9 +15,6 @@ python3 scripts/shot_review.py edited_source.mp4 \
 # 有黑边/包装时，按实测主画窗填入像素坐标，保持阈值不变做对照：
 python3 scripts/shot_review.py packaged.mp4 --roi "$X" "$Y" "$WIDTH" "$HEIGHT" \
   --output review/shot_review_picture.json
-# 正常 cut 后显式开启；缓存命中也查实际文件；normalize-only 不扫描：
-python3 scripts/cut.py source.mp4 --work-dir work --review-shots
-# 同一画窗/阈值参数也可传给 cut.py --review-shots --shot-roi X Y WIDTH HEIGHT --shot-scene-threshold T
 ```
 
 `--roi` 仅裁检测输入，不改视频文件或剪辑计划。坐标采用 FFmpeg 自动转正后的原生像素，

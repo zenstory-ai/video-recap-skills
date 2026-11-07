@@ -16,7 +16,7 @@ from lib import CONFIG
 from source_subtitles import (
     _combined_subtitle_entries,
     _original_gap_subtitle_entries,
-    _source_subtitle_mask_policy,
+    _source_subtitle_mask,
 )
 from subtitles.core import (
     _frame_row,
@@ -26,12 +26,6 @@ from subtitles.core import (
     _style_for_measured_subtitle_band,
     _subtitle_style_config,
 )
-
-_OVERFLOW_KINDS = {
-    "max_lines_exceeded": "line_count",
-    "safe_width_exceeded": "line_width",
-    "safe_height_exceeded": "safe_area",
-}
 
 
 def _visual_text_units(text):
@@ -67,15 +61,11 @@ def _subtitle_layout_qc(entries, style, safe_area=None):
     usable_w = float(safe_area["width"])
     line_h = font_size * 1.25
     overflow_entries = []
-    violations = []
-    multi_line_entries = []
-    max_observed_lines = 0
     entry_facts = []
     for i, entry in enumerate(entries):
         raw_text = _normalize_subtitle_text(entry["text"])
         lines = [ln for ln in re.split(r"(?:\\N|\n)+", raw_text) if ln != ""] or [""]
         line_count = len(lines)
-        max_observed_lines = max(max_observed_lines, line_count)
         max_w = max(_visual_text_units(line) * font_size for line in lines)
         band_h = line_count * line_h + float(style["outline"]) * 2 + float(style["shadow"])
         overflow_reasons = []
@@ -97,14 +87,8 @@ def _subtitle_layout_qc(entries, style, safe_area=None):
             "overflow_reasons": overflow_reasons,
         }
         entry_facts.append(fact)
-        if line_count > 1:
-            multi_line_entries.append(i)
         if overflow_reasons:
             overflow_entries.append(fact)
-            violations.extend(
-                {"index": i, "kind": _OVERFLOW_KINDS[reason], "reason": reason}
-                for reason in overflow_reasons
-            )
     return {
         "enabled": CONFIG["burn_subtitles"],
         "renderer": "ass" if CONFIG["burn_subtitles"] else "sidecar_srt",
@@ -122,13 +106,8 @@ def _subtitle_layout_qc(entries, style, safe_area=None):
         },
         "safe_area": safe_area,
         "entries": len(entry_facts),
-        "max_lines": max_observed_lines,
-        "max_observed_lines": max_observed_lines,
-        "multi_line": bool(multi_line_entries),
-        "multi_line_entries": multi_line_entries,
         "overflow": bool(overflow_entries),
         "overflow_entries": overflow_entries,
-        "violations": violations,
         "entry_facts": entry_facts,
     }
 
@@ -297,7 +276,7 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
     subtitle_layout = _subtitle_layout_qc(
         entries, style, safe_area=_measured_subtitle_safe_area(style, canvas)
     )
-    mask = _source_subtitle_mask_policy(work_dir)
+    mask = _source_subtitle_mask()
     mask.update({
         "ratio": min(0.5, CONFIG["source_subtitle_mask_ratio"]) if mask["active"] else None,
         "filter": "drawbox" if mask_filter else None,
@@ -310,8 +289,6 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
         overlay_qc = _visual_overlay_filters(work_dir, canvas, video_duration)[1]
     warnings = _subtitle_delivery_warnings(mask, has_subtitles=bool(entries))
     blocking_codes = []
-    if mask["blocking"]:
-        blocking_codes.append("mask_policy_not_explicit")
     if subtitle_layout["overflow"]:
         blocking_codes.append("subtitle_overflow")
     if overlay_qc["unsupported"]:
@@ -342,15 +319,6 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
         "subtitles": subtitle_layout,
         "mask": mask,
         "overlays": overlay_qc,
-        "summary": {
-            "subtitle_entries": subtitle_layout["entries"],
-            "subtitle_overflow": subtitle_layout["overflow"],
-            "subtitle_multi_line": subtitle_layout["multi_line"],
-            "mask_policy": mask["policy"],
-            "mask_active": mask["active"],
-            "overlay_rendered": overlay_qc["rendered"],
-            "overlay_unsupported": len(overlay_qc["unsupported"]),
-        },
     }
 
 
@@ -414,8 +382,7 @@ def _source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
     the enhanced default is a measured, translucent narration-only band; opacity and timing
     remain configurable.
     """
-    policy = _source_subtitle_mask_policy(work_dir)
-    if not policy["active"]:
+    if not _source_subtitle_mask()["active"]:
         return None
     opacity = CONFIG["subtitle_mask_opacity"]
     timing = CONFIG["source_subtitle_mask_timing"]

@@ -138,8 +138,8 @@ def test_frame_snap_does_not_shrink_a_clip_off_a_required_evidence_edge(monkeypa
 def _snap_with_gate(tmp_path, spans, rate, speech, duration=10.0, origin=0.0, all_passes=False):
     """snap_source_clips against an ASR transcript of `speech`: the frame pass and the gate
     only, or with `all_passes` the default shot-change and line snapping too."""
-    (tmp_path / "asr_clean.json").write_text(json.dumps({"segments": [
-        {"start": a, "end": b, "text": "完整的一句台词"} for a, b in speech]}), encoding="utf-8")
+    (tmp_path / "asr_result.json").write_text(json.dumps([
+        {"start": a, "end": b, "text": "完整的一句台词"} for a, b in speech]), encoding="utf-8")
     plan = normalize_clip_plan([{"start": a, "end": b} for a, b in spans], duration)
     return sentence_boundaries.snap_source_clips(
         plan, tmp_path / "v.mp4", duration, tmp_path, line_max_extend=0.5, scene_margin=0.5,
@@ -390,8 +390,8 @@ def test_same_source_edges_split_by_another_sources_clip_are_not_a_continuous_jo
     work = tmp_path / "work"
     source_work = work / "sources" / "a"
     source_work.mkdir(parents=True)
-    (source_work / "asr_clean.json").write_text(json.dumps(
-        {"segments": [{"start": 1.0, "end": 3.0, "text": "一句完整的话"}]}), encoding="utf-8")
+    (source_work / "asr_result.json").write_text(json.dumps(
+        [{"start": 1.0, "end": 3.0, "text": "一句完整的话"}]), encoding="utf-8")
     (source_work / "silence_periods.json").write_text(json.dumps([{"start": 8.0, "end": 8.5}]),
                                                       encoding="utf-8")
     rows, cursor = [], 0.0
@@ -517,3 +517,11 @@ def test_clip_past_the_end_of_a_short_video_stream_still_renders_every_frame(
     times = _video_packet_times(work / "edited_source.mp4")
     assert len(times) == plan["qc"]["frame_grid"]["frame_count"] == 100
     assert {round(b - a, 4) for a, b in zip(times, times[1:])} == {0.04}
+
+
+def test_edge_gate_ignores_an_old_clean_transcript_left_behind(tmp_path):
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([{"start": 0.0, "end": 2.0, "text": "原始台词"}]), encoding="utf-8")
+    (tmp_path / "asr_clean.json").write_text(json.dumps(
+        {"segments": [{"start": 5.0, "end": 9.0, "text": "清洗旧稿"}]}), encoding="utf-8")
+    assert sentence_boundaries._load_source_speech_spans(tmp_path) == [{"start": 0.0, "end": 2.0}]

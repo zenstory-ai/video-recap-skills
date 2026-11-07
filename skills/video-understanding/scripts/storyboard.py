@@ -20,7 +20,6 @@ when no font is available (or drawtext errors) the sheet is still produced UNLAB
 """
 import json
 import math
-import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -46,10 +45,6 @@ def _fmt_mmss(seconds):
     """Format a timestamp as mm:ss (clamped to >= 0)."""
     total = int(round(max(0.0, float(seconds))))
     return f"{total // 60:02d}:{total % 60:02d}"
-
-
-def _ffmpeg_available():
-    return shutil.which("ffmpeg") is not None
 
 
 def _probe_font():
@@ -101,30 +96,10 @@ def _nearest_existing_frame(timestamp, fps, paths, numbers):
     Frames are named frame_{n:05d}.jpg; the number↔time mapping is owned by extract.py
     (frame_00001 is t=0, so n = t*fps + 1). Rounding a timestamp blindly can yield a frame
     number that was never written (fps boundary / last frame gap), so we resolve to the
-    closest number that actually exists on disk.
+    closest number that actually exists on disk (numbers is sorted: ties → earlier frame).
     """
-    if not numbers:
-        return None
-    fps = float(fps)
-    if fps <= 0:
-        return None
     target = frame_number_for_time(timestamp, fps)
-    # Clamp into the real extracted range so out-of-range timestamps pin to first/last frame.
-    if target <= numbers[0]:
-        return paths[0]
-    if target >= numbers[-1]:
-        return paths[-1]
-    # numbers is sorted; find the closest by absolute distance (ties → earlier frame).
-    best_idx = 0
-    best_dist = None
-    for idx, num in enumerate(numbers):
-        dist = abs(num - target)
-        if best_dist is None or dist < best_dist:
-            best_dist = dist
-            best_idx = idx
-        elif num - target > best_dist:
-            break  # sorted: distance only grows from here
-    return paths[best_idx]
+    return paths[min(range(len(numbers)), key=lambda idx: abs(numbers[idx] - target))]
 
 
 def _scene_anchor_timestamps(scenes, max_tiles):
@@ -279,18 +254,6 @@ def _tile_pages(frame_paths, columns, out_dir, out_stem, scratch_dir):
     return pages
 
 
-_PATH_SEPARATORS = re.compile(r"[\\/]")
-
-
-def work_dir_relative_pages(pages):
-    """Page images as work_dir-relative POSIX paths ("storyboard/<name>").
-
-    Pages always live in <work_dir>/storyboard/, so only the file name is kept: an absolute
-    path would keep naming the original work_dir after the directory is copied or moved."""
-    # Split on both separators: a sidecar written on Windows may be read on POSIX and back.
-    return ["storyboard/" + _PATH_SEPARATORS.split(str(page))[-1] for page in pages or []]
-
-
 def _render_storyboard(work_dir, tiles, out_stem):
     """Shared render path: optionally burn labels, tile to pages, return (page_paths, labels_burned).
 
@@ -298,9 +261,6 @@ def _render_storyboard(work_dir, tiles, out_stem):
     `label` string and optionally a `fit` tile size. Returns (None, _) on hard failure so
     callers degrade to None.
     """
-    if not _ffmpeg_available():
-        log("storyboard 跳过：未找到 ffmpeg")
-        return None, False
     storyboard_dir = Path(work_dir) / "storyboard"
     storyboard_dir.mkdir(parents=True, exist_ok=True)
     scratch_dir = storyboard_dir / f".scratch_{out_stem}"
@@ -343,9 +303,6 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
     try:
         work_dir = Path(work_dir)
         paths, numbers = _frame_index(work_dir)
-        if not paths:
-            log("storyboard 跳过 source：frames/ 为空或缺失")
-            return None
         max_tiles = int(CONFIG["storyboard_max_tiles"])
         columns = int(CONFIG["storyboard_columns"])
         anchors = _scene_anchor_timestamps(scenes, max_tiles)
@@ -356,8 +313,6 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
         tiles = []
         for tile_id, (scene_id, ts) in enumerate(anchors):
             frame = _nearest_existing_frame(ts, fps, paths, numbers)
-            if frame is None:
-                continue
             tiles.append({
                 "tile_id": tile_id,
                 "timestamp": round(float(ts), 3),
@@ -365,9 +320,6 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
                 "scene_id": scene_id,
                 "frame_file": str(frame),
             })
-        if not tiles:
-            log("storyboard 跳过 source：未解析到任何帧")
-            return None
 
         pages, labels_burned = _render_storyboard(work_dir, tiles, "source_storyboard")
         if not pages:
@@ -382,7 +334,8 @@ def build_source_storyboard(work_dir, video_path, scenes, fps):
             "video_path": str(video_path),
             "fps": float(fps) if fps else None,
             "labels_burned": labels_burned,
-            "page_images": work_dir_relative_pages(pages),
+            # Relative: an absolute path would keep naming the original work_dir after a copy.
+            "page_images": [f"storyboard/{Path(page).name}" for page in pages],
             "sample_policy": {
                 "max_tiles": max_tiles,
                 "columns": columns,
@@ -443,38 +396,21 @@ def build_edited_storyboard(
 
     Single-source plans read work_dir/frames at `fps`. A multi-source plan passes
     `source_frames` = {source_id: {"paths", "numbers", "fps"[, "source_path"]}} built from each
-    source's own work_dir; its tiles also carry `source_id` and a short `S<n>` label listed
-    under `sources`, and `frame_file` keeps the full path (frame names repeat across sources).
+    source's own work_dir, holding only sources a clip uses and that have frames; its tiles
+    also carry `source_id` and a short `S<n>` label listed under `sources`, and `frame_file`
+    keeps the full path (frame names repeat across sources).
     """
     try:
         work_dir = Path(work_dir)
         if source_frames is None:
             paths, numbers = _frame_index(work_dir)
-            if not paths:
-                log("storyboard 跳过 edited：frames/ 为空或缺失")
-                return None
             frame_sets = {None: {"paths": paths, "numbers": numbers, "fps": fps}}
             tile_size = None
         else:
-            # Only sources a clip uses: an unused one must not take an S<n> label, be listed
-            # under `sources`, or set the tile size.
-            used = {
-                clip.get("source_id") for clip in clip_plan_validated["clips"]
-                if isinstance(clip, dict)
-            }
-            frame_sets = {
-                sid: entry for sid, entry in source_frames.items()
-                if entry["paths"] and sid in used
-            }
-            if not frame_sets:
-                log("storyboard 跳过 edited：剪辑用到的来源都没有 frames/")
-                return None
+            frame_sets = source_frames
             tile_size = _multi_source_tile_size(frame_sets)
         short_labels = {sid: f"S{n}" for n, sid in enumerate(frame_sets, start=1)}
         clips = clip_plan_validated["clips"]
-        if not clips:
-            log("storyboard 跳过 edited：clip_plan_validated 无 clips")
-            return None
         columns = int(CONFIG["storyboard_columns"])
         max_tiles = int(CONFIG["storyboard_max_tiles"])
 
@@ -482,14 +418,9 @@ def build_edited_storyboard(
         seen_frames = set()  # frame-identity dedupe (NOT luma de-dupe; that stays deferred)
         tile_id = 0
         for clip in clips:
-            try:
-                source_start = float(clip["source_start"])
-                source_end = float(clip["source_end"])
-                clip_id = clip.get("clip_id")
-            except (KeyError, TypeError, ValueError):
-                continue
-            if source_end <= source_start:
-                continue
+            source_start = float(clip["source_start"])
+            source_end = float(clip["source_end"])
+            clip_id = clip.get("clip_id")
             source_id = clip.get("source_id") if source_frames is not None else None
             frame_set = frame_sets.get(source_id)
             if frame_set is None:
@@ -500,8 +431,6 @@ def build_edited_storyboard(
                 frame = _nearest_existing_frame(
                     src_ts, frame_set["fps"], frame_set["paths"], frame_set["numbers"]
                 )
-                if frame is None:
-                    continue
                 key = (clip_id, str(frame))
                 if key in seen_frames:
                     continue  # same clip resolving to the same frame → drop the duplicate tile
@@ -547,7 +476,7 @@ def build_edited_storyboard(
             "source_video_path": str(source_video_path) if source_frames is None else None,
             "edited_video_path": edited_source.name if edited_source.exists() else None,
             "labels_burned": labels_burned,
-            "page_images": work_dir_relative_pages(pages),
+            "page_images": [f"storyboard/{Path(page).name}" for page in pages],
             "sample_policy": {
                 "max_tiles": max_tiles,
                 "columns": columns,

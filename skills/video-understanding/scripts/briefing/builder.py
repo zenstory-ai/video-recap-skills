@@ -19,8 +19,6 @@ from briefing.context import (
 )
 from briefing.inputs import (
     _format_optional_stage_warnings,
-    _load_clean_asr,
-    _load_mimo_overview_for_brief,
 )
 from briefing.timeline import (
     _format_output_clip_list,
@@ -62,8 +60,6 @@ def build_agent_brief(
     work_dir,
     style="纪录片",
     *,
-    mimo_overview_enabled=None,
-    mimo_overview_video_path=None,
     asr_evidence=None,
 ):
     """Write a compact brief that tells the agent exactly how to author recap artifacts."""
@@ -83,14 +79,14 @@ def build_agent_brief(
     # In pass 2, prefer the actual validated edited_source duration; target_duration is
     # only a planning goal and can differ after clip snapping or under/over-selection.
     output_seconds = video_duration
-    if edit_mode == "cut":
-        spans = _load_cut_output_spans_for_brief(work_dir, required=False)
-        if spans:
-            output_seconds = max(span["output_end"] for span in spans)
-        else:
-            target_seconds = _parse_target_seconds(CONFIG["target_duration"])
-            if target_seconds:
-                output_seconds = min(video_duration, target_seconds)
+    cut_pass2 = edit_mode == "cut" and (Path(work_dir) / "edited_source.mp4").exists()
+    if cut_pass2:
+        spans = _load_cut_output_spans_for_brief(work_dir)
+        output_seconds = max(span["output_end"] for span in spans)
+    elif edit_mode == "cut":
+        target_seconds = _parse_target_seconds(CONFIG["target_duration"])
+        if target_seconds:
+            output_seconds = min(video_duration, target_seconds)
     # A loose first-draft timing fallback, not a creative quota. The Agent's beat map and audio-owner
     # decisions determine the real count; this only prevents accidental per-sentence fragmentation.
     cov_target = CONFIG["narration_coverage_target"]
@@ -174,7 +170,7 @@ def build_agent_brief(
             "",
             "## Creative decisions before expression / packaging",
             "",
-            "First determine the creative-control mode from the current user request and existing artifacts: CREATE explores a new cut; DIRECTED implements user-specified structure/shots/lines; REVISION changes an existing viewed version while freezing everything not named in the latest feedback. This is separate from full/cut/dub.",
+            "First determine the creative-control mode from the current user request and existing artifacts: CREATE explores a new cut; DIRECTED implements user-specified structure/shots/lines; REVISION changes an existing viewed version while freezing everything not named in the latest feedback. This is separate from full/cut.",
             "- CREATE compares at least two real editorial hypotheses. DIRECTED/REVISION inherit the user-specified or accepted spine and must not invent alternatives to satisfy a template.",
             "- In REVISION, state the current change list and frozen list first. Update `style_card.json` for expression/subtitle feedback and `visual_audio_board.json` for picture/timing/audio feedback; update `recap_story_plan.json` only when the promise, POV, spine, or story beats change. Remove stale descriptions when content is deleted.",
             "Before `clip_plan.json` or final narration, author or update `recap_story_plan.json` and `visual_audio_board.json` from the applicable director intent, beat changes, and picture/audio decisions described below.",
@@ -188,61 +184,33 @@ def build_agent_brief(
     )
 
     consolidation_index = _load_consolidation(work_dir, scenes_analysis)
-    mimo_overview = _load_mimo_overview_for_brief(
-        work_dir,
-        scenes_analysis,
-        enabled=mimo_overview_enabled,
-        video_path=mimo_overview_video_path,
-    )
-    lines.extend(
-        _format_optional_stage_warnings(
-            work_dir,
-            mimo_overview_enabled=mimo_overview_enabled,
-            mimo_overview=mimo_overview,
-            consolidation_index=consolidation_index,
-        )
-    )
+    lines.extend(_format_optional_stage_warnings(work_dir, consolidation_index=consolidation_index))
     lines.extend(_format_substrate_warning(substrate))
     lines.extend(_format_moderation_refusals(scenes_analysis))
     lines.extend(_format_research_directive(work_dir, substrate))
     lines.extend(_format_background_research(load_background_research(work_dir)))
     lines.extend(_format_consolidation(consolidation_index))
 
-    asr_for_chunks = _load_clean_asr(work_dir, asr_result) or asr_result
-    chunk_scenes, chunk_asr = scenes_analysis, asr_for_chunks
-    fusion_scenes, fusion_asr, fusion_silence = (
+    # The one evidence set behind the chunks, the fusion and the scene guide: source time, or
+    # the kept footage on the OUTPUT clock in cut pass 2.
+    brief_scenes, brief_asr, brief_silence = (
         scenes_analysis,
         asr_result,
         silence_periods,
     )
-    cut_pass2 = edit_mode == "cut" and (Path(work_dir) / "edited_source.mp4").exists()
     if cut_pass2:
-        chunk_scenes, chunk_asr, _ = _remap_brief_evidence_to_output_timeline(
-            work_dir, scenes_analysis, asr_for_chunks, [], required=True
-        )
-        fusion_scenes, fusion_asr, fusion_silence = (
+        brief_scenes, brief_asr, brief_silence = (
             _remap_brief_evidence_to_output_timeline(
-                work_dir, scenes_analysis, asr_result, silence_periods, required=True
+                work_dir, scenes_analysis, asr_result, silence_periods
             )
         )
-    asr_chunks = _chunk_asr_for_writing(chunk_asr, chunk_scenes)
-    timeline_fusion = _build_timeline_fusion(fusion_scenes, fusion_asr, fusion_silence)
+    asr_chunks = _chunk_asr_for_writing(brief_asr, brief_scenes)
+    timeline_fusion = _build_timeline_fusion(brief_scenes, brief_asr, brief_silence)
     _write_json_artifact(work_dir, "asr_writing_chunks.json", asr_chunks)
     _write_json_artifact(work_dir, "timeline_fusion.json", timeline_fusion)
     lines.extend(_format_asr_chunks_for_brief(asr_chunks))
     lines.extend(_format_timeline_fusion_for_brief(timeline_fusion))
     lines.extend(_format_sentence_entry_anchors_for_brief(work_dir, edit_mode))
-
-    overview_text = (mimo_overview or {}).get("content", "").strip()
-    if overview_text:
-        lines.extend(
-            [
-                "## MiMo scene-chunk video overview",
-                "",
-                overview_text[:2000],
-                "",
-            ]
-        )
 
     if edit_mode == "cut":
         cut_target_example = (
@@ -382,7 +350,6 @@ def build_agent_brief(
     # Cut pass 2 narrates edited_source.mp4, so its guide lists only the kept footage on the
     # OUTPUT clock; the source-time guide (cut-away scenes, credits) belongs to pass 1.
     if cut_pass2:
-        guide_scenes, guide_asr, guide_silence = fusion_scenes, fusion_asr, fusion_silence
         lines.extend(
             [
                 "## Scene timing guide (OUTPUT time)",
@@ -393,13 +360,12 @@ def build_agent_brief(
             ]
         )
     else:
-        guide_scenes, guide_asr, guide_silence = scenes_analysis, asr_result, silence_periods
         lines.extend(["## Scene timing guide", ""])
 
-    for scene in guide_scenes:
+    for scene in brief_scenes:
         duration = scene["end"] - scene["start"]
         max_chars = max(5, int(max(1.0, duration - breath_sec) * effective_rate))
-        quiets = _quiet_windows_for_scene(guide_silence, scene)
+        quiets = _quiet_windows_for_scene(brief_silence, scene)
         quiet_text = ", ".join(f"{s:.1f}-{e:.1f}s" for s, e in quiets) or "none"
         span = f"{scene['start']:.1f}-{scene['end']:.1f}s"
         lines.extend(
@@ -413,7 +379,6 @@ def build_agent_brief(
                 + (
                     " [moderation_refused]"
                     if scene.get("analysis_status") == "moderation_refused"
-                    and scene.get("description_source") != "mimo_video_overview"
                     else ""
                 ),
             ]
@@ -423,7 +388,7 @@ def build_agent_brief(
         facts = _format_frame_facts(scene)
         if facts:
             lines.append(facts.rstrip())
-        asr_lines = _scene_asr_lines(guide_asr, scene)
+        asr_lines = _scene_asr_lines(brief_asr, scene)
         if asr_lines:
             lines.append("- ASR overlap:")
             lines.extend(asr_lines[:8])

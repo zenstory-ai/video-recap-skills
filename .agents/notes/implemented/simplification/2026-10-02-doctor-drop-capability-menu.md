@@ -2,6 +2,8 @@
 
 Status: implemented
 
+`recap.py --doctor` 后来移除，自检入口只剩 `doctor.py`，见 [[2026-11-06-one-entry-per-capability]]；下文的 `recap.py --doctor --json` 现在写作 `doctor.py --json`。
+
 ## Problem
 
 - `doctor.py` 的 `_build_capability_menu`（约 200 行，#45 加入）把 `checks` 里的同一批布尔值再整理成第三种视图：`ready` / `blocked` / `warnings/degraded` / `optional_upgrades` 四组，`recap.py --doctor --json` 输出 `capability_menu` 键，人读输出再打一段 `[capability menu]`。除了 doctor 自己的打印和测试，没有 SKILL.md、参考文档、dashboard 或编排代码读它。
@@ -12,7 +14,7 @@ Status: implemented
 
 - 删除 `_capability`、`_build_capability_menu`、`DEGRADED_GROUP` 和 `[capability menu]` 打印段。`build_report` 只返回 `ok`、`repo_root`、`checks`、`failures`、`warnings`；`checks` 与 `failures` 不变，`ok` 的判定不变。
 - 菜单里独有的两条信息改为 `warnings`：
-  - `mimo_video_configured` 为假时：`MiMo VLM not configured: set MIMO_VIDEO_API_KEY or MIMO_API_KEY before video understanding`。
+  - `mimo_video_configured` 为假时：当时写 `MiMo VLM not configured: set MIMO_VIDEO_API_KEY or MIMO_API_KEY before video understanding`；`MIMO_VIDEO_API_KEY` 后来随视频分片概览移除（见 [[2026-11-06-remove-mimo-video-overview]]）。
   - 实际选中的 TTS 供应商是 mimo-tts 或 fish-audio 且未配置时：`TTS provider <名> not configured: set <变量> before voiceover`，变量提示来自 `TTS_KEY_HINTS`。index-tts 仍按原来的硬失败检查。
 - 降级提示并进已有 warning：缺 libass 时说明默认运行改为交付外挂 `.srt`、显式 `--burn-subtitles` 会失败（文案随 [[2026-10-02-libass-optional-sidecar-degrade]] 更新）；ASR 那条本来就写 `--skip-asr`。
 - `dashboard_server` 删除 `--host` 与 `_loopback_host`，`DashboardServer` 固定绑定 `127.0.0.1`，`make_server(root, port=0)`；Host 白名单只剩 `127.0.0.1:<端口>` 与 `localhost:<端口>`。传 `--host` 即报 argparse 错误。测试改为断言服务端绑定 127.0.0.1。

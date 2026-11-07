@@ -161,19 +161,13 @@ def ffmpeg_has_subtitles_filter():
 
 
 # Single MiMo credential powers ASR + VLM + TTS. Per-capability overrides
-# (MIMO_VIDEO_API_KEY / MIMO_TTS_API_KEY / MIMO_ASR_API_KEY and their *_API_URL forms)
+# (MIMO_TTS_API_KEY / MIMO_ASR_API_KEY and their *_API_URL forms)
 # are optional and fall back to MIMO_API_KEY / MIMO_API_URL. Token-Plan keys (tp-*) auto-
 # route to the Token-Plan cluster base URL; pay-as-you-go keys use api.xiaomimimo.com.
 _mimo_api_key = os.environ.get("MIMO_API_KEY", "")
-_mimo_video_api_key = os.environ.get("MIMO_VIDEO_API_KEY", "") or _mimo_api_key
 _mimo_tts_api_key = os.environ.get("MIMO_TTS_API_KEY", "") or _mimo_api_key
 _mimo_asr_api_key = os.environ.get("MIMO_ASR_API_KEY", "") or _mimo_api_key
 _raw_api_url = os.environ.get("MIMO_API_URL") or default_mimo_api_url(is_mimo_token_plan_key(_mimo_api_key))
-_raw_mimo_video_api_url = (
-    os.environ.get("MIMO_VIDEO_API_URL")
-    or os.environ.get("MIMO_API_URL")
-    or default_mimo_api_url(is_mimo_token_plan_key(_mimo_video_api_key))
-)
 _raw_mimo_tts_api_url = (
     os.environ.get("MIMO_TTS_API_URL")
     or os.environ.get("MIMO_API_URL")
@@ -191,9 +185,6 @@ CONFIG = {
     "api_url_source": "env" if os.environ.get("MIMO_API_URL") else "default",
     "api_key": _mimo_api_key,
     "api_env_var": "MIMO_API_KEY",
-    "mimo_api_key": _mimo_api_key,
-    "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
-    "mimo_video_api_key": _mimo_video_api_key,
     "mimo_tts_api_url": normalize_api_url(_raw_mimo_tts_api_url),
     "mimo_tts_api_url_source": "env" if (
         os.environ.get("MIMO_TTS_API_URL") or os.environ.get("MIMO_API_URL")
@@ -205,10 +196,6 @@ CONFIG = {
     ) else "default",
     "mimo_asr_api_key": _mimo_asr_api_key,
     "mimo_asr_env_var": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
-    "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
-    "mimo_video_model_source": "env" if (
-        os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL")
-    ) else "default",
     "vlm_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "vlm_model_source": "env" if os.environ.get("MIMO_MODEL") else "default",
     "mimo_asr_model": os.environ.get("MIMO_ASR_MODEL", DEFAULT_MIMO_ASR_MODEL),

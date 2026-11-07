@@ -351,7 +351,7 @@ The seven skills (six for production plus one on-demand reference skill) hand of
 |---|---|---|
 | [`video-recap`](skills/video-recap/) | Orchestrator and environment doctor; the one to use for everyday end-to-end production | `video` → `recap_<name>.mp4` |
 | [`video-understanding`](skills/video-understanding/) | Scene detection · frame extraction · ASR (`mimo-v2.5-asr`) · VLM (`mimo-v2.5`) · timeline fusion · creative brief | `video` → `scenes / asr_result / vlm_analysis / silence_periods / timeline_fusion / agent_narration_brief.md` |
-| [`video-script`](skills/video-script/) | Directing / story / picture / sound plan, narration writing, advisory review and lint; call it alone for planning or writing only | `brief + index` → `recap_story_plan.json + visual_audio_board.json + [clip_plan.json] + narration.json` |
+| [`video-script`](skills/video-script/) | Directing / story / picture / sound plan, narration writing, Agent self-check and lint; call it alone for planning or writing only | `brief + index` → `recap_story_plan.json + visual_audio_board.json + [clip_plan.json] + narration.json` |
 | [`video-cut`](skills/video-cut/) | Clip plan → rendered cut; cut first, narrate second on the output timeline | `clip_plan.json + video` → `edited_source.mp4` |
 | [`video-voiceover`](skills/video-voiceover/) | Synthesise narration audio (MiMo `mimo-v2.5-tts` / Fish Audio `s2.1-pro-free`) | `narration.json` → `tts_segments/ + tts_meta.json` |
 | [`video-assemble`](skills/video-assemble/) | Mix · duck original audio · render subtitles · multi-track timeline · optional JianYing export | `video + tts_meta` → `recap_<name>.mp4 + subtitles.srt/.ass + timeline.json` |
@@ -390,14 +390,6 @@ Use the voice from /path/to/voice-ref.wav for the recap of /path/to/video.mp4. I
 ```
 
 The reference audio is sent to MiMo for synthesis; use it only with the voice owner's authorisation.
-
-**Dub an English video into Chinese while keeping the speaker's voice:**
-
-```text
-Dub /path/to/english.mp4 into Chinese, keeping the original speaker's voice. I have the rights to this video and the speaker consents to having their voice cloned.
-```
-
-This is experimental and replaces the original speech rather than overlaying commentary; the current version supports one speaker and full-track replacement without background-music separation. The source audio is sent to MiMo ASR for transcription and about 10 seconds of the original speaker's voice are sent to MiMo as the voice-clone reference, so the run requires `--confirm-voice-rights`: confirm only when you have the rights to the video and the speaker's consent to clone their voice.
 
 **Reuse subtitle style, voice, BGM and frame across a series:**
 
