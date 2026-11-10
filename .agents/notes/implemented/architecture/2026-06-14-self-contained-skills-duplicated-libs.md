@@ -28,6 +28,7 @@ Status: implemented
 - 重访信号：所有目标宿主都开始支持 skill 间共享包时，再考虑抽公共库。
 - 2026-09-21：video-script 侧的 brief 链副本已删除，parity 清单缩到两 skill 仍共有的五个模块，见 [[2026-09-21-drop-script-brief-chain-and-orphan-references]]。
 - 2026-10-02：parity 从整文件改为函数级，understanding 不再携带 lint/ownership/deslop 模块，script 不再携带 `timeline_fusion` 和 brief 半边，见 [[2026-10-02-function-level-parity]]。
+- 2026-11-10：六个生产 skill（recap / understanding / script / cut / voiceover / assemble）合并为单一 `skills/video-recap/`，仓库保留 `video-recap` 与 `video-reference` 两个自包含 skill，生产侧不再维护多份 `lib.py` / `agent_text.py` 副本，见 [[2026-11-10-converge-production-skills-into-video-recap]]。
 
 ## Verification
 

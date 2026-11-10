@@ -17,7 +17,7 @@ sys.path.insert(
     str(
         Path(__file__).resolve().parents[2]
         / "skills"
-        / "video-understanding"
+        / "video-recap"
         / "scripts"
     ),
 )
@@ -297,32 +297,6 @@ def test_cache_hit_corrupt_sidecar_rebuilds_without_traceback(monkeypatch, tmp_p
     assert json.loads(json_path.read_text(encoding="utf-8"))["timeline"] == "source"
 
 
-def test_copied_work_dir_storyboard_names_its_own_pages(monkeypatch, tmp_path):
-    """A cache hit in a copied work_dir must not point at the original directory, including a
-    legacy sidecar that stored absolute page paths."""
-    generate, builds = _cached_source_storyboard(monkeypatch, tmp_path)
-    first = generate()
-    assert first["page_images"] == ["storyboard/source_storyboard.jpg"]
-
-    json_path = tmp_path / "storyboard" / "source_storyboard.json"
-    legacy = json.loads(json_path.read_text(encoding="utf-8"))
-    legacy["page_images"] = ["/elsewhere/original_work_dir/storyboard/source_storyboard.jpg"]
-    json_path.write_text(json.dumps(legacy), encoding="utf-8")
-    meta_path = json_path.with_name(json_path.name + ".meta.json")
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.pop("artifact")
-    understanding_storyboard._write_stage_meta(json_path, meta)  # as the old build stamped it
-
-    reused = generate()
-
-    assert builds["n"] == 1  # cache hit, no rebuild
-    assert reused["page_images"] == ["storyboard/source_storyboard.jpg"]
-    on_disk = json.loads(json_path.read_text(encoding="utf-8"))
-    assert on_disk["page_images"] == ["storyboard/source_storyboard.jpg"]
-    assert generate()["page_images"] == ["storyboard/source_storyboard.jpg"]
-    assert builds["n"] == 1  # the rewrite re-stamped the sidecar, so it still hits
-
-
 # ── graceful None on no-frames / run_cmd failure / font-probe raise ───────────
 
 
@@ -400,58 +374,6 @@ def test_edited_storyboard_skipped_without_validated_plan(tmp_path):
     _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
     # no clip_plan_validated.json → pass1 → None (gated on file presence, not edit_mode)
     assert understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4") is None
-
-
-def test_copied_work_dir_edited_storyboard_names_its_own_pages(monkeypatch, tmp_path):
-    """The edited storyboard's cache hit relocates a legacy sidecar too: absolute page paths
-    and an absolute edited_video_path become work_dir-relative, without a rebuild."""
-    _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
-    monkeypatch.setitem(CONFIG, "storyboard", True)
-    monkeypatch.setitem(CONFIG, "fps", 2.0)
-    _mock_run_cmd_makes_output(monkeypatch)
-    _with_font(monkeypatch)
-    (tmp_path / "clip_plan_validated.json").write_text(
-        json.dumps(_validated_plan()), encoding="utf-8"
-    )
-    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
-    builds = {"n": 0}
-    real_build = storyboard.build_edited_storyboard
-
-    def counting_build(*a, **k):
-        builds["n"] += 1
-        return real_build(*a, **k)
-
-    monkeypatch.setattr("understanding_storyboard.build_edited_storyboard", counting_build)
-
-    def generate():
-        return understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4")
-
-    first = generate()
-    assert first["page_images"] == ["storyboard/edited_storyboard.jpg"]
-    assert first["edited_video_path"] == "edited_source.mp4"
-
-    json_path = tmp_path / "storyboard" / "edited_storyboard.json"
-    legacy = json.loads(json_path.read_text(encoding="utf-8"))
-    legacy["page_images"] = ["/elsewhere/original_work_dir/storyboard/edited_storyboard.jpg"]
-    legacy["edited_video_path"] = "/elsewhere/original_work_dir/edited_source.mp4"
-    json_path.write_text(json.dumps(legacy), encoding="utf-8")
-    meta_path = json_path.with_name(json_path.name + ".meta.json")
-    meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    meta.pop("artifact")
-    understanding_storyboard._write_stage_meta(json_path, meta)  # as the old build stamped it
-
-    reused = generate()
-
-    assert builds["n"] == 1  # cache hit, no rebuild
-    expected = {
-        "page_images": ["storyboard/edited_storyboard.jpg"],
-        "edited_video_path": "edited_source.mp4",
-    }
-    assert {k: reused[k] for k in expected} == expected
-    on_disk = json.loads(json_path.read_text(encoding="utf-8"))
-    assert {k: on_disk[k] for k in expected} == expected
-    assert {k: generate()[k] for k in expected} == expected
-    assert builds["n"] == 1  # the rewrite re-stamped the sidecar, so it still hits
 
 
 def test_brief_header_branches_on_labels_burned(tmp_path):
@@ -633,26 +555,6 @@ def test_edited_storyboard_only_points_an_existing_brief_at_the_sheet_once(
     status = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert status["status"] == "edited_storyboard"
     assert status["page_images"]
-
-
-def test_storyboard_brief_header_replaces_the_pre_relative_paths_heading(tmp_path):
-    """A brief carrying the older heading (no "路径相对 work_dir") is replaced, not stacked."""
-    brief = tmp_path / "agent_narration_brief.md"
-    brief.write_text(
-        "## Storyboard（先看 storyboard 再写）\n\n"
-        "- 成片(output)时间线 storyboard: /old/work/storyboard/edited_storyboard.jpg\n\n"
-        "# Brief\n\nbody\n",
-        encoding="utf-8",
-    )
-    edited = {"page_images": ["storyboard/edited_storyboard.jpg"], "labels_burned": True}
-
-    understanding_storyboard._prepend_storyboard_brief_header(brief, None, edited, cut_mode=True)
-
-    text = brief.read_text(encoding="utf-8")
-    assert text.count("## Storyboard") == 1
-    assert "/old/work" not in text
-    assert text.startswith("## Storyboard（先看 storyboard 再写；路径相对 work_dir）")
-    assert text.endswith("# Brief\n\nbody\n")
 
 
 def _fill_real_frames(work_dir, specs):

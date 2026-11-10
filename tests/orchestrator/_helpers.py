@@ -33,8 +33,6 @@ def manifest_args(**overrides):
         "target_duration": None,
         "skip_asr": False,
         "mimo_video_overview": False,
-        "consolidate": True,
-        "consolidate_asr": False,
         "review_narration": None,
         "require_narration_review": False,
         "allow_duration_drift": False,

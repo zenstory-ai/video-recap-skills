@@ -14,7 +14,7 @@ import pytest
 
 from test_narration_adoption import _adoption
 
-SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'
+SCRIPTS = Path(__file__).resolve().parents[2] / 'skills/video-recap/scripts'
 sys.path.insert(0, str(SCRIPTS))
 import assemble  # noqa: E402
 import adoption.audio_mix_binding as audio_mix_binding  # noqa: E402

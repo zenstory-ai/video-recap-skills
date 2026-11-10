@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
 """The frame-number ↔ source-time contract owned by extract.py.
 
 ffmpeg's `fps` filter emits its FIRST frame at source time 0, while the image2 muxer

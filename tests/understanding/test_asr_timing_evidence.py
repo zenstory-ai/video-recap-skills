@@ -10,7 +10,7 @@ import pytest
 SCRIPTS = (
     Path(__file__).resolve().parents[2]
     / "skills"
-    / "video-understanding"
+    / "video-recap"
     / "scripts"
 )
 sys.path.insert(0, str(SCRIPTS))
@@ -147,28 +147,6 @@ def test_provider_failure_writes_failure_evidence(monkeypatch, tmp_path):
     assert not (tmp_path / "asr_result.json").exists()
 
 
-def test_glossary_keeps_observed_and_post_glossary_text(monkeypatch, tmp_path):
-    video = _video(tmp_path)
-    (tmp_path / "background_research.json").write_text(
-        json.dumps({"characters": {"叶轻眉": "角色"}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "test-key")
-    monkeypatch.setitem(asr.CONFIG, "asr_segment_seconds", 30)
-    monkeypatch.setattr(asr, "run_cmd", _successful_extract())
-    monkeypatch.setattr(asr, "get_video_duration", lambda _path: 3.0)
-    monkeypatch.setattr(asr, "_run_asr", lambda _path: "她叫叶青眉")
-
-    result = asr.transcribe_audio(video, tmp_path)
-    assert result == [{"start": 0.0, "end": 3.0, "text": "她叫叶轻眉"}]
-    window = _read_evidence(tmp_path)["windows"][0]
-    assert window["observed_text"] == "她叫叶青眉"
-    assert window["post_glossary_text"] == "她叫叶轻眉"
-    assert window["glossary_modified"] is True
-    assert window["text_availability"] == "AVAILABLE"
-    assert _read_evidence(tmp_path)["glossary"] == {"names": ["叶轻眉"], "name_count": 1}
-
-
 def test_empty_provider_text_is_unknown_not_proven_silence_and_not_cached(
     monkeypatch, tmp_path
 ):
@@ -209,7 +187,6 @@ def test_missing_or_legacy_sidecar_is_a_miss(tmp_path):
     )
     sidecar = _read_evidence(tmp_path)
     sidecar["status"] = "LEGACY_UNVERIFIED"
-    sidecar["glossary"] = {"names": None, "name_count": None}
     (tmp_path / "asr_timing_evidence.json").write_text(json.dumps(sidecar), encoding="utf-8")
     assert _asr_cache_state(result_path, meta, video) == "MISS"
     with pytest.raises(ValueError):
@@ -248,7 +225,7 @@ def test_duration_is_probed_from_extracted_audio(monkeypatch, tmp_path):
 HELLO = [{"start": 0.0, "end": 1.0, "text": "hello"}]
 
 
-def _valid_available_evidence(tmp_path, observed=HELLO, final=HELLO):
+def _valid_available_evidence(tmp_path, final=HELLO):
     """A coherent AVAILABLE_COARSE work_dir: source video, bound audio.wav, result and sidecar."""
     video = _video(tmp_path)
     audio = tmp_path / "audio.wav"
@@ -263,7 +240,6 @@ def _valid_available_evidence(tmp_path, observed=HELLO, final=HELLO):
         tmp_path,
         video,
         "AVAILABLE_COARSE",
-        observed_segments=observed,
         final_segments=final,
         audio_path=audio,
     )
@@ -280,45 +256,12 @@ def test_sidecar_rejects_changed_bound_artifact(tmp_path, changed):
     assert not validate_asr_timing_evidence(evidence_path, video, result_path)
 
 
-def test_glossary_change_invalidates_fresh_corrected_cache(tmp_path):
-    research = tmp_path / "background_research.json"
-    research.write_text(
-        json.dumps({"characters": {"叶轻眉": "角色"}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    video, result_path, _evidence_path = _valid_available_evidence(
-        tmp_path,
-        observed=[{"start": 0.0, "end": 1.0, "text": "叶青眉"}],
-        final=[{"start": 0.0, "end": 1.0, "text": "叶轻眉"}],
-    )
-    meta = _asr_cache_payload(video)
-    _write_stage_meta(result_path, meta)
-    assert _asr_cache_state(result_path, meta, video) == "FRESH"
-
-    research.write_text(
-        json.dumps({"characters": {"叶青眉": "另一个名字"}}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-    assert _asr_cache_state(result_path, meta, video) == "MISS"
-
-
 @pytest.mark.parametrize(
     "mutate",
     [
-        lambda p: p.update({"schema_version": True}),
-        lambda p: p.update({"extra": "not allowed"}),
         lambda p: p.update({"source_video": True}),
         lambda p: p.update({"asr_result": {"size": 1, "mtime_ns": 1}}),
-        lambda p: p["glossary"].update({"name_count": 99}),
-        lambda p: p["windows"][0].update({"start": True}),
-        lambda p: p.update({"status": "EMPTY_UNKNOWN"}),
-        lambda p: p.update({"audio": None}),
-        lambda p: p["windows"][0].update(
-            {"observed_text": "different", "glossary_modified": False}
-        ),
-        lambda p: p["windows"][0].update(
-            {"observed_text": "different", "glossary_modified": True}
-        ),
+        lambda p: p.update({"status": "INVALID_STATUS"}),
     ],
 )
 def test_strict_sidecar_schema_and_status_consistency(tmp_path, mutate):
@@ -364,7 +307,7 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
         ),
         encoding="utf-8",
     )
-    monkeypatch.setattr(understanding_brief, "ensure_speech_boundary_anchors", lambda *_a: None)
+    monkeypatch.setattr(understanding_brief, "detect_speech_boundary_anchors", lambda *_a: None)
     monkeypatch.setattr(understanding_brief, "_generate_source_storyboard", lambda *_a, **_k: None)
     monkeypatch.setattr(understanding_brief, "_generate_edited_storyboard", lambda *_a, **_k: None)
     monkeypatch.setattr(understanding_brief, "_prepend_storyboard_brief_header", lambda *_a, **_k: None)
@@ -396,20 +339,6 @@ def test_offline_rerun_reuses_a_transcript_made_with_a_key(monkeypatch, tmp_path
     # With a key the endpoint is compared again: a different provider endpoint re-transcribes.
     monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "sk-other")
     assert _asr_cache_state(result_path, _asr_cache_payload(video), video) == "MISS"
-
-
-def test_legacy_sidecar_with_key_presence_flag_stays_fresh(monkeypatch, tmp_path):
-    """Forward-compat guard: a sidecar written before the flag was dropped must stay a hit.
-
-    This passes on the pre-fix code too (its payload carried the flag), so it is not evidence
-    for the offline fix; test_offline_rerun_reuses_a_transcript_made_with_a_key is."""
-    video, result_path, _evidence = _valid_available_evidence(tmp_path)
-    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
-    meta = _asr_cache_payload(video)
-    legacy = json.loads(json.dumps(meta))
-    legacy["settings"]["mimo_asr_api_key_present"] = True
-    _write_stage_meta(result_path, legacy)
-    assert _asr_cache_state(result_path, meta, video) == "FRESH"
 
 
 def test_no_key_placeholder_is_never_a_cache_hit(monkeypatch, tmp_path):

@@ -1,6 +1,6 @@
 # 导出剪映草稿继续精修
 
-用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，含 6 个生产技能 + 1 个按需参考技能）在合成出片的同时，会把原片视频、逐段解说配音、BGM、字幕和静态包装图层一并写入剪映草稿目录（含 `draft_content.json`、`draft_info.json`、`draft_meta_info.json`），默认将用到的媒体文件打包进草稿内部的 `Resources/local/`，哪怕把整个草稿文件夹拷到另一台电脑上也能直接双击打开。全流程本机只依赖 Python 标准库与 `ffmpeg`，云端只需配置一个小米 MiMo API Key。
+用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，含 1 个统一生产技能 + 1 个按需参考技能）在合成出片的同时，会把原片视频、逐段解说配音、BGM、字幕和静态包装图层一并写入剪映草稿目录（含 `draft_content.json`、`draft_info.json`、`draft_meta_info.json`），默认将用到的媒体文件打包进草稿内部的 `Resources/local/`，哪怕把整个草稿文件夹拷到另一台电脑上也能直接双击打开。全流程本机只依赖 Python 标准库与 `ffmpeg`，云端只需配置一个小米 MiMo API Key。
 
 ## 端到端制作流程
 
@@ -19,7 +19,7 @@ Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草�
 
 ## 剪映草稿里包含哪些轨道？
 
-合成阶段（`video-assemble`）通过 `--export-jianying`（或环境变量 `EXPORT_JIANYING=1`）读取标准时间线 `timeline.json`，生成多轨剪映草稿：
+合成阶段（`assemble.py`）通过 `--export-jianying`（或环境变量 `EXPORT_JIANYING=1`）读取标准时间线 `timeline.json`，生成多轨剪映草稿：
 
 | 剪映轨道 | 轨道内容说明 |
 |---|---|

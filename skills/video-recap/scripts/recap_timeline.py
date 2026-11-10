@@ -24,26 +24,6 @@ ASSEMBLY_MANIFEST = "assembly_manifest.json"
 
 PHASE_LEDGER = "recap_phase.json"
 
-CUT_TIMELINE_CRAFT_BULLETS = [
-    "- 片段顺序必须服务同一条故事主线，而不是无序高光；可使用 0–1 个 cold open，随后回到 setup → turn → escalation → payoff。",
-    "- 每个片段必须对应 `recap_story_plan.json` 中的一个 change-based beat；删除后不损失因果、人物或情绪的片段通常不保留。",
-    "- 已从源证据确认的必保问答、反应或兑现段，写入同一 `clip_plan.json.required_evidence`（nodes登记id/source绝对路径/start/end原片秒/track/content，before登记必要先后）；只锁具体区间，不锁整个beat。剪点吸附后工具会核验，reason或花字不能代替缺失的源段。",
-    "- `reason` 统一写成 `beat_id | function | change | POV | preferred moment | 入点 | 出点`，不能只写 hook、重要剧情或事件摘要。",
-    "- 优先保留因果、揭示、决定、关系移动、情绪转向与不可替代的表演/反应；跳过片尾、广告、重复静态画面和水印废片段。",
-    "- 片段追求最短但完整：建立镜头可以短，关键表演/反应允许多停一点；在完整台词、完整动作或自然声音边界结束，避免原声从半句中切入或切出。",
-    "- 新人物/地点/情绪场景先给画面建立空间，再进旁白；不要在原片叠化或闪白中间再切一次。scene score 只用于定位候选接点，最终必须播放接点前后判断。",
-    "- 对短时间内密集的 scene 候选先区分来源：原片的无关短镜头整段删除，相关短镜头扩展到完整动作/反应；本次拼接制造的切点优先移动边界、恢复同源连续运动或合并片段，能消除就不保留。",
-]
-
-MULTI_SOURCE_NARRATION_CRAFT_BULLETS = [
-    "- `narration.json` 只使用 edited_source.mp4 的 OUTPUT 时间线，不使用任一原片时间。",
-    "- 先为每个 beat 指定 `audio_owner`，再决定是否需要旁白；允许 original_dialogue、action_sound、ambience、music、silence 或 narration 主导。",
-    "- 旁白只承担 context、causal_link、foreshadow、interpretation 或 transition；`narration_job=none` 的 beat 不写旁白。",
-    "- 7:3 不是配额，只是素材无法给出更好判断时的粗略回退；强对白、动作声、环境或沉默可以完整拥有一个 beat。",
-    "- 旁白拥有 beat 时才写成一个连续思路的 BLOCK；句数不是目标，字幕拆 cue 也不能切碎 TTS。不要把每个 beat 都机械变成旁白块或固定原声留白。",
-    "- 使用 kept-clip map 与每个 source work_dir 核对人物、事实、ASR 和上下文；跨源转场必须有明确叙事任务。",
-]
-
 _ALLOWED_VISUAL_OVERLAY_TYPES = {"top_title", "inline_label_or_callout"}
 
 _VISUAL_OVERLAYS = "visual_overlays.json"
@@ -140,20 +120,6 @@ def _print_narration_review_pointer(work_dir, *, review_ran=True):
     )
 
 
-def _settings_for_compare(settings):
-    """Settings that, if changed, invalidate reusing an existing work_dir on resume.
-
-    `consolidate`/`consolidate_asr` are EXCLUDED: they only ADD an optional understanding
-    artifact and never re-run Phase A on a Phase-B resume, so a stored manifest carrying the
-    old default (or missing the key entirely, pre-dating it) must still resume — otherwise
-    flipping `--consolidate`'s default ON would hard-fail every in-flight work_dir.
-    """
-    s = dict(settings)
-    s.pop("consolidate", None)
-    s.pop("consolidate_asr", None)
-    return s
-
-
 def _manifest_mismatches(work_dir, video, args):
     expected = _run_manifest_payload(video, args)
     actual = _load_run_manifest(work_dir)
@@ -166,7 +132,7 @@ def _manifest_mismatches(work_dir, video, args):
         for key in ("source_video", "source_video_identity")
         if actual.get(key) != expected[key]
     ]
-    if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
+    if actual["settings"] != expected["settings"]:
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
     actual_audio = actual.get("audio")
     expected_audio = audio_binding(args)
@@ -194,7 +160,7 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         mismatches.append(
             "sources: 当前输入视频列表/顺序/source_id/identity 与 Phase A manifest 不匹配"
         )
-    if _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
+    if actual["settings"] != expected["settings"]:
         mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
     actual_audio = actual.get("audio")
     expected_audio = audio_binding(args)
@@ -264,56 +230,7 @@ def _understand_args_for_source(source_record, source_work_dir, args):
         uargs.append("--skip-asr")
     if args.mimo_video_overview:
         uargs.append("--mimo-video-overview")
-    uargs.append("--consolidate" if args.consolidate else "--no-consolidate")
-    if args.consolidate_asr:
-        uargs.append("--consolidate-asr")
     return uargs
-
-
-def _brief_excerpt(path, limit=1200):
-    text = Path(path).read_text(encoding="utf-8")
-    if len(text) <= limit:
-        return text
-    marker = "\n…\n"
-
-    def section(heading):
-        lines = text.splitlines()
-        try:
-            start = lines.index(heading)
-        except ValueError:
-            return ""
-        end = next(
-            (i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")),
-            len(lines),
-        )
-        return "\n".join(lines[start:end]).strip()
-
-    def clipped(value, budget):
-        if len(value) <= budget:
-            return value
-        usable = budget - len(marker)
-        head = round(usable * 0.7)
-        return value[:head].rstrip() + marker + value[len(value) - (usable - head):].lstrip()
-
-    # The generic writing contract occupies the front of every generated brief. A raw
-    # prefix therefore drops the source facts that multi-source planning actually needs.
-    # Give evidence-bearing sections equal space and retain both their opening and tail.
-    preferred = [
-        value
-        for value in (
-            section("## Story context (from background_research.json)"),
-            section("## Understanding index (from consolidate.py)"),
-            section("## ASR writing chunks (semantic windows)"),
-            section("## Scene timing guide"),
-        )
-        if value
-    ]
-    if preferred:
-        per_section = (limit - 2 * (len(preferred) - 1)) // len(preferred)
-        return "\n\n".join(clipped(value, per_section) for value in preferred)[:limit]
-    usable = limit - len(marker)
-    head = usable // 4
-    return text[:head].rstrip() + marker + text[len(text) - (usable - head):].lstrip()
 
 
 def _write_multi_source_clip_brief(work_dir, source_records, args):
@@ -336,13 +253,9 @@ def _write_multi_source_clip_brief(work_dir, source_records, args):
         "",
         "- 每个 clip 必须带 `source_id`。",
         "- `start`/`end` 是对应 source 原视频时间（秒）。",
+        "- 已从源证据确认的必保问答、反应或兑现段，写入同一 `clip_plan.json.required_evidence`（nodes登记id/source绝对路径/start/end原片秒/track/content，before登记必要先后）。",
         "- 不同 `source_id` 的相同时间段不算重叠；同一 `source_id` 内不要重复/重叠，除非你明确接受稀疏/重复剪辑风险。",
-        '- 素材库是文件系统 JSON/MD/JSONL；需要找历史素材时直接 `grep -R "关键词" <material-library-dir>`。',
-        "",
-        "## 剪辑规则",
-        *CUT_TIMELINE_CRAFT_BULLETS,
-        "- 跨来源选择必须服务共享主线；除非本来就是 setup / turn / payoff 的设计，不要让某个来源变成脱节的小复盘。",
-        "- 选片前使用下方 source work_dir（`sources/<source_id>`）核对 scenes.json、ASR、索引和逐来源 brief。",
+        "- 选片前使用下方 source work_dir（`sources/<source_id>`）核对 scenes.json、ASR 和逐来源 brief。",
     ]
     if args.target_duration:
         lines.append(f"- 目标时长：`{args.target_duration}`。")
@@ -355,22 +268,12 @@ def _write_multi_source_clip_brief(work_dir, source_records, args):
             f"- work_dir: `{swd}`",
             f"- material_id: `{s['material_id']}`",
         ]
-        excerpt = _brief_excerpt(swd / "agent_narration_brief.md")
-        if excerpt:
-            lines += ["", "#### per-source brief excerpt", "", excerpt, ""]
     (Path(work_dir) / "agent_narration_brief.md").write_text(
         "\n".join(lines).rstrip() + "\n", encoding="utf-8"
     )
 
 
 def _source_speech_rows(source_dir):
-    """The cleaned transcript wins when it carries text; same precedence as
-    audio_mix._handoff_speech_evidence and sentence_boundaries._load_source_speech_spans."""
-    clean = source_dir / "asr_clean.json"
-    if clean.exists():
-        rows = load_json(clean)["segments"]
-        if any(row["text"].strip() for row in rows):
-            return rows
     raw = source_dir / "asr_result.json"
     return load_json(raw) if raw.exists() else []
 
@@ -510,8 +413,9 @@ def _write_multi_source_output_brief(work_dir, source_records, validated_plan_pa
         "注意：`start`/`end` 是剪后成片时间，不是原视频时间。",
         "",
         "## 输出时间线写作规则",
-        *MULTI_SOURCE_NARRATION_CRAFT_BULLETS,
-        "- 旁白增加上下文、因果、预期、证据支持的解释或跨源过渡，不复述画面像素；先保人物与原声，再润色句子。",
+        "- `narration.json` 只使用 edited_source.mp4 的 OUTPUT 时间线，不使用任一原片时间。",
+        "- 先为每个 beat 指定 `audio_owner` 与 `narration_job`；7:3 不是配额，只是素材无法给出更好判断时的粗略回退。",
+        "- 使用 kept-clip map 与每个 source work_dir 核对人物、事实、ASR 和上下文。",
         "",
         "## Kept clips (output → source)",
     ]
@@ -597,11 +501,6 @@ def _save_materials_enabled(args):
 def _pause_for_agent(work_dir, need_text, cont, inspect_hint=None, project=None):
     brief = Path(work_dir) / "agent_narration_brief.md"
     print("=" * 50)
-    if "Research the story FIRST" in brief.read_text(encoding="utf-8"):
-        print(
-            "[video-recap] ⚑ 理解素材偏薄：先按 brief 顶部「Research the story FIRST」调研并写 "
-            "background_research.json，再写解说，避免看图说话。"
-        )
     print(f"[video-recap] ⏸  阅读 {brief}（按 video-script 规则）后写入 {need_text}")
     if inspect_hint:
         print(f"[video-recap]    先核对状态/时间轴（建议性）: {inspect_hint}")

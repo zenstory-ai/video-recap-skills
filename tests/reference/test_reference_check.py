@@ -232,44 +232,6 @@ def test_shared_wording_with_a_fact_names_the_fact_side(breakdown, measurements)
     assert any(e.startswith("R6 methods.m1.rule") and "source_facts" in e for e in errors), errors
 
 
-def test_understanding_index_characters_and_entities_feed_the_name_scan(work_dir, breakdown, research, tmp_path):
-    _append_rule("，学林婉儿在鉴查院的压迫感")(breakdown, research)
-    root = work_dir(breakdown, {})
-    (root / "understanding_index.json").write_text(json.dumps(
-        {"characters": [{"name": "林婉儿", "aliases": ["郡主"], "asr_mentions": ["婉儿"]}],
-         "entities": [{"name": "鉴查院", "evidence_ids": []}]}, ensure_ascii=False), encoding="utf-8")
-
-    errors = run_check(root)["errors"]
-
-    assert any("R6" in e and "林婉儿" in e for e in errors), errors
-    assert any("R6" in e and "鉴查院" in e for e in errors), errors
-
-
-def test_consolidate_asr_mention_dicts_feed_the_name_scan_instead_of_crashing(work_dir, breakdown, research):
-    # video-understanding's deterministic ASR/research fallback writes asr_mentions as dicts next to
-    # the model's plain strings; check and export used to die on `names.update(list_of_dicts)`.
-    _append_rule("，学五竹叔那样沉默护主")(breakdown, research)
-    root = work_dir(breakdown, {})
-    (root / "understanding_index.json").write_text(json.dumps(
-        {"characters": [{"name": "五竹", "aliases": ["五竹叔"],
-                         "asr_mentions": ["抱五竹筐突围的蒙眼护卫叫五竹叔",
-                                          {"text": "五竹叔你等等我", "evidence_id": "asr:10",
-                                           "matched_aliases": ["五竹", "五竹叔"]},
-                                          {"text": "没有别名的条目", "evidence_id": "asr:11"}, 7, None]},
-                        {"name": "滕梓荆", "asr_mentions": [{"text": "老滕快走", "evidence_id": "asr:3",
-                                                          "matched_aliases": ["老滕"]}]}],
-         "research_glossary": [{"name": "五竹", "aliases": ["五竹叔"], "support": "context_only"}]},
-        ensure_ascii=False), encoding="utf-8")
-
-    report = run_check(root)
-
-    assert any("R6" in e and "五竹叔" in e for e in report["errors"]), report["errors"]
-    corpus_names = leak_corpus([], [], {}, {}, index=json.loads(
-        (root / "understanding_index.json").read_text(encoding="utf-8")))["names"]
-    assert "老滕" in corpus_names and "五竹" in corpus_names
-    assert not any(n in corpus_names for n in ("没有别名的条目", "老滕快走"))
-
-
 @pytest.mark.parametrize("malformed", [
     {"characters": [{"name": {"zh": "庆帝"}}, {"name": ["庆帝"]}, {"name": "林婉儿"}, "庆帝", 3]},
     {"characters": {"庆帝": "皇帝"},
@@ -305,10 +267,8 @@ def test_a_glossary_that_is_not_an_object_contributes_no_names():
 
 def test_warns_without_a_name_source_even_when_facts_list_names(breakdown, measurements, asr_segments):
     evidence = {"status": "AVAILABLE_COARSE"}
-    empty_index = {"characters": [], "entities": []}
 
-    report = check_breakdown(breakdown, measurements, asr_segments=asr_segments, asr_evidence=evidence,
-                             index=empty_index)
+    report = check_breakdown(breakdown, measurements, asr_segments=asr_segments, asr_evidence=evidence)
 
     assert breakdown["source_facts"][0]["entities"] == ["范闲"]
     assert any("fact entities" in w for w in report["warnings"])

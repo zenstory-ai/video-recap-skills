@@ -6,8 +6,8 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-voiceover' / 'scripts'))
-from lib import CONFIG, env_float
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
+from lib import CONFIG
 import tts_audio
 import tts_cache
 import voiceover
@@ -70,14 +70,6 @@ _TWO_SEGMENTS = [
     {"start": 0.0, "end": 1.0, "narration": "第一段。"},
     {"start": 1.0, "end": 2.0, "narration": "第二段。"},
 ]
-
-
-@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
-def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
-    monkeypatch.setenv("NONFINITE_FLOAT", raw)
-
-    with pytest.raises(ValueError, match="NONFINITE_FLOAT.*finite"):
-        env_float("NONFINITE_FLOAT", 1.0, minimum=0.0)
 
 
 def test_parse_rate_offset():
@@ -152,8 +144,8 @@ def test_synthesize_segment_raises_when_own_cache_sidecar_is_corrupt(
     assert wav.read_bytes() == b"stale"
 
 
-def test_mimo_preparation_always_derives_rate_and_pitch_from_content(tmp_path):
-    """MiMo/Fish segments always get content-aware prosody; there is no static '+0%' switch."""
+def test_mimo_preparation_uses_neutral_rate_and_pitch(tmp_path):
+    """MiMo/Fish segments use neutral '+0%' / '+0Hz' prosody instead of punctuation/position heuristics."""
     narration = [
         {"start": 0.0, "end": 2.0, "narration": "开场就爆了！"},
         {"start": 2.0, "end": 4.0, "narration": "他真的会回来吗？"},
@@ -165,7 +157,7 @@ def test_mimo_preparation_always_derives_rate_and_pitch_from_content(tmp_path):
         for i, seg in enumerate(narration)
     ]
 
-    assert prepared == [("+8%", "+3Hz"), ("-2%", "+5Hz"), ("-5%", "+0Hz")]
+    assert prepared == [("+0%", "+0Hz"), ("+0%", "+0Hz"), ("+0%", "+0Hz")]
     assert "tts_dynamic_params" not in voiceover.tts_settings_payload("mimo-tts")
 
 
@@ -365,8 +357,6 @@ def test_cleanup_partial_outputs_only_replaces_audio_suffix(tmp_path):
     output_wav.write_bytes(b"partial-wav")
     expected_mp3 = tts_dir / "narr_000.mp3"
     expected_mp3.write_bytes(b"partial-mp3")
-    cache = Path(str(output_wav) + ".cache.json")
-    cache.write_text("{}", encoding="utf-8")
 
     unrelated = tmp_path / "job.mp3" / "tts_segments" / "narr_000.mp3"
     unrelated.parent.mkdir(parents=True)
@@ -376,7 +366,6 @@ def test_cleanup_partial_outputs_only_replaces_audio_suffix(tmp_path):
 
     assert not output_wav.exists()
     assert not expected_mp3.exists()
-    assert not cache.exists()
     assert unrelated.read_bytes() == b"do-not-delete"
 
 
@@ -597,8 +586,7 @@ def test_fresh_voiceclone_keys_match_the_prepared_reference_snapshot(monkeypatch
     [cache] = (tmp_path / "tts_segments" / "cache").glob("*.json")
     cache_inputs = json.loads(cache.read_text(encoding="utf-8"))["settings"]
     expected = voiceover._tts_segment_cache_inputs(
-        "mimo-tts", narration[0], "快照一致。",
-        *voiceover._compute_tts_params("快照一致。", narration, 0),
+        "mimo-tts", narration[0], "快照一致。", "+0%", "+0Hz",
     )
 
     assert prepared == [voiceover._voice_reference_signature(ref)]
@@ -742,31 +730,6 @@ def test_tts_rms_normalization_passes_through_a_silent_block(tmp_path):
         "peak_after": 0.0,
         "gain_db": 0.0,
     }
-
-
-@pytest.mark.parametrize("old", [
-    "not json", {}, [], {"version": 2, "cache_key": "0" * 32, "audio_fingerprint": "f" * 64},
-])
-def test_unusable_per_index_sidecar_from_an_earlier_version_is_a_plain_miss(monkeypatch, tmp_path, old):
-    """A per-index sidecar from before the content-addressed store (any schema, even
-    unreadable) is never read: the block re-synthesizes once and the sidecar is removed."""
-    narration = [{"start": 0.0, "end": 2.0, "narration": "重新生成。"}]
-    tts_dir = tmp_path / "tts_segments"
-    tts_dir.mkdir()
-    wav = tts_dir / "narr_000.wav"
-    wav.write_bytes(b"stale")
-    legacy = tts_cache.legacy_sidecar_path(wav)
-    legacy.write_text(old if isinstance(old, str) else json.dumps(old), encoding="utf-8")
-    monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
-    calls = _offline_mimo_segment(monkeypatch, write=lambda _text, _n: b"fresh")
-    monkeypatch.setattr("voiceover.get_video_duration", lambda path: 1.0)
-
-    segments, _engine, failures = synthesize_tts(narration, tmp_path)
-
-    assert calls == ["重新生成。"]
-    assert failures == [] and segments[0]["audio_path"] == str(wav)
-    assert wav.read_bytes() == b"fresh"
-    assert not legacy.exists()
 
 
 @pytest.mark.parametrize(

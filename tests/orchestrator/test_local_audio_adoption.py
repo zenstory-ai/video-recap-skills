@@ -290,8 +290,7 @@ def test_copied_skill_python_i_cli_routes_offline_bundle_only_to_assemble(tmp_pa
     root = Path(__file__).resolve().parents[2]
     copied = tmp_path / "bundle" / "skills"
     shutil.copytree(root / "skills/video-recap", copied / "video-recap")
-    assemble_scripts = copied / "video-assemble" / "scripts"
-    assemble_scripts.mkdir(parents=True)
+    assemble_scripts = copied / "video-recap" / "scripts"
     (assemble_scripts / "assemble.py").write_text(
         """#!/usr/bin/env python3
 import argparse,json,shutil

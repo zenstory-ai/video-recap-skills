@@ -5,7 +5,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>Turn one or several videos into a Chinese-narration recap: seven skills (six for production plus one on-demand reference skill) inside the coding agent you already use, ffmpeg locally, one Xiaomi MiMo key remotely, and an optional JianYing/CapCut draft to keep editing by hand.</b>
+  <b>Turn one or several videos into a Chinese-narration recap: two self-contained skills (one unified production skill plus one on-demand reference skill) inside the coding agent you already use, ffmpeg locally, one Xiaomi MiMo key remotely, and an optional JianYing/CapCut draft to keep editing by hand.</b>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 <p align="center">
   <a href="https://github.com/zenstory-ai/video-recap-skills/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/video-recap-skills?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/video-recap-skills?style=flat-square&color=081431&label=Release"></a>
-  <img alt="Skills 7" src="https://img.shields.io/badge/Skills-7-081431?style=flat-square">
+  <img alt="Skills 2" src="https://img.shields.io/badge/Skills-2-081431?style=flat-square">
   <a href="https://www.python.org/"><img alt="Python 3.10%2B" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/actions/workflows/skill-validate.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/zenstory-ai/video-recap-skills/skill-validate.yml?style=flat-square&label=CI"></a>
   <a href="https://platform.xiaomimimo.com"><img alt="AI Xiaomi%20MiMo" src="https://img.shields.io/badge/AI-Xiaomi%20MiMo-34A853?style=flat-square"></a>
@@ -38,7 +38,7 @@ The 59-second landscape recap above, *Guohuo (这一秒过火)*, is the final de
 
 ## What it is
 
-Seven skills (six for production plus one on-demand reference skill) install into Claude Code, Codex CLI, OpenCode, or OpenClaw. You give the video paths and the recap you want in plain language; the agent understands picture and dialogue, decides the story and audiovisual plan, cuts, writes, voices, mixes, and subtitles. Supported inputs: `.mp4 / .mov / .mkv / .webm`.
+Two self-contained skills (`video-recap` for production plus `video-reference` on demand) install into Claude Code, Codex CLI, OpenCode, or OpenClaw. You give the video paths and the recap you want in plain language; the agent understands picture and dialogue, decides the story and audiovisual plan, cuts, writes, voices, mixes, and subtitles in one unified workflow. Supported inputs: `.mp4 / .mov / .mkv / .webm`.
 
 - **One key, ffmpeg locally.** ASR, VLM, and TTS all go through [Xiaomi MiMo](https://platform.xiaomimimo.com); the local runtime is Python's standard library plus `ffmpeg`, with no GPU, no `pip install`, and no model downloads. Voiceover can switch to Fish Audio, which replaces only that stage.
 - **The editorial decision comes before the sound allocation.** For a new concept, the agent compares viable edit directions; for a directed task or viewing feedback, it follows the current decisions. It records the viewer promise, POV, dramatic question, and change-based beats in `recap_story_plan.json`, then assigns each beat a picture job and an audio owner: narration is voiced as a block only when it has a defined job, and strong dialogue, action sound, or silence may own an entire beat.
@@ -50,7 +50,7 @@ Seven skills (six for production plus one on-demand reference skill) install int
 
 ### ClawHub
 
-ClawHub entries and dependencies are governed by the [explicit publish inventory](.clawhub/publish.json). The `video-recap` orchestrator remains `blocked` pending verification of companion installation under one skills root. For the complete workflow, install the plugin bundle or source checkout below.
+ClawHub entries and dependencies are governed by the [explicit publish inventory](.clawhub/publish.json) (`video-recap` and `video-reference` are both self-contained packages). For the complete plugin or source workflow, install as shown below.
 
 
 Prerequisites: Python 3.10 or newer, `ffmpeg` on `PATH`, and one [Xiaomi MiMo](https://platform.xiaomimimo.com) API key. Subtitles are burned in by default, which needs an ffmpeg with libass. Homebrew's stock `ffmpeg` has no libass: the default run then skips the burn, ships a same-name `.srt` sidecar next to the recap, and records a warning in `final_qc.json` (an explicit `--burn-subtitles` stops before the run starts instead). Narration that adds on-screen text overlays (`visual_overlays`) also needs an ffmpeg with drawtext, and stops before voiceover without it. To burn subtitles on macOS, use `brew install ffmpeg-full` (keg-only: put its `bin` first on `PATH`).
@@ -93,7 +93,7 @@ git clone https://github.com/zenstory-ai/video-recap-skills.git
 cd video-recap-skills
 mkdir -p .opencode
 ln -s ../skills .opencode/skills             # on Windows, copy skills\* into .opencode\skills\
-opencode debug skill                         # should list all 7 skills
+opencode debug skill                         # should list both skills
 ```
 
 **OpenClaw**: after cloning, import the Claude plugin bundle:
@@ -329,7 +329,7 @@ Use /path/to/ep1.mp4 and /path/to/ep2.mp4 to make one ten-minute recap with a sh
 
 For a complete production request, the agent handles understanding, story and audiovisual planning, cutting, scripting, voiceover, and assembly. A text-only handoff stops at the requested scope. In cut mode it first chooses the footage, renders the shortened video, and only then writes narration on the output timeline; the internal pauses and resumes are the agent's job too.
 
-## Workflow and the seven skills
+## Workflow and the two skills
 
 ```mermaid
 flowchart LR
@@ -345,16 +345,11 @@ flowchart LR
     class research,cut opt;
 ```
 
-The seven skills (six for production plus one on-demand reference skill) hand off through the JSON / MP4 artifacts in `work_dir`:
+The two self-contained skills (`video-recap` for production plus `video-reference` on demand) hand off through the JSON / MP4 artifacts in `work_dir`:
 
 | Skill | Responsibility | In → Out |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | Orchestrator and environment doctor; the one to use for everyday end-to-end production | `video` → `recap_<name>.mp4` |
-| [`video-understanding`](skills/video-understanding/) | Scene detection · frame extraction · ASR (`mimo-v2.5-asr`) · VLM (`mimo-v2.5`) · timeline fusion · creative brief | `video` → `scenes / asr_result / vlm_analysis / silence_periods / timeline_fusion / agent_narration_brief.md` |
-| [`video-script`](skills/video-script/) | Directing / story / picture / sound plan, narration writing, advisory review and lint; call it alone for planning or writing only | `brief + index` → `recap_story_plan.json + visual_audio_board.json + [clip_plan.json] + narration.json` |
-| [`video-cut`](skills/video-cut/) | Clip plan → rendered cut; cut first, narrate second on the output timeline | `clip_plan.json + video` → `edited_source.mp4` |
-| [`video-voiceover`](skills/video-voiceover/) | Synthesise narration audio (MiMo `mimo-v2.5-tts` / Fish Audio `s2.1-pro-free`) | `narration.json` → `tts_segments/ + tts_meta.json` |
-| [`video-assemble`](skills/video-assemble/) | Mix · duck original audio · render subtitles · multi-track timeline · optional JianYing export | `video + tts_meta` → `recap_<name>.mp4 + subtitles.srt/.ass + timeline.json` |
+| [`video-recap`](skills/video-recap/) | Unified production skill: scene/ASR/VLM understanding (`understand.py`), story/audiovisual direction, sentence-safe cutting (`cut.py`), baseline floor validation (`validate.py`), TTS voiceover (`voiceover.py` / `dub.py`), multi-track mixing & subtitle burn (`assemble.py`), optional JianYing export, local dashboard & resource library | `video` → `recap_<name>.mp4 + subtitles.srt/.ass + timeline.json` |
 | [`video-reference`](skills/video-reference/) | On demand, off the production path: break a finished video down into a reusable production reference (structure, pacing, shots, narration/subtitles, sound-picture handoff); source facts stay local, the export holds only methods and numbers | `finished video + understanding artifacts` → `production_reference.json` |
 
 The recap is always written to `recap_<name>.mp4` alongside `subtitles.srt/.ass`; all intermediate artifacts live in `work_dir/`, with the field contracts in the [data schema](skills/video-recap/references/data-schema.md).
@@ -434,7 +429,7 @@ VLM analysis saves completed scenes and retries suspected rate limits once with 
 
 ### The VLM can't tell who is who and the narration is all "a man in black"?
 
-When the title or plot is known, have the agent research first and write `background_research.json`; character names and relationships are folded into the VLM context. See the [research guide](skills/video-understanding/references/research-guide.md) (Chinese).
+When the title or plot is known, have the agent research first and write `background_research.json`; character names and relationships are folded into the VLM context. See the [research guide](skills/video-recap/references/research-guide.md) (Chinese).
 
 ## Further reading
 
@@ -444,7 +439,7 @@ When the title or plot is known, have the agent research first and write `backgr
 - [JianYing draft export and cost](docs/capcut-jianying-draft-export.md) — in-repo document (Chinese): what is in the draft, and how self-hosting bills differ from SaaS
 - [Production boundaries and acceptance](docs/production-boundaries.md) — in-repo document (Chinese): which delivery rules belong in the shared library and which belong to a single project; the three kinds of acceptance cannot stand in for one another
 - [Guohuo case runbook](examples/guohuo-60s/skill-runbook.md) · [decision chain from content lock to final](examples/guohuo-60s/iteration-notes.md) (both in Chinese)
-- Per-skill contracts in each `skills/<skill>/SKILL.md`; [data schema](skills/video-recap/references/data-schema.md) · [config playbook](skills/video-recap/references/config-playbook.md) · [multi-track timeline / JianYing export](docs/timeline-and-jianying.md) · [creative editing playbook](skills/video-script/references/creative-editing-playbook.md)
+- Per-skill contracts in each `skills/<skill>/SKILL.md`; [data schema](skills/video-recap/references/data-schema.md) · [config playbook](skills/video-recap/references/config-playbook.md) · [multi-track timeline / JianYing export](docs/timeline-and-jianying.md) · [creative editing playbook](skills/video-recap/references/creative-editing-playbook.md)
 
 ## Acknowledgements
 

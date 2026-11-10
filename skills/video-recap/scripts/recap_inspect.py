@@ -32,7 +32,6 @@ _UNDERSTANDING_ARTIFACTS = [
     "silence_periods.json",
     "speech_boundary_anchors.json",
     "vlm_analysis.json",
-    "understanding_index.json",
     "agent_narration_brief.md",
 ]
 _CUT_ARTIFACTS = [

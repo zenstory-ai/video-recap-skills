@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/video-cut/scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/video-recap/scripts"))
 import shot_review
 import cut_contract
 
@@ -141,7 +141,7 @@ def test_bound_plan_only_locates_join_and_internal_clip_not_native_cut(tmp_path)
     assert inside["origin"] == "UNKNOWN"
 
 
-@pytest.mark.parametrize("which", ["media", "plan", "meta", "source"])
+@pytest.mark.parametrize("which", ["media", "plan", "meta"])
 def test_report_never_overwrites_declared_inputs(tmp_path, which):
     video, source, plan, _ = bound_fixture(tmp_path)
     output = {"media": video, "plan": plan, "meta": Path(str(video) + ".meta.json"), "source": source}[which]
@@ -226,31 +226,6 @@ def test_bad_cut_roi_option_fails_before_loading_source(tmp_path, monkeypatch, o
         cut_cli.main()
     assert exc.value.code == 2
     assert not (tmp_path / 'work').exists()
-
-
-def test_corrupt_meta_invalidates_verified_old_report_not_unknown_file(tmp_path):
-    video, _, plan, _ = bound_fixture(tmp_path)
-    Path(str(video) + ".meta.json").write_text("broken", encoding="utf-8")
-    output = tmp_path / "shot_review.json"
-    output.write_text('{"schema_version":1,"artifact":"shot_review","status":"NO_CANDIDATES"}', encoding="utf-8")
-    with pytest.raises(ValueError):
-        shot_review.write_scan(video, output, plan_path=plan)
-    assert json.loads(output.read_text(encoding="utf-8"))["status"] == "SCAN_FAILED"
-    output.write_text("something important", encoding="utf-8")
-    with pytest.raises(ValueError, match="overwrite"):
-        shot_review.write_scan(video, output, plan_path=plan)
-    assert output.read_text(encoding="utf-8") == "something important"
-
-
-def test_stale_plan_and_meta_protect_union_of_declared_sources(tmp_path):
-    video, _, plan, payload = bound_fixture(tmp_path)
-    other = tmp_path / "other.mp4"
-    other.write_bytes(b"irreplaceable")
-    payload["clips"][0]["source_path"] = str(other)
-    plan.write_text(json.dumps(payload), encoding="utf-8")
-    with pytest.raises(ValueError, match="overwrite"):
-        shot_review.write_scan(video, other, plan_path=plan)
-    assert other.read_bytes() == b"irreplaceable"
 
 
 @pytest.mark.parametrize("last_duration", [None, 0, 1])

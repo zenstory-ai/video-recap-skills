@@ -11,7 +11,7 @@ sys.path.insert(
     str(
         Path(__file__).resolve().parents[2]
         / "skills"
-        / "video-understanding"
+        / "video-recap"
         / "scripts"
     ),
 )
@@ -267,66 +267,13 @@ def test_understand_writes_overview_status_when_key_missing(monkeypatch, tmp_pat
     video = _video(tmp_path)
     _patch_runner(monkeypatch, tmp_path, overview=True, mimo_key="")
 
-    _run_main(monkeypatch, video, tmp_path, "--skip-asr", "--no-consolidate")
+    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
 
     status = json.loads(
         (tmp_path / "mimo_video_overview.status.json").read_text(encoding="utf-8")
     )
     assert status["status"] == "skipped_no_key"
     assert status["artifact"] is None
-
-
-def test_understand_writes_failed_consolidation_status(monkeypatch, tmp_path):
-    video = _video(tmp_path)
-    _patch_runner(monkeypatch, tmp_path)
-    monkeypatch.setattr(
-        "consolidate.consolidate",
-        lambda work_dir, do_asr=False, do_index=True: {},
-        raising=False,
-    )
-
-    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
-
-    status = json.loads(
-        (tmp_path / "consolidation.status.json").read_text(encoding="utf-8")
-    )
-    assert status["stage"] == "consolidation"
-    assert status["enabled"] is True
-    assert status["do_asr"] is False
-    assert status["do_index"] is True
-    assert status["status"] == "failed"
-    assert "understanding_index.json" in status["message"]
-    assert status["artifacts"] == []
-
-
-def test_understand_reports_failed_not_ok_when_index_reply_is_cut_off(monkeypatch, tmp_path):
-    """A cut-off index reply (finish_reason=length, even after the retry) must surface as a
-    failed consolidation status, not "ok" over an empty understanding_index.json."""
-    video = _video(tmp_path)
-    _patch_runner(monkeypatch, tmp_path)
-
-    def analyze_and_write(scenes, frames, work_dir, **kwargs):
-        analysis = _fresh_analysis(scenes, frames, work_dir)
-        (Path(work_dir) / "vlm_analysis.json").write_text(json.dumps(analysis), encoding="utf-8")
-        return analysis
-
-    monkeypatch.setattr("understanding_runner.analyze_scenes", analyze_and_write)
-    monkeypatch.setattr(
-        "consolidate.api_call",
-        lambda payload: {
-            "choices": [{"message": {"content": '{"characters":[{"name":"范'}, "finish_reason": "length"}]
-        },
-    )
-
-    _run_main(monkeypatch, video, tmp_path, "--skip-asr")
-
-    status = json.loads(
-        (tmp_path / "consolidation.status.json").read_text(encoding="utf-8")
-    )
-    assert status["status"] == "failed"
-    assert "finish_reason=length" in status["message"]
-    assert status["artifacts"] == []
-    assert not (tmp_path / "understanding_index.json").exists()
 
 
 def test_understand_omits_stale_mimo_overview_when_overview_disabled(
@@ -349,12 +296,11 @@ def test_understand_omits_stale_mimo_overview_when_overview_disabled(
     )
 
 
-# ── stage cache freshness (each run below skips consolidate: its api_call is the real
-#    lib.api_call, not the mocked understand.api_call) ───────────────────────────
+# ── stage cache freshness ───────────────────────────────────────────────────
 
 
 def _run_cached(monkeypatch, video, work_dir, *argv_extra):
-    _run_main(monkeypatch, video, work_dir, "--no-consolidate", *argv_extra)
+    _run_main(monkeypatch, video, work_dir, *argv_extra)
 
 
 def test_understand_recomputes_stage_when_artifact_bytes_change(monkeypatch, tmp_path):
@@ -548,7 +494,6 @@ def test_understand_asr_exception_does_not_cache_empty_transcript(
 
 TOKEN_PLAN_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
 PAYG_URL = "https://api.xiaomimimo.com/v1/chat/completions"
-INDEX_REPLY = '{"characters":[{"name":"范闲"}],"relationships":[],"plot_points":[],"entities":[]}'
 
 
 def _set_keys(monkeypatch, key, url):
@@ -578,7 +523,7 @@ def _keyed_run_then_offline(monkeypatch, tmp_path):
         (work_dir / "asr_result.json").write_text(json.dumps(TRANSCRIPT), encoding="utf-8")
         write_asr_timing_evidence(
             work_dir, video_path, "AVAILABLE_COARSE",
-            observed_segments=TRANSCRIPT, final_segments=TRANSCRIPT,
+            final_segments=TRANSCRIPT,
             audio_path=work_dir / "audio.wav",
         )
         return TRANSCRIPT
@@ -592,11 +537,7 @@ def _keyed_run_then_offline(monkeypatch, tmp_path):
     _set_keys(monkeypatch, "tp-test", TOKEN_PLAN_URL)
     monkeypatch.setattr("understanding_runner.transcribe_audio", fake_asr)
     monkeypatch.setattr("understanding_runner.analyze_scenes", analyze_and_write)
-    monkeypatch.setattr("consolidate.api_call", lambda payload: {
-        "choices": [{"message": {"content": INDEX_REPLY}, "finish_reason": "stop"}]
-    })
     _run_main(monkeypatch, video, tmp_path)
-    assert json.loads((tmp_path / "consolidation.status.json").read_text(encoding="utf-8"))["status"] == "ok"
 
     def no_request(*_a, **_k):
         pytest.fail("offline rerun must not call the provider")
@@ -605,7 +546,6 @@ def _keyed_run_then_offline(monkeypatch, tmp_path):
     monkeypatch.setattr("understanding_runner.transcribe_audio", no_request)
     monkeypatch.setattr("understanding_runner.analyze_scenes", no_request)
     monkeypatch.setattr("understanding_runner.api_call", no_request)
-    monkeypatch.setattr("consolidate.api_call", no_request)
     return video
 
 
@@ -614,22 +554,14 @@ def _bump_mtime(path):
     os.utime(path, ns=(stat.st_atime_ns, stat.st_mtime_ns + 1_000_000_000))
 
 
-def test_offline_rerun_keeps_paid_artifacts_and_skips_consolidation(monkeypatch, tmp_path):
-    """Without MIMO_API_KEY a rerun must reuse the transcript, scene analysis and index made
+def test_offline_rerun_keeps_paid_artifacts(monkeypatch, tmp_path):
+    """Without MIMO_API_KEY a rerun must reuse the transcript and scene analysis made
     with a Token-Plan key (whose default endpoint differs), and must not send a request."""
     video = _keyed_run_then_offline(monkeypatch, tmp_path)
     _run_main(monkeypatch, video, tmp_path)
 
     assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == TRANSCRIPT
-    status = json.loads((tmp_path / "consolidation.status.json").read_text(encoding="utf-8"))
-    assert status["status"] == "ok"  # the fresh index is reused without a request
-
-    (tmp_path / "understanding_index.json").unlink()
-    _run_main(monkeypatch, video, tmp_path)
-    status = json.loads((tmp_path / "consolidation.status.json").read_text(encoding="utf-8"))
-    assert status["status"] == "skipped_no_key"
-    assert "MIMO_API_KEY" in status["message"]
-    assert not (tmp_path / "understanding_index.json").exists()
+    assert json.loads((tmp_path / "vlm_analysis.json").read_text(encoding="utf-8"))[0]["description"] == "fresh"
 
 
 def test_offline_asr_miss_keeps_the_transcript_and_fails(monkeypatch, tmp_path):

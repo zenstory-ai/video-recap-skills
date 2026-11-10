@@ -2,13 +2,13 @@ import sys
 from pathlib import Path
 
 sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
+    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
 )
 import json
 import os
 import validate as narration_validate
 import pytest
-from lib import CONFIG, env_float, file_identity
+from lib import CONFIG, file_identity
 from agent_text import _text_char_count
 from narration_lint import lint_narration
 from lint_summary import format_lint_failure
@@ -61,14 +61,6 @@ def test_text_char_count():
     assert _text_char_count("") == 0
     assert _text_char_count("你好，世界。") == 4
     assert _text_char_count("「你好」 world!") == 7
-
-
-@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
-def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
-    monkeypatch.setenv("NONFINITE_FLOAT", raw)
-
-    with pytest.raises(ValueError, match="NONFINITE_FLOAT.*finite"):
-        env_float("NONFINITE_FLOAT", 1.0, minimum=0)
 
 
 def test_lint_narration_reports_warnings_and_errors(tmp_path, monkeypatch):
@@ -610,26 +602,6 @@ def test_lint_does_not_treat_back_to_back_narration_as_new_source_entry(tmp_path
     )
 
 
-def test_lint_counts_leading_original_audio_block_and_interval_union(tmp_path):
-    report = lint_narration(
-        [
-            {"start": 5.81, "end": 18.34, "narration": "第一段旁白讲述选秀夜的起点。"},
-            {
-                "start": 18.34,
-                "end": 30.0,
-                "narration": "第二段旁白继续讲述全明星和季后赛。",
-            },
-        ],
-        [{"scene_id": 0, "start": 0.0, "end": 30.0}],
-        work_dir=tmp_path,
-    )
-
-    codes = {item["code"] for item in report["warnings"]}
-    assert "no_original_blocks" not in codes
-    assert "no_original_breaks" not in codes
-    assert report["metrics"]["original_block_count"] >= 1
-
-
 def test_lint_narration_cut_mode_checks_clip_membership_and_boundaries():
     """A beat outside the plan is an error; one spilling past its clip is silently trimmed
     by the mapper, so it must at least warn."""
@@ -658,91 +630,6 @@ def test_lint_narration_cut_mode_checks_clip_membership_and_boundaries():
     assert "crosses_clip_boundary" in {i["code"] for i in crossing["warnings"]}
 
 
-def test_lint_narration_warns_when_segment_spans_too_many_visual_beats(monkeypatch):
-    monkeypatch.setitem(CONFIG, "visual_beat_max_seconds", 10.0)
-    monkeypatch.setitem(CONFIG, "visual_beat_max_facts", 2)
-    report = lint_narration(
-        [
-            {
-                "start": 0.0,
-                "end": 20.0,
-                "narration": "这段长解说跨过太多画面锚点，应该拆开。",
-            },
-        ],
-        [
-            {
-                "scene_id": 0,
-                "start": 0.0,
-                "end": 25.0,
-                "frame_facts": {
-                    "1.0": ["人物走入房间"],
-                    "6.0": ["人物坐下"],
-                    "12.0": ["人物起身争执"],
-                    "18.0": ["镜头切到门外"],
-                },
-            }
-        ],
-    )
-
-    codes = {issue["code"] for issue in report["warnings"]}
-    assert "visual_beat_too_broad" in codes
-
-
-def test_lint_block_coverage_metrics_and_warnings(monkeypatch):
-    monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
-
-    # Under-narrated: two tiny blocks over a long span -> coverage far below the ~0.7 target.
-    sparse = lint_narration(
-        [
-            {
-                "start": 0.0,
-                "end": 4.0,
-                "narration": "第一句话。",
-                "pause_after_ms": 250,
-            },
-            {
-                "start": 60.0,
-                "end": 64.0,
-                "narration": "很久之后的第二句话。",
-                "pause_after_ms": 250,
-            },
-        ],
-        mode="full",
-    )
-    sparse_codes = {issue["code"] for issue in sparse["warnings"]}
-    assert "under_narrated" in sparse_codes
-    assert sparse["metrics"]["narration_coverage"] < 0.5
-    assert sparse["metrics"]["segment_count"] == 2
-
-    # Healthy block layout: a few big blocks covering most of the span, with deliberate
-    # original-audio gaps between them -> no coverage/fragmentation warnings.
-    block = "范闲表面是个闲散少爷背地里却握着监察院最深的暗线这一次他押上全部身家也要查清楚母亲当年究竟为何而死"
-    healthy = []
-    t = 0.0
-    for _ in range(6):
-        healthy.append(
-            {
-                "start": round(t, 2),
-                "end": round(t + 12.0, 2),
-                "narration": block,
-                "pause_after_ms": 250,
-            }
-        )
-        t += 16.0
-    report = lint_narration(healthy, mode="full")
-    codes = {issue["code"] for issue in report["warnings"]}
-    assert "under_narrated" not in codes
-    assert "no_original_blocks" not in codes
-    assert "fragmented_beats" not in codes
-    assert 0.45 <= report["metrics"]["narration_coverage"] <= 0.85
-    assert report["metrics"]["original_block_count"] >= 2
-
-    # cut mode -> coverage lint is skipped (measured on the mapped output timeline elsewhere)
-    cut_report = lint_narration(sparse, mode="cut")
-    assert cut_report["metrics"] == {}
-
-
 def test_lint_narration_accepts_ascii_period_as_complete_sentence():
     report = lint_narration(
         [
@@ -754,44 +641,29 @@ def test_lint_narration_accepts_ascii_period_as_complete_sentence():
     assert "incomplete_sentence" not in {issue["code"] for issue in report["warnings"]}
 
 
-def test_lint_flags_fragmented_beats(tmp_path, monkeypatch):
-    # The forbidden pattern: many lone short sentences instead of blocks -> each synthesizes as a
-    # separate choppy TTS utterance, so fragmented_beats must fire.
-    monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
-    segs = [
-        {"start": i * 5.0, "end": i * 5.0 + 1.6, "narration": "一句短解说。"}
-        for i in range(8)
+def test_lint_narration_blocks_placeholder_leakage_in_narration_and_original_subtitles(tmp_path):
+    _write_json(
+        tmp_path / "original_subtitles.json",
+        [
+            {"start": 0, "end": 1, "text": "正常台词"},
+            {"start": 1, "end": 2, "text": "【主角】快跑"},
+        ],
+    )
+    report = lint_narration(
+        [
+            {"start": 0.0, "end": 4.0, "narration": "凶手就在其中，TA要做的下一件事，就是灭口。"},
+            {"start": 4.0, "end": 8.0, "narration": "这一次，TA要赌上全部去查清旧案真相。"},
+        ],
+        work_dir=tmp_path,
+    )
+    leak_errors = [e for e in report["errors"] if e["code"] == "placeholder_leakage"]
+    assert [(e["source"], e["index"]) for e in leak_errors] == [
+        ("narration", 1),
+        ("original_subtitles", 1),
     ]
-    report = lint_narration(segs, mode="full", work_dir=tmp_path)
-    codes = {w["code"] for w in report["warnings"]}
-    assert "fragmented_beats" in codes
-    assert report["metrics"]["avg_block_chars"] < 16
-
-
-def test_lint_flags_wall_to_wall_narration_with_no_original_blocks(monkeypatch):
-    # The user's complaint: narration nearly wall-to-wall, the original never gets to breathe.
-    monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
-    rate = 3.5 * 1.3
-    block = "这是一段连续不断的解说词没有给原声留下任何空隙一路讲到底"
-    spoken = len(block) / rate
-    segs = []
-    t = 0.0
-    for _ in range(6):
-        segs.append(
-            {
-                "start": round(t, 2),
-                "end": round(t + spoken + 0.05, 2),
-                "narration": block,
-            }
-        )
-        t += spoken + 0.1  # next block starts right after -> no original gap
-    report = lint_narration(segs, mode="full")
-    codes = {w["code"] for w in report["warnings"]}
-    assert "no_original_blocks" in codes
-    assert report["metrics"]["original_block_count"] == 0
-    assert report["metrics"]["narration_coverage"] > 0.85
+    summary = format_lint_failure(report)
+    assert "- 段 2 placeholder_leakage：" in summary
+    assert "- 原声字幕第 2 条 placeholder_leakage：" in summary
 
 
 # A beat that is 84% quiet but still covers 0.7s of source speech: the retired full-mode

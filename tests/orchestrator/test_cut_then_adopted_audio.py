@@ -14,9 +14,9 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CUT = ROOT / "skills/video-cut/scripts/cut.py"
+CUT = ROOT / "skills/video-recap/scripts/cut.py"
 RECAP = ROOT / "skills/video-recap/scripts/recap.py"
-SOURCE_SCORE = ROOT / "skills/video-assemble/scripts/source_score.py"
+SOURCE_SCORE = ROOT / "skills/video-recap/scripts/source_score.py"
 RATE = 48_000
 STRICT_TEMPO = {
     "global_atempo": 1.0,

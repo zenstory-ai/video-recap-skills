@@ -5,7 +5,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>把一段或几段长视频做成有解说质感的中文成片：七个技能（六个生产 + 一个按需拆片参考）装进你正在用的编程 Agent，本机只要 ffmpeg，云端只要一个小米 MiMo Key，成片还能一键导出剪映草稿接着精修。</b>
+  <b>把一段或几段长视频做成有解说质感的中文成片：两个自包含技能（一个统一生产技能 + 一个按需拆片参考技能）装进你正在用的编程 Agent，本机只要 ffmpeg，云端只要一个小米 MiMo Key，成片还能一键导出剪映草稿接着精修。</b>
 </p>
 
 <p align="center">
@@ -21,7 +21,7 @@
 <p align="center">
   <a href="https://github.com/zenstory-ai/video-recap-skills/stargazers"><img alt="Stars" src="https://img.shields.io/github/stars/zenstory-ai/video-recap-skills?style=flat-square&color=22D3EE&logo=github&logoColor=white&label=Stars"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/releases/latest"><img alt="Release" src="https://img.shields.io/github/v/release/zenstory-ai/video-recap-skills?style=flat-square&color=081431&label=Release"></a>
-  <img alt="Skills 7" src="https://img.shields.io/badge/Skills-7-081431?style=flat-square">
+  <img alt="Skills 2" src="https://img.shields.io/badge/Skills-2-081431?style=flat-square">
   <a href="https://www.python.org/"><img alt="Python 3.10%2B" src="https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat-square&logo=python&logoColor=white"></a>
   <a href="https://github.com/zenstory-ai/video-recap-skills/actions/workflows/skill-validate.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/zenstory-ai/video-recap-skills/skill-validate.yml?style=flat-square&label=CI"></a>
   <a href="https://platform.xiaomimimo.com"><img alt="AI Xiaomi%20MiMo" src="https://img.shields.io/badge/AI-Xiaomi%20MiMo-34A853?style=flat-square"></a>
@@ -38,7 +38,7 @@
 
 ## 这是什么
 
-把七个技能（六个生产技能 + 一个按需拆片参考技能）装进 Claude Code、Codex CLI、OpenCode 或 OpenClaw，直接用自然语言给出视频路径和想要的风格，Agent 就会自动完成画面与对白理解、故事主线与声画分工设计、视频剪辑、解说词撰写、TTS 配音、多轨混音与字幕烧录。支持 `.mp4 / .mov / .mkv / .webm`。
+把两个自包含技能（统一生产技能 `video-recap` + 按需拆片参考技能 `video-reference`）装进 Claude Code、Codex CLI、OpenCode 或 OpenClaw，直接用自然语言给出视频路径和想要的风格，Agent 就会一气呵成完成画面与对白理解、故事主线与声画分工设计、视频剪辑、解说词撰写、TTS 配音、多轨混音与字幕烧录。支持 `.mp4 / .mov / .mkv / .webm`。
 
 - **一个 Key 跑通全链，本机只要 ffmpeg**：语音转写（ASR）、画面理解（VLM）和默认配音（TTS）全部走[小米 MiMo](https://platform.xiaomimimo.com)，本机只用 Python 标准库和 `ffmpeg`，不需要 GPU，不需要 `pip install`，也不用下载几十 GB 的模型权重。配音支持一键切换为 Fish Audio 或自托管 IndexTTS。
 - **先立主线与声画让位，再按“垫半句、让半句、接半句”写词**：动笔写单句旁白前，Agent 先在 `recap_story_plan.json` 中定死观众看点、主视角（POV）、核心悬念与每一拍的局势翻转，并在 `visual_audio_board.json` 中为每一拍指定主导音源——演员飙戏的名场面原速原调让给原声，动作撞击让给现场声，旁白只负责把处境和潜台词垫到位。
@@ -50,7 +50,7 @@
 
 ### ClawHub
 
-ClawHub 条目与依赖由[显式发布清单](.clawhub/publish.json)管理。编排器 `video-recap` 当前仍因同根安装验证未完成而标为 `blocked`；使用完整流程请按下方方式安装整套插件或源码。
+ClawHub 条目与依赖由[显式发布清单](.clawhub/publish.json)管理（`video-recap` 与 `video-reference` 均为自包含包）；使用完整插件或源码工作流请按下方方式安装。
 
 **环境前提**：Python 3.10+、`PATH` 中有 `ffmpeg`，以及一个[小米 MiMo](https://platform.xiaomimimo.com) API Key。系统默认将解说字幕烧录进画面，这需要带 `libass` 滤镜的 `ffmpeg`；macOS 上 Homebrew 默认的 `ffmpeg` 不含 `libass`，此时默认运行会自动降级为在成片旁输出同名 `.srt` 外挂字幕并在 `final_qc.json` 中记一条警告（若显式传了 `--burn-subtitles` 则会在启动前直接报错）。若旁白中使用了画面花字叠加（`visual_overlays`），还需要带 `drawtext`（`libfreetype`）的 `ffmpeg`。在 macOS 上如需完整烧录字幕与花字，可执行 `brew install ffmpeg-full` 并将其 `bin` 目录置于 `PATH` 最前面。
 
@@ -92,7 +92,7 @@ git clone https://github.com/zenstory-ai/video-recap-skills.git
 cd video-recap-skills
 mkdir -p .opencode
 ln -s ../skills .opencode/skills             # Windows 把 skills\* 复制到 .opencode\skills\
-opencode debug skill                         # 应列出全部 7 个技能
+opencode debug skill                         # 应列出全部 2 个技能
 ```
 
 **OpenClaw**：克隆后导入 Claude 插件包：
@@ -166,7 +166,7 @@ export FISH_TTS_REFERENCE_ID=your-voice-model-id  # 可选；默认内置“娱�
 },
 ```
 
-这一拍随后在 [`clip_plan.json`](examples/guohuo-60s/clip_plan.json) 中转化为带 7 段剪辑理由的选段，由 `video-cut` 先剪出画面母版，再进入二阶段写词。
+这一拍随后在 [`clip_plan.json`](examples/guohuo-60s/clip_plan.json) 中转化为带 7 段剪辑理由的选段，由 `cut.py` 先剪出画面母版，再进入二阶段写词。
 
 ### 2. 旁白主动给原声名场面让路：谁主导声音白纸黑字写进分镜板
 
@@ -314,7 +314,7 @@ export FISH_TTS_REFERENCE_ID=your-voice-model-id  # 可选；默认内置“娱�
 
 > 我有权使用〈本地视频〉，并提供了对应的已核对画面与对白记录。先只给这段素材的声音分工建议：哪句对白、哪个动作声或停顿应完整保留，哪里确需旁白，依据是哪条记录。缺证据就列待核对项，不补人物动机或没出现的事件。交付分拍说明和必要的旁白草案，不调用配音或渲染。
 
-## 流程与七个技能分工
+## 流程与两个技能分工
 
 ```mermaid
 flowchart LR
@@ -330,16 +330,11 @@ flowchart LR
     class research,cut opt;
 ```
 
-七个技能（六个生产 + 一个按需参考）通过 `work_dir` 下的 JSON 与 MP4 文件交接：
+两个自包含技能（一个统一生产 + 一个按需参考）通过 `work_dir` 下的 JSON 与 MP4 文件交接：
 
 | 技能 | 核心职责 | 输入 → 输出 |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | 端到端编排器、断点续跑、资源库管理、本地只读看板与环境自检 | `视频` → `recap_<名>.mp4` |
-| [`video-understanding`](skills/video-understanding/) | 场景切点检测 · 抽帧 · ASR（`mimo-v2.5-asr`）· VLM（`mimo-v2.5`）· 时间轴融合 · 生成创作简报 | `视频` → `scenes / asr_result / vlm_analysis / silence_periods / timeline_fusion / agent_narration_brief.md` |
-| [`video-script`](skills/video-script/) | 导演主线、声画让位、解说词创作规范，确定性门禁校验与建议型语义评审 | `brief + 索引` → `recap_story_plan.json + visual_audio_board.json + [clip_plan.json] + narration.json` |
-| [`video-cut`](skills/video-cut/) | 句界安全吸附、帧网格对齐与片段拼接；支撑先剪画面后写旁白 | `clip_plan.json + 视频` → `edited_source.mp4 + clip_plan_validated.json` |
-| [`video-voiceover`](skills/video-voiceover/) | 逐段合成解说语音（MiMo `mimo-v2.5-tts` / Fish Audio `s2.1-pro-free` / 自托管 IndexTTS）及实验性英译中克隆配音 | `narration.json` → `tts_segments/ + tts_meta.json` |
-| [`video-assemble`](skills/video-assemble/) | 多轨混音 · 原声闪避 · 烧录字幕 · 响度真峰值控制 · 导出剪映草稿 | `视频 + tts_meta` → `recap_<名>.mp4 + subtitles.srt/.ass + timeline.json` |
+| [`video-recap`](skills/video-recap/) | 统一解说成片生产技能：视频理解（`understand.py`）· 导演主线与声画分工 · 句界安全剪辑（`cut.py`）· 底线门禁校验（`validate.py`）· TTS 配音（`voiceover.py` / `dub.py`）· 多轨混音与字幕烧录（`assemble.py`）· 剪映草稿导出 · 本地只读看板与资源库 | `视频` → `recap_<名>.mp4 + subtitles.srt/.ass + timeline.json` |
 | [`video-reference`](skills/video-reference/) | 按需把优秀成片拆解为制作参考（测镜头节奏与响度、分离原片事实与可迁移方法），不在日常生产链上 | `成片 + 理解产物` → `production_reference.json` |
 
 最终成片统一命名为 `recap_<名>.mp4`，附带 `subtitles.srt/.ass`；全部中间产物保存在 `work_dir/` 下，字段定义见[数据结构规范](skills/video-recap/references/data-schema.md)。
@@ -419,7 +414,7 @@ flowchart LR
 
 ### 为什么 VLM 认不出角色名字，解说里全是“黑衣男子”“年轻女子”？
 
-只要提前知道片名或剧集名，开跑前先让 Agent 按[背景调研指南](skills/video-understanding/references/research-guide.md)把主要角色全名与关系写入 `work_dir/background_research.json`，VLM 看图和写稿简报就会直接叫准角色姓名。
+只要提前知道片名或剧集名，开跑前先让 Agent 按[背景调研指南](skills/video-recap/references/research-guide.md)把主要角色全名与关系写入 `work_dir/background_research.json`，VLM 看图和写稿简报就会直接叫准角色姓名。
 
 ## 延伸阅读
 
@@ -430,10 +425,10 @@ flowchart LR
 - [AI 分析视频总爱乱编剧情怎么办](docs/ai-video-analysis-without-invented-plot.md) — 把亲眼看见的事实与脑补推断彻底分开
 - [导出剪映草稿继续精修](docs/capcut-jianying-draft-export.md) — 草稿包含哪些轨道、自建流程与按月订阅 SaaS 的账单对比
 - [开源 AI 影视解说工具怎么选](docs/open-source-ai-video-recap-tools.md) — 8 个开源项目按交互形态、许可证、剪映导出与模型来源横向对比
-- [仓库架构说明](docs/architecture.md) — 七个技能分工、内部子包、编排路由与复制函数守卫
+- [仓库架构说明](docs/architecture.md) — 生产技能与参考技能分工、内部子包、编排路由与架构守卫
 - [生产能力边界与验收原则](docs/production-boundaries.md) — 通用核心与单项目数据的边界，以及三层验收标准
 - [《这一秒过火》案例复现手册](examples/guohuo-60s/skill-runbook.md) · [从初剪母版到终审交付的四轮复盘](examples/guohuo-60s/iteration-notes.md)
-- 技能契约与参考手册：[数据结构规范](skills/video-recap/references/data-schema.md) · [全量配置手册](skills/video-recap/references/config-playbook.md) · [多轨时间线与剪映协议](docs/timeline-and-jianying.md) · [创作剪辑与去 AI 味手册](skills/video-script/references/creative-editing-playbook.md)
+- 技能契约与参考手册：[数据结构规范](skills/video-recap/references/data-schema.md) · [全量配置手册](skills/video-recap/references/config-playbook.md) · [多轨时间线与剪映协议](docs/timeline-and-jianying.md) · [创作剪辑与去 AI 味手册](skills/video-recap/references/creative-editing-playbook.md)
 
 ## 致谢
 

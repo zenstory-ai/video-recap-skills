@@ -2,7 +2,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
+    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
 )
 import json
 import os
@@ -351,8 +351,8 @@ def test_multi_source_cut_output_review_loads_each_source_grounding(
             ],
         )
         _write_json(
-            source_dir / "asr_clean.json",
-            {"segments": [{"start": 0, "end": 5, "text": label + "对白"}]},
+            source_dir / "asr_result.json",
+            [{"start": 0, "end": 5, "text": label + "对白"}],
         )
         sources.append({"source_id": source_id, "source_work_dir": relative})
     _write_json(
@@ -762,16 +762,6 @@ def test_parse_review_clamps_craft_categories_to_warning_but_keeps_factual_error
     assert all(severities[category] == "warning" for category in craft_categories)
     assert severities["hallucination"] == "error"
     assert severities["incomplete"] == "error"
-
-
-def test_single_source_review_grounds_on_asr_clean_like_multi_source(tmp_path):
-    _write_json(tmp_path / "asr_result.json", [{"start": 0, "end": 5, "text": "原始转写"}])
-    _write_json(
-        tmp_path / "asr_clean.json",
-        {"segments": [{"start": 0, "end": 5, "text": "清洗后的台词"}]},
-    )
-    _, asr = review_grounding._load_review_grounding(tmp_path)
-    assert [row["text"] for row in asr] == ["清洗后的台词"]
 
 
 def _original_audio_plan(tmp_path):

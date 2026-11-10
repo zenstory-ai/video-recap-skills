@@ -2,7 +2,7 @@
 subtitles so the band is never blank while the original speaks. Cut mode remaps ASR to output."""
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
 import json  # noqa: E402
 
 import pytest  # noqa: E402

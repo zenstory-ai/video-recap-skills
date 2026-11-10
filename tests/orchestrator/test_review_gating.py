@@ -6,35 +6,17 @@ for the duration of each test and then removed, so they never shadow video-recap
 modules for the rest of the group.
 """
 
-import importlib
 import json
-import sys
-from pathlib import Path
 
 import pytest
 
 import recap_review
-
-SCRIPT_SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts"
-
-
-def _is_script_module(module):
-    origin = getattr(module, "__file__", None)
-    return bool(origin) and Path(origin).resolve().is_relative_to(SCRIPT_SCRIPTS)
+import review_runner as review_runner_module
 
 
 @pytest.fixture
-def review_runner(monkeypatch):
-    names = {path.stem for path in SCRIPT_SCRIPTS.glob("*.py")}
-    shadowed = {name: sys.modules.pop(name) for name in names if name in sys.modules}
-    monkeypatch.syspath_prepend(str(SCRIPT_SCRIPTS))
-    try:
-        yield importlib.import_module("review_runner")
-    finally:
-        for name, module in list(sys.modules.items()):
-            if _is_script_module(module):
-                del sys.modules[name]
-        sys.modules.update(shadowed)
+def review_runner():
+    return review_runner_module
 
 
 def _seed_work_dir(work_dir):

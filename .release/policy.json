@@ -16,13 +16,8 @@
   "requiredPaths": [
     "README.md",
     "README.en.md",
-    "skills/video-assemble/SKILL.md",
-    "skills/video-cut/SKILL.md",
     "skills/video-recap/SKILL.md",
     "skills/video-reference/SKILL.md",
-    "skills/video-script/SKILL.md",
-    "skills/video-understanding/SKILL.md",
-    "skills/video-voiceover/SKILL.md",
     "VERSION",
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json"

@@ -11,7 +11,7 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 
 import assemble  # noqa: E402
 import assembly_contract  # noqa: E402

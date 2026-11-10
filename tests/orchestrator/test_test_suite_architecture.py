@@ -8,12 +8,12 @@ ROOT = Path(__file__).resolve().parents[2]
 MAX_SCRIPT_MODULE_LINES = 800
 
 PUBLIC_ENTRYPOINTS = (
-    "skills/video-assemble/scripts/assemble.py",
-    "skills/video-cut/scripts/cut.py",
+    "skills/video-recap/scripts/assemble.py",
+    "skills/video-recap/scripts/cut.py",
     "skills/video-recap/scripts/recap.py",
+    "skills/video-recap/scripts/review.py",
+    "skills/video-recap/scripts/understand.py",
     "skills/video-reference/scripts/reference.py",
-    "skills/video-script/scripts/review.py",
-    "skills/video-understanding/scripts/understand.py",
 )
 
 

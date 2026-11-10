@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"),
+    str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"),
 )
 import importlib.util
 import json
@@ -50,22 +50,13 @@ from visual_render import (
     _subtitle_burn_filter,
 )
 import lib
-from lib import CONFIG, env_float
+from lib import CONFIG
 import assemble
 
 
 def _render_command(commands):
     """The final render: the delivered-peak measurement that follows it writes no file."""
     return next(cmd for cmd in reversed(commands) if "-movflags" in cmd)
-
-
-
-@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
-def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
-    monkeypatch.setenv("NONFINITE_FLOAT", raw)
-
-    with pytest.raises(ValueError, match="NONFINITE_FLOAT.*有限"):
-        env_float("NONFINITE_FLOAT", 1.0, minimum=0.0)
 
 
 def _assembly_manifest_payload(
@@ -1613,7 +1604,7 @@ def _load_lib_with_env(monkeypatch, **env):
             monkeypatch.delenv(name, raising=False)
         else:
             monkeypatch.setenv(name, value)
-    path = Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts" / "lib.py"
+    path = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts" / "lib.py"
     spec = importlib.util.spec_from_file_location("_assemble_lib_env_probe", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -2292,23 +2283,6 @@ def test_source_handoff_records_entry_status_for_unducked_run(tmp_path):
 
     assert report[0]["status"] == "quiet_source"
     assert seg["source_entry_status"] == "quiet_source"
-
-
-@pytest.mark.parametrize(
-    ("dialogue", "quiet", "expected"),
-    [
-        pytest.param([], [], 1.8, id="no-dialogue-pulls-fully"),
-        pytest.param([{"start": 1.0, "end": 2.5}], [], 2.5, id="stops-after-dialogue"),
-        pytest.param([{"start": 2.0, "end": 3.5}], [], 3.0, id="dialogue-at-written-start"),
-        pytest.param([{"start": 1.0, "end": 2.5}], [{"start": 2.0, "end": 2.6}], 2.0,
-                     id="measured-quiet-is-not-dialogue"),
-        pytest.param([{"start": 1.0, "end": 1.83}], [], 1.8, id="sub-tolerance-sliver-ignored"),
-    ],
-)
-def test_dialogue_free_pull_start(dialogue, quiet, expected):
-    assert audio_mix._dialogue_free_pull_start(1.8, 3.0, dialogue, quiet) == pytest.approx(
-        expected
-    )
 
 
 def test_source_handoff_blocks_entry_after_anchor_pause_has_ended(tmp_path):

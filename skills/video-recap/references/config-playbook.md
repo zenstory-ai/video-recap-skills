@@ -10,7 +10,7 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 |---|---|---|---|
 | MiMo API key | `MIMO_API_KEY` | — | **required for the default pipeline**; one key drives ASR + VLM + default MiMo TTS. `tp-*` Token-Plan keys auto-route to the cluster base URL; `sk-*` keys support pay-as-you-go without a subscription |
 | Token-Plan cluster | `MIMO_TOKEN_PLAN_CLUSTER` | `cn` | `cn` / `sgp` / `ams` (only for `tp-*` keys) |
-| VLM / chat model | `MIMO_MODEL` | `mimo-v2.5` | frame VLM + reviewer + consolidate |
+| VLM / chat model | `MIMO_MODEL` | `mimo-v2.5` | frame VLM + reviewer |
 | ASR model | `MIMO_ASR_MODEL` | `mimo-v2.5-asr` | speech-to-text |
 | ASR language | `MIMO_ASR_LANGUAGE` | `auto` | `auto` / `zh` / `en` |
 | ASR window | `ASR_SEGMENT_SECONDS` | `15` | smaller → finer dialogue timestamps (stays under MiMo's 10MB base64 cap) |
@@ -46,15 +46,14 @@ Defaults below are bundle-level defaults unless a note scopes them to a specific
 | VLM workers | `VLM_WORKERS` | `8` | lower to 1 if a proxy/WAF rate-limits |
 | Subtitle size | `SUBTITLE_FONT_SIZE` / `SUBTITLE_MARGIN_V` | `42` / `48` | look & placement |
 | Subtitle font | `SUBTITLE_FONT_NAME` / `SUBTITLE_FONT_FILE` | `Arial` / — | with a font file, burned ASS subtitles load fonts from its directory (`fontsdir`) and on-screen text overlays use it (`fontfile`); `SUBTITLE_FONT_NAME` must be that file's family name. A bound `subtitle_style` template sets both |
-| 整理 / index | `--no-consolidate` / `--consolidate-asr` | on | build the understanding index (and optionally clean ASR); use `--no-consolidate` to skip |
 | Advisory / strict narration review | `REVIEW_NARRATION` / `--review-narration` / `--no-review-narration`; strict: `REQUIRE_NARRATION_REVIEW` / `--require-narration-review` | advisory on, strict off | runs the narration review stage after validation and before TTS; it sends the narration text plus text excerpts of the understanding evidence and planning files (no video, frames or audio) to the MiMo chat endpoint, so `--no-review-narration` / `REVIEW_NARRATION=0` keeps the script on this machine unless strict review is on. Default advisory mode is fail-open; strict mode blocks TTS on review failure, parse error, or error-severity findings. In cut mode the reviewer uses `clip_plan_validated.json` to remap VLM/ASR grounding onto the output timeline |
 | 剪映 export (optional) | `--export-jianying` / `EXPORT_JIANYING` | off | after rendering, also write a 剪映/JianYing draft from `timeline.json`. Decoupled — the core render never needs it |
 | 剪映 draft dir | `JIANYING_DRAFT_DIR` | work_dir | parent folder for the exported draft (point it at 剪映's drafts root to open in-app) |
 | 剪映 bundle media | `JIANYING_BUNDLE_MEDIA` / `--jianying-no-bundle-media` | **on** | copies video/audio/photo into `Resources/local/*`, uses draft-placeholder paths, and writes the type-0 material index in `draft_meta_info.json`. This makes a cloned/moved draft self-contained and is required on sandboxed macOS. Use `--jianying-no-bundle-media` only if 剪映 can reach the original paths |
 | Source video | `--source-video` | — | original video (cut mode) so `timeline.json` / 剪映 export reference the real source clips instead of the concatenated `edited_source.mp4` |
 
-`video-assemble` always writes `timeline.json` — a backend-neutral multi-track model
+`assemble.py` always writes `timeline.json` — a backend-neutral multi-track model
 (video / original-audio / narration / BGM / subtitle, with ducking automation). The
 canonical renderer is ffmpeg; the 剪映 exporter is an optional consumer of the same file. Subtitle text in `timeline.json` is display-ready and follows the same terminal-punctuation policy as SRT/ASS.
 
-See each stage skill's SKILL.md for the full per-stage option list.
+See `SKILL.md` and `python3 scripts/<stage>.py --help` for the full per-stage option list.

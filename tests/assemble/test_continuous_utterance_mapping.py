@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-assemble/scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-recap/scripts'))
 from source_subtitles import _map_asr_to_output, _combined_subtitle_entries
 from lib import CONFIG
 from subtitles.render import _generate_ass

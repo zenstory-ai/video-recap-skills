@@ -10,7 +10,7 @@ import pytest
 MODULE_PATH = (
     Path(__file__).resolve().parents[2]
     / "skills"
-    / "video-assemble"
+    / "video-recap"
     / "scripts"
     / "subtitles"
     / "track.py"

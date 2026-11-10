@@ -2,16 +2,16 @@
 
 ## 仓库是什么
 
-把一段或几段视频做成中文解说成片的 skill 包。`skills/` 下七个技能：六个生产技能加一个按需参考技能。
+把一段或几段视频做成中文解说成片的 skill 包。`skills/` 下两个自包含技能（1 个生产技能 + 1 个按需拆片参考技能）：
 
-- `video-recap`：编排器，以子进程依次调用 `video-understanding` → Agent 按 `video-script` 写计划与旁白 → `video-cut`（cut 模式）→ `video-voiceover` → `video-assemble`。
-- `video-reference`：不在流水线上，按需把成片拆成 `production_reference.json`。
+- `video-recap`：统一生产技能，一气呵成完成视频理解（`understand.py`）→ Agent 制定故事/声画方案与写稿 → 视频剪辑（`cut.py`）→ 校验评审（`validate.py` / `review.py`）→ TTS 配音（`voiceover.py` / `dub.py`）→ 音画混音与字幕渲染（`assemble.py`），由总入口 `recap.py` 编排串联。
+- `video-reference`：不在默认生产流水线上，按需把现有优秀成片拆成 `production_reference.json`。
 - 各阶段拥有什么、入口脚本和功能子包见 `docs/architecture.md`；能力边界与验收原则见 `docs/production-boundaries.md`。
 - 分发渠道：Claude 插件（`.claude-plugin/`，OpenClaw 的 `plugins install` 也读它）、源码 Release（`.release/policy.json`）和 ClawHub（`.clawhub/`）。
 
 ## 改动前必须知道的规矩
 
-- **每个 skill 自包含**：`skills/<name>/scripts/`（含子包）只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；阶段之间只交换 `work_dir` 里的 JSON / MP4。不要把刻意复制的函数抽成共享模块：副本由 `tests/orchestrator/test_brief_narration_parity.py`、`test_audio_policy_parity.py` 守，改一处须同批改副本（见 `architecture/2026-06-14-self-contained-skills-duplicated-libs.md`）。
+- **每个 skill 自包含**：`skills/<name>/scripts/`（含子包）只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；各阶段之间通过 `work_dir` 里的 JSON / MP4 交接数据，`lib.py` 只声明本技能实际读取的配置项（`tests/orchestrator/test_audio_policy_parity.py` 守；见 `architecture/2026-11-10-converge-production-skills-into-video-recap.md`）。
 - **结构上限**：每个脚本模块不超过 800 行，skill 内 import 图无环（`tests/orchestrator/test_test_suite_architecture.py`）。
 - **运行时只用 Python 标准库和 ffmpeg / ffprobe**，README 承诺不需要 `pip install`；最低 Python 3.10（README），CI 用 3.12。
 - **创作产物归 Agent**：`clip_plan.json`、`narration.json` 等由 Agent 写，脚本只准备 brief、做确定性校验、执行 TTS 与渲染（`architecture/2026-05-18-agent-owned-narration-cli-mechanical.md`）。

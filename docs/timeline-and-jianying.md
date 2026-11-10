@@ -1,6 +1,6 @@
 # Multi-track timeline (`timeline.json`) + optional 剪映 export
 
-`video-assemble` always emits `timeline.json`: a backend-neutral description of
+`assemble.py` (`video-recap`) always emits `timeline.json`: a backend-neutral description of
 the finished recap. ffmpeg remains the canonical renderer; the optional 剪映
 exporter consumes the same timeline to make an editable sidecar draft. Timeline
 times are seconds and volumes are gains, so this file has no 剪映-only units.

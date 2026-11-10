@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
+    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
 )
 import validate as narration_validate
 from lib import CONFIG, file_identity
@@ -118,8 +118,7 @@ def test_full_over_budget_text_fails_lint_with_actionable_budget(monkeypatch, tm
     # (1-based block numbers, the key numbers, the fix, the report path), not a traceback.
     summary = str(exc_info.value.code)
     assert summary.splitlines()[1] == (
-        "- 段 2 over_budget：10.00s-13.00s 写了 42 字，窗口约 8 字（硬上限 10，超出 32 字）。"
-        "改法：缩短文字，或放宽/挪动时间窗"
+        "- 段 2 over_budget：10.00s-13.00s 写了 42 字，窗口约 8 字（硬上限 10，超出 32 字）"
     )
     assert str(tmp_path / "narration_lint.json") in summary
     assert path.read_text(encoding="utf-8") == raw
@@ -238,8 +237,7 @@ def test_cut_output_short_overfilled_slot_prints_both_warnings(monkeypatch, tmp_
     ) in out
     assert (
         f"- 段 1 over_budget：0.00s-1.20s 写了 {over['actual_chars']} 字，窗口约 {over['budget_chars']} 字，"
-        f"估计读完 {over['estimated_tts_seconds']:.2f}s，可用 {over['slot_seconds']:.2f}s。"
-        "改法：缩短文字，或放宽/挪动时间窗"
+        f"估计读完 {over['estimated_tts_seconds']:.2f}s，可用 {over['slot_seconds']:.2f}s"
     ) in out
     assert str(tmp_path / "narration_lint.json") in out
 
@@ -271,9 +269,7 @@ def test_lint_failure_summary_also_lists_the_warnings():
 
     assert lines[1] == "- 段 2 empty_narration：m"
     assert lines[2] == "另有 1 个 warning（不阻塞）："
-    assert lines[3] == (
-        "- 段 1 incomplete_sentence：结尾「半句话」没有句末标点。改法：用句号、问号或感叹号收尾"
-    )
+    assert lines[3] == "- 段 1 incomplete_sentence：结尾「半句话」没有句末标点"
 
 
 def test_cut_mode_validates_without_writing(monkeypatch, tmp_path):
@@ -369,8 +365,6 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
         "ok": True,
         "error_count": 0,
         "warning_count": 0,
-        "metrics": {"stale": True},
-        "deslop_qc": {"ok": True},
         "errors": [],
         "warnings": [],
     }
@@ -404,7 +398,6 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
     assert current["ok"] is False
     assert current["error_count"] == len(current["errors"]) >= 1
     assert current["errors"][0]["code"] == "invalid_narration"
-    assert current["metrics"] == {}
 
 
 def test_full_derives_quiet_ownership_without_changing_other_approved_fields(
@@ -553,7 +546,6 @@ def test_cut_output_cli_duration_failure_updates_lint(tmp_path, duration):
     assert current["errors"][0]["message"] in result.stderr
     assert current["warning_count"] == len(current["warnings"])
     assert any(warning["code"] == "over_budget" for warning in current["warnings"])
-    assert "blockers" in current["deslop_qc"]
     assert not (tmp_path / "deslop_qc.json").exists()
 
 

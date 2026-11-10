@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
 """Subtitle style must scale to the probed canvas so 竖屏 (9:16) text is not stretched.
 
 Regression guard for the hardcoded 1280x720 PlayRes bug: libass interprets all style

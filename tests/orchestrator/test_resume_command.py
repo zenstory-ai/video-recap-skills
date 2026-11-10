@@ -82,7 +82,7 @@ def test_resume_command_keeps_the_user_spelling_and_pins_cwd_and_env(
     monkeypatch.setenv("EDIT_MODE", "cut")
     monkeypatch.setenv("TARGET_DURATION", "90")
     _, args = recap_cli.parse_args(
-        ["in.mp4", "--style=悬疑", "--output-dir", "out", "--no-consolidate"]
+        ["in.mp4", "--style=悬疑", "--output-dir", "out", "--skip-asr"]
     )
     args.voice_ref = str(tmp_path / "voice.wav")  # main() folds VOICE_REF in like this
     work = tmp_path / "work dir"
@@ -91,7 +91,7 @@ def test_resume_command_keeps_the_user_spelling_and_pins_cwd_and_env(
 
     assert resume == [
         str(tmp_path / "in.mp4"), "--style=悬疑", "--output-dir", str(tmp_path / "out"),
-        "--no-consolidate", "--work-dir", str(work), "--edit-mode", "cut",
+        "--skip-asr", "--work-dir", str(work), "--edit-mode", "cut",
         "--target-duration", "90", "--voice-ref", str(tmp_path / "voice.wav"),
     ]
     video = tmp_path / "in.mp4"

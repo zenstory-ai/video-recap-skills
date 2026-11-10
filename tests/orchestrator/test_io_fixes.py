@@ -97,8 +97,7 @@ def _write_stale_lint_pass(work):
                 "ok": True,
                 "error_count": 0,
                 "warning_count": 0,
-                "metrics": {"stale": True},
-                "deslop_qc": {"ok": True},
+                "stale": True,
                 "errors": [],
                 "warnings": [],
             }
@@ -112,7 +111,7 @@ def _assert_validation_replaced_stale_pass(work, expected_code):
     assert lint["ok"] is False
     assert lint["error_count"] == len(lint["errors"]) >= 1
     assert lint["errors"][0]["code"] == expected_code
-    assert "stale" not in lint["metrics"]
+    assert "stale" not in lint
 
 
 def _real_validation_then_stop(calls, work=None, clips=None):
@@ -679,61 +678,6 @@ def test_recap_cut_duration_read_failure_stops_before_tts(monkeypatch, tmp_path)
 
     with pytest.raises(SystemExit, match="无法读取成片时长"):
         recap.main()
-
-
-def test_recap_resumes_old_manifest_missing_consolidate_key(monkeypatch, tmp_path):
-    """A manifest predating the consolidate setting (key absent) must still resume Phase B."""
-    video, work = seed_full_work(tmp_path, [{"start": 0, "end": 1, "narration": "old。"}])
-    manifest = json.loads(
-        (work / recap_runtime.RUN_MANIFEST).read_text(encoding="utf-8")
-    )
-    manifest["settings"].pop("consolidate", None)
-    manifest["settings"].pop("consolidate_asr", None)
-    (work / recap_runtime.RUN_MANIFEST).write_text(
-        json.dumps(manifest), encoding="utf-8"
-    )
-    calls = []
-    monkeypatch.setattr(
-        "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
-    )
-    _argv(monkeypatch, video, "--work-dir", work)
-
-    recap.main()
-
-    assert any(call[:2] == ("video-assemble", "assemble.py") for call in calls)
-
-
-@pytest.mark.parametrize(
-    "brief, amplified",
-    [
-        (
-            "# Agent Narration Brief\n\n"
-            "## ⚑ Research the story FIRST (do this before writing narration)\n",
-            True,
-        ),
-        ("# Agent Narration Brief\n", False),
-    ],
-)
-def test_recap_pause_banner_amplifies_research_only_when_brief_flags_thin(
-    monkeypatch, tmp_path, capsys, brief, amplified
-):
-    """The Phase-A pause banner repeats the brief's research directive, and only that."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-
-    def understand(cli):
-        (work / "agent_narration_brief.md").write_text(brief, encoding="utf-8")
-
-    monkeypatch.setattr("recap_runner._run", stub_child_run(work, understand=understand))
-    _argv(monkeypatch, video, "--work-dir", work)
-
-    recap.main()  # Phase A (no narration.json) -> pause
-
-    out = capsys.readouterr().out
-    assert ("理解素材偏薄" in out) is amplified
-    assert ("Research the story FIRST" in out) is amplified
 
 
 def test_recap_cut_two_pass_renders_then_pauses_for_output_narration(
@@ -1781,24 +1725,6 @@ def test_multi_source_pass2_builds_the_output_storyboard_after_the_brief(
     assert ("剪后故事板未生成" in out) is storyboard_fails
     assert "⏸" in out
     assert (work / "recap_phase.json").exists()
-
-
-def test_multi_source_excerpt_preserves_source_evidence_from_a_long_brief(tmp_path):
-    brief = tmp_path / "agent_narration_brief.md"
-    unique_fact = "SOURCE_FACT_女主在雨中把钥匙交给弟弟"
-    brief.write_text(
-        "# Agent Narration Brief\n\n"
-        + ("通用写作说明，不是本片证据。\n" * 300)
-        + "\n## Scene timing guide\n\n"
-        + f"- 12.0–18.0s: {unique_fact}\n",
-        encoding="utf-8",
-    )
-
-    excerpt = recap_timeline._brief_excerpt(brief, limit=1200)
-
-    assert len(excerpt) <= 1200
-    assert "## Scene timing guide" in excerpt
-    assert unique_fact in excerpt
 
 
 def test_cut_qc_summary_surfaces_canonical_cut_result(tmp_path, capsys):

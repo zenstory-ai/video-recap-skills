@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-cut/scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-recap/scripts'))
 import shot_review
 
 ROI = [39, 101, 32, 32]  # Odd offsets must not be silently chroma-rounded.

@@ -9,7 +9,7 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-cut" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 import cut
 import cut_contract
 import cut_qc
@@ -20,17 +20,9 @@ import media_geometry
 import sentence_boundaries
 from cut_contract import normalize_clip_plan, parse_duration_seconds
 from cut_render import build_edited_source_video
-from lib import env_float
 from sentence_boundaries import snap_clip_ends_to_lines, snap_clips_off_shot_changes
 
 _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
-
-
-@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
-def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
-    monkeypatch.setenv("NONFINITE_FLOAT", raw)
-    with pytest.raises(ValueError, match="NONFINITE_FLOAT.*finite"):
-        env_float("NONFINITE_FLOAT", 1.0, min_val=0.0)
 
 
 def _geometry(width, height, fps):
@@ -128,20 +120,20 @@ def test_cut_main_keeps_sentence_gate_when_line_snapping_is_disabled(monkeypatch
     video.write_bytes(b"v")
     clip = {"start": 3.0, "end": 7.0}
     argv = ["cut.py", str(video), "--work-dir", str(tmp_path), "--normalize-only"]
-    asr = json.dumps({"segments": [{"start": 0.0, "end": 10.0, "text": "完整原声句子。"}]})
+    asr = json.dumps([{"start": 0.0, "end": 10.0, "text": "完整原声句子。"}])
 
     if multi_source:
         clip["source_id"] = "a"
         source_work = tmp_path / "sources" / "a"
         source_work.mkdir(parents=True)
-        (source_work / "asr_clean.json").write_text(asr, encoding="utf-8")
+        (source_work / "asr_result.json").write_text(asr, encoding="utf-8")
         manifest = tmp_path / "sources.json"
         manifest.write_text(json.dumps({"sources": [{
             "source_id": "a", "source_path": str(video), "source_work_dir": "sources/a", "duration": 10.0,
         }]}), encoding="utf-8")
         argv.extend(["--sources-manifest", str(manifest)])
     else:
-        (tmp_path / "asr_clean.json").write_text(asr, encoding="utf-8")
+        (tmp_path / "asr_result.json").write_text(asr, encoding="utf-8")
         monkeypatch.setattr(cut_cli, "get_video_duration", lambda _path: 10.0)
 
     (tmp_path / "clip_plan.json").write_text(json.dumps({"clips": [clip]}), encoding="utf-8")
@@ -1003,7 +995,7 @@ def test_contiguous_same_source_join_does_not_fade_inside_sentence(monkeypatch, 
 
 
 @pytest.mark.parametrize("kwargs,allowed_by", [
-    pytest.param({}, None, id="drift_blocks"),
+    pytest.param({}, None, id="drift_warns"),
     pytest.param({"allow_duration_drift": True}, "--allow-duration-drift", id="cli_flag_allows"),
     pytest.param({"allow_duration_drift": True, "duration_drift_allowed_by": "operator-override"},
                  "operator-override", id="custom_allowed_by"),
@@ -1012,10 +1004,9 @@ def test_update_cut_qc_duration_status_and_allow_drift(kwargs, allowed_by):
     plan = {"clips": [{"duration": 4.0}], "total_duration": 4.0, "target_duration": 10.0}
     cut_qc.update_cut_qc(plan, **kwargs)
     assert plan["qc"]["target_duration_status"] == "under"
-    if allowed_by is None:
-        assert plan["qc"]["blocking"][0]["code"] == "target_duration_drift"
-    else:
-        assert "blocking" not in plan["qc"]
+    assert "blocking" not in plan["qc"]
+    assert plan["qc"]["warnings"][0]["code"] == "target_duration_drift"
+    if allowed_by is not None:
         assert plan["qc"]["target_duration"]["duration_drift_allowed_by"] == allowed_by
 
 

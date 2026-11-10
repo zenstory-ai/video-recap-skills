@@ -10,6 +10,15 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **六个生产技能收敛为单一自包含技能 `video-recap`（`1 + 1` 技能结构）。** 将原 `video-understanding`、`video-script`、`video-cut`、`video-voiceover`、`video-assemble` 的脚本、子包与参考手册统一并入 `skills/video-recap/`，让视频理解、立意选镜、画面剪辑、旁白创作校验、TTS 配音与音画混音合成在同一个自包含技能内一气呵成完成；`skills/video-reference/` 保持为独立的按需拆片参考技能。合并后消除五份重复的 `lib.py`、`agent_text.py`、色彩标签推导与纯语气词对白区间计算副本。
+
+### Removed
+
+- **删除理解阶段的模型二次归纳、ASR 清洗、时间轴融合与分块产物。** 移除 `skills/video-understanding/scripts/consolidate.py`、`index_normalize.py`、`timeline_fusion.py`，以及 `understand.py` 与 `recap.py` 的 `--consolidate`、`--no-consolidate`、`--consolidate-asr` 参数；不再生成或读取 `understanding_index.json`、`understanding_index.md`、`asr_clean.json`、`consolidation.status.json`、`timeline_fusion.json` 与 `asr_writing_chunks.json`。写稿、剪辑、评审、拆片与合成统一直接读取 `vlm_analysis.json`、`asr_result.json`、`silence_periods.json` 与 `background_research.json`。
+- **删除代码写死的品味检查、启发式改写与旧版兼容层。** 移除 `skills/video-script/scripts/deslop_qc.py`（仅在 `narration_lint.py` 保留 `placeholder_leakage` 示例占位符拦截），`narration_lint.json` 不再包含 `deslop_qc` 与 `metrics` 字段，也不再报覆盖率配额、画面节拍或跨场景边界 warning；移除 `detect._merge_short_scenes`（保留原始检测切点，不再自动合并短于 4 秒的镜头）、`asr._correct_text_with_glossary`（保留 ASR 原始文本，不再根据人名表静默改写转写）、`audio_mix` 的口播段落自动前拉紧凑、以及 `voiceover._compute_tts_params` 按位置和标点调语速音高的启发式规则；移除 schema-1 句末锚点就地升级、旧 TTS sidecar 路径与旧 storyboard 绝对路径重定位兼容层。`cut_qc` 的 `target_duration_drift` 统一降为 `warning`，不再因时长比例阻断渲染。
+
 ### Fixed
 
 - **畸形输入不再崩溃。** `recap_project.json` 的 `bindings` 不是对象、或绑定值不是 id 字符串时给出明确错误（此前抛 AttributeError / TypeError）；VLM 帧标签里 `"."`、`"1.2.3"` 这类不是数字的时间戳整行丢弃，不再让 brief 与 lint 的 `float()` 崩溃；`background_research.json` 里字符串形式的剧情线、背景注释、别名与关系在 VLM 上下文和 brief 里统一规整，brief 不再在付费 VLM 调用之后崩溃，非法 JSON 给出可读错误。

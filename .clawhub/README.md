@@ -19,8 +19,3 @@ The canonical packager adds the root license only when needed. Cross-platform in
 New entries begin at the explicit `1.0.0` semver baseline; known existing entries retain an owner-qualified current/target version instead of being reset. Before the first write, the organization-level dry run reconciles every version with the existing ClawHub identity. `publisher: worldwonderer` is also subject to owner-qualified resolution before a write.
 
 `supportedRuntimes` remains empty until that exact package has been exercised on the runtime; publication alone is not runtime verification. `runtimeDependsOn` records declared host/binary prerequisites but is not a verification claim.
-
-
-## video-recap companion installation blocker
-
-`video-recap` is an orchestrator, not a standalone package: its runtime resolves the shared `skills/` directory and directly executes `video-understanding`, `video-cut`, `video-script`, `video-voiceover`, and `video-assemble`. It remains `blocked`, rather than excluded from coverage, until the exact ClawHub packages are installed into one isolated same-root layout and that installation is verified. Listing `skill:worldwonderer/<slug>@<version>` dependencies records the requirement but does not by itself prove that ClawHub performs companion installation.

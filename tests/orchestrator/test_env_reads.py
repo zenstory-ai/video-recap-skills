@@ -57,7 +57,7 @@ def _credential_shaped(name):
 
 def test_literal_env_reads_are_not_credential_shaped_except_api_keys():
     trees = _skill_script_trees()
-    assert len(trees) >= 6
+    assert len(trees) == 2
     reads = set()
     for tree in trees:
         reads |= _literal_env_reads(tree)

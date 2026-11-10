@@ -86,11 +86,6 @@ def test_skill_descriptions_are_single_line_values():
 def test_skill_frontmatter_exposes_router_writing_and_reference_skills():
     expected_invocability = {
         "video-recap": True,
-        "video-script": True,
-        "video-understanding": False,
-        "video-cut": False,
-        "video-voiceover": False,
-        "video-assemble": False,
         "video-reference": True,
     }
 

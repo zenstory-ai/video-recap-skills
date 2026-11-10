@@ -13,7 +13,7 @@ import materials as material_lib
 from lib import env_bool, env_int, ffmpeg_has_subtitles_filter, file_identity, load_json, material_id_for
 from recap_source import audio_binding
 
-BUNDLE = Path(__file__).resolve().parents[2]  # the skills/ directory
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 RUN_MANIFEST = "recap_run_manifest.json"
 
@@ -130,8 +130,6 @@ def _analysis_settings(args):
         "target_duration": args.target_duration,
         "skip_asr": bool(args.skip_asr),
         "mimo_video_overview": bool(args.mimo_video_overview),
-        "consolidate": bool(args.consolidate),
-        "consolidate_asr": bool(args.consolidate_asr),
     }
 
 
@@ -321,4 +319,4 @@ def _preflight_burn_subtitles(args):
 
 
 def _entry(skill, script):
-    return BUNDLE / skill / "scripts" / script
+    return SCRIPT_DIR / script

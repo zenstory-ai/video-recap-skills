@@ -11,7 +11,7 @@ sys.path.insert(
     str(
         Path(__file__).resolve().parents[2]
         / "skills"
-        / "video-understanding"
+        / "video-recap"
         / "scripts"
     ),
 )

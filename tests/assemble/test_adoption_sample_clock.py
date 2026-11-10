@@ -7,7 +7,7 @@ import wave
 
 import pytest
 
-SCRIPTS = Path(__file__).resolve().parents[2] / "skills/video-assemble/scripts"
+SCRIPTS = Path(__file__).resolve().parents[2] / "skills/video-recap/scripts"
 sys.path.insert(0, str(SCRIPTS))
 
 import assemble  # noqa: E402

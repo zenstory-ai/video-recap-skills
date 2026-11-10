@@ -109,15 +109,6 @@ def parse_args(argv=None):
     core.add_argument("--output-dir", default=None)
     core.add_argument("--skip-asr", action="store_true")
     core.add_argument("--mimo-video-overview", action="store_true")
-    core.add_argument(
-        "--consolidate",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="build the understanding story index (Pass B); default ON, --no-consolidate to skip",
-    )
-    core.add_argument(
-        "--consolidate-asr", action="store_true", help="also clean ASR (Pass A)"
-    )
 
     voice = parser.add_argument_group("声音策略与配音")
     voice.add_argument("--audio-mode", choices=AUDIO_MODES, default="narration")

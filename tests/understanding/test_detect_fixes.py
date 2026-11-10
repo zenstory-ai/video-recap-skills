@@ -3,9 +3,7 @@ import sys
 from pathlib import Path
 from subprocess import CompletedProcess
 
-import pytest
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-understanding' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
 
 import detect  # noqa: E402
 from detect import (  # noqa: E402
@@ -64,33 +62,26 @@ def test_filter_all_black_falls_back_to_keeping_everything(monkeypatch):
     assert _filter_junk_scenes(scenes, Path("video.mp4")) == scenes
 
 
-# ── BUG 2: ordering — filter runs BEFORE merge ──
+# ── BUG 2: junk filter runs on detected scenes ──
 
-def test_detect_scenes_filters_junk_before_merging(monkeypatch, tmp_path):
+def test_detect_scenes_filters_junk(monkeypatch, tmp_path):
     # scdet reports a cut at 2.0s → scenes [{0-2 黑场}, {2-30 真实}]
     stderr = "lavfi.scd.time: 2.000\n"
     monkeypatch.setattr("detect.run_cmd", lambda cmd, **kw: _ok(stderr=stderr))
     monkeypatch.setattr("detect.get_video_duration", lambda video: 30.0)
     monkeypatch.setitem(detect.CONFIG, "scene_junk_filter", True)
-    monkeypatch.setitem(detect.CONFIG, "scene_merge_min", 4.0)
 
     order = []
 
     def fake_filter(scenes, video_path):
         order.append("filter")
-        # the 0-2 black lead-in is still an ISOLATED short scene here (not yet merged)
         assert {"start": 0.0, "end": 2.0} in scenes
         return [s for s in scenes if s["start"] != 0.0]
 
-    def fake_merge(scenes, min_duration=4.0):
-        order.append("merge")
-        return scenes
-
     monkeypatch.setattr("detect._filter_junk_scenes", fake_filter)
-    monkeypatch.setattr("detect._merge_short_scenes", fake_merge)
 
     scenes = detect_scenes(tmp_path / "v.mp4", tmp_path)
-    assert order == ["filter", "merge"]
+    assert order == ["filter"]
     # the long real scene reached the output (was NOT deleted wholesale)
     assert {"start": 2.0, "end": 30.0} in scenes
 
@@ -224,96 +215,6 @@ def test_speech_boundary_anchor_beyond_alignment_limit_is_unusable(monkeypatch, 
     )
     assert anchor["alignment_error"] == 1.3
     assert anchor["boundary_use"] == "none"
-
-
-def test_anchors_current_regenerates_only_stale_schema(tmp_path):
-    import json
-
-    path = tmp_path / "speech_boundary_anchors.json"
-    assert detect.anchors_current(tmp_path) is False
-    path.write_text(json.dumps({"schema_version": 1, "sentence_anchors": []}), encoding="utf-8")
-    assert detect.anchors_current(tmp_path) is False
-    path.write_text(json.dumps({"schema_version": 2, "sentence_anchors": []}), encoding="utf-8")
-    assert detect.anchors_current(tmp_path) is True
-
-
-_V1_ASR = [{"start": 0.0, "end": 15.0, "text": "一句完整的话。"}]
-_V1_ANCHOR = {
-    "time": 15.1, "pause_start": 14.92, "pause_end": 15.1, "expected_time": 15.0,
-    "alignment_error": 0.01, "confidence": "high", "punctuation": "。",
-    "text_tail": "一句完整的话。", "asr_segment_index": 0,
-}
-
-
-def _write_v1_restore(tmp_path, anchors=None):
-    import json
-
-    (tmp_path / "asr_result.json").write_text(json.dumps(_V1_ASR, ensure_ascii=False), encoding="utf-8")
-    (tmp_path / "speech_boundary_anchors.json").write_text(
-        json.dumps({"schema_version": 1, "status": "completed",
-                    "sentence_anchors": anchors if anchors is not None else [_V1_ANCHOR]},
-                   ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def _brief_only(monkeypatch, tmp_path):
-    import json
-    from types import SimpleNamespace
-
-    import understanding_brief
-
-    monkeypatch.setattr(understanding_brief, "_finish_brief", lambda *_a, **_k: None)
-    understanding_brief._write_brief_from_existing_artifacts(
-        tmp_path / "video.mp4", tmp_path, SimpleNamespace(style="纪录片"), 15.0
-    )
-    return json.loads((tmp_path / "speech_boundary_anchors.json").read_text(encoding="utf-8"))
-
-
-def test_brief_only_upgrades_restored_v1_anchors_in_place_without_audio(monkeypatch, tmp_path):
-    # A material-library restore copies the anchors but never audio.wav: the detector must not
-    # run (it would write an empty `unavailable` file and every gate would lose its anchors).
-    _write_v1_restore(tmp_path)
-    monkeypatch.setattr("detect.run_cmd", lambda *a, **k: pytest.fail("no audio: must not detect"))
-
-    payload = _brief_only(monkeypatch, tmp_path)
-
-    assert payload["schema_version"] == 2
-    assert payload["status"] == "completed"
-    [anchor] = payload["sentence_anchors"]
-    assert (anchor["time"], anchor["pause_start"], anchor["pause_end"]) == (15.1, 14.92, 15.1)
-    assert anchor["confidence"] == "low"
-    assert anchor["boundary_use"] == "unverified"
-    assert anchor["timing_basis"] == "asr_window"
-    assert anchor["timing_bound_seconds"] == 14.92
-
-
-def test_brief_only_leaves_unmappable_v1_anchors_untouched_without_audio(monkeypatch, tmp_path):
-    import json
-
-    _write_v1_restore(tmp_path, [{**_V1_ANCHOR, "asr_segment_index": 7}])
-    before = (tmp_path / "speech_boundary_anchors.json").read_text(encoding="utf-8")
-    monkeypatch.setattr("detect.run_cmd", lambda *a, **k: pytest.fail("no audio: must not detect"))
-
-    payload = _brief_only(monkeypatch, tmp_path)
-
-    assert payload == json.loads(before)
-
-
-def test_brief_only_redetects_v1_anchors_when_audio_is_present(monkeypatch, tmp_path):
-    _write_v1_restore(tmp_path)
-    (tmp_path / "audio.wav").write_bytes(b"RIFF")
-    monkeypatch.setattr(
-        "detect.run_cmd", lambda cmd, **kw: _ok(stderr="silence_start: 14.92\nsilence_end: 15.1")
-    )
-
-    payload = _brief_only(monkeypatch, tmp_path)
-
-    assert payload["schema_version"] == 2
-    assert "upgraded_from_schema" not in payload
-    assert payload["acoustic_pauses"]
-    [anchor] = payload["sentence_anchors"]
-    assert anchor["boundary_use"] == "unverified"
 
 
 def test_detect_silence_reextracts_audio_when_source_video_changes(monkeypatch, tmp_path):

@@ -13,7 +13,7 @@ Agent 在此扮演**拆片编辑**：先把“这条成片具体是怎么剪、�
 ## 2. 输入
 
 - 待拆解的成片视频文件（支持 `.mp4 / .mov / .mkv / .webm`）。
-- 针对**这部成片**跑出的视频理解产物目录 `U`（建议在理解阶段设 `ASR_SEGMENT_SECONDS=5`，分窗越细，测算出的旁白语速越准）。本技能会从中读取可选的 `asr_result.json`、`asr_timing_evidence.json`、`background_research.json` 与 `understanding_index.json`（其中登记的角色名、别名及 ASR 台词都会纳入防剧透泄漏扫描）；Agent 做人工标注时还应结合故事板拼图（storyboard）与 `vlm_analysis.json` 一起看。
+- 针对**这部成片**跑出的视频理解产物目录 `U`（建议在理解阶段设 `ASR_SEGMENT_SECONDS=5`，分窗越细，测算出的旁白语速越准）。本技能会从中读取可选的 `asr_result.json`、`asr_timing_evidence.json` 与 `background_research.json`（其中登记的角色名、别名及 ASR 台词都会纳入防剧透泄漏扫描）；Agent 做人工标注时还应结合故事板拼图（storyboard）与 `vlm_analysis.json` 一起看。
 
 即使没有跑过视频理解，本技能也能单独运行，只是导出的旁白语速字段为空、防泄漏扫描词表仅依赖 Agent 手写的 `entities`，且 `check` 会给出相应警告；此时可用 `frames --span 0,<时长> --step 2` 抽帧生成拼图来辅助看片。
 
@@ -55,7 +55,7 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 | R7 | 五大制作维度（`narrative_structure`、`pacing`、`shots_editing`、`narration_subtitles`、`audio_visual`）每个维度至少提炼一条 `method`，若某维度确实无法提炼则必须在 `skipped_dimensions` 中写明原因 |
 | R8 | 导出 `production_reference.json` 时，对所有键名和字符串值再跑一遍 R6 防泄漏扫描，且导出物任意层级严禁出现 `source_facts`、`labels`、`entities`、`evidence`、`statement`、`from`、`path` 键 |
 
-防泄漏词表会自动汇总 `source_facts[].entities`、`understanding_index.json` 中的 `characters` / `entities` / `research_glossary` 名称与别名、`background_research.json` 中的角色与 `character_details` 别名、不超过 5 个字的 `cultural_notes` 词条，以及资料中带《》「」引号的短词。若报出与 `source_facts` 连续 8 字重合，只需把其中一侧的通用剪辑表述换个说法即可。
+防泄漏词表会自动汇总 `source_facts[].entities`、`background_research.json` 中的角色与 `character_details` 别名、不超过 5 个字的 `cultural_notes` 词条，以及资料中带《》「」引号的短词。若报出与 `source_facts` 连续 8 字重合，只需把其中一侧的通用剪辑表述换个说法即可。
 
 以下情况仅报警告（warning），不阻断导出：`method` 未填 `applies_when`、`rule` 正文里直接写了阿拉伯数字、ASR 精度不是 `AVAILABLE_COARSE`、成片含中文对白但理解产物与资料库均未提供人名（此时仅靠手写的 `entities` 把关）、`basis` 为空、理解产物记录的视频文件身份与当前测量的成片不一致、存在待复核切点窗口但未填写 `cut_fixes`。
 

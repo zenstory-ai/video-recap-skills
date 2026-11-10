@@ -38,10 +38,9 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "clean"}]}), encoding="utf-8")
-    (work / "understanding_index.json").write_text(json.dumps({
-        "characters": [{"name": "英雄"}], "relationships": [], "plot_points": [],
-        "entities": [{"name": "hero-sword"}], "research_glossary": [],
+    (work / "asr_result.json").write_text(json.dumps([{"text": "clean"}]), encoding="utf-8")
+    (work / "background_research.json").write_text(json.dumps({
+        "characters": {"英雄": "主角"}, "terms": {"hero-sword": "名剑"},
     }), encoding="utf-8")
     (work / "audio.wav").write_bytes(b"raw audio should not copy")
     (work / "secret.json").write_text("tp-secret", encoding="utf-8")
@@ -52,7 +51,7 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     assert (mdir / "material.json").exists()
     assert (mdir / "material.md").exists()
     assert (mdir / "artifacts" / "scenes.json").exists()
-    assert (mdir / "artifacts" / "asr_clean.json").exists()
+    assert (mdir / "artifacts" / "asr_result.json").exists()
     assert not (mdir / "artifacts" / "audio.wav").exists()
     assert not (mdir / "artifacts" / "secret.json").exists()
     lines = (lib / "materials_index.jsonl").read_text(encoding="utf-8").splitlines()
@@ -60,7 +59,7 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     rec = json.loads(lines[0])
     assert rec["event"] == "saved"
     assert rec["summary"].startswith("Analyzed video material: ep1.mp4")
-    assert "英雄" in rec["tags"] and "hero-sword" in rec["tags"]
+    assert "英雄" in rec["tags"] and "scenes:1" in rec["tags"] and "asr:1" in rec["tags"]
     assert meta["source_video_identity"] == IDENTITY and meta["settings"] == SETTINGS
     assert all(set(a) == {"name", "path", "bytes"} for a in meta["artifacts"])
 
@@ -73,7 +72,7 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
     (work / "asr_result.json").write_text(json.dumps([{"text": "hello"}]), encoding="utf-8")
-    (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "hello。"}]}), encoding="utf-8")
+    (work / "vlm_analysis.json").write_text(json.dumps([{"description": "hello。"}]), encoding="utf-8")
     video = tmp_path / "ep.mp4"
     meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
 
@@ -97,25 +96,22 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     )
     assert ok["restored"] is True
     assert (dest / "asr_result.json").exists()
-    assert (dest / "asr_clean.json").exists()
+    assert (dest / "vlm_analysis.json").exists()
 
 
-def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_not(tmp_path):
-    """brief-only on a restored work_dir still sees a failed consolidate; the ASR timing
+def test_speech_boundary_anchors_round_trip_but_identity_bound_asr_evidence_does_not(tmp_path):
+    """speech_boundary_anchors.json round-trips through the material library; the ASR timing
     sidecar binds files a restore rewrites or never copies, so it is not stored at all."""
     lib = tmp_path / "library"
     work = tmp_path / "work"
     work.mkdir()
-    status = {
-        "stage": "consolidation", "enabled": True, "do_asr": False, "do_index": True,
-        "status": "failed", "message": "MiMo timeout", "artifacts": [],
-    }
+    anchors = {"schema_version": 2, "status": "completed", "sentence_anchors": []}
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    (work / "consolidation.status.json").write_text(json.dumps(status), encoding="utf-8")
+    (work / "speech_boundary_anchors.json").write_text(json.dumps(anchors), encoding="utf-8")
     (work / "asr_timing_evidence.json").write_text(json.dumps({"status": "x"}), encoding="utf-8")
     video = tmp_path / "ep.mp4"
     meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
-    assert {a["name"] for a in meta["artifacts"]} == {"scenes.json", "consolidation.status.json"}
+    assert {a["name"] for a in meta["artifacts"]} == {"scenes.json", "speech_boundary_anchors.json"}
 
     dest = tmp_path / "dest"
     restored = materials.restore_material(
@@ -123,7 +119,7 @@ def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_n
         material_id=meta["material_id"],
     )
     assert restored["restored"] is True
-    assert json.loads((dest / "consolidation.status.json").read_text(encoding="utf-8")) == status
+    assert json.loads((dest / "speech_boundary_anchors.json").read_text(encoding="utf-8")) == anchors
     assert not (dest / "asr_timing_evidence.json").exists()
 
 
@@ -160,10 +156,9 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     lib = tmp_path / "library"
     work = tmp_path / "work"
     work.mkdir()
-    (work / "understanding_index.json").write_text(
+    (work / "background_research.json").write_text(
         json.dumps({
-            "characters": [], "relationships": [], "plot_points": [], "entities": [],
-            "research_glossary": [],
+            "characters": {}, "terms": {},
             "summary": "主角发现了一个秘密 secret，一枚 token 在黑市流通",   # legit words -> must survive
             "api_key": "tp-abcdef12345678",                                  # credential key -> value dropped
             "token_economy": "影片解释 token 的发行机制",                     # benign name containing 'token' -> kept
@@ -184,7 +179,7 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     assert "secret" in persisted and "token" in persisted
     assert "token_economy" in persisted
 
-    idx = json.loads((lib / "materials" / meta["material_id"] / "artifacts" / "understanding_index.json")
+    idx = json.loads((lib / "materials" / meta["material_id"] / "artifacts" / "background_research.json")
                      .read_text(encoding="utf-8"))
     assert idx["api_key"] == "[redacted]"                 # value dropped, key name kept, not coalesced
     assert "secret" in idx["summary"] and "token" in idx["summary"]
@@ -193,7 +188,7 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     dest = tmp_path / "dest"
     materials.restore_material(lib, dest, source_path=tmp_path / "ep.mp4", source_identity=IDENTITY,
                                settings=SETTINGS, material_id=meta["material_id"])
-    restored = (dest / "understanding_index.json").read_text(encoding="utf-8")
+    restored = (dest / "background_research.json").read_text(encoding="utf-8")
     assert "tp-abcdef12345678" not in restored
     assert "secret" in restored and "token" in restored
 

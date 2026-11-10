@@ -3,7 +3,7 @@ from pathlib import Path
 
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"),
+    str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"),
 )
 import json  # noqa: E402
 import pytest  # noqa: E402
@@ -404,7 +404,7 @@ def test_core_assemble_does_not_import_exporter():
     import subprocess
 
     scripts = str(
-        Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"
+        Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"
     )
     code = (
         f"import sys; sys.path.insert(0, {scripts!r}); import assemble; "

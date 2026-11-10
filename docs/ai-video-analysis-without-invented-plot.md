@@ -74,7 +74,7 @@
 
 ## 用本仓库的 Skill 怎么跑？
 
-装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），可以直接对 Agent 说：“用 `/video-recap` 处理这段视频，只跑视频理解与分析，生成理解索引和创作简报后就停下”（Codex 中写作 `$video-recap`）。技能会调用 [`video-understanding`](../skills/video-understanding/SKILL.md) 把画面直接观察、粗粒度语音转写、有据可查的推断和未知项分门别类写进产物里；遇到某段没有转写出文字，也只会标记为静音或待确认，绝不会替空窗口编造台词。
+装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），可以直接对 Agent 说：“用 `/video-recap` 处理这段视频，只跑视频理解与分析，生成理解索引和创作简报后就停下”（Codex 中写作 `$video-recap`）。技能会调用 `understand.py` 把画面直接观察、粗粒度语音转写、有据可查的推断和未知项分门别类写进产物里；遇到某段没有转写出文字，也只会标记为静音或待确认，绝不会替空窗口编造台词。
 
 ## 常见问题
 
@@ -85,8 +85,7 @@
 ## 延伸链接
 
 - 在线指南原文：https://zenstory.ai/zh/video-recap/stop-ai-video-analysis-from-inventing-the-story
-- 编排主流程与创作暂停点：[`skills/video-recap/SKILL.md`](../skills/video-recap/SKILL.md)
-- 视频理解的事实与推断边界：[`skills/video-understanding/SKILL.md`](../skills/video-understanding/SKILL.md)
-- VLM 画面观察与深层解读提示词模板：[`skills/video-understanding/references/prompt-templates.md`](../skills/video-understanding/references/prompt-templates.md)
-- 视频理解数据结构规范：[`skills/video-understanding/references/data-schema.md`](../skills/video-understanding/references/data-schema.md)
+- 编排主流程、理解边界与创作暂停点：[`skills/video-recap/SKILL.md`](../skills/video-recap/SKILL.md)
+- VLM 画面观察与深层解读提示词模板：[`skills/video-recap/references/prompt-templates.md`](../skills/video-recap/references/prompt-templates.md)
+- 数据结构规范：[`skills/video-recap/references/data-schema.md`](../skills/video-recap/references/data-schema.md)
 - 代码仓库：https://github.com/zenstory-ai/video-recap-skills

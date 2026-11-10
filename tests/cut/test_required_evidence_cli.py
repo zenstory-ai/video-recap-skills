@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-cut/scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-recap/scripts'))
 import cut_cli
 import media_geometry
 import sentence_boundaries

@@ -131,5 +131,5 @@
 ## 延伸链接
 
 - 在线指南原文（含更多案例）：https://zenstory.ai/zh/video-recap/recap-script
-- 创作剪辑与去 AI 味手册：[`skills/video-script/references/creative-editing-playbook.md`](../skills/video-script/references/creative-editing-playbook.md)
+- 创作剪辑与去 AI 味手册：[`skills/video-recap/references/creative-editing-playbook.md`](../skills/video-recap/references/creative-editing-playbook.md)
 - 代码仓库：https://github.com/zenstory-ai/video-recap-skills

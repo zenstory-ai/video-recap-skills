@@ -25,7 +25,7 @@ exactly this all-or-none bundle:
 
 It requires narration mode, stream 0, a new explicit `--work-dir`, and a delivery path
 that does not already exist. `--output-dir` is optional; when omitted, delivery uses the
-new work directory's parent. The route calls only the video-assemble CLI; it does
+new work directory's parent. The route calls only `assemble.py`; it does
 not run understanding, script validation, narration review, voiceover, cut,
 continuation, editor export, or material-cache reuse. Ambient TTS provider and voice
 configuration are inert. Explicit TTS/voice/review/editor flags are rejected rather
@@ -35,7 +35,7 @@ than silently ignored.
 `audio.local_adoption`, and the picture's path plus `{size, mtime_ns}` as
 `source_video_identity`. Analysis settings remain separate and unchanged. Recap validates
 routing and, after the child run, checks that the assembler's binding records reference
-the same adoption files and picture; video-assemble remains authoritative for the adoption
+the same adoption files and picture; `assemble.py` remains authoritative for the adoption
 schemas, PCM shapes, frame clock, mix, bindings, and final media transaction. This path
 executes caller-adopted assets and does not claim that recap authored or approved their
 story, voice, or mix.
@@ -45,12 +45,12 @@ story, voice, or mix.
 The single input above is the **finished picture**, which may contain one or many source
 episodes. Use two existing stages rather than sending an old mix binding into a new cut:
 
-1. Finish the selected cut with `video-cut`: either run `recap.py ... --edit-mode cut`,
-   or call that skill's own `scripts/cut.py` from its installed directory, with an
+1. Finish the selected cut: either run `recap.py ... --edit-mode cut`,
+   or call `scripts/cut.py` directly with an
    existing clip plan and source manifest:
 
    ```bash
-   python3 <video-cut>/scripts/cut.py ep1.mp4 --work-dir CUT_WORK \
+   python3 scripts/cut.py ep1.mp4 --work-dir CUT_WORK \
      --sources-manifest SOURCES_JSON
    ```
 
@@ -64,7 +64,7 @@ episodes. Use two existing stages rather than sending an old mix binding into a 
    windows in `tts_meta.json` are not the revised output timeline.
 3. Match source dialogue, ambience and music to the new picture. Reuse the prepared bed
    only if that sound and its complete sample clock remain appropriate; otherwise rebuild
-   it with the existing `video-assemble` source/score producer. Write a **new** mix adoption
+   it with `scripts/source_score.py`. Write a **new** mix adoption
    with the prepared receipt path, total samples and complete WAV placements for the new
    picture. Reordering shots can require moving dialogue too; a mix adoption written for
    the old picture cannot simply be pointed at the new one.

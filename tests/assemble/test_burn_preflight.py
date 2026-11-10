@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
 """Burn preflight: when ffmpeg lacks the libass `subtitles` filter, an explicit burn request
 must raise BEFORE the render (not die at the final -vf) and the default burn must degrade to
 the .srt sidecar with the reason recorded."""
