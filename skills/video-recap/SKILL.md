@@ -100,10 +100,10 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 
 - **`reason` 七段式结构**：依次写明 `beat_id | 叙事功能 | 局势状态变化（A→B） | POV=人物 | 本段实质看点 | 入点=具体动作/原声锚点 | 出点=具体反应/落点`，倒逼每段画面都服务于故事推进。
 - **必保画面与原声证据（`required_evidence`）**：拍板决定必须留住的高光动作、变脸瞬间或关键原声问答，写入顶层 `required_evidence`（`nodes` 登记 `id`/`source` 绝对路径/`start`/`end`/`track`/`content`，`before` 登记不可颠倒的先后对）；边界吸附一旦裁掉任何必保区间或打乱先后顺序，脚本会直接报错阻断。
-- **句末安全切点**：切点必须落在原片首尾、句末停顿锚点或静音窗口内，或者属于同源相邻片段无缝顺接；踩进原声台词中间会触发 `unsafe_clip_sentence_boundary` 阻断，并在报错中给出前后 5 秒内已对齐帧网格的 `nearest_safe` 秒数。
-- **高频快切与碎镜头排查**：面对动作戏或密集反打时，可用 `ffmpeg -i <video> -vf "select='gt(scene,0.35)',showinfo" -f null -` 或只读工具 `scripts/shot_review.py`（用法见 `references/shot-review.md`）定位高分切点，但必须区分**原片自带的切点**与**由本次拼接制造的切点**——若属于**原片自带的无关短镜头整段删除**或把切点挪到快切簇外侧；若属于**由本次拼接制造的切点**（如硬切边缘残留几帧隔壁镜头、碎反打），则外扩入出点或合并同源相邻片段，严禁靠塞转场遮丑。
+- **句末安全切点与呼吸尾垫**：切点必须落在原片首尾、句末停顿锚点或静音窗口内，或者属于同源相邻片段无缝顺接；吸附句末时会自动在停顿窗口内预留最多 `0.22s` 反应/呼吸气口且绝不跨越硬切点，片段最短时长不低于 `0.8s`。踩进原声台词中间会触发 `unsafe_clip_sentence_boundary` 阻断并给出 `nearest_safe`；若回退硬切吸附会同时暴露 `<= 0.20s` 闪帧与截断台词，则直接报 `shot_speech_conflict` 阻断。
+- **高频快切与碎镜头排查**：`cut.py` 渲染 `edited_source.mp4` 后会自动调用 `shot_review.py` 生成 `shot_review.json`，并对时长 `<= 0.20s`（约 1–5 帧）的极短残镜闪帧（`flash_slivers`）直接硬阻断。面对动作戏或密集反打时，也可手动运行 `ffmpeg -i <video> -vf "select='gt(scene,0.35)',showinfo" -f null -` 或只读工具 `scripts/shot_review.py`（用法见 `references/shot-review.md`）定位高分切点，但必须区分**原片自带的切点**与**由本次拼接制造的切点**——若属于**原片自带的无关短镜头整段删除**或把切点挪到快切簇外侧；若属于**由本次拼接制造的切点**（如硬切边缘残留几帧隔壁镜头、碎反打），则外扩入出点或合并同源相邻片段，严禁靠塞转场遮丑。
 
-写好 `clip_plan.json` 后重跑 `recap.py`，脚本会调用 `cut.py` 完成三步边界吸附（镜头硬切吸附 → 句末静音吸附 → 帧网格对齐）、渲染恒定帧率 `edited_source.mp4`，并把 ASR、VLM 与句末锚点重映射到成片输出时间轴（`speech_boundary_anchors_output.json`、`storyboard/edited_storyboard.*`），随后再次暂停等待写解说词。
+写好 `clip_plan.json` 后重跑 `recap.py`，脚本会调用 `cut.py` 完成三步边界吸附（镜头硬切吸附 → 句末静音吸附与尾垫 → 帧网格对齐）、渲染恒定帧率 `edited_source.mp4` 并完成闪帧体检，再把 ASR、VLM 与句末锚点重映射到成片输出时间轴（`speech_boundary_anchors_output.json`、`storyboard/edited_storyboard.*`），随后再次暂停等待写解说词。
 
 ### 4.3 解说词与原声留白创作（full / cut 第二阶段）
 
@@ -112,9 +112,9 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 ```json
 [
   {
-    "start": 2.5,
-    "end": 7.0,
-    "narration": "相恋五年揣着户口本去求婚，推门却撞见他正搂着千金谈联姻。",
+    "start": 0.2,
+    "end": 5.0,
+    "narration": "相恋五年揣着户口本去求婚，沈曼推开门，却撞见未婚夫正搂着千金谈联姻。",
     "pause_after_ms": 250,
     "overlaps_speech": true
   }
@@ -123,11 +123,11 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 
 注意：**编排 `cut` 模式下，`narration.json` 必须直接填写剪后成片的 OUTPUT 时间戳（`0 .. 成片总时长`）**（单独调用校验器时传 `validate.py --mode cut_output`）。动笔时遵循九条核心写作铁律（详规与正反例见 `references/creative-editing-playbook.md`）：
 
-1. **前 3–6 秒直接亮底牌或反差钩子**，不写空泛背景铺垫。
-2. **句句推着局势走**（处境 → 动作 → 当场后果），不复读画面表面动作。
-3. **声画对位“垫半句、让半句、接半句”**：高光原声台词、耳光声、沉默变脸前果断闭嘴让位，原声落定后再接半句点破潜台词。
-4. **死守句末切入红线**：压低原声切入旁白（`overlaps_speech: true`）时，`start` 必须贴紧 `speech_boundary_anchors*.json` 中的可用句末锚点或静音区，严禁拦腰斩断角色正在说的话（违者报 `interrupts_source_sentence` 阻断）。
-5. **严控时间窗字数预算**：每段字数留在推荐预算内，留出呼吸气口；`full` 模式超预算 1.25 倍直接报 `over_budget` 阻断，校验器绝不擅自替 Agent 删字。
+1. **前 2.5 秒内亮出钩子或原声高光**，不写空泛背景铺垫；超过 `2.5s` 既无旁白也无原声对白的冷开场会触发 `weak_cold_open_silence` 阻断。
+2. **讲清背景、人物关系与因果，拒绝“看图说话”**：已提供 `background_research.json` 角色名时严禁用“黑衣男子”“年轻女子”等笼统外貌词指代（违者报 `generic_character_label` 阻断），句句围绕“处境 → 动作 → 当场后果”推进。
+3. **声画对位“垫半句、让半句、接半句”且消灭死气空窗**：高光原声台词、耳光声、沉默变脸前果断闭嘴让位，原声落定后再接半句点破潜台词；全片严禁出现连续超过 `5.0s` 既无旁白也无原声对白的死气空窗（违者报 `excessive_dead_air` 阻断）。
+4. **死守原声切入与回升双红线**：压低原声切入旁白（`overlaps_speech: true`）时，`start` 必须贴紧句末锚点或静音区（违者报 `interrupts_source_sentence` 阻断）；旁白结束放回原声时同样不得在角色半句话中间突然恢复音量（违者在校验与合成阶段分别报 `unsafe_source_release` / `unsafe_source_handoff` 阻断）。
+5. **严控时间窗字数预算与完整句收尾**：每段必须以完整句末标点收口（残句报 `incomplete_sentence` 硬阻断），字数留在推荐预算内；`full` 模式超预算 1.25 倍直接报 `over_budget` 阻断，校验器绝不擅自替 Agent 删字。
 6. **去套路与电报腔**：写自然连贯的口语长短句，不写一词一顿的碎句，不堆砌“殊不知、命运的齿轮、不是……而是……”等廉价模板词。
 7. **锚定具体画面证据**：用看得到的眼神、道具、动作细节说话，不替角色编造画面外的心理活动。
 8. **核准原声留白字幕**：当开启原片字幕遮罩且留有原声高光段落时，同步在 `work_dir/original_subtitles.json` 中按成片时间写出校对后的原声台词，修正 ASR 同音错字。
@@ -137,9 +137,9 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 
 写好 `narration.json` 后重跑同一条 `recap.py` 命令：
 
-1. **本地确定性校验（`validate.py`）**：生成 `narration_lint.json`，对时间重叠、越界、字数超预算、残句、抢断原话与占位符泄漏做硬门禁检查，存在 error 立即停机。
+1. **本地确定性校验（`validate.py`）**：生成 `narration_lint.json`，对时间重叠、越界、字数超预算、残句、开场冷场、超过 5 秒的死气空窗、抢断原话、半句放回原声、笼统角色代称与占位符泄漏做硬门禁检查，存在 error 立即停机。
 2. **TTS 配音（`voiceover.py`）**：逐段合成语音并写入 `tts_segments/` 与 `tts_meta.json`。缓存按文本、音色、模型与参考音频指纹精确命中；若某段音频时长低于正常语速下限（`TTS_MIN_SPEECH_RATE`）疑似模型幻读，会自动重试并留存 `*.rejected.wav` 拒止入库。
-3. **音画合成（`assemble.py`）**：将画面、逐段旁白、压低与句末回升后的原声（详见 `references/data-schema.md` 中 `source_handoff_status` 说明）、可选 BGM（`BGM_PATH`）、底部字幕带遮罩、ASS/SRT 字幕及可选外层包装图层一并混音渲染为最终 MP4，并输出后端无关的 `timeline.json`（传 `--export-jianying` 可同步导出剪映草稿）。
+3. **音画合成（`assemble.py`）**：将画面、逐段旁白、压低与句末回升后的原声（详见 `references/data-schema.md` 中 `source_handoff_status` 说明）、可选 BGM（`BGM_PATH`）、片尾平滑淡出（默认 `350ms`）、底部字幕带遮罩、ASS/SRT 字幕及可选静态包装图层一并混音渲染为最终 MP4，并输出后端无关的 `timeline.json`（传 `--export-jianying` 可同步导出剪映草稿）。
 
 任何一段旁白若在允许的微加速上限内仍塞不进可用时间窗，合成器直接报 `no_safe_fit` 阻断，**绝不削断旁白尾音**。更多声音模式、音频路由与外层视觉包装规范分别见 `references/audio-modes.md`、`references/audio-routing.md` 与 `references/packaging.md`。
 
@@ -163,7 +163,7 @@ python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --target-duration 10m -
 2. **逐个盯拼接点**：把每个切点前后 0.5–1 秒拉出来看，排查闪帧、半截叠化、动作跳接和被掐断的半句原声。
 3. **闭上眼纯听一遍**：不看画面只听声音，检查旁白有没有碎成一蹦一跳的电报腔、转场处声音过得顺不顺、关键原声台词清不清楚。
 4. **单拎三处戏眼**：把前 5 秒开场钩子、中段情绪爆发点和片尾最后一幕单独重看一遍，确认切入时机、情绪停留和收尾余味全都立得住。
-5. **返修对账与规格兜底**：REVISION 模式先逐条确认“点名要改的真改到位了、没点名的锁定项分毫未动”，最后再核对 `final_qc.json` 的解码完整性、总时长与音画编码规格（传 `--require-final-qc` 可让阻断项直接决定退出码）。
+5. **返修对账与规格兜底**：REVISION 模式先逐条确认“点名要改的真改到位了、没点名的锁定项分毫未动”，最后再核对 `final_qc.json` 的解码完整性、总时长、残帧扫描与音画编码规格（`--require-final-qc` 默认开启，阻断项直接决定退出码；仅调试时可传 `--no-require-final-qc`）。
 
 交付成片时务必查看 `final_qc.json` 里的 `metadata.warnings`：只要非空（例如开启部分容错后出现 `partial_tts` 缺段，或本机 ffmpeg 缺少 `libass` 触发 `subtitle_burn_degraded` 降级为外挂 `.srt`）就必须如实告知用户，不能只报一句“渲染成功”。
 
@@ -176,7 +176,7 @@ python3 scripts/recap.py locked_picture.mp4 --work-dir source_work --audio-mode 
 python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --work-dir cut_work --audio-mode source-mix
 ```
 
-`source-mix` 会走完整的混音与音频重编码（若需零重编码拷贝既有 AAC 数据包的工作流，请固定使用 `v0.6.2` 版本）。切换音频模式时必须使用全新的工作目录。详见 `references/audio-routing.md`。
+`source-mix` 会走完整的混音、片尾平滑淡出与音频重编码。切换音频模式时必须使用全新的工作目录。详见 `references/audio-routing.md`。
 
 ## 5. 自检与只读看板
 

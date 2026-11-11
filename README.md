@@ -52,7 +52,7 @@
 
 ClawHub 条目与依赖由[显式发布清单](.clawhub/publish.json)管理（`video-recap` 与 `video-reference` 均为自包含包）；使用完整插件或源码工作流请按下方方式安装。
 
-**环境前提**：Python 3.10+、`PATH` 中有 `ffmpeg`，以及一个[小米 MiMo](https://platform.xiaomimimo.com) API Key。系统默认将解说字幕烧录进画面，这需要带 `libass` 滤镜的 `ffmpeg`；macOS 上 Homebrew 默认的 `ffmpeg` 不含 `libass`，此时默认运行会自动降级为在成片旁输出同名 `.srt` 外挂字幕并在 `final_qc.json` 中记一条警告（若显式传了 `--burn-subtitles` 则会在启动前直接报错）。若旁白中使用了画面花字叠加（`visual_overlays`），还需要带 `drawtext`（`libfreetype`）的 `ffmpeg`。在 macOS 上如需完整烧录字幕与花字，可执行 `brew install ffmpeg-full` 并将其 `bin` 目录置于 `PATH` 最前面。
+**环境前提**：Python 3.10+、`PATH` 中有 `ffmpeg`，以及一个[小米 MiMo](https://platform.xiaomimimo.com) API Key。系统默认将解说字幕烧录进画面，这需要带 `libass` 滤镜的 `ffmpeg`；macOS 上 Homebrew 默认的 `ffmpeg` 不含 `libass`，此时默认运行会自动降级为在成片旁输出同名 `.srt` 外挂字幕并在 `final_qc.json` 中记一条警告（若显式传了 `--burn-subtitles` 则会在启动前直接报错）。在 macOS 上如需完整烧录硬字幕，可执行 `brew install ffmpeg-full` 并将其 `bin` 目录置于 `PATH` 最前面。
 
 ```bash
 brew install ffmpeg                        # macOS；Debian/Ubuntu 用 apt，Windows 用 choco / scoop / winget
@@ -392,7 +392,7 @@ flowchart LR
 
 <img alt="剪辑台模板视图：包装图层与字幕样式的画布示意、带来源标记的参数表" src="docs/dashboard-templates.png" width="100%">
 
-**自带精校原声字幕：** 将 `user_subtitles.json`（默认按成片时间轴；若包成 `{"timeline": "source", "lines": [...]}` 则按原片时间轴自动映射）或原片时间轴的 `user_subtitles.srt / .ass` 放入 `work_dir`，即可在原声留白处优先渲染你提供的精校台词。
+**精校原声留白字幕：** 当原片角色在旁白留白处开口对白时，由 Agent 核实后写入 `work_dir/original_subtitles.json`（`[{"start": s, "end": s, "text": "台词"}]`），即可在成片与剪映草稿中精准呈现带 `「」` 引号的原声台词。
 
 ## 常见问题
 

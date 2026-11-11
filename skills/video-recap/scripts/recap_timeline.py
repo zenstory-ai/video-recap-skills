@@ -3,12 +3,18 @@
 import json
 import os
 import shlex
-import shutil
 import sys
 from pathlib import Path
 
+from briefing.builder import (
+    write_multi_source_clip_brief as _write_multi_source_clip_brief,
+    write_multi_source_output_brief as _write_multi_source_output_brief,
+)
+from briefing.timeline import (
+    source_speech_rows as _source_speech_rows,
+    write_multi_source_output_speech_evidence as _write_multi_source_output_speech_evidence,
+)
 from lib import load_json
-from lib import file_identity, ffmpeg_filters, read_json_object
 import resources.project_binding as project_binding
 from library import LIBRARY_ENV
 from recap_runtime import (
@@ -19,86 +25,31 @@ from recap_runtime import (
     _run_manifest_payload,
 )
 
+__all__ = [
+    "ASSEMBLY_MANIFEST",
+    "PHASE_LEDGER",
+    "_continuation_command",
+    "_cut_narration_is_stale",
+    "_manifest_mismatches",
+    "_material_library_dir",
+    "_materials_enabled",
+    "_multi_manifest_mismatches",
+    "_pause_for_agent",
+    "_read_assembly_output",
+    "_read_phase_ledger",
+    "_save_materials_enabled",
+    "_source_speech_rows",
+    "_source_work_dir",
+    "_surface_cut_qc",
+    "_understand_args_for_source",
+    "_write_multi_source_clip_brief",
+    "_write_multi_source_output_brief",
+    "_write_multi_source_output_speech_evidence",
+    "_write_phase_ledger",
+]
+
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
-
 PHASE_LEDGER = "recap_phase.json"
-
-_ALLOWED_VISUAL_OVERLAY_TYPES = {"top_title", "inline_label_or_callout"}
-
-_VISUAL_OVERLAYS = "visual_overlays.json"
-
-
-def _canonical_visual_overlay(overlay, segment):
-    """Return the first-release assemble overlay contract, or None for unsupported types.
-
-    Recap owns the handoff artifact but does not invent richer overlay semantics: only the
-    two overlay types implemented by assemble pass through, an overlay without its own
-    start/end inherits the narration segment's, and renderer placement hints are preserved.
-    """
-    if overlay["type"] not in _ALLOWED_VISUAL_OVERLAY_TYPES:
-        return None
-    item = {
-        "type": overlay["type"],
-        "text": overlay["text"],
-        "start": overlay.get("start", segment["start"]),
-        "end": overlay.get("end", segment["end"]),
-    }
-    for key in ("anchor", "x", "y", "max_width", "style"):
-        if key in overlay:
-            item[key] = overlay[key]
-    return item
-
-
-def _canonical_visual_overlays(narration_path):
-    return [
-        item
-        for segment in load_json(narration_path)
-        for overlay in segment.get("visual_overlays", [])
-        if (item := _canonical_visual_overlay(overlay, segment)) is not None
-    ]
-
-
-def _preflight_visual_overlays(work_dir, *, narration):
-    """Fail before TTS and render when the run will draw text overlays but this ffmpeg has
-    no drawtext (libfreetype; stock Homebrew ffmpeg lacks it). Overlays are authored content,
-    never a default, so they are not dropped silently the way a default subtitle burn
-    degrades: the message says how to remove them. Narration runs read narration.json (the
-    overlays are only written after TTS); source modes read an existing visual_overlays.json."""
-    work_dir = Path(work_dir)
-    if shutil.which("ffmpeg") is None:
-        return
-    if narration:
-        narration_path = work_dir / "narration.json"
-        overlays = _canonical_visual_overlays(narration_path) if narration_path.exists() else []
-        remedy = "删掉 narration.json 各段的 visual_overlays"
-    else:
-        data = read_json_object(work_dir / _VISUAL_OVERLAYS) or {}
-        overlays = data.get("overlays") if isinstance(data.get("overlays"), list) else []
-        remedy = f"删掉 {_VISUAL_OVERLAYS} 里的 overlays"
-    if not overlays or "drawtext" in ffmpeg_filters():
-        return
-    raise SystemExit(
-        f"本次运行有 {len(overlays)} 个画面文字叠加（visual_overlays），但当前 ffmpeg 不支持 drawtext"
-        " 滤镜（需要 libfreetype），会在最后渲染时失败。\n"
-        f"  解决其一：(1) 安装带 drawtext/libfreetype 的 ffmpeg；(2) {remedy} 后续跑。"
-    )
-
-
-def _write_canonical_visual_overlays(work_dir, narration_path):
-    """Write assemble's canonical work_dir/visual_overlays.json recap handoff.
-
-    Direct assemble still supports user-authored/manual visual_overlays.json files. Once
-    recap owns the handoff for a narration, the canonical artifact is a deterministic
-    reflection of the current narration so reused work_dirs cannot render stale overlays
-    from a previous run; unsupported types are filtered out and represented as an explicit
-    empty overlay list.
-    """
-    path = Path(work_dir) / _VISUAL_OVERLAYS
-    overlays = _canonical_visual_overlays(narration_path)
-    payload = {"schema_version": 1, "overlays": overlays}
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"[video-recap] 🧩 visual overlays: {len(overlays)} → {path}", flush=True)
-    return path
 
 
 def _settings_for_compare(settings):
@@ -132,8 +83,6 @@ def _manifest_mismatches(work_dir, video, args):
     actual = _load_run_manifest(work_dir)
     if actual is None:
         return ["缺少 recap_run_manifest.json；不能证明 work_dir 属于当前视频/参数"]
-    # A multi-source manifest carries `sources` instead of these keys, so .get() reports it
-    # as a mismatch rather than a crash.
     mismatches = [
         f"{key}: expected {expected[key]!r}, got {actual.get(key)!r}"
         for key in ("source_video", "source_video_identity")
@@ -151,8 +100,6 @@ def _multi_manifest_mismatches(work_dir, args, source_records):
         return [f"mode: expected 'multi_source', got {actual.get('mode')!r}"]
     mismatches = []
     identity = ("source_id", "source_path", "source_video_identity")
-    # A 0.5.0 manifest carries `source_video_fingerprint` instead of `source_video_identity`;
-    # .get() reports it as a mismatch rather than a crash.
     if [{k: s.get(k) for k in identity} for s in actual["sources"]] != [
         {k: s[k] for k in identity} for s in expected["sources"]
     ]:
@@ -184,10 +131,6 @@ def _write_phase_ledger(work_dir, clip_plan_identity):
 
 
 def _cut_narration_is_stale(ledger, current_clip_plan_identity):
-    """Two-pass cut: the narration is authored against the rendered cut shown at the A2 pause,
-    i.e. against the clip_plan recorded in the ledger (its ``{size, mtime_ns}`` identity). If
-    clip_plan.json was rewritten since (a re-cut) while that narration is still present, it
-    describes the OLD cut — stale."""
     return ledger is not None and ledger["clip_plan_identity"] != current_clip_plan_identity
 
 
@@ -222,233 +165,6 @@ def _understand_args_for_source(source_record, source_work_dir, args):
     return uargs
 
 
-def _write_multi_source_clip_brief(work_dir, source_records, args):
-    lines = [
-        "# Multi-source Clip Plan Brief",
-        "",
-        "你正在做多视频剪辑复盘。当前 MVP 只支持 `--edit-mode cut`：先做跨素材的故事与视听决定，再写 `clip_plan.json`；下一步会剪出 `edited_source.mp4`，最后按 OUTPUT 时间轴写 `narration.json`。",
-        "",
-        "## 创作决定",
-        "",
-        "先判断创作控制模式：CREATE 比较至少两个可行剪辑假设；DIRECTED 落实用户指定结构；REVISION 只改最新反馈点并冻结未点名内容。然后写或更新 `recap_story_plan.json` 与 `visual_audio_board.json`。前者记录观众承诺、POV、戏剧问题、选定主线及 change-based beats；后者记录每拍的具体画面/反应、入点/出点、原声锚点、`audio_owner` 与 `narration_job`。",
-        "",
-        "多视频不是把每个来源各做一段小总结。每个来源片段都必须服务同一条主线，并用 `source_id` 保留证据归属。这两份计划是 Agent 的工作记录，不是 CLI 渲染门禁。",
-        "",
-        "## 必须写入的格式",
-        "",
-        "```json",
-        '{"target_duration":"10m","clips":[{"source_id":"src_xxx","start":12.0,"end":38.0,"reason":"b01 | hook | knowledge: unknown→threat | POV=主角 | 保留倾听反应 | 入点=问题已问出 | 出点=沉默落地"}]}',
-        "```",
-        "",
-        "- 每个 clip 必须带 `source_id`。",
-        "- `start`/`end` 是对应 source 原视频时间（秒）。",
-        "- 已从源证据确认的必保问答、反应或兑现段，写入同一 `clip_plan.json.required_evidence`（nodes登记id/source绝对路径/start/end原片秒/track/content，before登记必要先后）。",
-        "- 不同 `source_id` 的相同时间段不算重叠；同一 `source_id` 内不要重复/重叠，除非你明确接受稀疏/重复剪辑风险。",
-        "- 选片前使用下方 source work_dir（`sources/<source_id>`）核对 scenes.json、ASR 和逐来源 brief。",
-    ]
-    if args.target_duration:
-        lines.append(f"- 目标时长：`{args.target_duration}`。")
-    lines += ["", "## Sources", ""]
-    for s in source_records:
-        swd = _source_work_dir(work_dir, s)
-        lines += [
-            f"### {s['source_id']} — {s['source_name']}",
-            f"- path: `{s['source_path']}`",
-            f"- work_dir: `{swd}`",
-            f"- material_id: `{s['material_id']}`",
-        ]
-    (Path(work_dir) / "agent_narration_brief.md").write_text(
-        "\n".join(lines).rstrip() + "\n", encoding="utf-8"
-    )
-
-
-def _source_speech_rows(source_dir):
-    raw = source_dir / "asr_result.json"
-    return load_json(raw) if raw.exists() else []
-
-
-def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
-    """Map each source's speech and quiet evidence onto the combined output clock."""
-    source_by_id = {row["source_id"]: row for row in source_records}
-    cache = {}
-
-    def load_source(source_id):
-        if source_id not in cache:
-            source_dir = _source_work_dir(work_dir, source_by_id[source_id])
-            anchors_path = source_dir / "speech_boundary_anchors.json"
-            quiet_path = source_dir / "silence_periods.json"
-            cache[source_id] = (
-                load_json(anchors_path)["sentence_anchors"] if anchors_path.exists() else [],
-                _source_speech_rows(source_dir),
-                load_json(quiet_path) if quiet_path.exists() else [],
-            )
-        return cache[source_id]
-
-    spans_by_source = {}
-    for clip in plan["clips"]:
-        spans_by_source.setdefault(clip["source_id"], []).append(
-            (float(clip["source_start"]), float(clip["source_end"])))
-
-    mapped_anchors, mapped_speech, mapped_quiet = [], [], []
-    output_duration = max(float(clip["output_end"]) for clip in plan["clips"])
-    for clip in plan["clips"]:
-        source_id = clip["source_id"]
-        source_start = float(clip["source_start"])
-        source_end = float(clip["source_end"])
-        output_start = float(clip["output_start"])
-        output_end = float(clip["output_end"])
-
-        def to_output(when):
-            # A source time on this clip's OUTPUT clock, never past its own span: the next
-            # clip on the output timeline plays a different range (or source).
-            when = min(max(when, source_start), source_end)
-            return round(min(output_start + when - source_start, output_end), 3)
-
-        anchors, speech_rows, quiet_rows = load_source(source_id)
-        for anchor in anchors:
-            when = float(anchor["time"])
-            if not (source_start - 0.05 <= when <= source_end + 0.05):
-                continue
-            # The 0.05 s source slack can carry an anchor past the output's ends (a clip
-            # end frame-snapped 181.42 -> 181.40): narration cannot start there.
-            if not 0 <= round(output_start + when - source_start, 3) <= output_duration:
-                continue
-            # A pause end just past a frame-snapped edge belongs to this clip at that edge,
-            # unless another clip of the same source plays that instant itself.
-            if not source_start <= when <= source_end and any(
-                    start <= when <= end for start, end in spans_by_source[source_id]):
-                continue
-            # Same default as the single-source remap in briefing.timeline.
-            pause = max(source_start, min(float(anchor.get("pause_start", when - 0.12)), when))
-            item = dict(anchor)
-            item.update(
-                source_id=source_id,
-                source_time=round(when, 3),
-                time=to_output(when),
-                source_pause_start=round(min(pause, source_end), 3),
-                pause_start=to_output(pause),
-                # `time` IS the pause end; keep the source value apart (one clock per field).
-                source_pause_end=round(float(anchor.get("pause_end", when)), 3),
-            )
-            item["pause_end"] = item["time"]
-            if "expected_time" in anchor:
-                expected = float(anchor["expected_time"])
-                item["source_expected_time"] = round(expected, 3)
-                item["expected_time"] = to_output(expected)
-            mapped_anchors.append(item)
-        for rows, destination, require_text in (
-            (speech_rows, mapped_speech, True),
-            (quiet_rows, mapped_quiet, False),
-        ):
-            for row in rows:
-                if require_text and not row["text"].strip():
-                    continue
-                if not require_text and row["has_speech"]:
-                    continue
-                start = max(source_start, float(row["start"]))
-                end = min(source_end, float(row["end"]))
-                if end <= start:
-                    continue
-                item = dict(row)
-                item.update(
-                    source_id=source_id,
-                    source_start=round(start, 3),
-                    source_end=round(end, 3),
-                    start=to_output(start),
-                    end=to_output(end),
-                )
-                destination.append(item)
-
-    payload = {
-        "schema_version": 2,
-        "artifact": "speech_boundary_anchors_output.json",
-        "timeline": "cut_output",
-        "source_artifact": "multi_source_manifest.json",
-        # validate.py's cut_output lint trusts this evidence only for this exact plan file.
-        "clip_plan_identity": file_identity(Path(work_dir) / "clip_plan_validated.json"),
-        "sentence_anchors": sorted(mapped_anchors, key=lambda row: row["time"]),
-        "speech_spans": sorted(mapped_speech, key=lambda row: (row["start"], row["end"])),
-        "quiet_windows": sorted(mapped_quiet, key=lambda row: (row["start"], row["end"])),
-    }
-    Path(work_dir, "speech_boundary_anchors_output.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return payload
-
-
-def _write_multi_source_output_brief(work_dir, source_records, validated_plan_path):
-    plan = load_json(validated_plan_path)
-    source_by_id = {s["source_id"]: s for s in source_records}
-    speech_evidence = _write_multi_source_output_speech_evidence(
-        work_dir, source_records, plan
-    )
-    lines = [
-        "# Multi-source Output Narration Brief",
-        "",
-        "现在 `edited_source.mp4` 已经由多个源视频剪好。请对剪后成片的 OUTPUT 时间轴写 `narration.json`。",
-        "",
-        "## 更新创作决定",
-        "",
-        "先查看 `edited_source.mp4` 与下方 kept-clip map，在 `visual_audio_board.json` 中补齐 OUTPUT 起止时间，并根据实际成片重新确认每拍的 `audio_owner`、原声锚点与 `narration_job`。如剪后顺序改变了主线或情绪路径，同时更新 `recap_story_plan.json`。",
-        "",
-        "beat 对应关系保留在视听板中；`narration.json` 仍只承载时间、文本与朗读参数，CLI 不声称校验计划映射。",
-        "",
-        "## narration.json 格式",
-        "",
-        "```json",
-        '[{"start":0.0,"end":4.0,"narration":"解说文本。","pause_after_ms":250,"overlaps_speech":true,"emotion":"平静"}]',
-        "```",
-        "",
-        "注意：`start`/`end` 是剪后成片时间，不是原视频时间。",
-        "",
-        "## 输出时间线写作规则",
-        "- `narration.json` 只使用 edited_source.mp4 的 OUTPUT 时间线，不使用任一原片时间。",
-        "- 先为每个 beat 指定 `audio_owner` 与 `narration_job`；7:3 不是配额，只是素材无法给出更好判断时的粗略回退。",
-        "- 使用 kept-clip map 与每个 source work_dir 核对人物、事实、ASR 和上下文。",
-        "",
-        "## Kept clips (output → source)",
-    ]
-    for c in plan["clips"]:
-        src = source_by_id[c["source_id"]]
-        reason = f" — {c['reason']}" if c["reason"] else ""
-        lines.append(
-            f"- output {_fmt_range(c['output_start'], c['output_end'])} → "
-            f"{c['source_id']} `{src['source_path']}` "
-            f"source {_fmt_range(c['source_start'], c['source_end'])}{reason}"
-        )
-    anchors = []
-    for row in speech_evidence["sentence_anchors"]:
-        # Schema-1 anchors (no `boundary_use`) came from the old coarse estimator: high/medium
-        # labels there are usable but unverified.
-        use = row.get("boundary_use") or (
-            "unverified" if row["confidence"] in {"high", "medium"} else "none"
-        )
-        if use != "none":
-            anchors.append((row, use))
-    if anchors:
-        lines += [
-            "",
-            "## 原声句末安全切入点",
-            "",
-            "`unverified` 点是粗粒度 ASR 窗口里的标点位置估计、再吸附到短停顿：不切断单词，"
-            "但不保证原声句子已说完（误差上限见 `±`）；门禁照常生效。",
-        ]
-        for row, use in anchors:
-            if use == "verified":
-                label = row["confidence"]
-            elif "timing_bound_seconds" in row:
-                label = f"unverified ±{float(row['timing_bound_seconds']):.1f}s"
-            else:  # schema-1 anchors carry no error bound
-                label = "unverified"
-            lines.append(f"- {row['time']:.3f}s [{label}] ({row['source_id']})")
-    lines += ["", "## Source work dirs"]
-    for s in source_records:
-        lines.append(f"- {s['source_id']}: `{_source_work_dir(work_dir, s)}`")
-    (Path(work_dir) / "agent_narration_brief.md").write_text(
-        "\n".join(lines).rstrip() + "\n", encoding="utf-8"
-    )
-
-
 def _surface_cut_qc(work_dir):
     """Print the cut QC cut.py recorded; cut.py itself already fails on blocking QC."""
     qc = load_json(Path(work_dir) / "clip_plan_validated.json")["qc"]
@@ -465,10 +181,6 @@ def _surface_cut_qc(work_dir):
         parts.append(f"warnings={len(qc['warnings'])}")
     print("[video-recap] cut QC: " + "; ".join(parts), flush=True)
     return qc
-
-
-def _fmt_range(start, end):
-    return f"{start:.3f}-{end:.3f}s"
 
 
 def _material_library_dir(args):

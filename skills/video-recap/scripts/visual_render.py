@@ -1,4 +1,4 @@
-"""Visual overlays, subtitle layout QC, masking, and video filter helpers."""
+"""Subtitle layout QC, source-subtitle masking, and video filter helpers."""
 
 import json
 import re
@@ -6,16 +6,13 @@ from pathlib import Path
 
 from assemble_constants import (
     SUBTITLE_STYLE_REF_H,
-    VISUAL_OVERLAYS,
     VISUAL_QC,
-    _SUPPORTED_VISUAL_OVERLAY_TYPES,
 )
 from audio_automation import coalesce_duck_windows
 from audio_mix import _seg_place_window
 from lib import CONFIG
 from source_subtitles import (
     _combined_subtitle_entries,
-    _original_gap_subtitle_entries,
     _source_subtitle_mask,
 )
 from subtitles.core import (
@@ -112,148 +109,8 @@ def _subtitle_layout_qc(entries, style, safe_area=None):
     }
 
 
-def _load_visual_overlays(work_dir):
-    """Return (overlays, source) from the canonical visual_overlays.json handoff."""
-    path = Path(work_dir) / VISUAL_OVERLAYS
-    if not path.exists():
-        return [], {"present": False, "path": str(path)}
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path}: JSON 无效") from exc
-    if (
-        not isinstance(data, dict)
-        or type(data.get("schema_version")) is not int
-        or data["schema_version"] != 1
-        or not isinstance(data.get("overlays"), list)
-        or not all(isinstance(item, dict) for item in data["overlays"])
-    ):
-        raise ValueError(f"{path}: visual_overlays.json schema 无效")
-    source = {
-        "present": True,
-        "path": str(path),
-        "schema_version": 1,
-    }
-    return data["overlays"], source
-
-
-def _escape_drawtext_text(text):
-    return (
-        text
-        .replace("\\", "\\\\")
-        .replace(":", "\\:")
-        .replace("'", "\\'")
-        .replace("%", "\\%")
-        .replace("\n", "\\n")
-    )
-
-
-def _overlay_time_window(overlay, video_duration):
-    start = float(overlay.get("start", 0.0))
-    end = float(overlay.get("end", video_duration))
-    return start, max(start, end)
-
-
-def _overlay_bbox(overlay, canvas, *, default_y):
-    width = canvas["width"]
-    height = canvas["height"]
-    text = overlay["text"]
-    font_size = int(overlay.get("font_size", max(18, round(height * 0.045))))
-    lines = [ln for ln in text.splitlines() if ln.strip()] or [text]
-    max_w = max(_visual_text_units(ln) * font_size for ln in lines)
-    text_h = len(lines) * font_size * 1.25
-    if overlay["type"] == "top_title":
-        x = max(0.0, (width - max_w) / 2)
-        y = float(overlay.get("y", default_y))
-    else:
-        # Fractions of the canvas in [0, 1] are normalized coordinates; larger values are pixels.
-        x = float(overlay.get("x", 0.08))
-        y = float(overlay.get("y", 0.25))
-        if 0.0 <= x <= 1.0:
-            x *= width
-        if 0.0 <= y <= 1.0:
-            y *= height
-    return {
-        "x": round(x, 2),
-        "y": round(y, 2),
-        "width": round(max_w, 2),
-        "height": round(text_h, 2),
-        "font_size": font_size,
-        "line_count": len(lines),
-        "overflow": x < 0 or y < 0 or x + max_w > width or y + text_h > height,
-    }
-
-
-def _visual_overlay_filters(work_dir, canvas, video_duration):
-    """Render the first-release canonical visual_overlays.json contract.
-
-    Only two semantic renderers are supported: top_title and inline_label_or_callout.
-    Unsupported types are QC-blocking and deliberately do not silently render.
-    """
-    overlays, source = _load_visual_overlays(work_dir)
-    default_top_y = max(24, round(canvas["height"] * 0.05))
-    filters = []
-    facts = []
-    unsupported = []
-    overflow = []
-    for idx, overlay in enumerate(overlays):
-        typ = overlay.get("type")
-        text = overlay.get("text", "").strip()
-        if typ not in _SUPPORTED_VISUAL_OVERLAY_TYPES:
-            unsupported.append({"index": idx, "type": typ, "reason": "unsupported_overlay_type"})
-            continue
-        if not text:
-            unsupported.append({"index": idx, "type": typ, "reason": "missing_text"})
-            continue
-        start, end = _overlay_time_window(overlay, video_duration)
-        bbox = _overlay_bbox(overlay, canvas, default_y=default_top_y)
-        if bbox["overflow"]:
-            overflow.append({"index": idx, "type": typ, "bbox": bbox})
-        font_size = bbox["font_size"]
-        safe_text = _escape_drawtext_text(text)
-        enable = f"between(t\\,{start:.3f}\\,{end:.3f})"
-        if typ == "top_title":
-            filt = (
-                "drawtext="
-                f"{_drawtext_font_option()}text='{safe_text}':x=(w-text_w)/2:y={int(bbox['y'])}:"
-                f"fontsize={font_size}:fontcolor=white:borderw=2:bordercolor=black@0.85:"
-                f"box=1:boxcolor=black@0.35:boxborderw=12:enable='{enable}'"
-            )
-        else:
-            filt = (
-                "drawtext="
-                f"{_drawtext_font_option()}text='{safe_text}':x={int(bbox['x'])}:y={int(bbox['y'])}:"
-                f"fontsize={font_size}:fontcolor=white:borderw=2:bordercolor=black@0.85:"
-                f"box=1:boxcolor=black@0.45:boxborderw=8:enable='{enable}'"
-            )
-        filters.append(filt)
-        facts.append({
-            "index": idx,
-            "type": typ,
-            "text_chars": len(text),
-            "start": round(start, 3),
-            "end": round(end, 3),
-            "bbox": bbox,
-        })
-    qc = {
-        "source": source,
-        "supported_types": sorted(_SUPPORTED_VISUAL_OVERLAY_TYPES),
-        "present": source["present"],
-        "count": len(overlays),
-        "rendered": len(facts),
-        "facts": facts,
-        "unsupported": unsupported,
-        "overflow": overflow,
-    }
-    return filters, qc
-
-
 def _subtitle_delivery_warnings(mask, *, has_subtitles):
-    """Non-blocking, machine-readable record of a default burn that degraded to the sidecar.
-
-    A run with no subtitle entries loses nothing to the missing libass (a burned empty ASS
-    shows nothing either), so it ships no sidecar and records no warning.
-    """
+    """Non-blocking, machine-readable record of a default burn that degraded to the sidecar."""
     reason = CONFIG["burn_subtitles_degraded"]
     if not reason or not has_subtitles:
         return []
@@ -270,7 +127,7 @@ def _subtitle_delivery_warnings(mask, *, has_subtitles):
     }]
 
 
-def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_qc=None, mask_filter=None):
+def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, mask_filter=None):
     entries = _combined_subtitle_entries(tts_segments, work_dir, video_duration)
     style = _style_for_measured_subtitle_band(_subtitle_style_config(canvas), canvas)
     subtitle_layout = _subtitle_layout_qc(
@@ -285,16 +142,10 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
         "subtitle_y_top": CONFIG["subtitle_y_top"],
         "subtitle_y_bot": CONFIG["subtitle_y_bot"],
     })
-    if overlay_qc is None:
-        overlay_qc = _visual_overlay_filters(work_dir, canvas, video_duration)[1]
     warnings = _subtitle_delivery_warnings(mask, has_subtitles=bool(entries))
     blocking_codes = []
     if subtitle_layout["overflow"]:
         blocking_codes.append("subtitle_overflow")
-    if overlay_qc["unsupported"]:
-        blocking_codes.append("unsupported_visual_overlay")
-    if overlay_qc["overflow"]:
-        blocking_codes.append("visual_overlay_overflow")
     return {
         "schema_version": 1,
         "artifact": VISUAL_QC,
@@ -318,7 +169,6 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, overlay_
         },
         "subtitles": subtitle_layout,
         "mask": mask,
-        "overlays": overlay_qc,
     }
 
 
@@ -344,11 +194,7 @@ def _escape_subtitle_filter_path(path):
 
 
 def _subtitle_burn_filter(subtitle_path):
-    """Build the ffmpeg video filter used for hard-sub rendering.
-
-    With SUBTITLE_FONT_FILE set, libass also loads the fonts in that file's directory so
-    the ASS style's family name resolves to the declared file instead of a system font.
-    """
+    """Build the ffmpeg video filter used for hard-sub rendering."""
     filt = f"subtitles=filename='{_escape_subtitle_filter_path(subtitle_path)}'"
     font_file = CONFIG["subtitle_font_file"]
     if font_file:
@@ -357,31 +203,13 @@ def _subtitle_burn_filter(subtitle_path):
     return filt
 
 
-def _drawtext_font_option():
-    font_file = CONFIG["subtitle_font_file"]
-    if not font_file:
-        return ""
-    return f"fontfile='{_escape_subtitle_filter_path(Path(font_file).expanduser().resolve())}':"
-
-
 def _output_downscale_filter(max_h):
-    """Lanczos downscale that forces BOTH output dimensions even (libx264/yuv420p need it).
-
-    -2 keeps the aspect ratio with an even width; 2*trunc(min(ih,H)/2) caps the height at H
-    yet forces it even, so an odd OUTPUT_MAX_HEIGHT (e.g. 721) cannot produce an odd height
-    that makes libx264 abort with an empty output file. 'min(ih,H)' only ever shrinks.
-    """
+    """Lanczos downscale that forces BOTH output dimensions even (libx264/yuv420p need it)."""
     return f"scale=-2:'2*trunc(min(ih,{max_h})/2)':flags=lanczos"
 
 
 def _source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration):
-    """Return source-subtitle drawbox filters, optionally scoped to narration windows.
-
-    Many source videos (e.g. 庆余年) ship hardcoded subtitles; without this the recap
-    shows the original subs AND our narration subs stacked. Once masking is explicitly enabled,
-    the enhanced default is a measured, translucent narration-only band; opacity and timing
-    remain configurable.
-    """
+    """Return source-subtitle drawbox filters, optionally scoped to narration windows."""
     if not _source_subtitle_mask()["active"]:
         return None
     opacity = CONFIG["subtitle_mask_opacity"]
@@ -397,8 +225,6 @@ def _source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
         mask_bot = _frame_row(canvas, min(canvas["height"], y_bot + padding))
         geometry = f"x=0:y={mask_top}:w=iw:h={mask_bot - mask_top}"
     else:
-        # Our subtitle cues are one line. Keep the mask large enough for that line and its
-        # margin, but never regress to the old two-line bar that hid ~23% of the image.
         style = _subtitle_style_config(canvas)
         play_res_y = float(style["play_res_y"])
         line_h = float(style["font_size"]) * 1.25
@@ -418,24 +244,8 @@ def _source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
                 for start, end in map(_seg_place_window, tts_segments)
                 if end > start
             ]
-            # Avoid overlapping drawboxes: stacking two 60%-black masks would darken the
-            # overlap to 84%. Coalescing also keeps long filter chains smaller.
             filters.extend(
                 f"{base}:enable='between(t,{start:.3f},{end:.3f})'"
                 for start, end, _ in coalesce_duck_windows(windows, bridge=0.001)
             )
-
-    # A translucent mask deliberately leaves the source glyphs visible. Whenever we burn a
-    # replacement original-dialogue subtitle into a gap, cover that exact window opaquely first;
-    # otherwise the source hard-sub and replacement text are stacked on top of each other.
-    if not (timing == "all" and opacity >= 1.0 - 1e-9):
-        replacement_windows = [
-            (entry["start"], entry["end"], 0.0)
-            for entry in _original_gap_subtitle_entries(tts_segments, work_dir, video_duration)
-        ]
-        opaque = f"drawbox={geometry}:color=black@1.00:t=fill"
-        filters.extend(
-            f"{opaque}:enable='between(t,{start:.3f},{end:.3f})'"
-            for start, end, _ in coalesce_duck_windows(replacement_windows, bridge=0.001)
-        )
     return ",".join(filters) if filters else None

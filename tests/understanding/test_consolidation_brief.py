@@ -650,7 +650,7 @@ def test_brief_counts_moderation_refused_scenes(tmp_path):
     count_lines = [line for line in text.splitlines() if "Moderation-refused scenes" in line]
     assert len(count_lines) == 1
     assert "1/2 (Scene 2)" in count_lines[0]
-    assert "- Description: (VLM 无法识别此场景画面) [moderation_refused]" in text
+    assert "- Visual ref (cut-point check only): (VLM 无法识别此场景画面) [moderation_refused]" in text
     assert "[moderation_refused]" not in text.split("### Scene 1:")[1].split("### Scene 2:")[0]
 
 

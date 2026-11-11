@@ -12,7 +12,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 import cut_cli
 import frame_grid
-import media_geometry
+import media
 import sentence_boundaries
 from cut_contract import normalize_clip_plan
 
@@ -56,7 +56,7 @@ def test_parse_frame_rate_rejects_unknown_and_timebase_rates(text, expected):
     ({"r_frame_rate": "0/0", "avg_frame_rate": "25/1"}, "25/1"),
 ])
 def test_probed_frame_grid_uses_frames_not_fields(stream, expected):
-    geometry = media_geometry._geometry_from_stream(
+    geometry = media._geometry_from_stream(
         {"width": 320, "height": 240, "start_time": "1.5", **stream}, format_start="1.4")
     assert geometry.facts["frame_rate"] == expected
     # The canvas fps bucket follows the same grid, not the field or nominal rate.
@@ -117,8 +117,8 @@ def test_frame_snap_does_not_shrink_a_clip_off_a_required_evidence_edge(monkeypa
     assert (clips[0]["source_start"], clips[0]["source_end"]) == (2.2, 5.0)
 
     # End to end: the declared moment still counts as kept after frame snapping.
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: (
-        media_geometry._geometry_from_stream({"width": 320, "height": 240, "r_frame_rate": "25/1"})))
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: (
+        media._geometry_from_stream({"width": 320, "height": 240, "r_frame_rate": "25/1"})))
     monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes", lambda *_a, **_k: [])
     monkeypatch.setattr(cut_cli, "get_video_duration", lambda _path: 10.0)
     video = tmp_path / "v.mp4"
@@ -411,8 +411,8 @@ def test_same_source_edges_split_by_another_sources_clip_are_not_a_continuous_jo
 
 
 def test_cut_main_records_frame_aligned_clips_and_frame_grid(monkeypatch, tmp_path):
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: (
-        media_geometry._geometry_from_stream(
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: (
+        media._geometry_from_stream(
             {"width": 320, "height": 240, "r_frame_rate": "25/1", "start_time": "0.000000"})))
     monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes", lambda *_a, **_k: [])
     monkeypatch.setattr(cut_cli, "get_video_duration", lambda _path: 10.0)

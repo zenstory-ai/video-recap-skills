@@ -125,26 +125,6 @@ def _no_child_work(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("via_env", [False, True])
-def test_removed_dub_mode_is_rejected_by_name(monkeypatch, tmp_path, capsys, via_env):
-    """An old shell's EDIT_MODE=dub must not silently run full either."""
-    work = tmp_path / "must-not-exist"
-    _no_child_work(monkeypatch)
-    argv = ["recap.py", str(tmp_path / "input.mp4"), "--work-dir", str(work)]
-    if via_env:
-        monkeypatch.setenv("EDIT_MODE", "dub")
-    else:
-        monkeypatch.delenv("EDIT_MODE", raising=False)
-        argv += ["--edit-mode", "dub"]
-    monkeypatch.setattr(sys, "argv", argv)
-    with pytest.raises(SystemExit) as exc:
-        recap_runner.main()
-    assert exc.value.code == 2
-    expected = "环境变量 EDIT_MODE 已移除" if via_env else "dub 模式已移除"
-    assert expected in capsys.readouterr().err
-    assert not work.exists()
-
-
 def test_removed_voice_rights_flag_is_unrecognized(monkeypatch, tmp_path, capsys):
     monkeypatch.delenv("EDIT_MODE", raising=False)
     _no_child_work(monkeypatch)
@@ -156,52 +136,6 @@ def test_removed_voice_rights_flag_is_unrecognized(monkeypatch, tmp_path, capsys
         recap_runner.main()
     assert exc.value.code == 2
     assert "unrecognized arguments: --confirm-voice-rights" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("edit_mode_args", [[], ["--edit-mode", "cut"]])
-@pytest.mark.parametrize(
-    ("filename", "content"),
-    [
-        ("recap_run_manifest.json", json.dumps({"settings": {"edit_mode": "dub"}})),
-        ("dub_transcript.json", "{}"),
-        ("dub_script.json", "[]"),
-        ("dub_manifest.json", "{}"),
-    ],
-)
-def test_old_dub_work_dir_is_not_resumed_as_another_mode(
-    monkeypatch, tmp_path, filename, content, edit_mode_args
-):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"source")
-    work = tmp_path / "old-dub-work"
-    work.mkdir()
-    (work / filename).write_text(content, encoding="utf-8")
-    monkeypatch.delenv("EDIT_MODE", raising=False)
-    _no_child_work(monkeypatch)
-    monkeypatch.setattr(
-        sys, "argv",
-        ["recap.py", str(video), "--work-dir", str(work), "--no-burn-subtitles", *edit_mode_args],
-    )
-    with pytest.raises(SystemExit, match="已移除的 dub 模式"):
-        recap_runner.main()
-
-
-def test_old_dub_work_dir_is_not_reused_for_multi_video(monkeypatch, tmp_path):
-    videos = [tmp_path / "a.mp4", tmp_path / "b.mp4"]
-    for video in videos:
-        video.write_bytes(video.stem.encode())
-    work = tmp_path / "old-dub-work"
-    work.mkdir()
-    (work / "dub_script.json").write_text("[]", encoding="utf-8")
-    monkeypatch.delenv("EDIT_MODE", raising=False)
-    _no_child_work(monkeypatch)
-    monkeypatch.setattr(
-        sys, "argv",
-        ["recap.py", *map(str, videos), "--edit-mode", "cut", "--work-dir", str(work),
-         "--no-burn-subtitles"],
-    )
-    with pytest.raises(SystemExit, match="已移除的 dub 模式"):
-        recap_runner.main()
 
 
 def _minimal_env():
@@ -229,8 +163,8 @@ def _run_source_cli(source, work, output, env, *, strict):
         "--work-dir", str(work), "--output-dir", str(output),
         "--audio-mode", "source-mix", "--no-burn-subtitles",
     ]
-    if strict:
-        command.append("--require-final-qc")
+    if not strict:
+        command.append("--no-require-final-qc")
     return subprocess.run(
         command, cwd=SCRIPTS, env=env, capture_output=True, text=True, timeout=90
     )

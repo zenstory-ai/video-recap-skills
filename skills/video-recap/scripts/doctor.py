@@ -99,7 +99,6 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
         tts_configured = mimo_tts_configured
         tts_model = CONFIG["mimo_tts_model"]
     subtitle_filter = "subtitles" in filters
-    drawtext_filter = "drawtext" in filters
     burn_explicit = "BURN_SUBTITLES" in os.environ and env_bool("BURN_SUBTITLES", True)
     if not ffmpeg_path:
         subtitle_delivery = "unavailable"
@@ -118,8 +117,6 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             "ffmpeg_ass_filter": "ass" in filters,
             "burn_subtitles_ready": bool(ffmpeg_path and subtitle_filter),
             "subtitle_delivery": subtitle_delivery,
-            "ffmpeg_drawtext_filter": drawtext_filter,
-            "visual_overlays_ready": bool(ffmpeg_path and drawtext_filter),
         },
         "tts": {
             "provider": effective_tts_provider,
@@ -188,11 +185,6 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             "will stop at preflight: unset BURN_SUBTITLES to get a .srt sidecar, pass "
             "--no-burn-subtitles, or install an ffmpeg build with libass"
         )
-    if tools["ffmpeg"] and not drawtext_filter:
-        warnings.append(
-            "ffmpeg lacks the drawtext filter (libfreetype); narration visual_overlays will stop "
-            "the run before TTS: remove them or install an ffmpeg build with drawtext"
-        )
     if not checks["api_config"]["api_key_set"]:
         failures.append("MIMO_API_KEY is not set; the default ASR / VLM path requires MiMo")
     if not tts_configured and effective_tts_provider in TTS_KEY_HINTS:
@@ -231,11 +223,6 @@ def _print_human(report: dict) -> None:
         f"ffmpeg subtitles/libass filter: "
         f"{'available' if system['ffmpeg_subtitles_filter'] else 'missing'}"
         f" (subtitles: {system['subtitle_delivery']})"
-    )
-    print(
-        f"{_status_icon(system['ffmpeg_drawtext_filter'], warning=True)} "
-        f"ffmpeg drawtext filter (visual_overlays): "
-        f"{'available' if system['ffmpeg_drawtext_filter'] else 'missing'}"
     )
 
     api = checks["api_config"]

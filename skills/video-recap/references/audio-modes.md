@@ -24,11 +24,12 @@ track is not the first one.
   final loudness/limiter stage and AAC encoding. `assembly_qc.json` reports the
   operations that actually ran.
 
-## No frozen-audio route
+## Processed audio delivery
 
-Both modes re-encode audio to AAC 192 kbps at 48 kHz and trim it with `-t`. The
-packet-copy route `adopted-packet-copy` was removed after v0.6.2, so no mode leaves
-the audio packets untouched. Requesting it fails with an error naming v0.6.2.
+Both modes re-encode audio to AAC 192 kbps at 48 kHz, apply a smooth tail fade-out
+(`ENDING_AUDIO_FADE_MS`, default `350` ms) on original audio and BGM so the ending never
+cuts abruptly, and trim to the video duration with `-t`. No mode leaves the raw source
+audio packets untouched.
 
 The closest settings for a picture or packaging re-render are
 `--audio-mode source-mix` with `IDLE_ORIG_VOLUME=1.0` and `FINAL_LOUDNORM=0`. The

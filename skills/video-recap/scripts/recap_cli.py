@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 from lib import TTS_PROVIDERS, env_bool
-from recap_source import AUDIO_MODES, REMOVED_AUDIO_MODE, removed_route_message
+from recap_source import AUDIO_MODES
 
 
 # Options whose value names a file or directory; the resume command makes them absolute.
@@ -50,34 +50,7 @@ def _replayable_argv(parser, argv):
     return out, frozenset(explicit)
 
 
-def _edit_mode(value):
-    """Name the removed dub mode instead of argparse's generic choice error."""
-    if value == "dub":
-        raise argparse.ArgumentTypeError(
-            "dub 模式已移除（--edit-mode dub）；请用 full 或 cut，"
-            "仍需英译中克隆配音请使用 v0.6.2"
-        )
-    return value
-
-
-def _audio_mode(value):
-    """Name the removed packet-copy route instead of argparse's generic choice error."""
-    if value == REMOVED_AUDIO_MODE:
-        raise argparse.ArgumentTypeError(removed_route_message(f"--audio-mode {value}"))
-    return value
-
-
-class _RemovedFlag(argparse.Action):
-    """A removed delivery option: hidden from --help, and a clear refusal when used.
-
-    It also catches a resume command replayed from an old manifest.
-    """
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        parser.error(removed_route_message(option_string))
-
-
-class _DoctorMoved(_RemovedFlag):
+class _DoctorMoved(argparse.Action):
     """Answer the old offline check instead of argparse's "video is required"."""
 
     def __call__(self, parser, namespace, values, option_string=None):
@@ -99,7 +72,6 @@ def parse_args(argv=None):
     core.add_argument(
         "--edit-mode",
         default="full",
-        type=_edit_mode,
         choices=["full", "cut"],
     )
     core.add_argument("--target-duration", default=None)
@@ -107,7 +79,7 @@ def parse_args(argv=None):
     core.add_argument("--skip-asr", action="store_true")
 
     voice = parser.add_argument_group("声音策略与配音")
-    voice.add_argument("--audio-mode", choices=AUDIO_MODES, type=_audio_mode, default="narration")
+    voice.add_argument("--audio-mode", choices=AUDIO_MODES, default="narration")
     voice.add_argument(
         "--tts-provider",
         default=os.environ.get("TTS_PROVIDER", "auto"),
@@ -146,18 +118,15 @@ def parse_args(argv=None):
         help="exclusive auto-rotated display-frame Y at the bottom of the measured subtitle band",
     )
 
-    for removed in ("--tts-meta", "--narration-adoption", "--audio-mix-adoption"):
-        parser.add_argument(removed, nargs="?", action=_RemovedFlag,
-                            default=argparse.SUPPRESS, help=argparse.SUPPRESS)
-
     parser.add_argument("--doctor", nargs=0, action=_DoctorMoved,
                         default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
     qc = parser.add_argument_group("QC 与导出")
     qc.add_argument(
         "--require-final-qc",
-        action="store_true",
-        help="full/cut: require a literal passing final_qc summary",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="full/cut: require a literal passing final_qc summary (default on; --no-require-final-qc for advisory preview)",
     )
     qc.add_argument(
         "--export-jianying",

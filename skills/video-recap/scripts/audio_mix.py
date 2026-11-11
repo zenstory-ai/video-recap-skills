@@ -285,12 +285,23 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             duck_end = float(video_duration)
             status = "held_to_timeline_end"
         elif anchors:
-            # No anchor within the bound: release at the narration end, same values as
-            # `no_source_speech`. Up to the ramp of a source tail is audible; a long duck
-            # would instead bury dialogue that may matter more.
+            # No anchor within the bound: release at the narration end unless doing so
+            # exposes the middle of an active source dialogue sentence (> 0.35s remaining).
             restore_at = run["end"] + fade
             duck_end = run["end"]
-            status = "bounded_release"
+            in_quiet = any(
+                row["start"] - 0.05 <= run["end"] <= row["end"] + 0.05
+                for row in quiet_windows
+            )
+            mid_dialogue = not in_quiet and any(
+                row["start"] - 0.05 <= run["end"] < row["end"] - 0.35
+                for row in dialogue_spans
+            )
+            if mid_dialogue:
+                last["source_handoff_blocking"] = True
+                status = "unsafe_mid_sentence_release"
+            else:
+                status = "bounded_release"
         elif source_has_speech:
             first["source_handoff_blocking"] = True
             first["source_entry_status"] = "anchors_unavailable"
@@ -353,12 +364,26 @@ def _bgm_envelope(tts_segments, base, duck, fade, bridge):
     return ducking_expression(coalesce_duck_windows(windows, bridge), base, fade)
 
 
+def _tail_fade_suffix(video_duration):
+    """Smooth master tail fade-out on bed tracks so room tone/BGM never chop abruptly."""
+    fade_ms = float(CONFIG.get("ending_audio_fade_ms", 0.0))
+    if fade_ms <= 0.0 or video_duration is None or float(video_duration) <= 0.0:
+        return ""
+    dur = float(video_duration)
+    fade_sec = min(fade_ms / 1000.0, dur / 3.0)
+    if fade_sec < 0.02:
+        return ""
+    start = max(0.0, dur - fade_sec)
+    return f",afade=t=out:st={start:.3f}:d={fade_sec:.3f}"
+
+
 def _build_audio_filter_complex(
     tts_segments,
     has_bgm=False,
     *,
     original_audio_label="0:a",
     bgm_audio_label="2:a",
+    video_duration=None,
 ):
     """Compose the audio tracks into [aout], like a cut-software timeline.
 
@@ -375,13 +400,14 @@ def _build_audio_filter_complex(
     bridge = CONFIG["duck_bridge_seconds"]
     original_in = f"[{original_audio_label}]"
     bgm_in = f"[{bgm_audio_label}]"
+    tail_fade = _tail_fade_suffix(video_duration)
 
     # BGM bed (input [2:a]): ducked under each narration window when present.
     bgm_chain = ""
     if has_bgm:
         base = CONFIG["bgm_volume"]
         bgm_expr = _bgm_envelope(tts_segments, base, CONFIG["bgm_ducking_volume"], fade, bridge)
-        bgm_chain = f"{bgm_in}volume='{bgm_expr}':eval=frame,aresample=48000[bgm];"
+        bgm_chain = f"{bgm_in}volume='{bgm_expr}':eval=frame,aresample=48000{tail_fade}[bgm];"
 
     # Gap-fill ducking envelope on the original track.
     idle = CONFIG["idle_orig_volume"]
@@ -391,5 +417,5 @@ def _build_audio_filter_complex(
     n_overlap = sum(1 for s in tts_segments if s["overlaps_speech"])
     n_quiet = len(tts_segments) - n_overlap
     log(f"gap-fill ducking: 间隙原声={idle}, 对白段={speech_vol}({n_overlap}), 安静段={quiet_vol}({n_quiet}), 桥接间隙<{bridge}s")
-    orig = f"{original_in}volume='{expr}':eval=frame,aresample=48000[orig];"
+    orig = f"{original_in}volume='{expr}':eval=frame,aresample=48000{tail_fade}[orig];"
     return orig + _amix_tail(narr_vol, bgm_chain)

@@ -19,10 +19,57 @@ from cut_contract import (
 )
 from cut_render import build_edited_source_video
 from frame_grid import record_frame_grid, source_frame_grids
-from media_geometry import _has_audio_stream, _select_output_geometry
+from media import _has_audio_stream, _select_output_geometry
 from narrative_selection import check_required_evidence
 from cut_qc import update_cut_qc
 from sentence_boundaries import snap_multi_source_clips, snap_source_clips
+import shot_review
+
+
+def run_cut_shot_review(edited_source_path, plan_path, work_dir, validated_plan, *, reused=False):
+    """Scan rendered edited_source.mp4 for internal shot candidates and block flash slivers."""
+    if not CONFIG["cut_shot_review"]:
+        return None
+    report_path = Path(work_dir) / "shot_review.json"
+    report = None
+    if reused and report_path.is_file():
+        try:
+            cached = json.loads(report_path.read_text(encoding="utf-8"))
+            if (
+                isinstance(cached, dict)
+                and cached.get("scan_complete") is True
+                and (cached.get("plan_binding") or {}).get("path") == str(Path(plan_path).resolve())
+            ):
+                report = cached
+        except (OSError, ValueError):
+            report = None
+    if report is None:
+        report = shot_review.write_scan(
+            edited_source_path,
+            report_path,
+            threshold=CONFIG["shot_review_threshold"],
+            plan_path=plan_path,
+            flash_sliver_max_seconds=CONFIG["flash_sliver_max_seconds"],
+        )
+    slivers = report.get("flash_slivers") or []
+    if slivers:
+        validated_plan["qc"].setdefault("blocking", []).append(
+            {
+                "code": "flash_frame_sliver",
+                "flash_sliver_count": len(slivers),
+                "flash_slivers": slivers,
+                "report_path": str(report_path),
+            }
+        )
+        Path(plan_path).write_text(
+            json.dumps(validated_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        raise SystemExit(
+            f"clip_plan QC blocking: detected {len(slivers)} flash-frame sliver(s) "
+            f"(<= {CONFIG['flash_sliver_max_seconds']:.2f}s) in edited_source.mp4. "
+            "Trim/adjust clip boundaries and inspect shot_review.json."
+        )
+    return report
 
 
 def _write_validated_plan(path, plan, raw_plan_paths):
@@ -118,10 +165,12 @@ def main():
     # so a prettier edit point never moves a boundary back inside a spoken sentence.
     snap_options = {
         "line_max_extend": CONFIG["clip_snap_max_extend"],
+        "end_pause_pad": CONFIG["clip_end_pause_pad"],
         "scene_margin": CONFIG["scene_cut_snap_margin"],
         "scene_threshold": CONFIG["scene_cut_detect_threshold"],
         "start_max_prepend": CONFIG["clip_start_snap_max_prepend"],
         "start_max_trim": CONFIG["clip_start_snap_max_trim"],
+        "flash_sliver_max_seconds": CONFIG["flash_sliver_max_seconds"],
         "do_line_snap": CONFIG["snap_clip_line_end"],
         "do_scene_snap": CONFIG["scene_cut_snap"],
     }
@@ -131,6 +180,7 @@ def main():
             raw_plan,
             video_duration,
             target_duration=target_seconds,
+            min_clip_duration=CONFIG["min_clip_duration"],
             allow_overlap=args.allow_overlap,
         )
     else:
@@ -138,6 +188,7 @@ def main():
             raw_plan,
             sources_manifest,
             target_duration=target_seconds,
+            min_clip_duration=CONFIG["min_clip_duration"],
             allow_overlap=args.allow_overlap,
         )
     # The canvas (and so the output frame rate) is chosen before snapping because the
@@ -230,6 +281,9 @@ def main():
             args.video, validated_plan, work_dir, edited_source_path
         )
     _write_validated_plan(plan_path, validated_plan, raw_plan_paths)
+    run_cut_shot_review(
+        edited_source_path, plan_path, work_dir, validated_plan, reused=reuse
+    )
 
     log(
         f"剪辑模式: {len(validated_plan['clips'])} 个片段 → {validated_plan['total_duration']:.1f}s"

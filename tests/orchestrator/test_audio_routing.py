@@ -29,7 +29,11 @@ def _finish_stubs(monkeypatch, work, calls):
     monkeypatch.setattr(recap_runner, "_run", fake_run)
     monkeypatch.setattr(recap_runner, "_preflight_burn_subtitles", lambda _args: None)
     monkeypatch.setattr(recap_runner, "_surface_cut_qc", lambda _work: {"status": "pass"})
-    monkeypatch.setattr(recap_runner, "_write_final_qc_reports", lambda *_: {})
+    monkeypatch.setattr(
+        recap_runner,
+        "_write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     monkeypatch.setattr(recap_runner, "_print_final_qc_pointer", lambda *_: None)
     return fake_run
 
@@ -41,8 +45,6 @@ def test_full_source_audio_routes_directly_to_assemble_without_tts(monkeypatch, 
     work = tmp_path / "work"
     work.mkdir()
     (work / "tts_meta.json").write_text("not-json", encoding="utf-8")
-    overlays = work / "visual_overlays.json"
-    overlays.write_text('{"author":"keep"}', encoding="utf-8")
     calls = []
     _finish_stubs(monkeypatch, work, calls)
     monkeypatch.setattr(
@@ -58,7 +60,6 @@ def test_full_source_audio_routes_directly_to_assemble_without_tts(monkeypatch, 
     assert assemble[:1] == [str(video.resolve())]
     assert assemble[assemble.index("--audio-mode") + 1] == audio_mode
     assert "--tts-meta" not in assemble
-    assert overlays.read_text(encoding="utf-8") == '{"author":"keep"}'
     manifest = json.loads((work / "recap_run_manifest.json").read_text(encoding="utf-8"))
     assert manifest["audio"] == {"mode": audio_mode, "selected_stream_index": 0}
 
@@ -141,25 +142,16 @@ def test_cut_source_audio_without_plan_keeps_analysis_pause_and_continuation_mod
     assert not (work / "narration.json").exists()
 
 
-@pytest.mark.parametrize("audio_mode", ["narration", "source-mix"])
-def test_removed_subtitle_track_is_rejected_before_cut(monkeypatch, tmp_path, audio_mode):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"video")
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "subtitle_track.json").write_text("{}", encoding="utf-8")
-    (work / "clip_plan.json").write_text('{"clips":[]}', encoding="utf-8")
+@pytest.mark.parametrize("argv", [["--doctor"], ["--doctor", "--json"], ["input.mp4", "--doctor"]])
+def test_removed_doctor_flag_points_at_doctor_py(monkeypatch, capsys, argv):
     calls = []
     monkeypatch.setattr(recap_runner, "_run", lambda *args: calls.append(args))
     monkeypatch.setattr(recap_runner, "_preflight_burn_subtitles", lambda _args: None)
-    monkeypatch.setattr(
-        sys, "argv",
-        ["recap.py", str(video), "--work-dir", str(work), "--edit-mode", "cut",
-         "--audio-mode", audio_mode],
-    )
-
-    with pytest.raises(SystemExit, match="subtitle_track.*v0.6.2"):
+    monkeypatch.setattr(sys, "argv", ["recap.py", *argv])
+    with pytest.raises(SystemExit) as exc:
         recap_runner.main()
+    assert exc.value.code == 2
+    assert "doctor.py" in capsys.readouterr().err
     assert calls == []
 
 

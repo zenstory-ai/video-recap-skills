@@ -5,31 +5,10 @@ import math
 import wave
 from pathlib import Path
 
-from lib import CONFIG, read_json_object
+from lib import CONFIG
 from assemble_constants import ASSEMBLY_MANIFEST, ASSEMBLY_QC
 from loudness import _loudness_mode
 from artifacts import _source_video_identity, _timeline_provenance_status
-from recap_source import (
-    REMOVED_AUDIO_MODE,
-    _REMOVED_DELIVERY_ARTIFACTS,
-    removed_route_message,
-)
-
-
-def reject_removed_delivery_inputs(work_dir, audio_mode=None):
-    """Refuse the removed audio mode and any work_dir such a route left behind."""
-    if audio_mode == REMOVED_AUDIO_MODE:
-        raise RuntimeError(removed_route_message(f"audio_mode {audio_mode}"))
-    work_dir = Path(work_dir)
-    for name in _REMOVED_DELIVERY_ARTIFACTS:
-        if (work_dir / name).exists():
-            raise RuntimeError(removed_route_message(f"{work_dir / name}"))
-    bound = read_json_object(work_dir / "narration_input_binding.json") or {}
-    if bound.get("identity_status") == "BOUND_TO_ADOPTION":
-        raise RuntimeError(removed_route_message(f"{work_dir / 'narration_input_binding.json'}"))
-    for name in (ASSEMBLY_MANIFEST, ASSEMBLY_QC):
-        if (read_json_object(work_dir / name) or {}).get("audio_mode") == REMOVED_AUDIO_MODE:
-            raise RuntimeError(removed_route_message(f"{work_dir / name}"))
 
 
 def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,

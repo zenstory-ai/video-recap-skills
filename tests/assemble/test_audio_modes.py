@@ -230,3 +230,27 @@ def test_handoff_speech_evidence_ignores_an_old_clean_transcript_left_behind(tmp
     (tmp_path / "asr_clean.json").write_text(
         json.dumps({"segments": [{"start": 0.0, "end": 2.0, "text": "清洗旧稿"}]}), encoding="utf-8")
     assert [row["text"] for row in audio_mix._asr_segments(tmp_path)] == ["原始转写"]
+
+
+def test_source_mix_rerun_in_its_own_work_dir_is_not_rejected(tmp_path):
+    source = tmp_path / "source.mp4"
+    _make_av(source)
+    work = tmp_path / "work"
+    work.mkdir()
+    args = [
+        sys.executable, str(SCRIPTS / "assemble.py"), str(source),
+        "--work-dir", str(work), "--audio-mode", "source-mix", "--no-burn-subtitles",
+        "--output-dir", str(tmp_path / "delivery"),
+    ]
+    assert subprocess.run(args, capture_output=True, text=True).returncode == 0
+    second = subprocess.run(args, capture_output=True, text=True)
+    assert second.returncode == 0, second.stderr
+
+
+def test_source_mix_with_tts_meta_is_refused_before_any_render(tmp_path, monkeypatch):
+    import assemble
+
+    monkeypatch.setattr(assemble.lib, "get_video_duration", lambda _p: pytest.fail("reached the render"))
+    with pytest.raises(RuntimeError, match="tts_meta"):
+        assemble_video(tmp_path / "in.mp4", [], tmp_path, tmp_path / "out.mp4",
+                       audio_mode="source-mix", tts_meta_path=tmp_path / "tts_meta.json")

@@ -230,12 +230,16 @@ def snap_clip_starts_to_lines(
     return result
 
 
-def snap_clip_ends_to_lines(plan, silence_periods, video_duration, max_extend):
+def snap_clip_ends_to_lines(
+    plan, silence_periods, video_duration, max_extend, *, pause_pad=0.0, shot_cuts=(),
+):
     """Extend each clip's source_end forward to the next natural pause, preventing mid-sentence cuts.
 
     - No quiet windows: the plan is returned unchanged.
     - A source_end already inside a quiet window is left alone.
-    - Otherwise extend to the next quiet window start, capped by max_extend and video_duration.
+    - Otherwise extend to the next quiet window start (plus up to `pause_pad` inside that pause
+      so the speaker's reaction/breath lands cleanly instead of chopping at 0 ms), capped by
+      max_extend, any nearby shot cut inside the pause pad, and video_duration.
     - When plan["allow_overlap"] is False, never extend into another clip's source range.
     - Recomputes output_start/output_end/duration for all clips cursor-based.
     """
@@ -245,6 +249,7 @@ def snap_clip_ends_to_lines(plan, silence_periods, video_duration, max_extend):
     clips = [dict(c) for c in plan["clips"]]
     allow_overlap = plan["allow_overlap"]
     events = []
+    pad = max(0.0, float(pause_pad))
 
     for i, clip in enumerate(clips):
         source_end = clip["source_end"]
@@ -260,18 +265,26 @@ def snap_clip_ends_to_lines(plan, silence_periods, video_duration, max_extend):
             events.append(event)
             continue
 
-        candidates = [w["start"] for w in silence_periods if w["start"] >= source_end]
-        if not candidates:
+        candidate_windows = [w for w in silence_periods if w["start"] >= source_end]
+        if not candidate_windows:
             event["end_unsnapped_reason"] = "no_next_quiet"
             events.append(event)
             continue
-        next_quiet_start = min(candidates)
+        target_window = min(candidate_windows, key=lambda w: (w["start"], -w["end"]))
+        next_quiet_start = target_window["start"]
 
         if next_quiet_start > source_end + max_extend:
             event["end_unsnapped_reason"] = "next_quiet_too_far"
             events.append(event)
             continue
-        candidate_end = min(next_quiet_start, video_duration)
+        padded_target = next_quiet_start
+        if pad > 0.0:
+            padded_target = min(target_window["end"], next_quiet_start + pad)
+            cuts_in_pad = [c for c in shot_cuts if next_quiet_start + 1e-3 < c <= padded_target]
+            if cuts_in_pad:
+                padded_target = max(next_quiet_start, min(cuts_in_pad) - 0.001)
+            padded_target = min(padded_target, source_end + max_extend)
+        candidate_end = min(padded_target, video_duration)
         if candidate_end <= source_end:
             event["end_unsnapped_reason"] = "non_forward_candidate"
             events.append(event)
@@ -420,16 +433,13 @@ def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5, fo
     return _plan_with_snapped_clips(plan, clips, "shot_snaps", events)
 
 
-def _revert_unsafe_shot_snaps(plan, before, classify):
+def _revert_unsafe_shot_snaps(plan, before, classify, *, flash_sliver_max_seconds=0.0):
     """Undo a shot-change move that left an edge in speech where the plan's own edge was safe.
 
-    Sound outranks picture cleanup. Line snapping can pull a moved edge back out of speech
-    only next to a pause window, so an end the shot-change pass pulled back up to
-    `scene_margin` into a sentence (the plan ended it in an ASR gap that is music, not
-    silence) would block, and the nearest safe edge the gate suggests would be pulled back
-    again on the next run. Such an edge returns to `before` (the clips before the shot-change
-    pass) and its shot_snaps event reads `reverted_unsafe`, unless that would overlap
-    another clip's source range.
+    Sound outranks picture cleanup for ordinary L-cut overlaps (> flash_sliver_max_seconds).
+    However, when reverting would re-expose a <= flash_sliver_max_seconds (1-5 frame) flash
+    sliver at the edit point while keeping the shot cut would truncate speech, neither choice
+    is acceptable: record a blocking `shot_speech_conflict` so the clip plan adjusts the cut.
     """
     events = plan.get("qc", {}).get("boundary_status", {}).get("shot_snaps", [])
     if len(events) != len(before):
@@ -437,6 +447,7 @@ def _revert_unsafe_shot_snaps(plan, before, classify):
     clips = [dict(c) for c in plan["clips"]]
     events = [dict(e) for e in events]
     reverted = 0
+    conflicts = []
     for idx, (clip, old, event) in enumerate(zip(clips, before, events)):
         for edge, key, moved in (("start", "source_start", "moved_forward"),
                                  ("end", "source_end", "moved_back")):
@@ -445,6 +456,21 @@ def _revert_unsafe_shot_snaps(plan, before, classify):
             status, reason = classify(edge, clip[key], _edge_joined(clips, idx, edge))
             if status != "blocking" or classify(
                     edge, old[key], _edge_joined(before, idx, edge))[0] != "safe":
+                continue
+            sliver_seconds = abs(clip[key] - old[key])
+            if flash_sliver_max_seconds > 0 and sliver_seconds <= flash_sliver_max_seconds + 1e-6:
+                event[f"{edge}_action"] = "blocked_shot_speech_conflict"
+                event[f"{edge}_conflict_reason"] = reason
+                conflicts.append({
+                    "code": "shot_speech_conflict",
+                    "clip_id": clip["clip_id"],
+                    "source_id": clip.get("source_id"),
+                    "edge": edge,
+                    "original_time": round(old[key], 3),
+                    "shot_cut_time": round(clip[key], 3),
+                    "sliver_seconds": round(sliver_seconds, 3),
+                    "speech_reason": reason,
+                })
                 continue
             span = {**clip, key: old[key]}
             if not plan["allow_overlap"] and _candidate_overlaps(
@@ -455,10 +481,14 @@ def _revert_unsafe_shot_snaps(plan, before, classify):
             event[f"rejected_{edge}"] = event.pop(f"new_{edge}")
             event[f"{edge}_revert_reason"] = reason
             reverted += 1
-    if not reverted:
+    if not reverted and not conflicts:
         return plan
-    log(f"切镜头避让会截断原声，已撤回 {reverted} 处边界")
-    return _plan_with_snapped_clips(plan, clips, "shot_snaps", events)
+    if reverted:
+        log(f"切镜头避让会截断原声，已撤回 {reverted} 处边界")
+    updated = _plan_with_snapped_clips(plan, clips, "shot_snaps", events)
+    if conflicts:
+        updated["qc"].setdefault("blocking", []).extend(conflicts)
+    return updated
 
 
 def _load_silence_for_source(work_dir, source_id, source_work_dir=None):
@@ -478,6 +508,8 @@ def snap_source_clips(
     scene_threshold,
     start_max_prepend,
     start_max_trim,
+    end_pause_pad=0.0,
+    flash_sliver_max_seconds=0.0,
     do_line_snap=True,
     do_scene_snap=True,
     source_id=None,
@@ -509,13 +541,25 @@ def snap_source_clips(
         plan = snap_clip_starts_to_lines(
             plan, boundaries, duration, start_max_prepend, max_trim=start_max_trim
         )
-        plan = snap_clip_ends_to_lines(plan, boundaries, duration, line_max_extend)
+        plan = snap_clip_ends_to_lines(
+            plan,
+            boundaries,
+            duration,
+            line_max_extend,
+            pause_pad=end_pause_pad,
+            shot_cuts=scene_cuts,
+        )
     speech_spans = _load_source_speech_spans(work_dir, source_id, source_work_dir)
     video_start = frame_grid["origin"] if frame_grid is not None else 0.0
     classify = _edge_classifier(boundaries, speech_spans, duration, _GATE_TOLERANCE,
                                 video_start)
     if do_scene_snap:
-        plan = _revert_unsafe_shot_snaps(plan, before_shot_snap, classify)
+        plan = _revert_unsafe_shot_snaps(
+            plan,
+            before_shot_snap,
+            classify,
+            flash_sliver_max_seconds=flash_sliver_max_seconds,
+        )
     if frame_grid is None:
         return enforce_clip_sentence_boundaries(plan, boundaries, speech_spans, duration)
 

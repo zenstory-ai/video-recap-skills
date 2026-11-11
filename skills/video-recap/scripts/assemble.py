@@ -34,7 +34,6 @@ AUDIO_MODES = ("narration", "source-mix")
 def assemble_video(input_video, tts_segments, work_dir, output_path, *,
                    audio_mode="narration", tts_meta_path=None):
     """组装最终视频"""
-    assembly_contract.reject_removed_delivery_inputs(work_dir, audio_mode)
     if audio_mode not in AUDIO_MODES:
         raise RuntimeError(f"不支持的 audio_mode: {audio_mode}")
     if audio_mode == "narration" and not tts_segments:
@@ -96,7 +95,6 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         audio_mode=audio_mode,
     )
 
-    overlay_filters, overlay_qc = visual_render._visual_overlay_filters(work_dir, canvas, video_duration)
     packaging_layers = packaging.load_packaging_layers(work_dir, canvas)
     mask_filter = visual_render._source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
     visual_qc = visual_render._build_visual_qc(
@@ -104,7 +102,6 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         work_dir,
         video_duration,
         canvas,
-        overlay_qc=overlay_qc,
         mask_filter=mask_filter,
     )
     visual_render._write_visual_qc(work_dir, visual_qc)
@@ -127,11 +124,12 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     audio_map = "[aoutln]"
     # mix_graph is the mix before the final loudness stage ([aout]).
     if audio_mode == "source-mix":
-        mix_graph = f"[0:a:0]volume={lib.CONFIG['idle_orig_volume']}[source]"
+        tail_fade = audio_mix._tail_fade_suffix(video_duration)
+        mix_graph = f"[0:a:0]volume={lib.CONFIG['idle_orig_volume']}{tail_fade}[source]"
         if has_bgm:
             bgm_input = ["-stream_loop", "-1", "-i", str(bgm_path)]
             mix_graph += (
-                f";[1:a]volume={lib.CONFIG['bgm_volume']}[bgm]"
+                f";[1:a]volume={lib.CONFIG['bgm_volume']}{tail_fade}[bgm]"
                 ";[source][bgm]amix=inputs=2:duration=first:dropout_transition=0[aout]"
             )
         else:
@@ -157,6 +155,7 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             has_bgm,
             original_audio_label=original_audio_label,
             bgm_audio_label=bgm_audio_label,
+            video_duration=video_duration,
         )
         # BGM is input [2:a]; -stream_loop -1 loops it to cover the whole timeline (amix
         # duration=first + -t trim it back to the video length).
@@ -205,7 +204,6 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     vf_chain = []
     if mask_filter:
         vf_chain.append(mask_filter)
-    vf_chain.extend(overlay_filters)
     if burn_subtitles:
         vf_chain.append(visual_render._subtitle_burn_filter(ass_path))
     # Downscale LAST so the mask + burned subtitles render at native resolution and are then
@@ -249,7 +247,6 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         cmd += ["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]
         notes = ((["遮挡原字幕"] if mask_filter else [])
                  + ([f"包装图层×{len(packaging_layers)}"] if packaging_layers else [])
-                 + ([f"视觉叠加×{len(overlay_filters)}"] if overlay_filters else [])
                  + (["压制解说字幕"] if burn_subtitles else [])
                  + ([f"缩放≤{max_h}p"] if max_h > 0 else []))
         lib.log(f"视频重编码: {' + '.join(notes)} (crf={crf}, preset={preset})")
@@ -401,31 +398,14 @@ def _block_before_render(tts_segments, video_duration, work_dir, output_path, au
     )
 
 
-def _audio_mode(value):
-    """Name the removed packet-copy route instead of argparse's generic choice error."""
-    if value == assembly_contract.REMOVED_AUDIO_MODE:
-        raise argparse.ArgumentTypeError(assembly_contract.removed_route_message(f"--audio-mode {value}"))
-    return value
-
-
-class _RemovedFlag(argparse.Action):
-    """A removed delivery option: hidden from --help, and a clear refusal when used."""
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        parser.error(assembly_contract.removed_route_message(option_string))
-
-
 def main():
     ap = argparse.ArgumentParser(
         description="assemble.py: mux narration audio over the video, duck the original, render subtitles.")
     ap.add_argument("video", help="source video (edited_source.mp4 in cut mode, else the original)")
     ap.add_argument("--work-dir", required=True)
     ap.add_argument("--tts-meta", default=None, help="tts_meta.json (default: <work-dir>/tts_meta.json)")
-    for removed in ("--narration-adoption", "--audio-mix-adoption"):
-        ap.add_argument(removed, nargs="?", action=_RemovedFlag,
-                        default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     ap.add_argument(
-        "--audio-mode", choices=AUDIO_MODES, type=_audio_mode,
+        "--audio-mode", choices=AUDIO_MODES,
         default="narration", help="audio path (default: narration)",
     )
     ap.add_argument("--recap-stem", default=None, help="final recap filename stem (default: video stem)")
@@ -451,10 +431,6 @@ def main():
     ap.set_defaults(jianying_bundle_media=None)
     args = ap.parse_args()
     work_dir = Path(args.work_dir)
-    try:
-        assembly_contract.reject_removed_delivery_inputs(work_dir, args.audio_mode)
-    except RuntimeError as exc:
-        raise SystemExit(str(exc)) from None
     if args.burn_subtitles is not None:
         lib.CONFIG["burn_subtitles"] = args.burn_subtitles
         lib.CONFIG["burn_subtitles_explicit"] = True
@@ -480,9 +456,8 @@ def main():
     if args.jianying_bundle_media is not None:
         lib.CONFIG["jianying_bundle_media"] = args.jianying_bundle_media
     # Before the render: an explicit burn without libass fails, the default degrades to the
-    # .srt sidecar; drawtext overlays without drawtext fail.
+    # .srt sidecar.
     render_preflight._preflight_burn_subtitles()
-    render_preflight._preflight_visual_overlays(work_dir)
     # Argument combinations are validated once, by assemble_video.
     tts_meta = Path(args.tts_meta) if args.tts_meta else None
     tts_segments = []

@@ -337,3 +337,113 @@ def _format_output_clip_list(work_dir):
         )
     out.append("")
     return out
+
+
+def source_speech_rows(source_dir):
+    """Read raw ASR speech rows for a source work dir (ignoring any leftover asr_clean.json)."""
+    return _read_json(Path(source_dir) / "asr_result.json", [])
+
+
+def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
+    """Map each source's speech and quiet evidence onto the combined output clock."""
+    work_dir = Path(work_dir)
+    source_by_id = {row["source_id"]: row for row in source_records}
+    cache = {}
+
+    def load_source(source_id):
+        if source_id not in cache:
+            source_dir = work_dir / source_by_id[source_id]["source_work_dir"]
+            anchors_path = source_dir / "speech_boundary_anchors.json"
+            quiet_path = source_dir / "silence_periods.json"
+            cache[source_id] = (
+                _read_json(anchors_path, {"sentence_anchors": []})["sentence_anchors"],
+                source_speech_rows(source_dir),
+                _read_json(quiet_path, []),
+            )
+        return cache[source_id]
+
+    spans_by_source = {}
+    for clip in plan["clips"]:
+        spans_by_source.setdefault(clip["source_id"], []).append(
+            (float(clip["source_start"]), float(clip["source_end"]))
+        )
+
+    mapped_anchors, mapped_speech, mapped_quiet = [], [], []
+    output_duration = max(float(clip["output_end"]) for clip in plan["clips"])
+    for clip in plan["clips"]:
+        source_id = clip["source_id"]
+        source_start = float(clip["source_start"])
+        source_end = float(clip["source_end"])
+        output_start = float(clip["output_start"])
+        output_end = float(clip["output_end"])
+        span = {
+            "source_start": source_start,
+            "source_end": source_end,
+            "output_start": output_start,
+            "output_end": output_end,
+        }
+
+        anchors, speech_rows, quiet_rows = load_source(source_id)
+        for anchor in anchors:
+            when = float(anchor["time"])
+            if not (source_start - 0.05 <= when <= source_end + 0.05):
+                continue
+            if not 0 <= round(output_start + when - source_start, 3) <= output_duration:
+                continue
+            if not source_start <= when <= source_end and any(
+                start <= when <= end for start, end in spans_by_source[source_id]
+            ):
+                continue
+            pause = max(source_start, min(float(anchor.get("pause_start", when - 0.12)), when))
+            item = dict(anchor)
+            item.update(
+                source_id=source_id,
+                source_time=round(when, 3),
+                time=_source_to_span_output(when, span),
+                source_pause_start=round(min(pause, source_end), 3),
+                pause_start=_source_to_span_output(pause, span),
+                source_pause_end=round(float(anchor.get("pause_end", when)), 3),
+            )
+            item["pause_end"] = item["time"]
+            if "expected_time" in anchor:
+                expected = float(anchor["expected_time"])
+                item["source_expected_time"] = round(expected, 3)
+                item["expected_time"] = _source_to_span_output(expected, span)
+            mapped_anchors.append(item)
+        for rows, destination, require_text in (
+            (speech_rows, mapped_speech, True),
+            (quiet_rows, mapped_quiet, False),
+        ):
+            for row in rows:
+                if require_text and not row["text"].strip():
+                    continue
+                if not require_text and row["has_speech"]:
+                    continue
+                start = max(source_start, float(row["start"]))
+                end = min(source_end, float(row["end"]))
+                if end <= start:
+                    continue
+                item = dict(row)
+                item.update(
+                    source_id=source_id,
+                    source_start=round(start, 3),
+                    source_end=round(end, 3),
+                    start=_source_to_span_output(start, span),
+                    end=_source_to_span_output(end, span),
+                )
+                destination.append(item)
+
+    payload = {
+        "schema_version": 2,
+        "artifact": "speech_boundary_anchors_output.json",
+        "timeline": "cut_output",
+        "source_artifact": "multi_source_manifest.json",
+        "clip_plan_identity": file_identity(work_dir / "clip_plan_validated.json"),
+        "sentence_anchors": sorted(mapped_anchors, key=lambda row: row["time"]),
+        "speech_spans": sorted(mapped_speech, key=lambda row: (row["start"], row["end"])),
+        "quiet_windows": sorted(mapped_quiet, key=lambda row: (row["start"], row["end"])),
+    }
+    (work_dir / "speech_boundary_anchors_output.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return payload

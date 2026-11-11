@@ -20,7 +20,6 @@ from _helpers import (
     seed_full_work,
     seed_multi_work,
     stub_child_run,
-    write_assemble_output,
     write_cut_output,
 )
 
@@ -358,22 +357,6 @@ def test_doctor_warns_explicit_burn_env_will_stop_without_libass(monkeypatch):
     assert "--no-burn-subtitles" in report["warnings"][0]
 
 
-def test_doctor_warns_when_drawtext_missing(monkeypatch):
-    monkeypatch.delenv("BURN_SUBTITLES", raising=False)
-    _tools_present(monkeypatch, filters=("subtitles", "ass"))
-    _all_mimo_keys(monkeypatch)
-
-    report = doctor.build_report()
-
-    tools = report["checks"]["system_tools"]
-    assert tools["subtitle_delivery"] == "burned"
-    assert tools["ffmpeg_drawtext_filter"] is False
-    assert tools["visual_overlays_ready"] is False
-    assert len(report["warnings"]) == 1
-    assert "drawtext" in report["warnings"][0]
-    assert "before TTS" in report["warnings"][0]
-
-
 def test_doctor_warns_when_tts_override_missing(monkeypatch):
     _tools_present(monkeypatch)
     monkeypatch.setitem(doctor.CONFIG, "api_key", "tp-x")
@@ -408,6 +391,10 @@ def test_recap_full_mode_passes_explicit_narration_json(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
     )
+    monkeypatch.setattr(
+        "recap_runner._write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
@@ -429,6 +416,10 @@ def test_recap_cut_mode_voiceover_uses_output_time_narration(monkeypatch, tmp_pa
     calls = []
     monkeypatch.setattr(
         "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
+    )
+    monkeypatch.setattr(
+        "recap_runner._write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
     )
     monkeypatch.setattr("recap_runner._read_video_duration_or_raise", lambda path: 10.0)
     _argv(
@@ -509,6 +500,10 @@ def test_recap_completion_prints_manifest_final_output(monkeypatch, tmp_path, ca
     video, work = seed_full_work(tmp_path)
     collision_safe = tmp_path / "recap_video_abcd1234ef.mp4"
     monkeypatch.setattr("recap_runner._run", stub_child_run(work, collision_safe))
+    monkeypatch.setattr(
+        "recap_runner._write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     _argv(monkeypatch, video, "--work-dir", work)
 
     recap.main()
@@ -521,6 +516,10 @@ def test_recap_forwards_tts_provider_and_allow_partial_to_voiceover(monkeypatch,
     calls = []
     monkeypatch.setattr(
         "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
+    )
+    monkeypatch.setattr(
+        "recap_runner._write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
     )
     _argv(
         monkeypatch,
@@ -605,6 +604,10 @@ def test_old_work_dir_resumes_and_leftover_review_files_have_no_reader(monkeypat
     monkeypatch.setenv("REQUIRE_NARRATION_REVIEW", "0")
     monkeypatch.setattr(
         "recap_runner._run", stub_child_run(work, tmp_path / "recap_video.mp4", calls)
+    )
+    monkeypatch.setattr(
+        "recap_runner._write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
     )
     _argv(monkeypatch, video, "--work-dir", work)
 
@@ -1607,117 +1610,3 @@ def test_cut_qc_summary_surfaces_canonical_cut_result(tmp_path, capsys):
         "cut QC" in out and "target_duration_status=under" in out and "1920x1080" in out
     )
 
-
-def test_recap_rewrites_visual_overlays_for_each_narration(tmp_path):
-    """visual_overlays.json always mirrors the current narration: supported overlays are
-    written out, and a later narration without any supported overlay empties the file."""
-    work = tmp_path / "work"
-    work.mkdir()
-    overlays_path = work / "visual_overlays.json"
-    first_narration = work / "narration.first.json"
-    first_narration.write_text(
-        json.dumps(
-            [
-                {
-                    "start": 0.0,
-                    "end": 2.0,
-                    "narration": "开场标题。",
-                    "visual_overlays": [
-                        {
-                            "type": "top_title",
-                            "text": "上一版标题",
-                            "start": 0.0,
-                            "end": 2.0,
-                        }
-                    ],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-    second_narration = work / "narration.json"
-    second_narration.write_text(
-        json.dumps(
-            [
-                {
-                    "start": 0.0,
-                    "end": 2.0,
-                    "narration": "没有受支持的贴片。",
-                    "visual_overlays": [
-                        {
-                            "type": "platform_card",
-                            "text": "unsupported",
-                            "start": 0.0,
-                            "end": 1.0,
-                        }
-                    ],
-                }
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    assert (
-        recap_timeline._write_canonical_visual_overlays(work, first_narration)
-        == overlays_path
-    )
-    assert json.loads(overlays_path.read_text(encoding="utf-8"))["overlays"]
-
-    assert (
-        recap_timeline._write_canonical_visual_overlays(work, second_narration)
-        == overlays_path
-    )
-    assert json.loads(overlays_path.read_text(encoding="utf-8")) == {
-        "schema_version": 1,
-        "overlays": [],
-    }
-
-
-def test_recap_writes_canonical_visual_overlays_before_assemble(monkeypatch, tmp_path):
-    """Recap owns the canonical visual_overlays.json input; assemble reads it by contract."""
-    video, work = seed_full_work(
-        tmp_path,
-        [
-            {
-                "start": 0.0,
-                "end": 2.0,
-                "narration": "开场标题。",
-                "visual_overlays": [
-                    {
-                        "type": "top_title",
-                        "text": "今日回顾",
-                        "start": 0.0,
-                        "end": 2.0,
-                    },
-                    {
-                        "type": "inline_label_or_callout",
-                        "text": "关键人物",
-                        "start": 1.0,
-                        "end": 2.0,
-                        "anchor": "center",
-                    },
-                ],
-            }
-        ],
-    )
-    calls = []
-
-    def assemble(cli):
-        overlays_path = work / "visual_overlays.json"
-        assert overlays_path.exists(), "visual_overlays.json must exist before assemble runs"
-        payload = json.loads(overlays_path.read_text(encoding="utf-8"))
-        assert payload["schema_version"] == 1
-        assert [item["type"] for item in payload["overlays"]] == [
-            "top_title",
-            "inline_label_or_callout",
-        ]
-        write_assemble_output(work, tmp_path / "recap_video.mp4")
-
-    monkeypatch.setattr(
-        "recap_runner._run", stub_child_run(work, calls=calls, assemble=assemble)
-    )
-    _argv(monkeypatch, video, "--work-dir", work)
-
-    recap.main()
-
-    assert "--visual-overlays" not in _call_args(calls, "assemble", "assemble.py")

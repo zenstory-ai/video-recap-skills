@@ -18,7 +18,6 @@ import assembly_contract  # noqa: E402
 import loudness  # noqa: E402
 import media  # noqa: E402
 import narration_audio  # noqa: E402
-import render_preflight  # noqa: E402
 import source_subtitles  # noqa: E402
 import timeline_emit  # noqa: E402
 import visual_render  # noqa: E402
@@ -250,8 +249,10 @@ def _degraded(monkeypatch):
 def test_degraded_burn_keeps_user_gap_cues_in_the_sidecar(monkeypatch, tmp_path):
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    (tmp_path / "user_subtitles.srt").write_text(
-        "1\n00:00:01,000 --> 00:00:04,000\n原声台词\n\n", encoding="utf-8")
+    (tmp_path / "original_subtitles.json").write_text(
+        json.dumps([{"start": 1.0, "end": 4.0, "text": "原声台词"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说"}]
     entries = source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0)
     assert entries and all(e["text"].startswith("「") for e in entries)
@@ -314,36 +315,6 @@ def test_sidecar_ships_next_to_an_unburned_recap_and_is_retired_by_a_burned_one(
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     assert assemble._publish_subtitle_sidecar(work, final) is None
     assert not sidecar.exists()
-
-
-# ── drawtext overlay preflight ──────────────────────────────────────────────────────
-
-
-def _overlays(work_dir, overlays):
-    (work_dir / "visual_overlays.json").write_text(
-        json.dumps({"schema_version": 1, "overlays": overlays}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def test_overlay_preflight_fails_before_render_without_drawtext(monkeypatch, tmp_path):
-    _overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    monkeypatch.setattr(render_preflight.shutil, "which", lambda _n: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(render_preflight, "_ffmpeg_filters", lambda: {"drawbox"})
-    with pytest.raises(SystemExit, match="drawtext"):
-        render_preflight._preflight_visual_overlays(tmp_path)
-
-
-@pytest.mark.parametrize("setup", ["no_file", "empty", "drawtext_present", "no_ffmpeg"])
-def test_overlay_preflight_passes(monkeypatch, tmp_path, setup):
-    if setup == "empty":
-        _overlays(tmp_path, [])
-    elif setup != "no_file":
-        _overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    monkeypatch.setattr(render_preflight.shutil, "which",
-                        lambda _n: None if setup == "no_ffmpeg" else "/usr/bin/ffmpeg")
-    monkeypatch.setattr(render_preflight, "_ffmpeg_filters", lambda: {"drawtext"})
-    render_preflight._preflight_visual_overlays(tmp_path)  # must not raise
 
 
 # ── real ffmpeg: what ffprobe reports on the delivered file ─────────────────────────

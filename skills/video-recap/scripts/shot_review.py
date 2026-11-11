@@ -31,10 +31,12 @@ def _validate_clock(pts, end):
 
 def summarize_candidates(pts, end, cut_frames, *, max_short_frames=None,
                          max_short_seconds=1.0, dense_window_seconds=2.0,
-                         min_dense_cuts=4):
+                         min_dense_cuts=4, flash_sliver_max_seconds=0.20):
     """Half-open frame spans including the head and tail; thresholds are recall policy."""
     _validate_clock(pts, end)
     _positive(max_short_seconds, "max_short_seconds")
+    if isinstance(flash_sliver_max_seconds, bool) or not isinstance(flash_sliver_max_seconds, (int, float)) or not math.isfinite(flash_sliver_max_seconds) or flash_sliver_max_seconds < 0:
+        raise ValueError("flash_sliver_max_seconds must be a finite non-negative number")
     if max_short_frames is None:
         # A fixed frame count only coincides with the seconds limit at one frame rate, so
         # derive it from the measured clock; --max-short-frames stays an explicit override.
@@ -49,15 +51,20 @@ def summarize_candidates(pts, end, cut_frames, *, max_short_frames=None,
     boundaries = [0, *cuts, len(pts)]
     clock = [*pts, end]
     short = []
+    flash_limit = Fraction(str(flash_sliver_max_seconds))
+    flash_slivers = []
     for start, stop in zip(boundaries, boundaries[1:]):
         duration = clock[stop] - clock[start]
         if stop - start <= max_short_frames and duration <= Fraction(str(max_short_seconds)):
-            short.append({
+            entry = {
                 "start_frame": start, "end_frame": stop, "frame_count": stop - start,
                 "start_exact": str(clock[start]), "end_exact": str(clock[stop]),
                 "duration_exact": str(duration), "duration_seconds": float(duration),
                 "review_status": "NEEDS_DYNAMIC_REVIEW",
-            })
+            }
+            short.append(entry)
+            if cuts and duration <= flash_limit:
+                flash_slivers.append(dict(entry, review_status="BLOCKING_FLASH_SLIVER"))
     windows = []
     right = 0
     window_duration = Fraction(str(dense_window_seconds))
@@ -79,8 +86,9 @@ def summarize_candidates(pts, end, cut_frames, *, max_short_frames=None,
         "status": "NEEDS_REVIEW" if short or windows else "NO_CANDIDATES",
         "normal_speed_review": "NOT_CHECKED", "automatic_repairs": [],
         "candidates": [{"frame": f, "pts_exact": str(pts[f]), "origin": "UNKNOWN"} for f in cuts],
-        "short_spans": short, "dense_windows": windows,
+        "short_spans": short, "flash_slivers": flash_slivers, "dense_windows": windows,
         "policy": {"max_short_frames": max_short_frames, "max_short_seconds": max_short_seconds,
+                   "flash_sliver_max_seconds": flash_sliver_max_seconds,
                    "dense_window_seconds": dense_window_seconds, "min_dense_cuts": min_dense_cuts},
     }
 
@@ -127,7 +135,7 @@ def _validate_scene_roi(roi, video):
     if x < 0 or y < 0 or width <= 0 or height <= 0:
         raise ValueError("scene ROI requires x/y >= 0 and width/height > 0")
 
-    from media_geometry import _probe_video_geometry
+    from media import _probe_video_geometry
     facts = _probe_video_geometry(video).facts
     rotation = facts["rotation"]
     if rotation not in {0, 90, 180, 270}:

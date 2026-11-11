@@ -74,7 +74,7 @@ def test_full_preserves_refrain_punctuation_pause_and_unknown_metadata(
         {
             "start": 0,
             "end": 5.0,
-            "narration": "每次遇到危险，他都会先转身寻找同伴，",
+            "narration": "每次遇到危险，他都会先转身寻找同伴！",
             "pause_after_ms": 0,
             "overlaps_speech": False,
             "author_note": {"locked": True, "rank": 1},
@@ -208,7 +208,7 @@ def test_cut_output_over_budget_text_stays_a_warning(monkeypatch, tmp_path):
     approved = [{"start": 0, "end": 3, "narration": "等待同伴。" * 10}]
     path, _ = _write_narration(tmp_path, approved)
 
-    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "10")
+    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "6")
 
     assert _approved_fields(_read_json(path)[0]) == approved[0]
     lint = _read_json(tmp_path / "narration_lint.json")
@@ -224,7 +224,7 @@ def test_cut_output_short_overfilled_slot_prints_both_warnings(monkeypatch, tmp_
     _write_output_evidence(tmp_path)
     _write_narration(tmp_path, [{"start": 0, "end": 1.2, "narration": "等待同伴归来。" * 2}])
 
-    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "10")
+    _run_validate(monkeypatch, tmp_path, "cut_output", "--output-duration", "5")
 
     lint = _read_json(tmp_path / "narration_lint.json")
     assert lint["errors"] == []
@@ -245,7 +245,7 @@ def test_cut_output_short_overfilled_slot_prints_both_warnings(monkeypatch, tmp_
 def test_every_warning_is_listed_on_the_console(monkeypatch, tmp_path, capsys):
     _write_output_evidence(tmp_path)
     segments = [
-        {"start": i * 0.7, "end": i * 0.7 + 0.5, "narration": "没有句号的一块"}
+        {"start": i * 0.7, "end": i * 0.7 + 0.5, "narration": "完整句号的一块。"}
         for i in range(MAX_WARNINGS_PROBE)
     ]
     _write_narration(tmp_path, segments)
@@ -254,7 +254,8 @@ def test_every_warning_is_listed_on_the_console(monkeypatch, tmp_path, capsys):
 
     out = capsys.readouterr().out
     for n in range(1, MAX_WARNINGS_PROBE + 1):
-        assert f"- 段 {n} incomplete_sentence：结尾「没有句号的一块」没有句末标点" in out
+        assert f"- 段 {n} slot_too_short：" in out
+        assert f"- 段 {n} over_budget：" in out
 
 
 def test_lint_failure_summary_also_lists_the_warnings():
@@ -262,14 +263,14 @@ def test_lint_failure_summary_also_lists_the_warnings():
 
     report = {
         "errors": [{"level": "error", "index": 1, "code": "empty_narration", "message": "m"}],
-        "warnings": [{"level": "warning", "index": 0, "code": "incomplete_sentence",
-                      "message": "x", "text_tail": "半句话"}],
+        "warnings": [{"level": "warning", "index": 0, "code": "slot_too_short",
+                      "message": "x", "start": 0.0, "end": 0.8, "budget_chars": 1}],
     }
     lines = format_lint_failure(report, "narration_lint.json").splitlines()
 
     assert lines[1] == "- 段 2 empty_narration：m"
     assert lines[2] == "另有 1 个 warning（不阻塞）："
-    assert lines[3] == "- 段 1 incomplete_sentence：结尾「半句话」没有句末标点"
+    assert lines[3] == "- 段 1 slot_too_short：0.00s-0.80s 只容得下约 1 字，TTS 可能放不下"
 
 
 def test_cut_output_preserves_fields_and_derives_only_ownership(monkeypatch, tmp_path):
@@ -278,7 +279,7 @@ def test_cut_output_preserves_fields_and_derives_only_ownership(monkeypatch, tmp
         {
             "start": 0,
             "end": 8.0,
-            "narration": "批准的输出时间线文本不会因预算被截短，也不会补写标点，",
+            "narration": "批准的输出时间线文本不会因预算被截短，也不会改写标点！",
             "pause_after_ms": 321,
             "unknown": ["keep", 2],
         }

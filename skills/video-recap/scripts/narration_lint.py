@@ -1,4 +1,4 @@
-"""Enforce narration timing, evidence, budget, and sentence-integrity rules.
+"""Enforce narration timing, evidence, budget, pacing, and sentence-integrity rules.
 
 This is the single validator for the agent-authored narration.json: shape, numeric
 timing and text checks live here, and every later consumer trusts its result.
@@ -8,7 +8,7 @@ import json
 import re
 from pathlib import Path
 
-from lib import CONFIG, log
+from lib import CONFIG, load_background_research, log
 from agent_text import (
     TTS_UTTERANCE_OVERHEAD_SECONDS,
     _lint_char_budget,
@@ -31,6 +31,13 @@ from speech_ownership import (
 )
 
 PLACEHOLDER_RE = re.compile(r"【主角】|TA要赌上")
+GENERIC_CHARACTER_RE = re.compile(
+    r"(?:黑衣|白衣|灰衣|红衣|蓝衣|西装|年轻|中年|年老|陌生|神秘|高个|眼镜)(?:男子|女子|男人|女人)"
+    r"|白发女子|黑发男子"
+)
+SOURCE_HANDOFF_MAX_HOLD_SECONDS = 3.0
+_SENTENCE_END_PUNCT = "。！？!?…."
+_TRAILING_QUOTES = "”’\"'」』）》】] "
 
 
 def _lint_issue(level, index, code, message, **extra):
@@ -39,86 +46,27 @@ def _lint_issue(level, index, code, message, **extra):
     return issue
 
 
-# Copy of recap_timeline._ALLOWED_VISUAL_OVERLAY_TYPES (recap drops any other type after TTS);
-# test_audio_policy_parity.py holds the two equal.
-_RENDERED_OVERLAY_TYPES = {"top_title", "inline_label_or_callout"}
+def _has_terminal_punctuation(text):
+    stripped = text.rstrip(_TRAILING_QUOTES)
+    return bool(stripped) and stripped[-1] in _SENTENCE_END_PUNCT
 
 
-def _unsupported_overlay_warnings(index, seg):
-    overlays = seg.get("visual_overlays")
-    return [
-        _lint_issue(
-            "warning", index, "unsupported_visual_overlay_type",
-            f"visual_overlays[].type {overlay['type']!r} 不会渲染，recap 会丢弃它；"
-            f"只支持 {', '.join(sorted(_RENDERED_OVERLAY_TYPES))}",
-            overlay_index=position,
-        )
-        for position, overlay in enumerate(overlays if isinstance(overlays, list) else [])
-        if isinstance(overlay, dict) and isinstance(overlay.get("type"), str)
-        and overlay["type"].strip() and overlay["type"] not in _RENDERED_OVERLAY_TYPES
-    ]
-
-
-def _visual_overlay_issues(index, seg):
-    """Shape-check the renderer handoff recap reads verbatim from a validated segment.
-
-    recap owns which overlay `type` values it actually renders and drops the rest; lint owns
-    the shape, because nothing between here and that filter re-checks it — and the filter runs
-    after TTS, so a malformed overlay caught there would already have cost a synthesis pass.
-    """
-    overlays = seg.get("visual_overlays")
-    if overlays is None:
-        return []
-    if not isinstance(overlays, list):
-        return [
-            _lint_issue(
-                "error", index, "invalid_visual_overlays", "visual_overlays must be an array"
-            )
-        ]
-    issues = []
-    for position, overlay in enumerate(overlays):
-        if not isinstance(overlay, dict):
-            issues.append(
-                _lint_issue(
-                    "error", index, "invalid_visual_overlay",
-                    "visual_overlays entries must be objects",
-                    overlay_index=position,
-                )
-            )
-            continue
-        for key in ("type", "text"):
-            value = overlay.get(key)
-            if not isinstance(value, str) or not value.strip():
-                issues.append(
-                    _lint_issue(
-                        "error", index, "invalid_visual_overlay",
-                        f"visual_overlays[].{key} must be a non-empty string",
-                        overlay_index=position,
-                    )
-                )
-        for key in ("start", "end"):
-            if key in overlay and not _is_number(overlay[key]):
-                issues.append(
-                    _lint_issue(
-                        "error", index, "invalid_visual_overlay",
-                        f"visual_overlays[].{key} must be numeric",
-                        overlay_index=position,
-                    )
-                )
-    return issues
+def _has_connected_successor(narration, index, end):
+    if index + 1 >= len(narration):
+        return False
+    nxt = narration[index + 1]
+    if not isinstance(nxt, dict):
+        return False
+    next_start = nxt.get("start")
+    if not _is_number(next_start):
+        return False
+    return next_start - end <= CONFIG["duck_bridge_seconds"] + 1e-6
 
 
 def _source_sentence_entry_issue(
     index, start, end, anchors, speech_owned, other_spans=(), window=(None, None),
 ):
-    """Return a blocking issue when narration enters midway through source speech.
-
-    The validator reports a correction instead of silently moving audio. Source
-    sentence integrity is invariant; an editorial policy string cannot bypass it.
-    `other_spans` are the other blocks' (start, end) and `window` the open range between
-    the neighbours (see _nearest_safe_anchor): the suggested entry never moves this block
-    onto, flush against, or past one of them.
-    """
+    """Return a blocking issue when narration enters midway through source speech."""
     if not speech_owned:
         return None
     # A cold-open at the first frame is not an interruption: the source sentence
@@ -135,9 +83,6 @@ def _source_sentence_entry_issue(
             entry_time=round(start, 3),
             suggested_start=None,
         )
-    # Only the measured acoustic pause owns a safe entry. A tiny 80ms post-anchor
-    # tolerance covers timestamp/sample rounding; the old +450ms allowance could
-    # already be several Chinese syllables into the next sentence.
     for anchor in anchors:
         when = anchor["time"]
         pause_start = anchor.get("pause_start", when - 0.12)
@@ -165,16 +110,46 @@ def _source_sentence_entry_issue(
     )
 
 
+def _source_sentence_exit_issue(index, end, source_evidence, timeline_duration=None):
+    """Block when a narration run releases original audio mid-sentence with no nearby pause anchor."""
+    anchors = source_evidence["anchors"]
+    if not anchors:
+        return None
+    if timeline_duration is not None and timeline_duration - end <= SOURCE_HANDOFF_MAX_HOLD_SECONDS:
+        return None
+    if any(
+        row["start"] - 0.05 <= end <= row["end"] + 0.05
+        for row in source_evidence["quiet_windows"]
+    ):
+        return None
+    in_mid_dialogue = any(
+        row["start"] - 0.05 <= end < row["end"] - 0.35
+        for row in source_evidence["dialogue_spans"]
+    )
+    if not in_mid_dialogue:
+        return None
+    if any(
+        end - 0.05 <= anchor["time"] <= end + SOURCE_HANDOFF_MAX_HOLD_SECONDS
+        for anchor in anchors
+    ):
+        return None
+    return _lint_issue(
+        "error",
+        index,
+        "unsafe_source_release",
+        f"旁白结束于 {end:.2f}s，但此处原声仍在句子中途且后续 {SOURCE_HANDOFF_MAX_HOLD_SECONDS:g}s "
+        "内无句末停顿锚点，恢复原声会放出半截残句；请延长/调整旁白覆盖完整原句，或桥接到下一段旁白。",
+        exit_time=round(end, 3),
+        max_hold_seconds=SOURCE_HANDOFF_MAX_HOLD_SECONDS,
+    )
+
+
 def _suggestion_limits(output_duration):
-    """Closed range a suggested move must stay in: [0, output_duration] when that is known
-    (cut_output)."""
+    """Closed range a suggested move must stay in: [0, output_duration] when that is known."""
     usable = _is_number(output_duration) and output_duration > 0
     return 0.0, output_duration if usable else None
 
 
-# Full-mode hard text budget: a segment longer than this multiple of its recommended
-# character budget cannot be spoken in its window, so lint returns it to the author
-# instead of anything downstream shortening it.
 OVER_BUDGET_ERROR_RATIO = 1.25
 
 
@@ -230,6 +205,147 @@ def _placeholder_leakage_issues(narration, work_dir):
     return issues
 
 
+def _generic_character_label_issues(narration, work_dir):
+    """When background_research.json supplies named characters, reject VLM appearance labels."""
+    if work_dir is None or not isinstance(narration, list):
+        return []
+    research = load_background_research(work_dir)
+    characters = research.get("characters") if isinstance(research, dict) else None
+    if not isinstance(characters, dict) or not characters:
+        return []
+    known = [str(k).strip() for k in characters if str(k).strip()][:8]
+    if not known:
+        return []
+    issues = []
+    for idx, seg in enumerate(narration):
+        if not isinstance(seg, dict) or not isinstance(seg.get("narration"), str):
+            continue
+        matches = GENERIC_CHARACTER_RE.findall(seg["narration"])
+        if matches:
+            issues.append(
+                _lint_issue(
+                    "error",
+                    idx,
+                    "generic_character_label",
+                    f"background_research.json 已提供角色名（{', '.join(known)}），"
+                    f"禁止在解说中使用笼统外貌代称「{matches[0]}」",
+                    matches=matches,
+                    known_characters=known,
+                )
+            )
+    return issues
+
+
+def _resolve_timeline_duration(scenes_analysis, mode, work_dir, output_duration):
+    if _is_number(output_duration) and output_duration > 0:
+        return float(output_duration)
+    if mode != "full":
+        return None
+    rows = scenes_analysis if isinstance(scenes_analysis, list) and scenes_analysis else None
+    if rows is None and work_dir is not None:
+        scenes_path = Path(work_dir) / "scenes.json"
+        if scenes_path.is_file():
+            try:
+                loaded = json.loads(scenes_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list) and loaded:
+                    rows = loaded
+            except (OSError, ValueError):
+                rows = None
+    if not rows:
+        return None
+    ends = [
+        float(row["end"])
+        for row in rows
+        if isinstance(row, dict) and _is_number(row.get("end")) and float(row["end"]) > 0
+    ]
+    return max(ends) if ends else None
+
+
+def _has_local_timing_evidence(work_dir, mode):
+    if work_dir is None:
+        return False
+    root = Path(work_dir)
+    if mode == "cut_output":
+        return (root / "speech_boundary_anchors_output.json").is_file()
+    return any(
+        (root / name).is_file()
+        for name in ("asr_result.json", "silence_periods.json", "speech_boundary_anchors.json")
+    )
+
+
+def _timeline_pacing_issues(sorted_segments, source_evidence, timeline_duration):
+    """Enforce crisp opening hook (<= max_cold_open_silence_seconds) and zero long dead air."""
+    if not sorted_segments or timeline_duration is None or timeline_duration <= 0:
+        return []
+    raw_spans = [
+        (max(0.0, float(s["start"])), min(timeline_duration, float(s["end"])))
+        for s in sorted_segments
+    ] + [
+        (max(0.0, float(d["start"])), min(timeline_duration, float(d["end"])))
+        for d in source_evidence["dialogue_spans"]
+    ]
+    intervals = sorted((a, b) for a, b in raw_spans if b > a)
+    merged = []
+    for left, right in intervals:
+        if merged and left <= merged[-1][1] + 1e-6:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], right))
+        else:
+            merged.append((left, right))
+
+    issues = []
+    max_cold = CONFIG["max_cold_open_silence_seconds"]
+    if timeline_duration >= 8.0 and max_cold > 0:
+        first_onset = merged[0][0] if merged else timeline_duration
+        if first_onset > max_cold + 1e-6:
+            issues.append(
+                _lint_issue(
+                    "error",
+                    0,
+                    "weak_cold_open_silence",
+                    f"开场前 {first_onset:.2f}s 既无旁白也无原声对白（上限 {max_cold:.1f}s）；"
+                    "前 3 秒必须用旁白钩子或高张力原声台词抓住观众",
+                    first_audio_onset=round(first_onset, 3),
+                    max_cold_open_silence_seconds=max_cold,
+                )
+            )
+
+    max_dead = CONFIG["max_dead_air_seconds"]
+    if max_dead > 0:
+        cursor = 0.0
+        for left, right in merged:
+            if left - cursor > max_dead + 1e-6:
+                issues.append(
+                    _lint_issue(
+                        "error",
+                        None,
+                        "excessive_dead_air",
+                        f"成片 [{cursor:.2f}-{left:.2f}s] 连续 {left - cursor:.2f}s "
+                        f"既无旁白也无原声对白（上限 {max_dead:.1f}s）；请补解说或收紧留白",
+                        start=round(cursor, 3),
+                        end=round(left, 3),
+                        duration=round(left - cursor, 3),
+                        max_dead_air_seconds=max_dead,
+                    )
+                )
+            cursor = max(cursor, right)
+        if timeline_duration - cursor > max_dead + 1e-6:
+            issues.append(
+                _lint_issue(
+                    "error",
+                    None,
+                    "excessive_dead_air",
+                    f"成片尾部 [{cursor:.2f}-{timeline_duration:.2f}s] 连续 "
+                    f"{timeline_duration - cursor:.2f}s 既无旁白也无原声对白（上限 {max_dead:.1f}s）；"
+                    "请补收束旁白、保留原声落点或裁剪拖尾",
+                    start=round(cursor, 3),
+                    end=round(timeline_duration, 3),
+                    duration=round(timeline_duration - cursor, 3),
+                    max_dead_air_seconds=max_dead,
+                )
+            )
+    return issues
+
+
 def lint_narration(
     narration, scenes_analysis=None, *, mode="full", work_dir=None, output_duration=None,
 ):
@@ -237,12 +353,14 @@ def lint_narration(
 
     Segments must already be in chronological order; validation never reorders them.
     `output_duration` (cut_output) bounds where interrupt suggestions may move a block."""
-    del scenes_analysis
     errors = []
     warnings = []
     normalized = []
     source_evidence = load_source_sentence_evidence(work_dir, mode=mode)
     source_sentence_anchors = source_evidence["anchors"]
+    timeline_duration = _resolve_timeline_duration(
+        scenes_analysis, mode, work_dir, output_duration
+    )
     if not isinstance(narration, list):
         errors.append(
             _lint_issue(
@@ -254,7 +372,6 @@ def lint_narration(
         )
     else:
         previous_start = None
-        # Suggested (start, end) of blocks already told to move; later blocks keep clear.
         suggested_spans = {}
         for idx, seg in enumerate(narration):
             if not isinstance(seg, dict):
@@ -312,8 +429,6 @@ def lint_narration(
                     )
                 )
                 continue
-            errors.extend(_visual_overlay_issues(idx, seg))
-            warnings.extend(_unsupported_overlay_warnings(idx, seg))
             if end <= start:
                 errors.append(
                     _lint_issue(
@@ -341,9 +456,6 @@ def lint_narration(
 
             char_count = _text_char_count(text)
             budget = _lint_char_budget(start, end)
-            # estimate at the REAL playback rate (after the narration_speed atempo); otherwise a
-            # beat sized to its 1.3x-sped slot looks "over budget" when it actually fits. The
-            # utterance's TTS edge silence takes room too.
             play_rate = CONFIG["speech_rate"] * CONFIG["narration_speed"]
             estimated_tts_seconds = char_count / play_rate + TTS_UTTERANCE_OVERHEAD_SECONDS
             slot_seconds = _scene_available_seconds(start, end)
@@ -364,8 +476,6 @@ def lint_narration(
                         budget_chars=budget,
                     )
                 )
-            # Independent of slot_too_short: a short slot can also be overfilled, and the
-            # author needs both numbers.
             if not over_limit and estimated_tts_seconds > slot_seconds:
                 warnings.append(
                     _lint_issue(
@@ -381,13 +491,13 @@ def lint_narration(
                         slot_seconds=round(slot_seconds, 2),
                     )
                 )
-            if text[-1] not in "。！？!?….":
-                warnings.append(
+            if not _has_terminal_punctuation(text):
+                errors.append(
                     _lint_issue(
-                        "warning",
+                        "error",
                         idx,
                         "incomplete_sentence",
-                        "Narration should end with a complete sentence punctuation",
+                        "Narration must end with complete sentence punctuation",
                         text_tail=text[-8:],
                     )
                 )
@@ -415,6 +525,13 @@ def lint_narration(
                         suggested_spans[idx] = (
                             entry_issue["suggested_start"], entry_issue["suggested_end"],
                         )
+
+            if timeline_duration is not None and not _has_connected_successor(narration, idx, end):
+                exit_issue = _source_sentence_exit_issue(
+                    idx, end, source_evidence, timeline_duration=timeline_duration
+                )
+                if exit_issue:
+                    errors.append(exit_issue)
 
             normalized.append(
                 {"index": idx, "start": start, "end": end, "char_count": char_count}
@@ -445,7 +562,12 @@ def lint_narration(
                 )
             )
 
+    if _has_local_timing_evidence(work_dir, mode):
+        errors.extend(
+            _timeline_pacing_issues(sorted_segments, source_evidence, timeline_duration)
+        )
     errors.extend(_placeholder_leakage_issues(narration, work_dir))
+    errors.extend(_generic_character_label_issues(narration, work_dir))
 
     report = {
         "ok": not errors,
@@ -485,4 +607,3 @@ def validate_narration_or_raise(
     else:
         log("narration lint：通过")
     return report
-

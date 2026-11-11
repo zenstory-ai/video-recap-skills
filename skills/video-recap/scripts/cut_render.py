@@ -7,8 +7,13 @@ from frame_grid import frame_count, parse_frame_rate
 from lib import CONFIG, filter_file_args, get_video_duration, log, run_cmd
 
 from cut_contract import _write_edited_source_meta
-from media import _color_tag_args, _color_tag_filter, _output_color_tags
-from media_geometry import _has_audio_stream, _probe_video_format
+from media import (
+    _color_tag_args,
+    _color_tag_filter,
+    _has_audio_stream,
+    _output_color_tags,
+    _probe_video_format,
+)
 from sentence_gate import _continuous_source_join
 
 
@@ -148,7 +153,7 @@ def build_edited_source_video(input_video, validated_plan, work_dir, output_path
     if "output_geometry" not in qc:
         raise KeyError(
             "validated_plan['qc']['output_geometry'] is required: select the canvas with "
-            "media_geometry._select_output_geometry before build_edited_source_video"
+            "media._select_output_geometry before build_edited_source_video"
         )
     geometry_qc = qc["output_geometry"]
     out_rate = Fraction(geometry_qc["frame_rate"])

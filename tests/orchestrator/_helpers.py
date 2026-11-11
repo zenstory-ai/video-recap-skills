@@ -45,7 +45,7 @@ def manifest_args(**overrides):
         "material_library_dir": None,
         "use_materials": False,
         "save_materials": False,
-        "require_final_qc": False,
+        "require_final_qc": True,
         "_explicit_options": frozenset(),
         "_argv": [],
     }

@@ -5,7 +5,7 @@
   "tts_meta": "MEDIA_NOT_DISTRIBUTED/tts_meta.json",
   "tts_segments": 7,
   "assembly_settings": {
-    "user_subtitles": false,
+    "original_subtitles": false,
     "burn_subtitles": false,
     "force_video_reencode": false,
     "encode": {
@@ -20,11 +20,7 @@
       "subtitle_mask_opacity": null,
       "subtitle_mask_padding": null,
       "subtitle_y_top": -1,
-      "subtitle_y_bot": -1,
-      "visual_overlays": {
-        "artifact": "visual_overlays.json",
-        "present": true
-      }
+      "subtitle_y_bot": -1
     },
     "narration_timing": {
       "fade_ms": 120,

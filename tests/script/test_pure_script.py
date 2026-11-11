@@ -105,50 +105,6 @@ def test_lint_narration_rejects_empty_file(tmp_path):
     assert (tmp_path / "narration_lint.json").exists()
 
 
-def test_lint_narration_rejects_malformed_visual_overlays(tmp_path):
-    """Lint is the last cheap place to catch an overlay recap will read after TTS."""
-    segment = {"start": 0.0, "end": 5.0, "narration": "开场的一段解说文字内容。"}
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 5.0}]
-
-    for overlays in (
-        {"type": "top_title", "text": "标题"},          # not an array
-        ["top_title"],                                  # entry is not an object
-        [{"text": "标题"}],                             # missing type
-        [{"type": "top_title"}],                        # missing text
-        [{"type": "top_title", "text": "  "}],          # blank text
-        [{"type": "top_title", "text": "标题", "start": "0"}],  # non-numeric span
-    ):
-        report = lint_narration(
-            [{**segment, "visual_overlays": overlays}], scenes, work_dir=tmp_path
-        )
-        codes = {issue["code"] for issue in report["errors"]}
-        assert codes & {"invalid_visual_overlay", "invalid_visual_overlays"}, overlays
-
-    ok = lint_narration(
-        [{**segment, "visual_overlays": [{"type": "top_title", "text": "标题"}]}],
-        scenes,
-        work_dir=tmp_path,
-    )
-    assert not any(
-        issue["code"].startswith("invalid_visual_overlay") for issue in ok["errors"]
-    )
-    assert not any(
-        issue["code"] == "unsupported_visual_overlay_type" for issue in ok["warnings"]
-    )
-
-
-def test_lint_warns_before_tts_about_an_overlay_type_recap_will_drop(tmp_path):
-    report = lint_narration(
-        [{"start": 0.0, "end": 5.0, "narration": "开场的一段解说文字内容。",
-          "visual_overlays": [{"type": "title", "text": "老王找箱子"}]}],
-        [{"scene_id": 0, "start": 0.0, "end": 5.0}],
-        work_dir=tmp_path,
-    )
-    issue = next(i for i in report["warnings"] if i["code"] == "unsupported_visual_overlay_type")
-    assert "title" in issue["message"] and "top_title" in issue["message"]
-    assert issue["index"] == 0
-
-
 def test_lint_reports_a_non_array_narration_file(tmp_path):
     report = lint_narration({"start": 0}, [], work_dir=tmp_path)
     assert report["ok"] is False
@@ -471,7 +427,7 @@ def test_validate_cut_output_uses_output_clock_sentence_anchors(
         [
             {
                 "start": 4.0,
-                "end": 6.0,
+                "end": 7.0,
                 "narration": "从剪后句末安全进入。",
                 "overlaps_speech": True,
             }
@@ -685,12 +641,9 @@ def test_full_and_cut_output_measure_speech_ownership_with_one_algorithm(
     assert full is cut_output is True
 
 
-def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
-    """Full mode persists measured ownership without losing render metadata."""
-    overlays = [
-        {"type": "top_title", "text": "二十一年", "start": 0.0, "end": 2.0},
-        {"type": "inline_label_or_callout", "text": "2003", "start": 2.0, "end": 3.0},
-    ]
+def test_full_validation_preserves_custom_metadata(tmp_path, monkeypatch):
+    """Full mode persists measured ownership without losing custom segment metadata."""
+    meta = {"beat_id": "b01", "role": "hook"}
     _write_json(
         tmp_path / "narration.json",
         [
@@ -698,7 +651,7 @@ def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
                 "start": 0.0,
                 "end": 10.0,
                 "narration": "这是一段能够通过完整模式校验的解说。",
-                "visual_overlays": overlays,
+                "custom_meta": meta,
             }
         ],
     )
@@ -711,7 +664,7 @@ def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
     _run_validate(monkeypatch, tmp_path, "full")
 
     rewritten = json.loads((tmp_path / "narration.json").read_text(encoding="utf-8"))
-    assert rewritten[0]["visual_overlays"] == overlays
+    assert rewritten[0]["custom_meta"] == meta
 
 
 def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():

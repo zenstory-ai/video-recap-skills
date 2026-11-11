@@ -53,7 +53,7 @@ Two self-contained skills (`video-recap` for production plus `video-reference` o
 ClawHub entries and dependencies are governed by the [explicit publish inventory](.clawhub/publish.json) (`video-recap` and `video-reference` are both self-contained packages). For the complete plugin or source workflow, install as shown below.
 
 
-Prerequisites: Python 3.10 or newer, `ffmpeg` on `PATH`, and one [Xiaomi MiMo](https://platform.xiaomimimo.com) API key. Subtitles are burned in by default, which needs an ffmpeg with libass. Homebrew's stock `ffmpeg` has no libass: the default run then skips the burn, ships a same-name `.srt` sidecar next to the recap, and records a warning in `final_qc.json` (an explicit `--burn-subtitles` stops before the run starts instead). Narration that adds on-screen text overlays (`visual_overlays`) also needs an ffmpeg with drawtext, and stops before voiceover without it. To burn subtitles on macOS, use `brew install ffmpeg-full` (keg-only: put its `bin` first on `PATH`).
+Prerequisites: Python 3.10 or newer, `ffmpeg` on `PATH`, and one [Xiaomi MiMo](https://platform.xiaomimimo.com) API key. Subtitles are burned in by default, which needs an ffmpeg with libass. Homebrew's stock `ffmpeg` has no libass: the default run then skips the burn, ships a same-name `.srt` sidecar next to the recap, and records a warning in `final_qc.json` (an explicit `--burn-subtitles` stops before the run starts instead). To burn subtitles on macOS, use `brew install ffmpeg-full` (keg-only: put its `bin` first on `PATH`).
 
 ```bash
 brew install ffmpeg                        # macOS; apt on Debian/Ubuntu, choco / scoop / winget on Windows
@@ -407,7 +407,7 @@ The dashboard is read-only and listens on loopback only; wherever something need
 
 <img alt="Dashboard template view: canvas schematics for packaging and subtitle style, parameter table with provenance" src="docs/dashboard-templates.png" width="100%">
 
-**Bring your own original-dialogue subtitles for accurate 「」 captions:** put `user_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]` on the output timeline; wrap it as `{"timeline": "source", "lines": [...]}` for source-timeline subs mapped through the clip plan) or `user_subtitles.srt` / `.ass` (source timeline) into `work_dir`. Priority: your file › the agent-proofread `original_subtitles.json` › ASR fallback.
+**Proofread original-dialogue captions (`「」`):** put verified output-timeline lines into `work_dir/original_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]`) so clean original-audio moments carry accurate `「」` captions without coarse ASR guesswork.
 
 ## FAQ
 

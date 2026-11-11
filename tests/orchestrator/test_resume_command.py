@@ -27,7 +27,7 @@ def _sample_argv(inline):
     argv = ["in dir/in.mp4"]
     for action in parser._actions:
         if (not action.option_strings or action.dest == "help"
-                or isinstance(action, recap_cli._RemovedFlag)):
+                or isinstance(action, recap_cli._DoctorMoved)):
             continue
         flag = action.option_strings[-1]
         if action.nargs == 0:

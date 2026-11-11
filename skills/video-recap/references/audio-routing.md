@@ -30,16 +30,14 @@ validation; an old `tts_meta.json` is not read as evidence for the current run.
 - Explicit TTS options are rejected in source modes rather than
   ignored. Ambient TTS provider/voice configuration is inert because TTS does
   not run, and continuation commands do not promote it into explicit flags.
-- The delivery routes removed after v0.6.2, and any work directory they left behind,
-  fail before any stage with an error naming that tag; use a new `--work-dir`.
 
 ## Packaging and audio
 
-Source modes never regenerate `visual_overlays.json`. A work directory already
-bound to narration is rejected, preventing narration-derived overlays from
-silently becoming source-mode author input. Otherwise existing overlays are
-treated as caller-authored packaging and preserved.
+Static image layers in `packaging_layers.json` apply identically across audio modes,
+while work directories remain strictly bound to a single audio mode so narration-mode
+artifacts never leak into `source-mix` runs.
 
-No route leaves the audio untouched: exact audio needs v0.6.2. The closest settings
-are `--audio-mode source-mix` with `IDLE_ORIG_VOLUME=1.0` and `FINAL_LOUDNORM=0`,
-which keep the gain at unity but still run the limiter and another AAC generation.
+No route leaves raw source audio packets untouched. The closest settings for unity-gain
+source delivery are `--audio-mode source-mix` with `IDLE_ORIG_VOLUME=1.0`,
+`ENDING_AUDIO_FADE_MS=0`, and `FINAL_LOUDNORM=0`, which keep gain at unity while still
+running the limiter and AAC encoding.

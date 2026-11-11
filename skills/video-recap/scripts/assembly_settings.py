@@ -3,26 +3,24 @@
 from pathlib import Path
 
 from artifacts import _artifact_identity
-from assemble_constants import VISUAL_OVERLAYS
 from loudness import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
-from source_subtitles import _has_user_subtitles, _source_subtitle_mask
+from source_subtitles import _source_subtitle_mask
 from subtitles.core import _subtitle_style_config
 from packaging import packaging_settings
 
 
 def assembly_settings_payload(work_dir=None, *, audio_mode="narration"):
-    """Settings that affect the rendered video, as a plain nested dict. assembly_manifest.json
-    records it for audit; nothing compares it to decide a rebuild. When work_dir is given, a
-    user_subtitles presence flag and the ``{size, mtime_ns}`` identity of the overlay input
-    are included."""
+    """Settings that affect the rendered video, recorded in assembly_manifest.json for audit."""
     burn_subtitles = CONFIG["burn_subtitles"]
     mask_source_subtitles = _source_subtitle_mask()["active"]
-    overlay_identity = (
-        _artifact_identity(Path(work_dir) / VISUAL_OVERLAYS) if work_dir is not None else None
+    original_subs_identity = (
+        _artifact_identity(Path(work_dir) / "original_subtitles.json")
+        if work_dir is not None
+        else None
     )
     settings = {
-        "user_subtitles": _has_user_subtitles(work_dir),
+        "original_subtitles": original_subs_identity is not None,
         "burn_subtitles": burn_subtitles,
         "subtitle_burn_degraded": CONFIG["burn_subtitles_degraded"],
         "force_video_reencode": CONFIG["force_video_reencode"],
@@ -47,11 +45,6 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration"):
             ),
             "subtitle_y_top": CONFIG["subtitle_y_top"],
             "subtitle_y_bot": CONFIG["subtitle_y_bot"],
-            "visual_overlays": {
-                "artifact": VISUAL_OVERLAYS,
-                "present": overlay_identity is not None,
-                "identity": overlay_identity,
-            },
             "packaging_layers": packaging_settings(work_dir),
         },
         "audio": {
@@ -74,6 +67,7 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration"):
         "idle_orig_volume": CONFIG["idle_orig_volume"],
         "speech_ducking_volume": CONFIG["speech_ducking_volume"],
         "zone_ducking_volume": CONFIG["zone_ducking_volume"],
+        "ending_audio_fade_ms": CONFIG["ending_audio_fade_ms"],
         "final_loudnorm": final_loudnorm_filter(),
         "loudness_mode": _loudness_mode(),
         "loudness_limiter_max_db": CONFIG["loudness_limiter_max_db"],

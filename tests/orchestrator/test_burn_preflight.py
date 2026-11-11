@@ -9,7 +9,6 @@ from argparse import Namespace
 import pytest
 
 import recap_runtime as recap
-import recap_timeline
 
 
 def _args(burn_subtitles=None, edit_mode="full"):
@@ -100,80 +99,6 @@ def test_cannot_burn_only_when_ffmpeg_is_present_without_the_filter(
     monkeypatch.setattr(shutil, "which", lambda _n: ffmpeg_path)
     monkeypatch.setattr(recap, "ffmpeg_has_subtitles_filter", lambda: has_filter)
     assert recap._ffmpeg_present_but_cannot_burn() is expected
-
-
-# ── drawtext overlays: authored content fails fast, before TTS ─────────────────────────
-
-
-def _narration_with_overlays(work_dir, overlays):
-    (work_dir / "narration.json").write_text(
-        json.dumps([{"start": 0.0, "end": 2.0, "narration": "解说。", "visual_overlays": overlays}],
-                   ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def _ffmpeg_with(monkeypatch, filters):
-    monkeypatch.setattr(recap_timeline.shutil, "which", lambda _n: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(recap_timeline, "ffmpeg_filters", lambda: set(filters))
-
-
-def test_overlay_preflight_fails_without_drawtext(tmp_path, monkeypatch):
-    _narration_with_overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    _ffmpeg_with(monkeypatch, {"scale", "drawbox"})
-    with pytest.raises(SystemExit, match="drawtext") as exc:
-        recap_timeline._preflight_visual_overlays(tmp_path, narration=True)
-    assert "narration.json" in str(exc.value)
-
-
-def test_overlay_preflight_passes_with_drawtext(tmp_path, monkeypatch):
-    _narration_with_overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    _ffmpeg_with(monkeypatch, {"drawtext"})
-    recap_timeline._preflight_visual_overlays(tmp_path, narration=True)  # must not raise
-
-
-def test_overlay_preflight_ignores_types_recap_never_hands_to_assemble(tmp_path, monkeypatch):
-    _narration_with_overlays(tmp_path, [{"type": "sticker", "text": "x"}])
-
-    def _boom():
-        raise AssertionError("must not probe ffmpeg without renderable overlays")
-
-    monkeypatch.setattr(recap_timeline.shutil, "which", lambda _n: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(recap_timeline, "ffmpeg_filters", _boom)
-    recap_timeline._preflight_visual_overlays(tmp_path, narration=True)
-
-
-def test_overlay_preflight_source_modes_read_existing_overlay_file(tmp_path, monkeypatch):
-    (tmp_path / "visual_overlays.json").write_text(
-        json.dumps({"schema_version": 1, "overlays": [{"type": "top_title", "text": "片头"}]}),
-        encoding="utf-8",
-    )
-    _ffmpeg_with(monkeypatch, set())
-    with pytest.raises(SystemExit, match="visual_overlays.json"):
-        recap_timeline._preflight_visual_overlays(tmp_path, narration=False)
-
-
-def test_overlay_preflight_noop_when_ffmpeg_absent(tmp_path, monkeypatch):
-    _narration_with_overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    monkeypatch.setattr(recap_timeline.shutil, "which", lambda _n: None)
-    recap_timeline._preflight_visual_overlays(tmp_path, narration=True)  # must not raise
-
-
-def test_deliver_runs_overlay_preflight_before_tts(tmp_path, monkeypatch):
-    import recap_runner
-
-    def _stop(work_dir, *, narration):
-        assert narration is True
-        raise SystemExit("drawtext missing")
-
-    def _narrate(*_a, **_k):
-        raise AssertionError("TTS must not start before the overlay preflight")
-
-    monkeypatch.setattr(recap_runner, "_preflight_visual_overlays", _stop)
-    monkeypatch.setattr(recap_runner, "_narrate", _narrate)
-    args = Namespace(resolved_project=None, audio_mode="narration")
-    with pytest.raises(SystemExit, match="drawtext missing"):
-        recap_runner._deliver(tmp_path, args, tmp_path / "in.mp4", "in")
 
 
 # ── degraded burn is reported, never a plain success ─────────────────────────────────

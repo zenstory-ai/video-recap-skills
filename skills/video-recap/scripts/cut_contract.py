@@ -107,7 +107,7 @@ def _source_identities_for_plan(validated_plan, input_video=None):
 
 
 # Version of the picture-format rules in the edited_source encode (yuv420p, colour tags,
-# RGB conversion; see media_geometry._output_color_tags). Bump it whenever those rules
+# RGB conversion; see media._output_color_tags). Bump it whenever those rules
 # change, so a cached edited_source.mp4 rendered under older rules is rebuilt instead of
 # reaching the final render with labels it no longer matches.
 EDITED_SOURCE_PICTURE_RULES = "yuv420p-color-tags-v2"

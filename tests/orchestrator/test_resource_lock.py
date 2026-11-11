@@ -96,6 +96,11 @@ def test_reference_voice_without_granted_consent_needs_attention(tmp_path):
 def test_finished_run_writes_the_lock_next_to_its_artifacts(monkeypatch, tmp_path):
     video, work = seed_full_work(tmp_path)
     monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, tmp_path / "recap_video.mp4"))
+    monkeypatch.setattr(
+        recap_runner,
+        "_write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)])
 
     recap_runner.main()

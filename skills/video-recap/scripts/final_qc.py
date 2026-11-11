@@ -23,7 +23,12 @@ SCHEMA_VERSION = 2
 FINAL_QC_ARTIFACT = "final_qc.json"
 # Summarised in metadata only. assemble.py exits nonzero on a blocking assembly/visual
 # QC before recap reaches final_qc, so their verdicts are recorded, not re-raised.
-_COLLECT_ARTIFACTS = ("assembly_manifest.json", "assembly_qc.json", "visual_qc.json")
+_COLLECT_ARTIFACTS = (
+    "assembly_manifest.json",
+    "assembly_qc.json",
+    "visual_qc.json",
+    "shot_review.json",
+)
 _SUMMARY_KEYS = ("schema_version", "verdict", "blocking", "blocking_codes")
 _PROBE_STREAM_KEYS = (
     "index", "codec_type", "codec_name", "profile", "pix_fmt", "width", "height",
@@ -327,6 +332,31 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
                     "final output tail failed to decode (truncated or corrupt media payload)",
                     evidence={"decode_error": decode_detail},
                     next_action="rerender_final_output",
+                ))
+        manifest = read_json_object(root / "assembly_manifest.json") or {}
+        rendered = manifest.get("final_output")
+        bound_to_manifest = (
+            selected is not None
+            and isinstance(rendered, str)
+            and _resolve_in_work_dir(root, rendered).resolve() == selected.resolve()
+        )
+        if bound_to_manifest:
+            assembly_qc = read_json_object(root / "assembly_qc.json") or {}
+            if assembly_qc.get("blocking") is True:
+                findings.append(_finding(
+                    "assembly_qc_blocking",
+                    "assembly_qc.json recorded blocking delivery issues",
+                    evidence={"blocking_codes": assembly_qc.get("blocking_codes", [])},
+                    next_action="fix_assembly_qc_blockers_and_rerender",
+                ))
+            shot_review = read_json_object(root / "shot_review.json") or {}
+            slivers = shot_review.get("flash_slivers")
+            if isinstance(slivers, list) and slivers:
+                findings.append(_finding(
+                    "flash_frame_sliver",
+                    "shot_review.json detected flash-frame slivers in rendered cut",
+                    evidence={"flash_slivers": slivers},
+                    next_action="adjust_clip_boundaries_and_recut",
                 ))
     return {
         "schema_version": SCHEMA_VERSION,

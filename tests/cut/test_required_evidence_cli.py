@@ -10,7 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills/video-recap/scripts'))
 import cut_cli
-import media_geometry
+import media
 import sentence_boundaries
 from lib import CONFIG
 
@@ -20,10 +20,11 @@ def run_cut(tmp_path, monkeypatch):
     video = tmp_path / 'source.mp4'
     video.write_bytes(b'fixture')
     monkeypatch.setattr(cut_cli, 'get_video_duration', lambda _: 10)
-    monkeypatch.setattr(media_geometry, '_probe_video_geometry', lambda _: media_geometry._geometry_from_stream({
+    monkeypatch.setattr(media, '_probe_video_geometry', lambda _: media._geometry_from_stream({
         'width': 320, 'height': 240, 'r_frame_rate': '24/1'}))
     monkeypatch.setitem(CONFIG, 'scene_cut_snap', False)
     monkeypatch.setitem(CONFIG, 'snap_clip_line_end', False)
+    monkeypatch.setitem(CONFIG, 'cut_shot_review', False)
     monkeypatch.setattr(sentence_boundaries, 'enforce_clip_sentence_boundaries', lambda plan, *a, **k: plan)
 
     def run(plan, *options):

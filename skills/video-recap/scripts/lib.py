@@ -145,7 +145,9 @@ def ffmpeg_filters():
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"`ffmpeg -filters` failed or hung: {exc}") from exc
     if result.returncode != 0:
-        detail = (result.stderr or result.stdout or "").strip()[:300]
+        detail = (
+            getattr(result, "stderr", None) or getattr(result, "stdout", None) or ""
+        ).strip()[:300]
         raise RuntimeError(f"`ffmpeg -filters` failed (exit {result.returncode}): {detail}")
     filters = set()
     for line in result.stdout.splitlines():
@@ -268,12 +270,20 @@ CONFIG = {
     "tts_segment_peak_limit": 0.98,
     "snap_clip_line_end": env_bool("SNAP_CLIP_LINE_END", True),
     "clip_snap_max_extend": env_float("CLIP_SNAP_MAX_EXTEND", 2.0, minimum=0.0),
+    "clip_end_pause_pad": env_float("CLIP_END_PAUSE_PAD", 0.22, minimum=0.0),
     "clip_start_snap_max_prepend": env_float("CLIP_START_SNAP_MAX_PREPEND", 1.8, minimum=0.0),
     "clip_start_snap_max_trim": env_float("CLIP_START_SNAP_MAX_TRIM", 0.35, minimum=0.0),
+    "min_clip_duration": env_float("MIN_CLIP_DURATION", 0.8, minimum=0.05),
     "clip_join_audio_fade_ms": 30.0,
     "scene_cut_snap": env_bool("SCENE_CUT_SNAP", True),
     "scene_cut_snap_margin": env_float("SCENE_CUT_SNAP_MARGIN", 0.5, minimum=0.0),
-    "scene_cut_detect_threshold": env_float("SCENE_CUT_DETECT_THRESHOLD", 0.4, minimum=0.0),
+    "scene_cut_detect_threshold": env_float("SCENE_CUT_DETECT_THRESHOLD", 0.32, minimum=0.0),
+    "cut_shot_review": env_bool("CUT_SHOT_REVIEW", True),
+    "shot_review_threshold": env_float("SHOT_REVIEW_THRESHOLD", 0.35, minimum=0.0),
+    "flash_sliver_max_seconds": env_float("FLASH_SLIVER_MAX_SECONDS", 0.20, minimum=0.0),
+    "max_dead_air_seconds": env_float("MAX_DEAD_AIR_SECONDS", 5.0, minimum=0.0),
+    "max_cold_open_silence_seconds": env_float("MAX_COLD_OPEN_SILENCE_SECONDS", 2.5, minimum=0.0),
+    "ending_audio_fade_ms": env_float("ENDING_AUDIO_FADE_MS", 350.0, minimum=0.0),
     "fade_ms": 120,
     "ducking_narr_weight": 1.5,
     "zone_ducking_volume": env_float(

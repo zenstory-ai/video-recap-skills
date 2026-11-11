@@ -16,7 +16,7 @@ import cut_qc
 import cut_render
 import frame_grid
 import lib
-import media_geometry
+import media
 import sentence_boundaries
 from cut_contract import normalize_clip_plan, parse_duration_seconds
 from cut_render import build_edited_source_video
@@ -27,15 +27,16 @@ _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 def _geometry(width, height, fps):
     """A probed geometry as ffprobe reports a square-pixel, unrotated stream."""
-    return media_geometry._geometry_from_stream(
+    return media._geometry_from_stream(
         {"width": width, "height": height, "r_frame_rate": f"{fps}/1"}
     )
 
 
 def _mock_media_probes(monkeypatch):
     """main() probes the (fake) source video for its canvas and shot changes."""
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
     monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes", lambda *_args, **_kwargs: [])
+    monkeypatch.setitem(lib.CONFIG, "cut_shot_review", False)
 
 
 def _make_plan(clips_spec, allow_overlap=False, video_duration=100.0):
@@ -53,7 +54,7 @@ def _fake_detector(changes):
 
 def _with_geometry(plan, source_paths):
     """cut_cli selects the output canvas before rendering; direct render calls must do the same."""
-    _, _, _, geometry_qc = media_geometry._select_output_geometry(source_paths, plan["clips"])
+    _, _, _, geometry_qc = media._select_output_geometry(source_paths, plan["clips"])
     plan.setdefault("qc", {})["output_geometry"] = geometry_qc
     return plan
 
@@ -75,9 +76,9 @@ def _capture_render(monkeypatch, tmp_path, raw_clips, video_duration, *, config=
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
     if probe is None:
-        monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
+        monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
     monkeypatch.setattr("cut_render.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("media.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 2.0)
     if config:
         monkeypatch.setattr("cut_render.CONFIG", {**cut_render.CONFIG, **config})
@@ -305,7 +306,7 @@ def _seed_cached_cut(tmp_path):
     (work / "clip_plan.json").write_text(json.dumps(raw_plan), encoding="utf-8")
     validated = cut_contract.normalize_clip_plan(raw_plan, video_duration=100.0)
     # cut_cli stamps each clip's frame count; the render cache binds to that too.
-    geometry = media_geometry._select_output_geometry([str(video)], validated["clips"])[3]
+    geometry = media._select_output_geometry([str(video)], validated["clips"])[3]
     frame_grid.record_frame_grid(validated, geometry)
     edited = work / "edited_source.mp4"
     edited.write_bytes(b"cached-edited")
@@ -681,7 +682,7 @@ def test_normalize_multi_source_clip_plan_maps_sources_and_validates_per_source_
 
 
 def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_meta(monkeypatch, tmp_path):
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
     a = tmp_path / "a.mp4"
     b = tmp_path / "b.mp4"
     a.write_bytes(b"aaa")
@@ -704,7 +705,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("cut_render.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("media.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 3.0)
 
     out = cut_render.build_edited_source_video("ignored.mp4", _with_geometry(plan, [str(a), str(b)]), work_dir)
@@ -872,10 +873,10 @@ def test_snap_multi_source_clips_start_snaps_each_source_silence(tmp_path):
 
 def test_select_output_geometry_uses_all_used_sources_not_first(monkeypatch):
     probes = {"/low.mp4": _geometry(854, 480, 24.0), "/hd.mp4": _geometry(1920, 1080, 30.0)}
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda p: probes[str(p)])
     clips = [{"source_id": "low", "source_path": "/low.mp4", "duration": 1.0},
              {"source_id": "hd", "source_path": "/hd.mp4", "duration": 5.0}]
-    w, h, fps, qc = media_geometry._select_output_geometry(["/low.mp4", "/hd.mp4"], clips)
+    w, h, fps, qc = media._select_output_geometry(["/low.mp4", "/hd.mp4"], clips)
     assert (w, h, fps) == (1920, 1080, 30.0)
     assert qc["source_id"] == "hd"
     assert qc["reason"] == "weighted_orientation_area_fps"
@@ -884,11 +885,11 @@ def test_select_output_geometry_uses_all_used_sources_not_first(monkeypatch):
 def test_select_output_geometry_orientation_duration_and_fps_ties(monkeypatch):
     probes = {"/portrait.mp4": _geometry(1080, 1920, 24.0), "/landscape.mp4": _geometry(1280, 720, 60.0),
               "/landscape2.mp4": _geometry(1920, 1080, 30.0)}
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda p: probes[str(p)])
     clips = [{"source_id": "p", "source_path": "/portrait.mp4", "duration": 2.0},
              {"source_id": "l1", "source_path": "/landscape.mp4", "duration": 1.0},
              {"source_id": "l2", "source_path": "/landscape2.mp4", "duration": 2.0}]
-    w, h, fps, qc = media_geometry._select_output_geometry(
+    w, h, fps, qc = media._select_output_geometry(
         ["/portrait.mp4", "/landscape.mp4", "/landscape2.mp4"], clips)
     assert (w, h) == (1920, 1080)  # landscape wins by total used duration (3s > 2s)
     assert fps == 30.0  # the 30 fps bucket carries 2s of used duration
@@ -899,9 +900,9 @@ def test_probe_video_geometry_is_iterable_and_rotation_sar_aware(monkeypatch):
     payload = {"streams": [{"width": 1920, "height": 1080, "r_frame_rate": "30000/1001",
                             "sample_aspect_ratio": "2:1", "display_aspect_ratio": "16:9",
                             "tags": {"rotate": "90"}}]}
-    monkeypatch.setattr(media_geometry, "run_cmd",
+    monkeypatch.setattr(media, "run_cmd",
                         lambda cmd: CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr=""))
-    geometry = media_geometry._probe_video_geometry("/rotated.mp4")
+    geometry = media._probe_video_geometry("/rotated.mp4")
     width, height, fps = geometry
     assert (width, height) == (1080, 3840)
     assert fps == 29.97
@@ -924,24 +925,24 @@ def test_probe_video_geometry_is_iterable_and_rotation_sar_aware(monkeypatch):
 ])
 def test_cut_probe_video_geometry_uses_display_geometry(monkeypatch, stream, expected):
     """Cut geometry uses display geometry (rotation, SAR), not raw encoded width/height."""
-    monkeypatch.setattr(media_geometry, "run_cmd", lambda cmd: CompletedProcess(
+    monkeypatch.setattr(media, "run_cmd", lambda cmd: CompletedProcess(
         cmd, 0, stdout=json.dumps({"streams": [stream]}), stderr=""))
-    assert media_geometry._probe_video_geometry("probe.mp4") == expected
+    assert media._probe_video_geometry("probe.mp4") == expected
 
 
 def test_select_output_geometry_qc_exposes_rotation_sar_dar_facts(monkeypatch):
     probes = {
-        "/rotated.mp4": media_geometry.VideoGeometry(1080, 1920, 30.0, {
+        "/rotated.mp4": media.VideoGeometry(1080, 1920, 30.0, {
             "coded_width": 1920, "coded_height": 1080, "display_width": 1080, "display_height": 1920,
             "rotation": 90, "rotation_swaps_axes": True, "sample_aspect_ratio": "1:1",
             "sample_aspect_ratio_float": 1.0, "display_aspect_ratio": "16:9",
             "frame_rate": "30/1", "video_start_offset": 0.0}),
         "/landscape.mp4": _geometry(1280, 720, 30.0),
     }
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda p: probes[str(p)])
     clips = [{"source_id": "r", "source_path": "/rotated.mp4", "duration": 5.0},
              {"source_id": "l", "source_path": "/landscape.mp4", "duration": 1.0}]
-    w, h, fps, qc = media_geometry._select_output_geometry(["/rotated.mp4", "/landscape.mp4"], clips)
+    w, h, fps, qc = media._select_output_geometry(["/rotated.mp4", "/landscape.mp4"], clips)
     assert (w, h, fps) == (1080, 1920, 30.0)
     assert qc["orientation"] == "portrait"
     assert qc["rotation"] == 90

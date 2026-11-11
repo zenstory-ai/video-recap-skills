@@ -547,7 +547,7 @@ def test_measured_band_accepts_near_square_pixels_and_masks_frame_rows(
 
 
 @pytest.mark.parametrize("configured_opacity", [0.0, 0.6])
-def test_source_subtitle_mask_opaquely_covers_byo_gap_subtitles(
+def test_source_subtitle_mask_narration_timing_leaves_gaps_unmasked(
     monkeypatch, tmp_path, configured_opacity
 ):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
@@ -556,8 +556,8 @@ def test_source_subtitle_mask_opaquely_covers_byo_gap_subtitles(
     monkeypatch.setitem(CONFIG, "subtitle_y_bot", 660)
     monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", configured_opacity)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "narration")
-    (tmp_path / "user_subtitles.json").write_text(
-        json.dumps([{"start": 1.0, "end": 4.0, "text": "用户校订原声"}]),
+    (tmp_path / "original_subtitles.json").write_text(
+        json.dumps([{"start": 1.0, "end": 4.0, "text": "校订原声"}]),
         encoding="utf-8",
     )
 
@@ -572,8 +572,9 @@ def test_source_subtitle_mask_opaquely_covers_byo_gap_subtitles(
     if configured_opacity > 0:
         assert "color=black@0.60" in filt
         assert "between(t,5.000,8.000)" in filt
-    assert "color=black@1.00" in filt
-    assert "between(t,1.000,4.000)" in filt
+        assert "between(t,1.000,4.000)" not in filt
+    else:
+        assert filt is None
 
 
 def test_source_subtitle_mask_coalesces_overlaps_to_avoid_double_opacity(monkeypatch):
@@ -872,7 +873,7 @@ def _filter_escaped(path):
     return text
 
 
-def test_declared_font_file_reaches_subtitle_and_drawtext_filters(monkeypatch, tmp_path):
+def test_declared_font_file_reaches_subtitle_burn_filter(monkeypatch, tmp_path):
     font = tmp_path / "fonts [1], a" / "Brand Sans.ttf"  # the drive letter covers ':' on Windows
     font.parent.mkdir()
     font.write_bytes(b"font")
@@ -881,12 +882,8 @@ def test_declared_font_file_reaches_subtitle_and_drawtext_filters(monkeypatch, t
     burn = _subtitle_burn_filter(tmp_path / "subs.ass")
 
     assert burn.endswith(r"fontsdir='" + _filter_escaped(font.parent.resolve()) + "'")
-    assert visual_render._drawtext_font_option() == (
-        "fontfile='" + _filter_escaped(font.resolve()) + "':"
-    )
     monkeypatch.setitem(CONFIG, "subtitle_font_file", "")
     assert "fontsdir" not in _subtitle_burn_filter(tmp_path / "subs.ass")
-    assert visual_render._drawtext_font_option() == ""
 
 
 def test_assemble_video_burns_ass_subtitles(monkeypatch, tmp_path):
@@ -2037,7 +2034,7 @@ def test_source_handoff_holds_to_end_when_no_later_sentence_anchor(
     assert _eval_envelope(expr, 29.0) == pytest.approx(0.2)
 
 
-def test_source_handoff_releases_when_next_anchor_is_beyond_the_hold_bound(
+def test_source_handoff_blocks_mid_sentence_release_when_next_anchor_is_beyond_hold_bound(
     monkeypatch, tmp_path
 ):
     _write_legacy_anchors(
@@ -2053,11 +2050,11 @@ def test_source_handoff_releases_when_next_anchor_is_beyond_the_hold_bound(
 
     report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 60.0)
 
-    assert report[0]["status"] == "bounded_release"
+    assert report[0]["status"] == "unsafe_mid_sentence_release"
     assert seg["source_duck_end"] == pytest.approx(12.0)
     assert seg["source_restore_at"] == pytest.approx(12.3)
     assert report[0]["hold_seconds"] == pytest.approx(0.3)
-    assert seg.get("source_handoff_blocking") is not True
+    assert seg.get("source_handoff_blocking") is True
     expr = audio_mix._duck_envelope([seg], 1.0, 0.2, 0.12, 0.3, bridge=1.5)
     assert _eval_envelope(expr, 13.0) == pytest.approx(1.0)
 
@@ -2465,7 +2462,6 @@ _VISUAL_QC_ALLOWED_TOP_LEVEL = {
     "warnings",
     "geometry",
     "subtitles",
-    "overlays",
     "mask",
 }
 _VISUAL_QC_FORBIDDEN_DELIVERY_KEYS = {
@@ -2497,21 +2493,7 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
     assembly_qc rollup, never to the visual layer."""
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    (tmp_path / "visual_overlays.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "overlays": [
-                    {"type": "top_title", "text": "第一章", "start": 0.0, "end": 2.0},
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
 
-    filters, overlay_qc = visual_render._visual_overlay_filters(
-        tmp_path, _canvas(1080, 1920), 5.0
-    )
     qc = visual_render._build_visual_qc(
         [
             {
@@ -2526,7 +2508,6 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
         tmp_path,
         5.0,
         _canvas(1080, 1920),
-        overlay_qc=overlay_qc,
     )
 
     assert set(qc) <= _VISUAL_QC_ALLOWED_TOP_LEVEL
@@ -2534,8 +2515,6 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
     assert qc["geometry"]["canvas"]["width"] == 1080
     assert any(entry["line_count"] > 1 for entry in qc["subtitles"]["entry_facts"])
     assert qc["mask"]["active"] is False
-    assert qc["overlays"]["facts"][0]["type"] == "top_title"
-    assert filters and all("drawtext=" in f for f in filters)
 
 
 @pytest.mark.parametrize(
@@ -2557,13 +2536,6 @@ def test_assembly_qc_gates_on_visual_verdict_and_keeps_visual_facts_out(visual_v
             "overflow": False,
             "entries": 1,
             "safe_area": {"x": 54},
-        },
-        "overlays": {
-            "present": True,
-            "rendered": 1,
-            "facts": [{"type": "inline_label_or_callout", "overflow": False}],
-            "unsupported": [],
-            "overflow": [],
         },
         "mask": {
             "scope": "bottom_band",
@@ -2617,73 +2589,6 @@ def test_mask_flag_alone_masks_and_needs_burned_subtitles(monkeypatch):
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     assert source_subtitles._source_subtitle_mask()["trigger"] == "mask_off"
-
-
-def test_visual_overlay_loader_uses_canonical_artifact_and_rejects_platform_expansion(
-    tmp_path,
-):
-    """visual_overlays.json is the sole first-release overlay input, and only
-    top_title plus inline_label_or_callout are supported."""
-    (tmp_path / "overlays.json").write_text(
-        json.dumps([{"type": "card", "text": "wrong file"}]), encoding="utf-8"
-    )
-    (tmp_path / "visual_overlays.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "overlays": [
-                    {"type": "top_title", "text": "第一章", "start": 0.0, "end": 2.0},
-                    {
-                        "type": "inline_label_or_callout",
-                        "text": "关键证据",
-                        "start": 1.0,
-                        "end": 3.0,
-                        "x": 0.2,
-                        "y": 0.3,
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    overlays, source = visual_render._load_visual_overlays(tmp_path)
-    assert source["present"] is True
-    assert [item["type"] for item in overlays] == [
-        "top_title",
-        "inline_label_or_callout",
-    ]
-    filters, qc = visual_render._visual_overlay_filters(
-        tmp_path, {"width": 1280, "height": 720}, 5.0
-    )
-    assert len(filters) == 2
-    assert qc["rendered"] == 2
-    assert qc["unsupported"] == []
-
-    (tmp_path / "visual_overlays.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "overlays": [
-                    {"type": "top_title", "text": "allowed", "start": 0.0, "end": 1.0},
-                    {
-                        "type": "chapter_card",
-                        "text": "not in first release",
-                        "start": 1.0,
-                        "end": 2.0,
-                    },
-                ],
-            }
-        ),
-        encoding="utf-8",
-    )
-    filters, qc = visual_render._visual_overlay_filters(
-        tmp_path, {"width": 1280, "height": 720}, 5.0
-    )
-    assert len(filters) == 1
-    assert qc["unsupported"] == [
-        {"index": 1, "type": "chapter_card", "reason": "unsupported_overlay_type"}
-    ]
 
 
 def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
@@ -2804,36 +2709,6 @@ def test_default_path_blocks_no_safe_fit_before_the_video_encode(monkeypatch, tm
     qc = json.loads((tmp_path / "assembly_qc.json").read_text(encoding="utf-8"))
     assert qc["blocking_codes"] == ["no_safe_fit"]
     assert qc["delivery_qc"]["video_encode_passes"] == 0
-
-
-def test_malformed_visual_overlays_is_rejected(tmp_path):
-    (tmp_path / "visual_overlays.json").write_text("{not json", encoding="utf-8")
-
-    with pytest.raises(ValueError, match="JSON 无效"):
-        visual_render._load_visual_overlays(tmp_path)
-
-
-@pytest.mark.parametrize(
-    "payload",
-    [
-        [{"type": "top_title", "text": "legacy top-level list"}],
-        {"overlays": []},
-        {"schema_version": 2, "overlays": []},
-        {"schema_version": "1", "overlays": []},
-        {"schema_version": True, "overlays": []},
-        {"overlays": {"type": "top_title", "text": "not a list"}},
-        "not a schema",
-        42,
-        {"schema_version": 1},
-    ],
-)
-def test_invalid_visual_overlays_schema_is_rejected(tmp_path, payload):
-    (tmp_path / "visual_overlays.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
-
-    with pytest.raises(ValueError, match="schema 无效"):
-        visual_render._load_visual_overlays(tmp_path)
 
 
 def test_measured_subtitle_band_is_the_visual_qc_safe_area(tmp_path, monkeypatch):

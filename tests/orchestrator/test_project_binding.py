@@ -133,6 +133,11 @@ def test_project_run_forwards_bound_settings_and_records_them(monkeypatch, tmp_p
 
     calls = []
     monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, None, calls, assemble=assemble))
+    monkeypatch.setattr(
+        recap_runner,
+        "_write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     monkeypatch.setattr(recap_runner, "_probe_display_size_or_raise", lambda *a, **k: (900, 1600))
     monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work),
                                       "--project", str(path)])
@@ -343,6 +348,11 @@ def test_reference_reaches_work_dir_before_the_first_pause_and_lands_in_the_lock
         (work / "assembly_manifest.json").write_text(json.dumps({"final_output": "x.mp4"}), encoding="utf-8")
 
     monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, understand=understand, assemble=assemble))
+    monkeypatch.setattr(
+        recap_runner,
+        "_write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     monkeypatch.setattr(recap_runner, "_probe_display_size_or_raise", lambda *a, **k: (900, 1600))
     monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work),
                                       "--project", str(path)])
@@ -372,6 +382,11 @@ def test_reference_only_binding_does_not_probe_the_canvas(monkeypatch, tmp_path,
         raise AssertionError("a reference carries no geometry; nothing to probe")
 
     monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, assemble=assemble))
+    monkeypatch.setattr(
+        recap_runner,
+        "_write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     monkeypatch.setattr(recap_runner, "_probe_display_size_or_raise", probe)
     monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work),
                                       "--project", str(path)])

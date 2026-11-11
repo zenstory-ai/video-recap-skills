@@ -29,8 +29,6 @@ from recap_stage_qc import (
     _write_final_qc_reports,
 )
 from recap_source import (
-    reject_removed_delivery_workdir,
-    reject_removed_dub_workdir,
     reject_unbound_narration_workdir,
     uses_narration,
     validate_audio_routing,
@@ -42,14 +40,12 @@ from recap_timeline import (
     _materials_enabled,
     _multi_manifest_mismatches,
     _pause_for_agent,
-    _preflight_visual_overlays,
     _read_assembly_output,
     _read_phase_ledger,
     _save_materials_enabled,
     _source_work_dir,
     _surface_cut_qc,
     _understand_args_for_source,
-    _write_canonical_visual_overlays,
     _write_multi_source_clip_brief,
     _write_multi_source_output_brief,
     _write_phase_ledger,
@@ -229,13 +225,12 @@ def _validate_cut_output_narration(work_dir):
 
 
 def _narrate(work_dir, args):
-    """TTS -> visual overlays for a validated narration.json."""
+    """Run TTS synthesis for a validated narration.json."""
     narration_json = work_dir / "narration.json"
     _run(
         "voiceover", "voiceover.py",
         *_voiceover_args(work_dir, narration_json, args),
     )
-    _write_canonical_visual_overlays(work_dir, narration_json)
 
 
 def _deliver(work_dir, args, assemble_video, recap_stem, extra_assemble_args=()):
@@ -244,7 +239,6 @@ def _deliver(work_dir, args, assemble_video, recap_stem, extra_assemble_args=())
     if project and any(t["role"] in project_binding.GEOMETRY_ROLES for t in project["templates"]):
         project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
     project_binding.sync_packaging_layers(work_dir, project)
-    _preflight_visual_overlays(work_dir, narration=uses_narration(args))
     if uses_narration(args):
         _narrate(work_dir, args)
     aargs = [str(assemble_video), "--work-dir", str(work_dir), "--recap-stem", recap_stem]
@@ -410,8 +404,6 @@ def _execute_pipeline(args, videos):
         else videos[0].parent / f"{prefix}{videos[0].stem}"
     )
     # Validate the work-directory audio policy before any stage writes into it.
-    reject_removed_dub_workdir(work_dir)
-    reject_removed_delivery_workdir(work_dir)
     reject_unbound_narration_workdir(work_dir, args)
     work_dir.mkdir(parents=True, exist_ok=True)
     if len(videos) > 1:
