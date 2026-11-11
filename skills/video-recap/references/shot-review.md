@@ -14,9 +14,6 @@ python3 scripts/shot_review.py edited_source.mp4 \
 # 画面带黑边或固定包装框时，传入实测主画面区域的像素坐标，保持阈值不变做对照：
 python3 scripts/shot_review.py packaged.mp4 --roi "$X" "$Y" "$WIDTH" "$HEIGHT" \
   --output review/shot_review_picture.json
-# 在正常 cut 渲染后顺带扫描（命中缓存也会扫描实际视频文件；--normalize-only 不扫描）：
-python3 scripts/cut.py source.mp4 --work-dir work --review-shots
-# 也可在 cut.py 中同时指定扫描区域与阈值：cut.py --review-shots --shot-roi X Y WIDTH HEIGHT --shot-scene-threshold T
 ```
 
 `--roi` 只在检测阶段裁切送入滤镜的画面区域，不修改原视频文件或剪辑计划。坐标按 FFmpeg 自动旋转摆正后的原生像素填写，而非播放器按 SAR 拉伸后的显示尺寸；矩形必须完整落在画布内部。报告中的 `scene_roi` 会记录本次实际扫描的矩形区域，未指定时为 `null`（全画布）。排查黑边或包装干扰时，应先用 `--roi` 排除黑边和标题花字区，再微调召回阈值，并同时保留全画布扫描报告作对照，严禁靠缩小扫描区域来掩盖闪帧。若主画面窗口位置随镜头切换而变化，单个固定 ROI 只能代表该区域的检测结果，不能据此宣称全片画面已检查完毕。

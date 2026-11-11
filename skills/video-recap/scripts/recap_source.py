@@ -1,4 +1,4 @@
-"""Validate recap audio ownership without importing another skill."""
+"""Validate recap audio ownership and removed-route guards."""
 
 import json
 from pathlib import Path

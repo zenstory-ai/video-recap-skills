@@ -376,9 +376,13 @@ def test_parse_target_seconds_table():
         "-5",
         "10x",
         "1:-30",
+        "01:75",
+        "1:60:00",
         "1:2:3:4",
         "nan",
         "inf",
+        float("nan"),
+        float("inf"),
     ):
         with pytest.raises(ValueError):
             _parse_target_seconds(bad)

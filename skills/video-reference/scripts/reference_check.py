@@ -140,7 +140,9 @@ def _check_cut_fixes(fixes, cuts, duration, errors):
         for t in values:
             near = any(abs(t - c) <= CUT_MATCH_S for c in cuts)
             if not EDGE_S < t < duration - EDGE_S:
-                errors.append(f"R2 labels.cut_fixes.{key}: {t} 不在 (0, {duration}) 内")
+                errors.append(
+                    f"R2 labels.cut_fixes.{key}: {t} 不在 ({EDGE_S}, {round(duration - EDGE_S, 4)}) 内"
+                )
             elif key == "remove" and not near:
                 errors.append(f"R2 labels.cut_fixes.remove: {t} 附近 ±{CUT_MATCH_S}s 内没有测得的切点")
             elif key == "add" and near:

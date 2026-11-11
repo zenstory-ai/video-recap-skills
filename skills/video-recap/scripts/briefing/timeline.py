@@ -5,47 +5,12 @@ import math
 import re
 from pathlib import Path
 
+from cut_contract import parse_duration_seconds
 from lib import file_identity
 
 
 def _parse_target_seconds(value):
-    """Parse a cut-mode target duration ("30m" / "600" / "1h5m" / "00:30:00") to seconds.
-
-    None or blank means the knob is unset (None). Any other value that does not parse to
-    a positive duration is a typo in user input and raises ValueError.
-    """
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        seconds = float(value)
-    else:
-        text = str(value).strip().lower()
-        if not text:
-            return None
-        if ":" in text:
-            parts = [float(p) for p in text.split(":")]
-            if len(parts) == 2:
-                seconds = parts[0] * 60 + parts[1]
-            elif len(parts) == 3:
-                seconds = parts[0] * 3600 + parts[1] * 60 + parts[2]
-            else:
-                raise ValueError(f"unparseable target duration: {value!r}")
-            if any(p < 0 for p in parts):
-                raise ValueError(f"unparseable target duration: {value!r}")
-        else:
-            factors = {"ms": 0.001, "s": 1, "m": 60, "h": 3600}
-            seconds = 0.0
-            pos = 0
-            for m in re.finditer(r"([0-9]+(?:\.[0-9]+)?)(ms|s|m|h)?", text):
-                if m.start() != pos:
-                    break
-                pos = m.end()
-                seconds += float(m.group(1)) * factors[m.group(2) or "s"]
-            if pos == 0 or pos != len(text):
-                raise ValueError(f"unparseable target duration: {value!r}")
-    if not seconds > 0:
-        raise ValueError(f"target duration must be positive: {value!r}")
-    return seconds
+    return parse_duration_seconds(value)
 
 
 def _load_cut_output_spans_for_brief(work_dir):

@@ -807,3 +807,17 @@ def test_entry_ignores_interjection_only_window_beyond_the_dialogue_guard(
     )
     codes = [item["code"] for item in report["errors"] if "source_sentence" in item["code"]]
     assert codes == (["interrupts_source_sentence"] if blocked else [])
+
+
+def test_validate_ignores_unreadable_vlm_analysis_json(monkeypatch, tmp_path):
+    _write_json(
+        tmp_path / "narration.json",
+        [{"start": 0.0, "end": 10.0, "narration": "这是一段不依赖画面分析文件也能完成校验的解说。"}],
+    )
+    (tmp_path / "vlm_analysis.json").write_text("{corrupt json", encoding="utf-8")
+    monkeypatch.setitem(CONFIG, "speech_rate", 6.0)
+
+    _run_validate(monkeypatch, tmp_path, "full")
+
+    report = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True

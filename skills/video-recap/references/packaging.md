@@ -31,7 +31,7 @@
 - `canvas` 宽高必须与成片实际画布完全一致，否则合成前直接报错；每个图层的 `rect` 必须完整落在画布内部，图片会缩放到 `rect` 指定尺寸并保留透明通道。
 - 画面叠加从底到顶的顺序固定为：原片硬字幕遮罩 → 静态包装图层（按 `layers` 数组先后顺序）→ `visual_overlays.json` 画面花字 → ASS 解说字幕 → 最终分辨率缩放。
 - 静态包装图层会同步写入 `timeline.json` 的 `image` 轨，导出剪映草稿后可在剪映里单独选中或调整边框图层。
-- `assembly_manifest.json` 的 `video_filters.packaging_layers` 会记录每张叠加图片的路径与 `{size, mtime_ns}`。
+- `assembly_manifest.json` 的 `assembly_settings.video_filters.packaging_layers` 会记录每张叠加图片的路径与 `{size, mtime_ns}`。
 - 编排器根据项目绑定的 `packaging` 模板自动生成该文件时会打上 `written_by` 标记；用户自己手写的 `packaging_layers.json` 不会被编排器误删。至于带渐入渐出或关键帧动画的动态包装，仍由项目级代码渲染器自行合成。
 
 ## 审美与克制原则

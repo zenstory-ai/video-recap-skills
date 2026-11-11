@@ -37,7 +37,7 @@ python3 -m pytest tests/script -q    # 调试单组
 
 - `CHANGELOG.md` 遵循 Keep a Changelog，小节名用 `Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security` 六个英文类别，正文中文；收紧到会拒绝旧输入的改动记入 `Changed`。按惯例，行为、契约或交付物有变化的 PR 在 `## [Unreleased]` 下记一条。
 - 版本号权威是 `.release/policy.json` 的 `versionFiles`：`VERSION` 与 `.claude-plugin/plugin.json` 的 `version` 一起改，并加带日期的 `## [x.y.z] - YYYY-MM-DD` 标题；只在单独授权的发布准备中切版本。发布流程见 `docs/source-release.md`。
-- ClawHub：`.clawhub/publish.json` 显式列出每个技能，`packageDigest` 锁定包字节。任何改动 `skills/<name>/` 下文件的 PR，都要给该条目升 semver，同步 `video-recap` 的 `skill:` 依赖版本，并用 `validate-clawhub.yml` 固定的中央 `clawhub_release.py lock` 重新锁定；规则见 `.clawhub/README.md`。
+- ClawHub：`.clawhub/publish.json` 显式列出每个技能，`packageDigest` 锁定包字节。任何改动 `skills/<name>/` 下文件的 PR，都要给该条目升 semver，并用 `validate-clawhub.yml` 固定的中央 `clawhub_release.py lock` 重新锁定；规则见 `.clawhub/README.md`。
 - 未经单独授权不推 tag、不手动触发发布或 ClawHub 工作流；`CLAWHUB_QUEUED` 只表示派发被接受，不等于已发布或扫描通过。
 
 ## 重要改动必须留笔记

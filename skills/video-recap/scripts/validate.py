@@ -81,14 +81,12 @@ def _validate(args):
     narration = _read_json(narration_path)
     if narration is None:
         raise SystemExit(f"缺少 {narration_path}；请先按 video-recap 规则写解说词")
-    vlm_analysis = _read_json(work_dir / "vlm_analysis.json")
     cut_output = args.mode == "cut_output"
     # Lint the authored shape first, then derive speech ownership (speech spans minus quiet
     # windows) from the evidence and persist that measured flag for voiceover/assemble instead
-    # of trusting JSON. cut_output narration is authored in OUTPUT time against
-    # edited_source.mp4, so the source-time scene analysis does not apply to it.
+    # of trusting JSON.
     report = validate_narration_or_raise(
-        narration, None if cut_output else vlm_analysis, mode=args.mode, work_dir=work_dir,
+        narration, None, mode=args.mode, work_dir=work_dir,
         output_duration=args.output_duration if cut_output else None,
     )
     narration = measure_narration_speech_ownership(narration, work_dir, mode=args.mode)

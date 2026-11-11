@@ -1,16 +1,9 @@
 """File identity and work-directory JSON helpers for the assemble stage."""
 
 import json
-import os
 from pathlib import Path
 
-from lib import CONFIG
-
-
-def file_identity(path):
-    """``{size, mtime_ns}`` of one input file: enough to notice a rewrite, cheap to take."""
-    st = os.stat(os.fspath(path))
-    return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+from lib import CONFIG, file_identity
 
 
 def _artifact_identity(path):

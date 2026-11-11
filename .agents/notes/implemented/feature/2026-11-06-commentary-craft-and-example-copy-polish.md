@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：文中涉及的六个生产技能已合并入 `skills/video-recap/`（见 [[2026-11-10-converge-production-skills-into-video-recap]]），`dub` 模式与 MiMo 解说评审链已移除（见 [[2026-11-06-remove-dub-mode]]、[[2026-11-06-remove-narration-review-chain]]），解说创作技法与案例润色成果保留在 `skills/video-recap/`、`docs/` 与 `examples/` 中。
+
 ## Problem
 
 [[2026-10-15-prose-polish-current-contracts]] 完成了首轮契约对齐与局部字句清理，但当时采取了“保留全部正反示例与案例产物原文”的保守边界，导致仓库仍存在三处短板：

@@ -5,38 +5,15 @@ import math
 import wave
 from pathlib import Path
 
-from lib import CONFIG
+from lib import CONFIG, read_json_object
 from assemble_constants import ASSEMBLY_MANIFEST, ASSEMBLY_QC
 from loudness import _loudness_mode
 from artifacts import _source_video_identity, _timeline_provenance_status
-
-# The delivery family (frozen sound, strict adoption, explicit subtitle track) was removed;
-# v0.6.2 is the fallback. These names stay only so an old input fails instead of silently
-# rendering through another route.
-REMOVED_AUDIO_MODE = "adopted-packet-copy"
-_REMOVED_DELIVERY_ARTIFACTS = (
-    "subtitle_track.json",
-    "subtitle_track_validation.json",
-    "audio_mix_binding.json",
-    ".narration_input_snapshots",
-    ".explicit_audio_mix",
+from recap_source import (
+    REMOVED_AUDIO_MODE,
+    _REMOVED_DELIVERY_ARTIFACTS,
+    removed_route_message,
 )
-
-
-def removed_route_message(what):
-    return (
-        f"{what} 属于已移除的声音定稿交付路线（adopted-packet-copy、narration/audio-mix adoption、"
-        "subtitle_track）；请使用新的 --work-dir 走当前路线，仍需这些路线请使用 v0.6.2"
-    )
-
-
-def _read_json_object(path):
-    """A readable JSON object, else {}: a malformed file is not evidence of a removed route."""
-    try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {}
-    return value if isinstance(value, dict) else {}
 
 
 def reject_removed_delivery_inputs(work_dir, audio_mode=None):
@@ -47,11 +24,11 @@ def reject_removed_delivery_inputs(work_dir, audio_mode=None):
     for name in _REMOVED_DELIVERY_ARTIFACTS:
         if (work_dir / name).exists():
             raise RuntimeError(removed_route_message(f"{work_dir / name}"))
-    bound = _read_json_object(work_dir / "narration_input_binding.json")
+    bound = read_json_object(work_dir / "narration_input_binding.json") or {}
     if bound.get("identity_status") == "BOUND_TO_ADOPTION":
         raise RuntimeError(removed_route_message(f"{work_dir / 'narration_input_binding.json'}"))
     for name in (ASSEMBLY_MANIFEST, ASSEMBLY_QC):
-        if _read_json_object(work_dir / name).get("audio_mode") == REMOVED_AUDIO_MODE:
+        if (read_json_object(work_dir / name) or {}).get("audio_mode") == REMOVED_AUDIO_MODE:
             raise RuntimeError(removed_route_message(f"{work_dir / name}"))
 
 

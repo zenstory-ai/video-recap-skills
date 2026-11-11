@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "f03ad10f6c335e538666df12ec1b1888c3bfa4ed22436315712be6aed30202fd",
+      "packageDigest": "a36cf2bd6d45ad7efd4b18919b2e6ac8a57a9a40ccd1b84a711b0798c1ce9406",
       "path": "skills/video-recap",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "dad0b2fed27fc46ea5211ee9c74b28e6b9997690c19f1ca039fdba2c2eed03f9",
+      "packageDigest": "31b69ccadb0e8fc12c646ef39ec7220053fb3baea63c12851924191c784b1abc",
       "path": "skills/video-reference",
       "publisher": "worldwonderer",
       "rebuildOn": [],

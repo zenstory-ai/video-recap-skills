@@ -44,7 +44,3 @@ def _recommended_char_budget(start, end):
 def _lint_char_budget(start, end):
     """The brief's budget for the window minus one utterance's TTS edge silence."""
     return _recommended_char_budget(start, end - TTS_UTTERANCE_OVERHEAD_SECONDS)
-
-
-def _overlap_seconds(start, end, other_start, other_end):
-    return max(0.0, min(end, other_end) - max(start, other_start))

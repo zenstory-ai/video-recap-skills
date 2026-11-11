@@ -451,4 +451,4 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
  "mask_dropped": false, "message": "…", "next_action": "…"}
 ```
 
-此时新字幕已保存在成片同目录的同名 `.srt` 文件中（路径见 `assembly_manifest.json` 的 `subtitle_sidecar`），而原片自带的硬字幕依然保留在画面上；若 `mask_dropped` 为 `true`，说明原本打算叠加的原片字幕遮罩也已一并取消。`final_qc.py` 与 `recap.py` 结束时都会在终端醒目打印这条警告及外挂字幕路径。
+此时新字幕已保存在成片同目录的同名 `.srt` 文件中（路径见 `assembly_manifest.json` 的 `subtitle_sidecar`），而原片自带的硬字幕依然保留在画面上；若 `mask_dropped` 为 `true`，说明原本打算叠加的原片字幕遮罩也已一并取消。`assemble.py` 与 `recap.py` 结束时都会在终端醒目打印这条警告及外挂字幕路径。

@@ -84,19 +84,22 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
     {
       "start": 12.0,
       "end": 38.0,
-      "reason": "b01 | hook | knowledge: unknown→threat | POV=沈曼 | 撞见未婚夫搂着千金谈联姻 | 入点=推门看清两人动作 | 出点=转身攥紧户口本",
-      "required_evidence": [
-        {"start": 14.2, "end": 18.6, "kind": "action", "label": "推门撞见两人拥抱"}
-      ]
+      "reason": "b01 | hook | knowledge: unknown→threat | POV=沈曼 | 撞见未婚夫搂着千金谈联姻 | 入点=推门看清两人动作 | 出点=转身攥紧户口本"
     }
-  ]
+  ],
+  "required_evidence": {
+    "nodes": [
+      {"id": "e1", "source": "/abs/source.mp4", "start": 14.2, "end": 18.6, "track": "video", "content": "推门撞见两人拥抱"}
+    ],
+    "before": []
+  }
 }
 ```
 
 选镜与切点必须严守以下底线：
 
 - **`reason` 七段式结构**：依次写明 `beat_id | 叙事功能 | 局势状态变化（A→B） | POV=人物 | 本段实质看点 | 入点=具体动作/原声锚点 | 出点=具体反应/落点`，倒逼每段画面都服务于故事推进。
-- **必保画面证据（`required_evidence`）**：拍板决定必须留住的高光动作、变脸瞬间或关键原声句，写进 `required_evidence`；边界吸附一旦裁掉其中任何区间，脚本会直接报错阻断。
+- **必保画面与原声证据（`required_evidence`）**：拍板决定必须留住的高光动作、变脸瞬间或关键原声问答，写入顶层 `required_evidence`（`nodes` 登记 `id`/`source` 绝对路径/`start`/`end`/`track`/`content`，`before` 登记不可颠倒的先后对）；边界吸附一旦裁掉任何必保区间或打乱先后顺序，脚本会直接报错阻断。
 - **句末安全切点**：切点必须落在原片首尾、句末停顿锚点或静音窗口内，或者属于同源相邻片段无缝顺接；踩进原声台词中间会触发 `unsafe_clip_sentence_boundary` 阻断，并在报错中给出前后 5 秒内已对齐帧网格的 `nearest_safe` 秒数。
 - **高频快切与碎镜头排查**：面对动作戏或密集反打时，可用 `ffmpeg -i <video> -vf "select='gt(scene,0.35)',showinfo" -f null -` 或只读工具 `scripts/shot_review.py`（用法见 `references/shot-review.md`）定位高分切点，但必须区分**原片自带的切点**与**由本次拼接制造的切点**——若属于**原片自带的无关短镜头整段删除**或把切点挪到快切簇外侧；若属于**由本次拼接制造的切点**（如硬切边缘残留几帧隔壁镜头、碎反打），则外扩入出点或合并同源相邻片段，严禁靠塞转场遮丑。
 

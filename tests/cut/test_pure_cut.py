@@ -158,7 +158,10 @@ def test_parse_duration_seconds_accepts_common_and_compound_forms(raw, expected)
     assert parse_duration_seconds(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["nope", "-1", "2m30x", "m30"])
+@pytest.mark.parametrize(
+    "raw",
+    ["nope", "-1", "2m30x", "m30", "01:75", "1:60:00", "1:nan", float("nan"), float("inf"), True],
+)
 def test_parse_duration_seconds_rejects_malformed_forms(raw):
     with pytest.raises(ValueError):
         parse_duration_seconds(raw)

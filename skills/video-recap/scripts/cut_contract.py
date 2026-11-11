@@ -1,6 +1,7 @@
 """Normalize cut plans and maintain the render-cache sidecar."""
 
 import json
+import math
 import re
 
 from pathlib import Path
@@ -12,9 +13,11 @@ def parse_duration_seconds(value):
     """Parse seconds, 10m/1h forms, or HH:MM:SS into seconds."""
     if value is None or value == "":
         return None
+    if isinstance(value, bool):
+        raise ValueError(f"invalid duration: {value}")
     if isinstance(value, (int, float)):
         seconds = float(value)
-        if seconds <= 0:
+        if not math.isfinite(seconds) or seconds <= 0:
             raise ValueError("duration must be positive")
         return seconds
 
@@ -30,6 +33,8 @@ def parse_duration_seconds(value):
             nums = [float(p) for p in parts]
         except ValueError as exc:
             raise ValueError(f"invalid duration: {value}") from exc
+        if any(not math.isfinite(n) for n in nums):
+            raise ValueError(f"invalid duration: {value}")
         if any(n < 0 for n in nums):
             raise ValueError("duration must be positive")
         if nums[-1] >= 60 or (len(nums) == 3 and nums[-2] >= 60):

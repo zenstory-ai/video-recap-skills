@@ -32,8 +32,7 @@ All notable changes to this project are documented here.
 - **`--use-materials` 保留本地较新的 `background_research.json` 并刷新创作简报。** 素材库条目缺少调研文件或比 `work_dir` 内已有文件更旧时不覆盖，单视频与多视频恢复后均用当前调研文件运行 `understand.py --brief-only` 重建 `agent_narration_brief.md`。
 - **`--allow-partial-tts` 缺段成片写入 `final_qc.json` 警告，`TTS_TIMEOUT` 覆盖默认 MiMo TTS。** 缺段成片现在记录 `metadata.warnings`（`partial_tts`），交付时必须转告用户；`TTS_TIMEOUT` 对默认 MiMo TTS 同样生效；`narration_lint.py` 对不会渲染的 `visual_overlays[].type` 在配音前提前给出 `unsupported_visual_overlay_type` 警告。
 - **看板与状态检查准确识别暂停点，`recap.py --doctor` 给出明确指引。** 剪辑台“等你”列表不再误列已完成的 `source-mix`、多视频子目录与素材库 `artifacts` 目录；`recap_inspect state` 在 `cut` 第一阶段准确报 `clip_plan.json`；`recap.py --doctor` 直接提示改用 `doctor.py`。
-- **畸形输入与目标路径保护更稳健。** `recap_project.json` 非法 `bindings`、VLM 帧标签中的非数字时间戳、`background_research.json` 字符串字段或非法 JSON、非法 `style_card.json`、以及非对象的 `recap_run_manifest.json` / `assembly_manifest.json` 均给出可读错误或结构化建议，不再抛未捕获异常；`shot_review.py` 在计划文件损坏或过期时仍保护已声明源视频与未知现存文件不被 `--output` 覆盖。
-- **对齐参考文档示例泄漏扫描与《这一秒过火》案例证据链。** `video-reference` 的 `reference-schema.md` 示例通过 R6 中文专名泄漏自检；修正 `examples/guohuo-60s/` 策划、声画板与核查文档中的服化道具与分拍对应描述，使其与原片画面及已发布成片时间轴严丝合缝。
+- **畸形输入与目标路径保护更稳健。** `recap_project.json` 非法 `bindings`、VLM 帧标签中的非数字时间戳、`background_research.json` 字符串字段或非法 JSON、非法 `style_card.json`、以及非对象的 `recap_run_manifest.json` / `assembly_manifest.json` 均给出可读错误或结构化建议，不再抛未捕获异常；`understand.py` 与 `cut.py` 统一校验 `--target-duration` 时间格式与有穷数值，`validate.py` 不再读取已不参与校验的 `vlm_analysis.json`；`shot_review.py` 在计划文件损坏或过期时仍保护已声明源视频与未知现存文件不被 `--output` 覆盖。
 
 ## [0.6.2] - 2026-10-03
 
