@@ -48,6 +48,16 @@ def _record(entry):
     return json.loads(Path(entry["record"]).read_text(encoding="utf-8"))
 
 
+def _ass_color_param(params, key):
+    raw = _value(params, key)
+    if raw is None:
+        return None
+    try:
+        return library_lib.to_ass_color(raw)
+    except ValueError as exc:
+        raise BindingError(str(exc)) from exc
+
+
 def _subtitle_env(template, record, resources):
     params = record["params"]
     canvas = record["canvas"]
@@ -57,8 +67,8 @@ def _subtitle_env(template, record, resources):
         "SUBTITLE_FONT_SIZE": _value(params, "size_px"),
         "SUBTITLE_OUTLINE": _value(params, "outline_px"),
         "SUBTITLE_SHADOW": _value(params, "shadow_px"),
-        "SUBTITLE_PRIMARY_COLOR": _value(params, "primary_color"),
-        "SUBTITLE_OUTLINE_COLOR": _value(params, "outline_color"),
+        "SUBTITLE_PRIMARY_COLOR": _ass_color_param(params, "primary_color"),
+        "SUBTITLE_OUTLINE_COLOR": _ass_color_param(params, "outline_color"),
         "SUBTITLE_MAX_CHARS": _value(params, "max_chars"),
         "SUBTITLE_MAX_LINES": _value(params, "max_lines"),
     }
@@ -101,6 +111,11 @@ def _voice_updates(resource, args):
 def _same_setting(key, current, value):
     if key.endswith(("_PATH", "_FILE", "VOICE_REF")):
         return Path(current).expanduser().resolve() == Path(value).expanduser().resolve()
+    if key in ("SUBTITLE_PRIMARY_COLOR", "SUBTITLE_OUTLINE_COLOR"):
+        try:
+            return library_lib.to_ass_color(current) == library_lib.to_ass_color(value)
+        except ValueError:
+            return current == value
     try:
         return float(current) == float(value)
     except ValueError:

@@ -22,6 +22,14 @@ class ASRProviderError(RuntimeError):
     """Provider/API response failed, so an empty transcript is not cacheable success."""
 
 
+def _is_no_audio_stream_error(stderr):
+    text = str(stderr or "")
+    return (
+        "Output file does not contain any stream" in text
+        or "matches no streams" in text
+    )
+
+
 def transcribe_audio(video_path, work_dir):
     """提取音频并用 MiMo ASR 分段转录，通过分段合成时间戳。"""
     work_dir = Path(work_dir)
@@ -56,6 +64,13 @@ def transcribe_audio(video_path, work_dir):
     if result.returncode != 0:
         audio_wav.unlink(missing_ok=True)
         audio_meta.unlink(missing_ok=True)
+        if _is_no_audio_stream_error(result.stderr):
+            log("ASR 跳过：源视频无音轨，记录空转写")
+            asr_file.write_text(json.dumps([], ensure_ascii=False, indent=2), encoding="utf-8")
+            write_asr_timing_evidence(
+                work_dir, video_path, "NO_AUDIO_STREAM", final_segments=[]
+            )
+            return []
         asr_file.unlink(missing_ok=True)
         write_asr_timing_evidence(work_dir, video_path, "FAILED_AUDIO_EXTRACTION")
         raise RuntimeError(f"音频提取失败: {result.stderr}")

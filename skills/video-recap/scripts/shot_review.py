@@ -114,10 +114,12 @@ def probe_frame_clock(video):
         last_duration = frames[-1].get("duration", frames[-1].get("pkt_duration"))
         if last_duration is None or int(last_duration) <= 0:
             raise ValueError("missing/invalid terminal frame duration")
-        decoded_end = pts[-1] + int(last_duration) * tb
+        terminal_duration = int(last_duration) * tb
+        decoded_end = pts[-1] + terminal_duration
         if "duration_ts" in stream:
             end = (int(stream.get("start_pts", frames[0]["pts"])) + int(stream["duration_ts"])) * tb - origin
-            if abs(end - decoded_end) > tb:
+            coverage_tolerance = max(tb, min(terminal_duration / 2, Fraction(1, 100)))
+            if abs(end - decoded_end) > coverage_tolerance:
                 raise ValueError("decoded frame coverage does not reach declared stream end")
         else:
             end = decoded_end

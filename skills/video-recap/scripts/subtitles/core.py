@@ -46,6 +46,26 @@ def _seconds_to_ass_time(seconds):
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+_HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$")
+_ASS_COLOR_RE = re.compile(r"^&H([0-9a-fA-F]{6}|[0-9a-fA-F]{8})&?$", re.IGNORECASE)
+
+
+def _normalize_ass_color(value):
+    raw = str(value or "").strip()
+    m_hex = _HEX_COLOR_RE.match(raw)
+    if m_hex:
+        rgb = m_hex.group(1).upper()
+        rr, gg, bb = rgb[0:2], rgb[2:4], rgb[4:6]
+        alpha_hex = m_hex.group(2)
+        ass_alpha = f"{255 - int(alpha_hex, 16):02X}" if alpha_hex else "00"
+        return f"&H{ass_alpha}{bb}{gg}{rr}"
+    m_ass = _ASS_COLOR_RE.match(raw)
+    if m_ass:
+        digits = m_ass.group(1).upper()
+        return f"&H00{digits}" if len(digits) == 6 else f"&H{digits}"
+    return raw
+
+
 def _subtitle_style_config(canvas=None):
     """Return the internal default burn-in subtitle style.
 
@@ -60,8 +80,8 @@ def _subtitle_style_config(canvas=None):
         "font_name": CONFIG["subtitle_font_name"],
         "font_file": CONFIG["subtitle_font_file"],
         "font_size": CONFIG["subtitle_font_size"],
-        "primary_color": CONFIG["subtitle_primary_color"],
-        "outline_color": CONFIG["subtitle_outline_color"],
+        "primary_color": _normalize_ass_color(CONFIG["subtitle_primary_color"]),
+        "outline_color": _normalize_ass_color(CONFIG["subtitle_outline_color"]),
         "outline": CONFIG["subtitle_outline"],
         "shadow": CONFIG["subtitle_shadow"],
         "alignment": CONFIG["subtitle_alignment"],

@@ -394,3 +394,44 @@ def test_reference_only_binding_does_not_probe_the_canvas(monkeypatch, tmp_path,
     recap_runner.main()
 
     assert (work / "assembly_manifest.json").exists()
+
+
+def test_subtitle_hex_colors_normalize_to_ass_bgr_across_library_binding_and_subtitles(
+    tmp_path, clean_env, monkeypatch
+):
+    import library as library_mod
+    from subtitles.core import _subtitle_style_config
+    import lib as recap_lib
+
+    assert library_mod.to_ass_color("#FFE885") == "&H0085E8FF"
+    assert library_mod.to_ass_color("#FFE88580") == "&H7F85E8FF"
+    assert library_mod.to_ass_color("#000000") == "&H00000000"
+    assert library_mod.to_ass_color("&H00FFFFFF") == "&H00FFFFFF"
+
+    lib_dir = tmp_path / "lib"
+    shutil.copytree(EXAMPLE, lib_dir)
+    template = lib_dir / "templates/subtitle_style/clean-white/v1/template.json"
+    data = json.loads(template.read_text(encoding="utf-8"))
+    data["params"]["primary_color"] = {"value": "#FFE885", "provenance": "specified"}
+    data["params"]["outline_color"] = {"value": "#000000", "provenance": "specified"}
+    template.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+
+    _, report = library_mod.scan_library(lib_dir)
+    assert report.errors == []
+
+    path, _ = _project(tmp_path, {"subtitle_style": "clean-white@v1"}, library=lib_dir)
+    monkeypatch.setenv("SUBTITLE_PRIMARY_COLOR", "#FFE885")
+    resolved = project_binding.resolve_project(path, _args())
+    assert resolved["env"]["SUBTITLE_PRIMARY_COLOR"] == "&H0085E8FF"
+    assert resolved["env"]["SUBTITLE_OUTLINE_COLOR"] == "&H00000000"
+
+    monkeypatch.setitem(recap_lib.CONFIG, "subtitle_primary_color", "#FFE885")
+    monkeypatch.setitem(recap_lib.CONFIG, "subtitle_outline_color", "#112233")
+    style = _subtitle_style_config()
+    assert style["primary_color"] == "&H0085E8FF"
+    assert style["outline_color"] == "&H00332211"
+
+    data["params"]["primary_color"] = {"value": "not-a-color", "provenance": "specified"}
+    template.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    _, bad_report = library_mod.scan_library(lib_dir)
+    assert any(err["code"] == "color" for err in bad_report.errors)

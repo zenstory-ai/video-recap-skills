@@ -210,3 +210,59 @@ def test_depth_first_brief_orders_depth_and_asr_before_visual_ref_and_warns_miss
     assert "⚠️ Missing Background Research" in out_brief
     assert "底线质量与审美硬门禁" in out_brief
     assert "max budget if fully narrated" not in out_brief
+
+
+def test_no_audio_stream_video_allows_narration_while_enforcing_dead_air_and_cold_open(tmp_path):
+    from speech_ownership import measure_narration_speech_ownership
+
+    (tmp_path / "asr_timing_evidence.json").write_text(
+        json.dumps({"status": "NO_AUDIO_STREAM", "segments": []}), encoding="utf-8"
+    )
+    (tmp_path / "speech_boundary_anchors.json").write_text(
+        json.dumps({"status": "NO_AUDIO_STREAM", "sentence_anchors": [], "quiet_windows": []}),
+        encoding="utf-8",
+    )
+    (tmp_path / "asr_result.json").write_text("[]", encoding="utf-8")
+    (tmp_path / "silence_periods.json").write_text("[]", encoding="utf-8")
+    scenes = [{"start": 0.0, "end": 12.0}]
+
+    items = [{"start": 0.2, "end": 11.4, "narration": "长街宫灯摇曳，密使深夜叩响相府侧门递上东宫急函，逼得众人连夜决断。", "overlaps_speech": False}]
+    measured = measure_narration_speech_ownership(items, tmp_path, mode="full")
+    assert measured[0]["overlaps_speech"] is False
+    clean = lint_narration(measured, scenes, work_dir=tmp_path)
+    assert clean["ok"] is True
+    assert clean["errors"] == []
+
+    late_items = measure_narration_speech_ownership(
+        [{"start": 3.5, "end": 11.4, "narration": "长街宫灯摇曳，密使深夜叩响相府侧门递上东宫急函。", "overlaps_speech": False}],
+        tmp_path,
+        mode="full",
+    )
+    late_open = lint_narration(late_items, scenes, work_dir=tmp_path)
+    assert "weak_cold_open_silence" in [e["code"] for e in late_open["errors"]]
+
+    gap_items = measure_narration_speech_ownership(
+        [
+            {"start": 0.2, "end": 2.2, "narration": "密使深夜叩门。", "overlaps_speech": False},
+            {"start": 8.5, "end": 11.4, "narration": "东宫急函逼众决断。", "overlaps_speech": False},
+        ],
+        tmp_path,
+        mode="full",
+    )
+    dead_air = lint_narration(gap_items, scenes, work_dir=tmp_path)
+    assert "excessive_dead_air" in [e["code"] for e in dead_air["errors"]]
+
+
+def test_all_skill_scripts_avoid_unguarded_python310_typing_imports():
+    import ast
+
+    skills_root = Path(__file__).resolve().parents[2] / "skills"
+    for py_file in sorted(skills_root.rglob("*.py")):
+        source = py_file.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(py_file))
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == "typing":
+                names = {alias.name for alias in node.names}
+                assert "TypeGuard" not in names, (
+                    f"{py_file} imports Python 3.10+ typing.TypeGuard at module top level"
+                )

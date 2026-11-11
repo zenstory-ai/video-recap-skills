@@ -73,6 +73,31 @@ SAMPLE_KEYS = {
 }
 ID_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_HEX_RGB_RE = re.compile(r"^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$")
+_ASS_COLOR_RE = re.compile(r"^&H([0-9a-fA-F]{6}|[0-9a-fA-F]{8})&?$", re.IGNORECASE)
+
+
+def to_ass_color(value: str | None) -> str | None:
+    """Normalize CSS ``#RRGGBB``/``#RRGGBBAA`` or ASS ``&H(AA)BBGGRR`` into ``&HAABBGGRR``."""
+    if value is None:
+        return None
+    raw = str(value).strip()
+    if not raw:
+        return None
+    m_hex = _HEX_RGB_RE.match(raw)
+    if m_hex:
+        rgb = m_hex.group(1).upper()
+        rr, gg, bb = rgb[0:2], rgb[2:4], rgb[4:6]
+        alpha_hex = m_hex.group(2)
+        ass_alpha = f"{255 - int(alpha_hex, 16):02X}" if alpha_hex else "00"
+        return f"&H{ass_alpha}{bb}{gg}{rr}"
+    m_ass = _ASS_COLOR_RE.match(raw)
+    if m_ass:
+        digits = m_ass.group(1).upper()
+        if len(digits) == 6:
+            digits = f"00{digits}"
+        return f"&H{digits}"
+    raise ValueError(f"不支持的字幕颜色格式: {value!r}（需要 #RRGGBB、#RRGGBBAA 或 &HAABBGGRR）")
 
 
 class Report:
@@ -301,6 +326,15 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
             value = node.get("value") if isinstance(node, dict) else None
             if node is not None and not (isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0):
                 report.error(path, "number", f"params.{key}.value 必须是非负数")
+        for key in ("primary_color", "outline_color"):
+            node = params.get(key)
+            if node is not None:
+                value = node.get("value") if isinstance(node, dict) else None
+                try:
+                    if not _nonempty_str(value) or to_ass_color(value) is None:
+                        raise ValueError("empty")
+                except ValueError:
+                    report.error(path, "color", f"params.{key}.value 需要 #RRGGBB、#RRGGBBAA 或 ASS &HAABBGGRR")
         size, per_line = (_param_number(params, "size_px"), _param_number(params, "max_chars"))
         if per_line is None:
             report.error(path, "max_chars", "subtitle_style 需要 params.max_chars：按最长一行在这块画布上校准")

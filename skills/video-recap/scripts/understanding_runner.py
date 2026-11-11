@@ -214,6 +214,8 @@ def main():
             detect_speech_boundary_anchors(work_dir, asr_result)
     else:
         silence_periods = detect_silence_periods(video, work_dir, asr_result)
+        if not (work_dir / "speech_boundary_anchors.json").exists():
+            detect_speech_boundary_anchors(work_dir, asr_result)
         _write_stage_meta(silence_json, silence_meta)
 
     # Step 4: VLM analysis (the only stage that requires the chat API key)

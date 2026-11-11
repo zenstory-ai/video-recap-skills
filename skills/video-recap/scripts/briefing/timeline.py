@@ -194,6 +194,18 @@ def _read_json(path, default):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
+def _quiet_rows_for_source(source_dir):
+    """Non-speech intervals for one source; a video-only source has no speech anywhere."""
+    evidence = _read_json(Path(source_dir) / "asr_timing_evidence.json", {})
+    if isinstance(evidence, dict) and evidence.get("status") == "NO_AUDIO_STREAM":
+        return [{"start": 0.0, "end": 1e9, "has_speech": False}]
+    return [
+        row
+        for row in _read_json(Path(source_dir) / "silence_periods.json", [])
+        if not row["has_speech"]
+    ]
+
+
 def _source_to_span_output(source_time, span):
     """`source_time` on one clip span's OUTPUT clock, clamped to that span: the next span on
     the output timeline plays a different source range."""
@@ -253,11 +265,7 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
     speech_rows = [
         row for row in _read_json(work_dir / "asr_result.json", []) if row["text"]
     ]
-    quiet_rows = [
-        row
-        for row in _read_json(work_dir / "silence_periods.json", [])
-        if not row["has_speech"]
-    ]
+    quiet_rows = _quiet_rows_for_source(work_dir)
     out_payload = {
         "schema_version": 2,
         "artifact": "speech_boundary_anchors_output.json",
@@ -354,11 +362,10 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         if source_id not in cache:
             source_dir = work_dir / source_by_id[source_id]["source_work_dir"]
             anchors_path = source_dir / "speech_boundary_anchors.json"
-            quiet_path = source_dir / "silence_periods.json"
             cache[source_id] = (
                 _read_json(anchors_path, {"sentence_anchors": []})["sentence_anchors"],
                 source_speech_rows(source_dir),
-                _read_json(quiet_path, []),
+                _quiet_rows_for_source(source_dir),
             )
         return cache[source_id]
 

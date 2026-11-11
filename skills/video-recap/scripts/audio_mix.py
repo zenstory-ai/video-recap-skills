@@ -97,8 +97,12 @@ def _handoff_speech_evidence(work_dir, payload):
     if not payload.get("require_measured"):
         rows = rows or [row for row in _asr_segments(work_dir) if row["text"].strip()]
         if not quiet:
-            silence = _load_work_json(work_dir, "silence_periods.json") or []
-            quiet = _timed_rows(row for row in silence if not row["has_speech"])
+            asr_evidence = _load_work_json(work_dir, "asr_timing_evidence.json") or {}
+            if isinstance(asr_evidence, dict) and asr_evidence.get("status") == "NO_AUDIO_STREAM":
+                quiet = [{"start": 0.0, "end": 1e9}]
+            else:
+                silence = _load_work_json(work_dir, "silence_periods.json") or []
+                quiet = _timed_rows(row for row in silence if not row["has_speech"])
     return _timed_rows(rows), quiet, _timed_rows(_dialogue_speech_spans(rows))
 
 
