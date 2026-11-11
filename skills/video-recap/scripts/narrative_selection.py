@@ -4,9 +4,14 @@ This checks source-span selection and ordering only.  It does not claim that the
 rendered mix is audible or that the declared content is semantically correct.
 """
 
+from __future__ import annotations
+
 import math
 import os
-from typing import TypeGuard
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from typing import TypeGuard
 
 
 _EPSILON = 1e-9

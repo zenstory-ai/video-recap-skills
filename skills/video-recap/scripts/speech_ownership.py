@@ -122,11 +122,15 @@ def load_source_sentence_evidence(work_dir, mode="full"):
             "sentence_anchors": []
         }
         speech_spans = _source_asr_rows(work_dir)
-        quiet_windows = [
-            row
-            for row in _read_json(work_dir / "silence_periods.json") or []
-            if not row["has_speech"]
-        ]
+        asr_evidence = _read_json(work_dir / "asr_timing_evidence.json") or {}
+        if isinstance(asr_evidence, dict) and asr_evidence.get("status") == "NO_AUDIO_STREAM":
+            quiet_windows = [{"start": 0.0, "end": 1e9, "has_speech": False}]
+        else:
+            quiet_windows = [
+                row
+                for row in _read_json(work_dir / "silence_periods.json") or []
+                if not row["has_speech"]
+            ]
     else:
         payload = _read_json(work_dir / "speech_boundary_anchors_output.json")
         if not _output_payload_is_current(payload, work_dir):

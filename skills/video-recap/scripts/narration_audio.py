@@ -26,10 +26,26 @@ def _apply_narration_speed(tts_segments, work_dir):
                               "-ar", "44100", "-ac", "1", "-acodec", "pcm_s16le", out])
         if res.returncode != 0:
             raise RuntimeError(f"解说提速失败 {src}: {res.stderr}")
+        seg["_unsped_audio_path"] = src
+        seg["_applied_global_speed"] = speed
         seg["audio_path"] = out
         seg["audio_duration"] = get_video_duration(out)
         done += 1
     log(f"解说整体提速: atempo={speed:.2f} ({done} 段)")
+
+
+def _atempo_filter_chain(factor):
+    """Build an FFmpeg atempo chain (each stage within [0.5, 2.0]) for a single-pass stretch."""
+    parts = []
+    rem = float(factor)
+    while rem > 2.0:
+        parts.append("atempo=2.0")
+        rem /= 2.0
+    while rem < 0.5:
+        parts.append("atempo=0.5")
+        rem /= 0.5
+    parts.append(f"atempo={rem:.6f}")
+    return ",".join(parts)
 
 
 def _adjust_tts_speed(
@@ -38,6 +54,8 @@ def _adjust_tts_speed(
     tts_rate_offset=0.0,
     *,
     segment_index=None,
+    raw_source_path=None,
+    base_speed=1.0,
 ):
     """Fit overlong TTS with bounded atempo; never time-trim speech in assemble.
 
@@ -71,8 +89,11 @@ def _adjust_tts_speed(
     # 多加速，也不能在写入时间线时裁掉最后一个音节。
     tempo = min(ratio * 1.002, effective_max)
     adjusted_path = audio_path.with_name(f"{audio_path.stem}_adj{audio_path.suffix}")
-    cmd = ["ffmpeg", "-y", "-i", str(audio_path),
-           "-filter:a", f"atempo={tempo:.6f}",
+    use_single_pass = bool(raw_source_path and os.path.exists(raw_source_path) and base_speed > 0)
+    encode_src = str(raw_source_path) if use_single_pass else str(audio_path)
+    encode_tempo = (float(base_speed) * tempo) if use_single_pass else tempo
+    cmd = ["ffmpeg", "-y", "-i", encode_src,
+           "-filter:a", _atempo_filter_chain(encode_tempo),
            "-ar", "44100", "-ac", "1", str(adjusted_path)]
     result = run_cmd(cmd)
     if result.returncode != 0:
@@ -183,6 +204,8 @@ def _build_timed_narration(
             wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
                 wav_path, available_duration, tts_rate_offset,
                 segment_index=seg["index"],
+                raw_source_path=seg.get("_unsped_audio_path"),
+                base_speed=seg.get("_applied_global_speed", 1.0),
             )
             if fit_meta["fit_status"] == "no_safe_fit":
                 if "needed_tempo_factor" in fit_meta:

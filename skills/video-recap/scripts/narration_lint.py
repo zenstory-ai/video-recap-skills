@@ -35,6 +35,11 @@ GENERIC_CHARACTER_RE = re.compile(
     r"(?:黑衣|白衣|灰衣|红衣|蓝衣|西装|年轻|中年|年老|陌生|神秘|高个|眼镜)(?:男子|女子|男人|女人)"
     r"|白发女子|黑发男子"
 )
+COMMENTARY_CLICHE_RE = re.compile(
+    r"这说明|这意味着|这证明了|这是一场关于|命运的齿轮|好戏才刚刚开始|故事才刚刚开始"
+    r"|传奇仍在继续|未来可期|拭目以待|让我们一起"
+)
+META_OPENER_RE = re.compile(r"^(?:大家好|今天我们来|今天聊聊|本期视频|接下来我们)")
 SOURCE_HANDOFF_MAX_HOLD_SECONDS = 3.0
 _SENTENCE_END_PUNCT = "。！？!?…."
 _TRAILING_QUOTES = "”’\"'」』）》】] "
@@ -499,6 +504,19 @@ def lint_narration(
                         "incomplete_sentence",
                         "Narration must end with complete sentence punctuation",
                         text_tail=text[-8:],
+                    )
+                )
+            cliche_matches = COMMENTARY_CLICHE_RE.findall(text)
+            if idx == 0 and META_OPENER_RE.search(text):
+                cliche_matches.append(META_OPENER_RE.search(text).group(0))
+            if cliche_matches:
+                warnings.append(
+                    _lint_issue(
+                        "warning",
+                        idx,
+                        "editorial_commentary_tone",
+                        f"检测到评论/升华套话「{cliche_matches[0]}」；请改写为具体人物动机、筹码与因果行动，避免阅读理解式总结或慢热寒暄开场",
+                        matches=cliche_matches,
                     )
                 )
 

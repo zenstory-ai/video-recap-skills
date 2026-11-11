@@ -19,7 +19,7 @@ def test_cut_floor_defaults():
     assert CONFIG["min_clip_duration"] == pytest.approx(0.8)
     assert CONFIG["scene_cut_detect_threshold"] == pytest.approx(0.32)
     assert CONFIG["flash_sliver_max_seconds"] == pytest.approx(0.20)
-    assert CONFIG["clip_end_pause_pad"] == pytest.approx(0.22)
+    assert CONFIG["clip_end_pause_pad"] == pytest.approx(0.30)
 
 
 def test_shot_review_blocks_flash_slivers_under_0_20s_and_keeps_0_50s_advisory():

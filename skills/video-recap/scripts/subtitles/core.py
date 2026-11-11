@@ -9,6 +9,7 @@ from assemble_constants import (
     SUBTITLE_STYLE_REF_H,
     SUBTITLE_STYLE_REF_W,
     _SUBTITLE_CLOSING_QUOTES,
+    _SUBTITLE_DISPLAY_STRIP_PUNCTUATION,
     _SUBTITLE_TERMINAL_PUNCTUATION,
 )
 from media import _ratio_to_float
@@ -46,6 +47,26 @@ def _seconds_to_ass_time(seconds):
     return f"{h}:{m:02d}:{s:02d}.{cs:02d}"
 
 
+_HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$")
+_ASS_COLOR_RE = re.compile(r"^&H([0-9a-fA-F]{6}|[0-9a-fA-F]{8})&?$", re.IGNORECASE)
+
+
+def _normalize_ass_color(value):
+    raw = str(value or "").strip()
+    m_hex = _HEX_COLOR_RE.match(raw)
+    if m_hex:
+        rgb = m_hex.group(1).upper()
+        rr, gg, bb = rgb[0:2], rgb[2:4], rgb[4:6]
+        alpha_hex = m_hex.group(2)
+        ass_alpha = f"{255 - int(alpha_hex, 16):02X}" if alpha_hex else "00"
+        return f"&H{ass_alpha}{bb}{gg}{rr}"
+    m_ass = _ASS_COLOR_RE.match(raw)
+    if m_ass:
+        digits = m_ass.group(1).upper()
+        return f"&H00{digits}" if len(digits) == 6 else f"&H{digits}"
+    return raw
+
+
 def _subtitle_style_config(canvas=None):
     """Return the internal default burn-in subtitle style.
 
@@ -60,8 +81,8 @@ def _subtitle_style_config(canvas=None):
         "font_name": CONFIG["subtitle_font_name"],
         "font_file": CONFIG["subtitle_font_file"],
         "font_size": CONFIG["subtitle_font_size"],
-        "primary_color": CONFIG["subtitle_primary_color"],
-        "outline_color": CONFIG["subtitle_outline_color"],
+        "primary_color": _normalize_ass_color(CONFIG["subtitle_primary_color"]),
+        "outline_color": _normalize_ass_color(CONFIG["subtitle_outline_color"]),
         "outline": CONFIG["subtitle_outline"],
         "shadow": CONFIG["subtitle_shadow"],
         "alignment": CONFIG["subtitle_alignment"],
@@ -91,14 +112,36 @@ def _subtitle_style_config(canvas=None):
     font_scale = font_size / base_font
     style.update({
         "font_size": font_size,
-        "outline": max(0, round(float(style["outline"]) * font_scale)),
-        "shadow": max(0, round(float(style["shadow"]) * font_scale)),
+        "outline": max(0.0, round(float(style["outline"]) * font_scale, 2)),
+        "shadow": max(0.0, round(float(style["shadow"]) * font_scale, 2)),
         "margin_l": margin_l,
         "margin_r": margin_r,
         "margin_v": margin_v,
         "play_res_x": cw,
         "play_res_y": ch,
     })
+    return style
+
+
+def _effective_subtitle_style(canvas=None, work_dir=None):
+    """Return subtitle style after measured-band fitting and optional studio packaging overrides."""
+    base = _style_for_measured_subtitle_band(_subtitle_style_config(canvas), canvas)
+    style = {
+        **base,
+        "glow": float(CONFIG.get("subtitle_glow", 0.0)),
+        "fade_ms": int(CONFIG.get("subtitle_fade_ms", 0)),
+        "highlight_color": _normalize_ass_color(CONFIG.get("subtitle_highlight_color", "&H004CD2FF")),
+        "bridge_gap_seconds": float(CONFIG.get("subtitle_bridge_gap_seconds", 0.0)),
+    }
+    if work_dir is not None and canvas is not None:
+        from packaging_studio import subtitle_overrides_for_plan
+
+        overrides = subtitle_overrides_for_plan(work_dir, canvas)
+        if overrides:
+            style.update(overrides)
+            for color_key in ("primary_color", "outline_color", "highlight_color", "dialogue_outline_color"):
+                if color_key in style and style[color_key]:
+                    style[color_key] = _normalize_ass_color(style[color_key])
     return style
 
 
@@ -201,17 +244,20 @@ def _measured_subtitle_safe_area(style, canvas):
 
 
 def _subtitle_display_text(text):
-    """Return display-only subtitle text with trailing sentence punctuation removed.
+    """Return display-only subtitle text with trailing clause/sentence punctuation removed.
 
     Narration/TTS source text stays untouched; this is applied only to SRT/ASS cue text.
-    Closing quotes/brackets are preserved, so 「原声台词。」 renders as 「原声台词」.
+    Closing quotes/brackets are preserved, so 「原声台词，」 renders as 「原声台词」;
+    interrupted ASCII words like ``Sor…`` keep their attached ellipsis.
     """
     text = text.strip()
     suffix = ""
     while text and text[-1] in _SUBTITLE_CLOSING_QUOTES:
         suffix = text[-1] + suffix
         text = text[:-1].rstrip()
-    text = text.rstrip(_SUBTITLE_TERMINAL_PUNCTUATION).rstrip()
+    if len(text) >= 2 and text.endswith("…") and text[-2].isascii() and text[-2].isalpha():
+        return (text + suffix).strip()
+    text = text.rstrip(_SUBTITLE_DISPLAY_STRIP_PUNCTUATION).rstrip()
     return (text + suffix).strip()
 
 
@@ -240,11 +286,60 @@ def _subtitle_entry_chunks(raw_chunks):
     return out
 
 
+_LATIN_APOSTROPHE_RE = re.compile(r"(?<=[A-Za-z])[‘’](?=[A-Za-z])")
+_ATOMIC_ASCII_TOKEN_RE = re.compile(r"[A-Za-z0-9.%+-]+")
+_ATOMIC_CJK_COMPOUND_RE = re.compile(
+    r"(?:服务区|烧烤店|大排档|为什么|怎么会|怎么办|只不过|没想到|是不是|能不能|"
+    r"黑骑|长公主|尚公主|宰相府|尚书省|大理寺|锦衣卫|太医院|"
+    r"总决赛|季后赛|常规赛|三分球|罚球线|独行侠|得分后卫|控球后卫|大前锋|小前锋)"
+)
+
+
 def _normalize_subtitle_text(text):
-    """Normalize Chinese em-dashes in burned subtitle text: a run of one-or-more "—" (incl. "——")
-    collapses to a single "，". Then collapse any resulting double commas ("，，"→"，") so the dash
-    swap never leaves a doubled comma."""
-    return re.sub(r"，{2,}", "，", re.sub(r"—+", "，", text))
+    """Normalize burned subtitle text: straighten Latin curly apostrophes so CJK fonts never
+    render full-width gaps inside contractions, collapse Chinese em-dashes ("—" / "——") to "，",
+    collapse doubled commas, and strip any dangling comma left if a cue ended with an em-dash."""
+    normalized = _LATIN_APOSTROPHE_RE.sub("'", text)
+    normalized = re.sub(r"，{2,}", "，", re.sub(r"—+", "，", normalized))
+    if normalized.endswith("，"):
+        normalized = normalized[:-1].rstrip()
+    elif len(normalized) >= 2 and normalized[-1] in _SUBTITLE_CLOSING_QUOTES and normalized[-2] == "，":
+        normalized = normalized[:-2].rstrip() + normalized[-1]
+    return normalized
+
+
+def _hard_wrap_clause(clause, max_chars):
+    """Balance an overlong clause across lines without slicing inside ASCII words, numbers, or CJK compounds."""
+    n = len(clause)
+    if n <= max_chars:
+        return [clause]
+    piece_count = (n + max_chars - 1) // max_chars
+    atomic_spans = sorted(
+        m.span()
+        for rx in (_ATOMIC_ASCII_TOKEN_RE, _ATOMIC_CJK_COMPOUND_RE)
+        for m in rx.finditer(clause)
+        if m.end() - m.start() <= max_chars
+    )
+    pieces, cursor = [], 0
+    for piece_index in range(piece_count - 1):
+        rem_len = n - cursor
+        rem_pieces = piece_count - piece_index
+        ideal = cursor + (rem_len + rem_pieces - 1) // rem_pieces
+        cut = ideal
+        for ts, te in atomic_spans:
+            if ts < ideal < te:
+                candidates = [
+                    c for c in (ts, te)
+                    if cursor + 2 <= c <= cursor + max_chars
+                    and 2 * (rem_pieces - 1) <= n - c <= (rem_pieces - 1) * max_chars
+                ]
+                if candidates:
+                    cut = min(candidates, key=lambda c: abs(c - ideal))
+                break
+        pieces.append(clause[cursor:cut])
+        cursor = cut
+    pieces.append(clause[cursor:])
+    return pieces
 
 
 def _split_subtitle_chunks(text, max_chars):
@@ -268,21 +363,9 @@ def _split_subtitle_chunks(text, max_chars):
             buf = ""
     if buf.strip():
         clauses.append(buf)
-    # Any single clause longer than max_chars is hard-wrapped so no chunk ever exceeds one line.
-    # Balance those pieces instead of slicing exactly at max_chars: a 21-character clause must
-    # not become a readable 20-character cue followed by a 1-character flash.
     sized = []
     for clause in clauses:
-        if len(clause) <= max_chars:
-            sized.append(clause)
-        else:
-            piece_count = (len(clause) + max_chars - 1) // max_chars
-            base, extra = divmod(len(clause), piece_count)
-            cursor = 0
-            for piece_index in range(piece_count):
-                width = base + (1 if piece_index < extra else 0)
-                sized.append(clause[cursor:cursor + width])
-                cursor += width
+        sized.extend(_hard_wrap_clause(clause, max_chars))
     chunks, cur = [], ""
     for clause in sized:
         sentence_closed = cur.rstrip().endswith(tuple(_SUBTITLE_TERMINAL_PUNCTUATION))
@@ -296,30 +379,47 @@ def _split_subtitle_chunks(text, max_chars):
     return [c.strip() for c in chunks if c.strip()]
 
 
-def _subtitle_entries(narration):
-    """Collect subtitle entries from final TTS segment placement.
-
-    Each placed segment is split into short one-line chunks and its played window
-    [actual_place_start, actual_place_end] is distributed across them in proportion to character
-    count — karaoke-style timing that keeps each line on screen only while it is roughly being
-    spoken, instead of holding a whole paragraph for the segment's full duration. Segments that
-    were not placed have a zero-width window and therefore produce no cue."""
-    max_chars = CONFIG["subtitle_max_chars"]
+def _subtitle_entries(narration, *, max_chars=None, highlights_by_index=None):
+    """Collect subtitle entries from final TTS segment placement."""
+    limit = int(max_chars or CONFIG["subtitle_max_chars"])
+    hl_map = highlights_by_index or {}
     entries = []
-    for seg in narration:
+    for pos, seg in enumerate(narration):
         text = seg["spoken_text"]
         start, end = float(seg["actual_place_start"]), float(seg["actual_place_end"])
-        entries.extend(_distribute_chunks(_split_subtitle_chunks(text, max_chars), start, end))
+        seg_idx = seg.get("index", pos)
+        seg_hl = seg.get("highlights") or hl_map.get(seg_idx) or ()
+        seg_entries = _distribute_chunks(_split_subtitle_chunks(text, limit), start, end)
+        if seg_hl:
+            for item in seg_entries:
+                item["highlights"] = list(seg_hl)
+        entries.extend(seg_entries)
     return entries
 
 
-def _distribute_chunks(chunks, start, end):
-    """Distribute [start,end] across raw chunks while emitting display-clean text.
+def _bridge_narration_micro_gaps(entries, bridge_seconds=0.0):
+    """Hold consecutive narrator cues across tiny inter-sentence pauses to prevent blank flashes."""
+    bridge = float(bridge_seconds or 0.0)
+    if bridge <= 0.0 or len(entries) < 2:
+        return entries
+    out = [dict(e) for e in entries]
+    for i in range(len(out) - 1):
+        cur, nxt = out[i], out[i + 1]
+        if (
+            cur.get("is_dialogue")
+            or nxt.get("is_dialogue")
+            or str(cur["text"]).startswith("「")
+            or str(nxt["text"]).startswith("「")
+        ):
+            continue
+        gap = float(nxt["start"]) - float(cur["end"])
+        if 0.0 < gap <= bridge:
+            cur["end"] = float(nxt["start"])
+    return out
 
-    Terminal subtitle punctuation is visual-only: it is stripped from final cue text,
-    but the raw split chunks remain the timing topology. A slice too short to show on its
-    own is folded into the previous line of the same block, so no chunk is ever dropped.
-    """
+
+def _distribute_chunks(chunks, start, end):
+    """Distribute [start,end] across raw chunks while emitting display-clean text."""
     chunks = _subtitle_entry_chunks(chunks)
     if not chunks or end - start < 0.1:
         return []
@@ -349,4 +449,7 @@ def _bracketed_original_chunks(text, start, end, max_chars):
     if chunks:
         chunks[0] = "「" + chunks[0]
         chunks[-1] = chunks[-1] + "」"
-    return _distribute_chunks(chunks, start, end)
+    entries = _distribute_chunks(chunks, start, end)
+    for entry in entries:
+        entry["is_dialogue"] = True
+    return entries

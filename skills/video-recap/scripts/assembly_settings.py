@@ -7,7 +7,8 @@ from loudness import _loudness_mode, final_loudnorm_filter
 from lib import CONFIG
 from source_subtitles import _source_subtitle_mask
 from subtitles.core import _subtitle_style_config
-from packaging import packaging_settings
+from packaging import packaging_settings, studio_packaging_settings
+from sfx_mix import sfx_settings
 
 
 def assembly_settings_payload(work_dir=None, *, audio_mode="narration"):
@@ -78,4 +79,10 @@ def assembly_settings_payload(work_dir=None, *, audio_mode="narration"):
     if burn_subtitles:
         settings["subtitle_renderer"] = "ass"
         settings["subtitle_style"] = _subtitle_style_config()
+    studio_meta = studio_packaging_settings(work_dir)
+    if studio_meta is not None:
+        settings["video_filters"]["packaging_plan"] = studio_meta
+    sfx_meta = sfx_settings(work_dir)
+    if sfx_meta["present"]:
+        settings["audio_mix"]["sfx"] = sfx_meta
     return settings

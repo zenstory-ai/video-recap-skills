@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.error
@@ -180,6 +181,15 @@ _raw_mimo_asr_api_url = (
 _foreign_source_audio = env_bool("FOREIGN_SOURCE_AUDIO", False)
 _foreign_under_narration_volume = 0.05
 
+
+def _default_subtitle_font_name():
+    """Return a clean CJK-capable system sans-serif family for burned subtitles."""
+    if sys.platform == "darwin":
+        return "PingFang SC"
+    if sys.platform == "win32":
+        return "Microsoft YaHei"
+    return "Noto Sans CJK SC"
+
 CONFIG = {
     "api_provider": "mimo",
     "api_url": normalize_api_url(_raw_api_url),
@@ -270,7 +280,7 @@ CONFIG = {
     "tts_segment_peak_limit": 0.98,
     "snap_clip_line_end": env_bool("SNAP_CLIP_LINE_END", True),
     "clip_snap_max_extend": env_float("CLIP_SNAP_MAX_EXTEND", 2.0, minimum=0.0),
-    "clip_end_pause_pad": env_float("CLIP_END_PAUSE_PAD", 0.22, minimum=0.0),
+    "clip_end_pause_pad": env_float("CLIP_END_PAUSE_PAD", 0.30, minimum=0.0),
     "clip_start_snap_max_prepend": env_float("CLIP_START_SNAP_MAX_PREPEND", 1.8, minimum=0.0),
     "clip_start_snap_max_trim": env_float("CLIP_START_SNAP_MAX_TRIM", 0.35, minimum=0.0),
     "min_clip_duration": env_float("MIN_CLIP_DURATION", 0.8, minimum=0.05),
@@ -284,8 +294,9 @@ CONFIG = {
     "max_dead_air_seconds": env_float("MAX_DEAD_AIR_SECONDS", 5.0, minimum=0.0),
     "max_cold_open_silence_seconds": env_float("MAX_COLD_OPEN_SILENCE_SECONDS", 2.5, minimum=0.0),
     "ending_audio_fade_ms": env_float("ENDING_AUDIO_FADE_MS", 350.0, minimum=0.0),
+    "studio_vocal_polish": env_bool("STUDIO_VOCAL_POLISH", True),
     "fade_ms": 120,
-    "ducking_narr_weight": 1.5,
+    "ducking_narr_weight": 1.6,
     "zone_ducking_volume": env_float(
         "ZONE_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.12,
@@ -311,7 +322,7 @@ CONFIG = {
     "quiet_overlap_min_ratio": 0.8,
     "speech_ducking_volume": env_float(
         "SPEECH_DUCKING_VOLUME",
-        _foreign_under_narration_volume if _foreign_source_audio else 0.2,
+        _foreign_under_narration_volume if _foreign_source_audio else 0.12,
         minimum=0.0,
     ),
     "burn_subtitles": env_bool("BURN_SUBTITLES", True),
@@ -328,21 +339,25 @@ CONFIG = {
     "target_lra": 11.0,
     "final_limiter_peak": 0.98,
     "loudness_limiter_max_db": env_float("LOUDNESS_LIMITER_MAX_DB", 6.0, minimum=0.0),
-    "subtitle_font_name": os.environ.get("SUBTITLE_FONT_NAME", "Arial"),
+    "subtitle_font_name": os.environ.get("SUBTITLE_FONT_NAME") or _default_subtitle_font_name(),
     "subtitle_font_file": os.environ.get("SUBTITLE_FONT_FILE", "").strip(),
     "subtitle_font_size": env_int("SUBTITLE_FONT_SIZE", 42, minimum=8),
-    "subtitle_primary_color": os.environ.get("SUBTITLE_PRIMARY_COLOR", "&H00FFFFFF"),
+    "subtitle_primary_color": os.environ.get("SUBTITLE_PRIMARY_COLOR", "&H008AE0FF"),
     "subtitle_outline_color": os.environ.get("SUBTITLE_OUTLINE_COLOR", "&H00000000"),
-    "subtitle_outline": env_float("SUBTITLE_OUTLINE", 2.0, minimum=0.0),
+    "subtitle_outline": env_float("SUBTITLE_OUTLINE", 2.5, minimum=0.0),
     "subtitle_shadow": env_float("SUBTITLE_SHADOW", 1.0, minimum=0.0),
     "subtitle_margin_v": env_int("SUBTITLE_MARGIN_V", 48, minimum=0),
     "subtitle_margin_l": 40,
     "subtitle_margin_r": 40,
     "subtitle_alignment": env_int("SUBTITLE_ALIGNMENT", 2, minimum=1),
-    "subtitle_max_chars": env_int("SUBTITLE_MAX_CHARS", 20, minimum=6),
+    "subtitle_max_chars": env_int("SUBTITLE_MAX_CHARS", 18, minimum=6),
     "subtitle_max_lines": env_int("SUBTITLE_MAX_LINES", 2, minimum=1),
     "subtitle_play_res_x": env_int("SUBTITLE_PLAY_RES_X", 1280, minimum=1),
     "subtitle_play_res_y": env_int("SUBTITLE_PLAY_RES_Y", 720, minimum=1),
+    "subtitle_glow": env_float("SUBTITLE_GLOW", 0.0, minimum=0.0),
+    "subtitle_fade_ms": env_int("SUBTITLE_FADE_MS", 0, minimum=0),
+    "subtitle_highlight_color": os.environ.get("SUBTITLE_HIGHLIGHT_COLOR", "&H004CD2FF"),
+    "subtitle_bridge_gap_seconds": env_float("SUBTITLE_BRIDGE_GAP_SECONDS", 0.0, minimum=0.0),
 }
 
 SCRIPT_DIR = Path(__file__).parent

@@ -370,3 +370,22 @@ def test_no_key_placeholder_is_never_a_cache_hit(monkeypatch, tmp_path):
     assert _cache_state_after_meta(tmp_path, video) == "MISS"
     monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "tp-real")
     assert _asr_cache_state(tmp_path / "asr_result.json", _asr_cache_payload(video), video) == "MISS"
+
+
+def test_video_without_audio_stream_records_no_audio_stream_and_caches(monkeypatch, tmp_path):
+    """A silent/video-only container must not fail ASR or require --skip-asr."""
+    video = _video(tmp_path)
+    monkeypatch.setitem(asr.CONFIG, "mimo_asr_api_key", "test-key")
+    monkeypatch.setattr(
+        asr,
+        "run_cmd",
+        lambda cmd, **_kw: CompletedProcess(
+            cmd, 234, stdout="", stderr="Output file does not contain any stream\n"
+        ),
+    )
+
+    assert asr.transcribe_audio(video, tmp_path) == []
+    assert json.loads((tmp_path / "asr_result.json").read_text(encoding="utf-8")) == []
+    evidence = _read_evidence(tmp_path)
+    assert evidence["status"] == "NO_AUDIO_STREAM"
+    assert _cache_state_after_meta(tmp_path, video) == "FRESH"

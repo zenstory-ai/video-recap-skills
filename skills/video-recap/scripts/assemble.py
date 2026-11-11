@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import shutil
+import subprocess
 from pathlib import Path
 
 import artifacts
@@ -16,6 +17,7 @@ import loudness
 import media
 import narration_audio
 import render_preflight
+import sfx_mix
 import subtitles.render as subtitle_render
 import timeline_emit
 import packaging
@@ -50,7 +52,8 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
 
     output_path = Path(output_path)
     video_duration = lib.get_video_duration(input_video)
-    canvas = media._probe_canvas(input_video)  # drives subtitle PlayRes/scale so 竖屏 text isn't stretched
+    input_canvas = media._probe_canvas(input_video)
+    canvas = packaging.resolve_output_canvas(work_dir, input_canvas)
     burn_subtitles = lib.CONFIG["burn_subtitles"]
     source_has_audio = media._has_audio_stream(input_video)
     if audio_mode == "source-mix" and not source_has_audio:
@@ -89,20 +92,25 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     elif has_bgm:
         lib.log(f"BGM 铺底: {bgm_path} (音量 {lib.CONFIG['bgm_volume']}，旁白时 {lib.CONFIG['bgm_ducking_volume']})")
 
+    studio_plan = packaging.prepare_studio_packaging(
+        work_dir, input_canvas, video_duration, tts_segments
+    )
     # 多轨时间线模型（timeline.json）：canonical 渲染仍是 ffmpeg，此模型供检视/可选导出
     timeline_emit._emit_timeline(
         input_video, tts_segments, work_dir, video_duration, canvas, has_bgm,
         audio_mode=audio_mode,
+        studio_packaging=studio_plan,
     )
 
     packaging_layers = packaging.load_packaging_layers(work_dir, canvas)
-    mask_filter = visual_render._source_subtitle_mask_filter(canvas, work_dir, tts_segments, video_duration)
+    mask_filter = visual_render._source_subtitle_mask_filter(input_canvas, work_dir, tts_segments, video_duration)
     visual_qc = visual_render._build_visual_qc(
         tts_segments,
         work_dir,
         video_duration,
         canvas,
         mask_filter=mask_filter,
+        packaging_qc=studio_plan["qc"] if studio_plan else None,
     )
     visual_render._write_visual_qc(work_dir, visual_qc)
     assembly_qc_path = Path(work_dir) / constants.ASSEMBLY_QC
@@ -168,6 +176,21 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
             )
 
         audio_input_args = ["-i", str(narration_wav), *original_audio_input]
+
+    sfx_wav, sfx_applied = sfx_mix.build_sfx_track(work_dir, video_duration, tts_segments)
+    if sfx_wav is not None:
+        sfx_idx = (
+            (1 + (1 if has_bgm else 0))
+            if audio_mode == "source-mix"
+            else (2 + (0 if source_has_audio else 1) + (1 if has_bgm else 0))
+        )
+        bgm_input = [*bgm_input, "-i", str(sfx_wav)]
+        tail_fade = audio_mix._tail_fade_suffix(video_duration)
+        mix_graph = (
+            f"{mix_graph[:-len('[aout]')]}[pre_sfx];"
+            f"[{sfx_idx}:a]aresample=48000{tail_fade}[sfx];"
+            "[pre_sfx][sfx]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
+        )
     # 末端整体响度归一：ducking 只管相对平衡，这一步统一成片绝对响度
     loudnorm_measurement, peak_limiter = plan_loudness(peak_target)
     final_ln = loudness.final_loudnorm_filter(loudnorm_measurement, peak_limiter,
@@ -223,11 +246,45 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     color_tags = media._output_color_tags(source_format)
     copy_unsafe = not media._video_copy_safe(source_format)
     reencode = (
-        bool(vf_chain or packaging_layers) or lib.CONFIG["force_video_reencode"] or copy_unsafe
+        bool(vf_chain or packaging_layers or studio_plan)
+        or lib.CONFIG["force_video_reencode"]
+        or copy_unsafe
     )
     notes = []
     video_filter_script = None
-    if vf_chain or packaging_layers:
+    if studio_plan is not None:
+        vf_tail = []
+        if burn_subtitles:
+            studio_font_file = studio_plan["subtitle_overrides"].get("font_file") or lib.CONFIG["subtitle_font_file"]
+            vf_tail.append(visual_render._subtitle_burn_filter(ass_path, font_file=studio_font_file))
+        if max_h > 0:
+            vf_tail.append(visual_render._output_downscale_filter(max_h))
+        else:
+            vf_tail.append(even)
+        vf_tail.append(media._color_tag_filter(color_tags))
+        video_filter = packaging.compose_studio_video_filter(
+            studio_plan, vf_tail, extra_layers=packaging_layers, mask_filter=mask_filter
+        )
+        if len(video_filter.encode("utf-8")) > constants.FILTER_SCRIPT_THRESHOLD_BYTES:
+            video_filter_script = Path(work_dir) / ".video_filter.txt"
+            video_filter_script.write_text(video_filter, encoding="utf-8")
+            cmd += lib.filter_file_args("filter:v:0", video_filter_script)
+            lib.log(
+                "使用 video filter script "
+                f"(表达式长度 {video_filter.encode('utf-8').__len__()} bytes)"
+            )
+        else:
+            cmd += ["-vf", video_filter]
+        cmd += ["-c:v", "libx264", "-preset", preset, "-crf", crf, "-pix_fmt", "yuv420p"]
+        notes = (
+            (["遮挡原字幕"] if mask_filter else [])
+            + [f"精装包装({studio_plan['preset']})"]
+            + ([f"包装图层×{len(packaging_layers)}"] if packaging_layers else [])
+            + (["压制解说字幕"] if burn_subtitles else [])
+            + ([f"缩放≤{max_h}p"] if max_h > 0 else [])
+        )
+        lib.log(f"视频重编码: {' + '.join(notes)} (crf={crf}, preset={preset})")
+    elif vf_chain or packaging_layers:
         if max_h <= 0:  # no downscale in the chain to force even dims
             vf_chain.append(even)
         vf_chain.append(media._color_tag_filter(color_tags))
@@ -486,6 +543,7 @@ def main():
             )
         base.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(output_path), str(final_output))
+        _export_cover_image(final_output, work_dir)
         sidecar = _publish_subtitle_sidecar(work_dir, final_output)
         manifest = assembly_contract._assembly_manifest_payload(
             args.video, tts_segments, work_dir, output_path,
@@ -517,6 +575,33 @@ def main():
                       "subtitle_sidecar": str(sidecar) if sidecar else None,
                       "warnings": [warning["code"] for warning in warnings]},
                      ensure_ascii=False))
+
+
+def _export_cover_image(final_output: Path, work_dir: Path) -> Path | None:
+    """Extract a crisp cover frame (work_dir/cover.jpg) capturing the opening hook header & card."""
+    if not final_output.is_file() or not shutil.which("ffmpeg"):
+        return None
+    try:
+        dur = lib.get_video_duration(final_output)
+    except Exception:
+        dur = 3.0
+    seek_t = min(max(0.9, dur * 0.06), max(0.0, dur - 0.15))
+    cover_path = Path(work_dir) / "cover.jpg"
+    try:
+        res = subprocess.run(
+            [
+                "ffmpeg", "-y", "-ss", f"{seek_t:.3f}", "-i", str(final_output),
+                "-frames:v", "1", "-q:v", "2", str(cover_path),
+            ],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    if res.returncode == 0 and cover_path.is_file() and cover_path.stat().st_size > 0:
+        lib.log(f"封面图: {cover_path}")
+        return cover_path
+    return None
 
 
 def _publish_subtitle_sidecar(work_dir, final_output):

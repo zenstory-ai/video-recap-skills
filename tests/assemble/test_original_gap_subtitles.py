@@ -264,3 +264,85 @@ def test_original_gap_text_normalizes_em_dashes(monkeypatch, tmp_path):
 
 def test_no_narration_and_no_dialogue_yields_no_subtitle_entries(tmp_path):
     assert source_subtitles._combined_subtitle_entries([], tmp_path, 6) == []
+
+
+def test_subtitle_display_strips_trailing_clause_punctuation_and_keeps_ascii_ellipsis():
+    assert subtitle_core._subtitle_display_text("他把烧烤店开在高速服务区，") == "他把烧烤店开在高速服务区"
+    assert subtitle_core._subtitle_display_text("「原声台词，」") == "「原声台词」"
+    assert subtitle_core._subtitle_display_text("Sor…") == "Sor…"
+    assert subtitle_core._normalize_subtitle_text("You’re ready——") == "You're ready"
+    assert subtitle_core._normalize_subtitle_text("「别走——」") == "「别走」"
+
+
+def test_split_subtitle_chunks_keeps_ascii_numbers_and_words_atomic():
+    chunks = subtitle_core._split_subtitle_chunks("他在选秀夜签下70000美元的保障合同震惊全场", 14)
+    assert all("70000" in c or not any(ch.isdigit() for ch in c) for c in chunks)
+    assert any("70000" in c for c in chunks)
+
+
+def test_generate_ass_routes_bracketed_original_dialogue_to_white_dialogue_style(
+    monkeypatch, tmp_path
+):
+    _burn_on(monkeypatch)
+    (tmp_path / "original_subtitles.json").write_text(
+        json.dumps([{"start": 1.0, "end": 3.5, "text": "把门锁死！"}]), encoding="utf-8"
+    )
+    segs = [
+        {
+            "actual_place_start": 4.5,
+            "actual_place_end": 7.5,
+            "narration": "林砚当场亮出底牌。",
+            "spoken_text": "林砚当场亮出底牌。",
+            "start": 4.5,
+            "end": 7.5,
+        }
+    ]
+    subtitle_render._generate_ass(segs, tmp_path, 9.0, {"width": 1280, "height": 720})
+    ass = (tmp_path / "subtitles.ass").read_text(encoding="utf-8")
+    assert "Style: Default," in ass
+    assert "Style: Dialogue," in ass
+    assert "Dialogue: 0,0:00:01.00,0:00:03.50,Dialogue,," in ass
+    assert "Dialogue: 0,0:00:04.50,0:00:07.50,Default,," in ass
+
+
+def test_narration_speed_and_micro_tempo_combine_in_single_atempo_pass(monkeypatch, tmp_path):
+    import narration_audio
+
+    raw = tmp_path / "seg_000.wav"
+    raw.write_bytes(b"RIFF")
+    calls = []
+
+    def fake_run(cmd, **_kwargs):
+        from subprocess import CompletedProcess
+
+        calls.append(list(cmd))
+        Path(cmd[-1]).write_bytes(b"RIFF")
+        return CompletedProcess(cmd, 0, "", "")
+
+    durations = {
+        str(raw): 4.4,
+        str(tmp_path / "_spd_0.wav"): 4.0,
+        str(tmp_path / "_spd_0_adj.wav"): 3.45,
+    }
+    monkeypatch.setattr(narration_audio, "run_cmd", fake_run)
+    monkeypatch.setattr(narration_audio, "get_video_duration", lambda p: durations[str(p)])
+    monkeypatch.setitem(CONFIG, "narration_speed", 1.10)
+
+    segs = [{"index": 0, "audio_path": str(raw), "audio_duration": 4.4}]
+    narration_audio._apply_narration_speed(segs, tmp_path)
+    assert segs[0]["_unsped_audio_path"] == str(raw)
+    assert segs[0]["_applied_global_speed"] == pytest.approx(1.10)
+
+    out_path, out_dur, meta = narration_audio._adjust_tts_speed(
+        segs[0]["audio_path"],
+        3.5,
+        raw_source_path=segs[0]["_unsped_audio_path"],
+        base_speed=segs[0]["_applied_global_speed"],
+    )
+    assert out_path == str(tmp_path / "_spd_0_adj.wav")
+    assert out_dur == pytest.approx(3.45)
+    assert meta["fit_status"] == "tempo_adjusted"
+    # Second ffmpeg call reads pristine `raw`, not already-stretched `_spd_0.wav`!
+    assert calls[-1][calls[-1].index("-i") + 1] == str(raw)
+    combined_factor = ((4.0 / 3.5) * 1.002) * 1.10
+    assert f"atempo={combined_factor:.6f}" in calls[-1]

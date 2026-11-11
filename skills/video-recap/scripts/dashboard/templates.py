@@ -28,11 +28,15 @@ SUBTITLE_ROWS = (
     ("band", "字幕带", "px"),
 )
 ASS_COLOR_RE = re.compile(r"^&H([0-9A-Fa-f]{2})?([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})&?$")
+HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def ass_to_hex(value) -> str | None:
-    """``#RRGGBB`` for an ASS ``&HAABBGGRR`` / ``&HBBGGRR`` colour, else None."""
-    match = ASS_COLOR_RE.match(str(value or "").strip())
+    """``#RRGGBB`` for an ASS ``&HAABBGGRR`` / ``&HBBGGRR`` or ``#RRGGBB`` colour, else None."""
+    raw = str(value or "").strip()
+    if HEX_COLOR_RE.match(raw):
+        return raw.upper()
+    match = ASS_COLOR_RE.match(raw)
     if not match:
         return None
     _, blue, green, red = match.groups()
@@ -90,8 +94,26 @@ def param_rows(kind: str, params, resources: dict) -> list:
                 value = node.get("value") if isinstance(node, dict) else node
                 rows.append(_row(key, label, str(value), unit, node))
     elif kind == "packaging":
+        studio = params.get("studio_plan") if isinstance(params.get("studio_plan"), dict) else None
         layers = params.get("layers") if isinstance(params.get("layers"), list) else []
-        rows.append(_row("layers", "图层", str(len(layers)), "层", None))
+        if studio:
+            preset_labels = {
+                "portrait_stage": "竖屏舞台 9:16",
+                "portrait_cinema": "竖屏影院 9:16",
+                "landscape_cinema": "横屏影院 16:9",
+            }
+            backdrop_labels = {"blurred_frame": "动态虚化底", "solid": "纯净暗底"}
+            preset = str(studio.get("preset") or "")
+            rows.append(_row("preset", "版式", preset_labels.get(preset, preset or "—"), "", None))
+            if studio.get("backdrop"):
+                bd = str(studio["backdrop"])
+                rows.append(_row("backdrop", "底图", backdrop_labels.get(bd, bd), "", None))
+            if studio.get("palette"):
+                rows.append(_row("palette", "色板", str(studio["palette"]), "", None))
+            if layers:
+                rows.append(_row("layers", "叠加图层", str(len(layers)), "层", None))
+        else:
+            rows.append(_row("layers", "图层", str(len(layers)), "层", None))
         if "safe_rect" in params:
             rows.append(_row("safe_rect", "安全区", _rect_text(params["safe_rect"]), "px", params["safe_rect"]))
     return rows
@@ -105,6 +127,8 @@ def _subtitle_preview(canvas: dict, params: dict) -> dict:
     width, height = canvas["width"], canvas["height"]
     size, per_line = _number(params, "size_px"), _number(params, "max_chars")
     band = _band(params)
+    primary_node = params.get("primary_color")
+    primary_raw = primary_node.get("value") if isinstance(primary_node, dict) else primary_node
     chars = int(per_line) if per_line else 0
     sample = (SAMPLE_TEXT * (chars // len(SAMPLE_TEXT) + 1))[:chars]
     margin_v = height - band["y_bot"] if band else None
@@ -116,7 +140,8 @@ def _subtitle_preview(canvas: dict, params: dict) -> dict:
                  "font_size": _pct(size, width) if size else None,  # percent of canvas width
                  "bottom": _pct(margin_v, height) if margin_v is not None else None,
                  "width_px": size * chars if size and chars else None,
-                 "usable_px": width - 2 * SIDE_MARGIN_PX},
+                 "usable_px": width - 2 * SIDE_MARGIN_PX,
+                 "color": ass_to_hex(primary_raw)},
         "band_px": band, "margin_v": margin_v, "side": _pct(SIDE_MARGIN_PX, width),
     }
 
@@ -139,8 +164,25 @@ def _packaging_preview(root: Path, canvas: dict, params: dict, resources: dict) 
         layers.append({"name": layer.get("name"), "rect": layer.get("rect"), "rect_text": _rect_text(layer.get("rect")),
                        "box": _box(layer.get("rect"), canvas), "resource": ref, "title": resource.get("title"),
                        "media": media_entry(root, Path(files[0]["path"])) if files else None})
+    studio = params.get("studio_plan") if isinstance(params.get("studio_plan"), dict) else None
+    studio_preview = None
+    if studio:
+        preset = str(studio.get("preset") or "")
+        vp = studio.get("viewport")
+        if not isinstance(vp, dict):
+            if preset == "portrait_stage":
+                vp = {"x": 0, "y": 520, "width": canvas["width"], "height": 810}
+            elif preset == "portrait_cinema":
+                vp = {"x": 0, "y": 0, "width": canvas["width"], "height": 1440}
+            else:
+                vp = {"x": 0, "y": 0, "width": canvas["width"], "height": canvas["height"]}
+        studio_preview = {
+            "preset": preset,
+            "backdrop": str(studio.get("backdrop") or ""),
+            "viewport": _box(vp, canvas),
+        }
     return {"type": "packaging", "canvas": {"width": canvas["width"], "height": canvas["height"]},
-            "safe": _box(params.get("safe_rect"), canvas), "layers": layers}
+            "safe": _box(params.get("safe_rect"), canvas), "layers": layers, "studio": studio_preview}
 
 
 def template_preview(root: Path, kind: str, canvas, params, resources: dict) -> dict | None:

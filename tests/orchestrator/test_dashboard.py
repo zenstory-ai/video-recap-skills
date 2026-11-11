@@ -216,7 +216,7 @@ def test_templates_come_with_labelled_params_and_a_schematic_geometry(site):
 
 
 @pytest.mark.parametrize("value, expected", [("&H00FFFFFF", "#FFFFFF"), ("&H0000A0FF", "#FFA000"),
-                                             ("&H102030", "#302010"), ("white", None)])
+                                             ("&H102030", "#302010"), ("#ffe8a3", "#FFE8A3"), ("white", None)])
 def test_ass_colours_become_swatches(value, expected):
     assert dashboard_templates.ass_to_hex(value) == expected
 
@@ -537,6 +537,39 @@ def test_only_runs_that_really_pause_are_waiting(tmp_path):
 
     waiting = {item["title"]: item for item in attention if item["kind"] == "waiting"}
     assert set(waiting) == {"paused", "paused_cut", "mix_paused_cut"}
-    assert "narration.json" in waiting["paused"]["ask"]
+    assert waiting["paused"]["ask"] and "narration.json" in waiting["paused"]["ask"]
     assert "clip_plan.json" in waiting["paused_cut"]["ask"]
     assert "clip_plan.json" in waiting["mix_paused_cut"]["ask"]
+
+
+def test_generic_work_dirs_receive_human_titles_and_storyboard_previews(tmp_path):
+    root = tmp_path / "root"
+    _manifest(root / "suite1_ep001" / "work", edit_mode="cut")
+    sb_dir = root / "suite1_ep001" / "work" / "storyboard"
+    sb_dir.mkdir(parents=True)
+    (sb_dir / "edited_storyboard.jpg").write_bytes(b"\xff\xd8\xff\xd9")
+    _write(sb_dir / "edited_storyboard.json", {
+        "schema_version": 1, "timeline": "output",
+        "page_images": ["storyboard/edited_storyboard.jpg"],
+        "tiles": [{"tile_id": 0}, {"tile_id": 1}],
+    })
+    _manifest(root / "suite1_ep001" / "work" / "sources" / "src_a", edit_mode="cut")
+    _manifest(root / "suite4_mix" / "full_work", mode="source-mix")
+    _manifest(root / "library" / "materials" / "ep1" / "artifacts")
+
+    resolved = root.resolve()
+    overview = dashboard_data.overview(resolved)
+    runs = {r["path"]: r for r in overview["runs"]}
+
+    assert runs["suite1_ep001/work"]["title"] == "suite1_ep001"
+    assert runs["suite1_ep001/work"]["internal"] is False
+    assert runs["suite1_ep001/work/sources/src_a"]["internal"] is True
+    assert runs["suite4_mix/full_work"]["title"] == "suite4_mix · full"
+    assert runs["library/materials/ep1/artifacts"]["internal"] is True
+
+    detail = dashboard_data.run_detail(resolved, "suite1_ep001/work")
+    assert detail["storyboards"] == [{
+        "label": "剪后分镜板", "timeline": "output", "tiles": 2,
+        "media": {"path": "suite1_ep001/work/storyboard/edited_storyboard.jpg",
+                  "kind": "image", "name": "edited_storyboard.jpg", "size": 4},
+    }]

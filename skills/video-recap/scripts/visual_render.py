@@ -16,11 +16,12 @@ from source_subtitles import (
     _source_subtitle_mask,
 )
 from subtitles.core import (
+    _effective_subtitle_style,
     _frame_row,
     _measured_subtitle_band,
     _measured_subtitle_safe_area,
     _normalize_subtitle_text,
-    _style_for_measured_subtitle_band,
+    _style_for_measured_subtitle_band,  # noqa: F401 — re-exported for assemble tests
     _subtitle_style_config,
 )
 
@@ -127,9 +128,24 @@ def _subtitle_delivery_warnings(mask, *, has_subtitles):
     }]
 
 
-def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, mask_filter=None):
-    entries = _combined_subtitle_entries(tts_segments, work_dir, video_duration)
-    style = _style_for_measured_subtitle_band(_subtitle_style_config(canvas), canvas)
+def _build_visual_qc(
+    tts_segments, work_dir, video_duration, canvas, *, mask_filter=None, packaging_qc=None
+):
+    style = _effective_subtitle_style(canvas, work_dir)
+    if (
+        int(style["max_chars"]) == int(CONFIG["subtitle_max_chars"])
+        and float(style.get("bridge_gap_seconds", 0.0)) <= 0.0
+        and packaging_qc is None
+    ):
+        entries = _combined_subtitle_entries(tts_segments, work_dir, video_duration)
+    else:
+        entries = _combined_subtitle_entries(
+            tts_segments,
+            work_dir,
+            video_duration,
+            max_chars=int(style["max_chars"]),
+            bridge_gap_seconds=float(style.get("bridge_gap_seconds", 0.0)),
+        )
     subtitle_layout = _subtitle_layout_qc(
         entries, style, safe_area=_measured_subtitle_safe_area(style, canvas)
     )
@@ -146,6 +162,26 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, mask_fil
     blocking_codes = []
     if subtitle_layout["overflow"]:
         blocking_codes.append("subtitle_overflow")
+    if packaging_qc and packaging_qc.get("blocking_codes"):
+        blocking_codes.extend(packaging_qc["blocking_codes"])
+    geometry = {
+        "canvas": {
+            "width": canvas["width"],
+            "height": canvas["height"],
+            "fps": canvas["fps"],
+        },
+        "storage": {
+            "width": canvas["storage_width"],
+            "height": canvas["storage_height"],
+        },
+        "rotation": canvas["rotation"],
+        "sample_aspect_ratio": canvas["sample_aspect_ratio"],
+        "display_aspect_ratio": canvas["display_aspect_ratio"],
+    }
+    if packaging_qc is not None:
+        geometry["packaging"] = {
+            k: v for k, v in packaging_qc.items() if k != "blocking_codes"
+        }
     return {
         "schema_version": 1,
         "artifact": VISUAL_QC,
@@ -153,20 +189,7 @@ def _build_visual_qc(tts_segments, work_dir, video_duration, canvas, *, mask_fil
         "blocking": bool(blocking_codes),
         "blocking_codes": blocking_codes,
         "warnings": warnings,
-        "geometry": {
-            "canvas": {
-                "width": canvas["width"],
-                "height": canvas["height"],
-                "fps": canvas["fps"],
-            },
-            "storage": {
-                "width": canvas["storage_width"],
-                "height": canvas["storage_height"],
-            },
-            "rotation": canvas["rotation"],
-            "sample_aspect_ratio": canvas["sample_aspect_ratio"],
-            "display_aspect_ratio": canvas["display_aspect_ratio"],
-        },
+        "geometry": geometry,
         "subtitles": subtitle_layout,
         "mask": mask,
     }
@@ -193,12 +216,12 @@ def _escape_subtitle_filter_path(path):
     return text
 
 
-def _subtitle_burn_filter(subtitle_path):
+def _subtitle_burn_filter(subtitle_path, font_file=None):
     """Build the ffmpeg video filter used for hard-sub rendering."""
     filt = f"subtitles=filename='{_escape_subtitle_filter_path(subtitle_path)}'"
-    font_file = CONFIG["subtitle_font_file"]
-    if font_file:
-        fonts_dir = Path(font_file).expanduser().resolve().parent
+    effective_font_file = font_file if font_file is not None else CONFIG["subtitle_font_file"]
+    if effective_font_file:
+        fonts_dir = Path(effective_font_file).expanduser().resolve().parent
         filt += f":fontsdir='{_escape_subtitle_filter_path(fonts_dir)}'"
     return filt
 

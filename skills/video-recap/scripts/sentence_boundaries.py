@@ -129,6 +129,9 @@ def snap_clip_starts_to_lines(
     max_prepend,
     max_trim=0.35,
     min_clip_duration=0.3,
+    *,
+    shot_cuts=(),
+    flash_sliver_max_seconds=0.0,
 ):
     """Snap clip starts to natural quiet boundaries, preferring safe prepend over trim.
 
@@ -166,7 +169,20 @@ def snap_clip_starts_to_lines(
             candidate_start = max(prior_ends)
             if original_start - candidate_start <= max_prepend:
                 candidate_start = round(candidate_start, 3)
-                safe = candidate_start < source_end - min_clip_duration + 1e-9
+                creates_sliver = (
+                    flash_sliver_max_seconds > 0
+                    and any(
+                        candidate_start + 1e-3 < cut <= min(
+                            original_start + 1e-3,
+                            candidate_start + flash_sliver_max_seconds + 1e-6,
+                        )
+                        for cut in shot_cuts
+                    )
+                )
+                safe = (
+                    not creates_sliver
+                    and candidate_start < source_end - min_clip_duration + 1e-9
+                )
                 if safe and not allow_overlap:
                     safe = not _candidate_overlaps(clips, i, candidate_start, source_end)
                 if safe:
@@ -180,7 +196,7 @@ def snap_clip_starts_to_lines(
                     )
                     events.append(event)
                     continue
-                reason = "overlap_or_collapse"
+                reason = "prepend_creates_flash_sliver" if creates_sliver else "overlap_or_collapse"
             else:
                 reason = "prior_quiet_too_far"
         else:
@@ -363,7 +379,9 @@ def _detect_shot_changes(video, win_start, win_end, threshold, lead=0.25):
 _FRAME_CUT_SCAN_PAD = 0.1
 
 
-def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5, found_cuts=None):
+def snap_clips_off_shot_changes(
+    plan, video, margin, threshold, min_keep=0.5, found_cuts=None, *, start_lookback=0.0
+):
     """Nudge each clip's boundaries clear of the ORIGINAL footage's hard cuts to avoid 闪烁.
 
     A clip whose source_start sits just before a shot-change opens on a brief sliver of the old
@@ -397,7 +415,9 @@ def snap_clips_off_shot_changes(plan, video, margin, threshold, min_keep=0.5, fo
             "end_action": "kept",
         }
         # Opening: a shot-change just AFTER source_start leaves an old-shot sliver before it.
-        seen = _detect_shot_changes(video, max(0.0, s - pad), min(e, s + margin), threshold)
+        seen = _detect_shot_changes(
+            video, max(0.0, s - max(pad, start_lookback)), min(e, s + margin), threshold
+        )
         found_cuts.update(seen)
         start_changes = [c for c in seen if c > s + 1e-3]
         if start_changes:
@@ -531,7 +551,12 @@ def snap_source_clips(
     scene_cuts = set()
     if do_scene_snap:
         plan = snap_clips_off_shot_changes(
-            plan, video, margin=scene_margin, threshold=scene_threshold, found_cuts=scene_cuts
+            plan,
+            video,
+            margin=scene_margin,
+            threshold=scene_threshold,
+            found_cuts=scene_cuts,
+            start_lookback=start_max_prepend if do_line_snap else 0.0,
         )
     boundaries = _combine_boundary_windows(
         _load_silence_for_source(work_dir, source_id, source_work_dir),
@@ -539,7 +564,13 @@ def snap_source_clips(
     )
     if do_line_snap:
         plan = snap_clip_starts_to_lines(
-            plan, boundaries, duration, start_max_prepend, max_trim=start_max_trim
+            plan,
+            boundaries,
+            duration,
+            start_max_prepend,
+            max_trim=start_max_trim,
+            shot_cuts=scene_cuts,
+            flash_sliver_max_seconds=flash_sliver_max_seconds,
         )
         plan = snap_clip_ends_to_lines(
             plan,

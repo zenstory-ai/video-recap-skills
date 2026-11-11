@@ -22,7 +22,28 @@ QC_FILES = (
 )
 STAGES = (("home", "概况"), ("understanding", "理解"), ("cut", "剪辑"), ("narration", "旁白"),
           ("film", "成片"), ("qc", "QC"), ("resources", "资源"))
+GENERIC_DIR_NAMES = {"work", "work_dir", "workdir", "artifacts", "out", "output"}
 MAX_FINDINGS = 20
+
+
+def is_material_artifact(rel: str) -> bool:
+    parts = PurePosixPath(rel).parts
+    return len(parts) >= 3 and parts[-3] == "materials" and parts[-1] == "artifacts"
+
+
+def _display_title(root: Path, rel: str) -> str:
+    """Human-readable run title: promote parent folder when work_dir uses a generic name."""
+    if rel == ".":
+        return root.name
+    parts = PurePosixPath(rel).parts
+    leaf = parts[-1]
+    if len(parts) >= 2:
+        parent_name = parts[-2]
+        if leaf in GENERIC_DIR_NAMES:
+            return parent_name
+        if leaf.endswith("_work") and len(leaf) > 5:
+            return f"{parent_name} · {leaf[:-5].replace('_', ' ')}"
+    return leaf or root.name
 
 
 def _fallback(path: Path, error: str) -> dict:
@@ -284,10 +305,39 @@ def _clock(seconds) -> str:
     return f"{whole // 60}:{whole % 60:02d}"
 
 
+def storyboard_views(root: Path, rdir: Path, state: dict | None) -> list:
+    """Contact-sheet images declared by storyboard JSON artifacts inside ``rdir``."""
+    items = []
+    seen = set()
+    resolved_rdir = rdir.resolve()
+    for rel_json in (state or {}).get("storyboards") or []:
+        if not isinstance(rel_json, str) or not rel_json:
+            continue
+        sb_path = (rdir / rel_json).resolve()
+        if sb_path.parent != resolved_rdir and resolved_rdir not in sb_path.parents:
+            continue
+        data, error = read_object(sb_path)
+        if error or not data:
+            continue
+        timeline = str(data.get("timeline") or "")
+        label = "剪后分镜板" if timeline == "output" else "原片分镜板" if timeline == "source" else sb_path.stem
+        tiles = len(data["tiles"]) if isinstance(data.get("tiles"), list) else 0
+        pages = data.get("page_images") if isinstance(data.get("page_images"), list) else []
+        for page in pages:
+            if not isinstance(page, str) or not page:
+                continue
+            media = media_entry(root, rdir / page)
+            if media and media["path"] not in seen:
+                seen.add(media["path"])
+                items.append({"label": label, "timeline": timeline, "tiles": tiles, "media": media})
+    return items
+
+
 # --- runs --------------------------------------------------------------------------------
 def run_views(root: Path, rel: str, runs: set) -> dict:
     """Everything the dashboard shows about one run; each view degrades on its own."""
     rdir = dir_of(root, rel)
+    parent = nearest(rel, runs)
     state, state_error = run_state(rdir)
     mode = (state or {}).get("mode") or ("cut" if (rdir / "clip_plan.json").is_file() else "full")
     audio_mode = _audio_mode(rdir)
@@ -299,6 +349,11 @@ def run_views(root: Path, rel: str, runs: set) -> dict:
         "film": {"video": final_video(root, rdir), "timeline": timeline_view(rdir)},
         "resources": lock_view(rdir),
     }
+    tl = views["film"]["timeline"]
+    cut = views["cut"]
+    raw_dur = tl.get("duration") if tl["status"] == "ok" else cut.get("total") if cut.get("status") == "ok" else None
+    duration = float(raw_dur) if isinstance(raw_dur, (int, float)) and raw_dur > 0 else None
+    video_info = views["film"]["video"] or {}
     unparseable = [c["file"] for c in qc if c["level"] == "unparseable"]
     unparseable += [name for name, view in (("clip_plan_validated.json", views["cut"]),
                                             ("narration.json", views["narration"]),
@@ -308,13 +363,18 @@ def run_views(root: Path, rel: str, runs: set) -> dict:
     if state_error:
         unparseable.insert(0, RUN_FILE)
     return {
-        "path": rel, "name": rdir.name or root.name, "work_dir": str(rdir),
-        "parent": nearest(rel, runs), "mode": mode, "audio_mode": audio_mode,
+        "path": rel, "name": rdir.name or root.name, "title": _display_title(root, rel),
+        "work_dir": str(rdir), "parent": parent,
+        "internal": bool(parent is not None or is_material_artifact(rel)),
+        "mode": mode, "audio_mode": audio_mode,
+        "duration": duration, "canvas": tl.get("canvas") if tl["status"] == "ok" else None,
+        "video_name": video_info.get("name") if video_info.get("path") else None,
         "state": state, "state_error": state_error,
         "next_pause": (state or {}).get("next_pause"),
         "qc": qc, "blockers": sum(c["blockers"] for c in qc), "unparseable": unparseable,
         "lock_attention": len(views["resources"].get("attention", [])),
-        "has_video": bool((views["film"]["video"] or {}).get("path")),
+        "has_video": bool(video_info.get("path")),
+        "storyboards": storyboard_views(root, rdir, state),
         "stages": _stage_bar(mode, audio_mode, state, views, qc),
         "views": views,
     }

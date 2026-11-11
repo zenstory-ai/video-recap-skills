@@ -1197,3 +1197,24 @@ def test_edited_source_real_multi_source_converts_rgb_clip_beside_yuv(tmp_path):
     y = raw[(h // 2) * w + w // 2]
     cb = raw[luma + (h // 4) * (w // 2) + w // 4]
     assert abs(y - 63) <= 2 and abs(cb - 102) <= 2, (y, cb)
+
+
+def test_start_prepend_rejects_flash_sliver_across_shot_cut():
+    plan = normalize_clip_plan([{"start": 156.10, "end": 160.0}], video_duration=166.65)
+    silences = [
+        {"start": 155.40, "end": 155.869},
+        {"start": 156.35, "end": 156.60},
+    ]
+    snapped = sentence_boundaries.snap_clip_starts_to_lines(
+        plan,
+        silences,
+        video_duration=166.65,
+        max_prepend=1.8,
+        shot_cuts=[155.97],
+        flash_sliver_max_seconds=0.20,
+    )
+    clip = snapped["clips"][0]
+    assert clip["source_start"] == 156.35
+    event = snapped["qc"]["boundary_status"]["start_snaps"][0]
+    assert event["action"] == "trimmed"
+    assert event["fallback_from"] == "prepend_creates_flash_sliver"

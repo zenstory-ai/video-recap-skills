@@ -62,7 +62,7 @@ def test_no_correction_when_the_file_is_under_or_unmeasured(monkeypatch, peaks, 
 
 
 def test_corrections_stop_at_the_maximum_and_assembly_qc_blocks(monkeypatch):
-    record, _state, targets = _deliver(monkeypatch, [0.5, -0.5, -0.8])
+    record, _state, targets = _deliver(monkeypatch, [0.5, -0.5, -0.65, -0.75, -0.8])
     assert len(targets) == codec_peak.CODEC_PEAK_MAX_CORRECTIONS
     assert record["true_peak"] == -0.8
 

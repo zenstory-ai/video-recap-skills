@@ -9,6 +9,7 @@ from assemble_constants import (
 )
 from subtitles.core import (
     _bracketed_original_chunks,
+    _bridge_narration_micro_gaps,
     _subtitle_entries,
 )
 
@@ -112,7 +113,7 @@ def _source_subtitles_already_visible_in_gaps():
     return not _source_subtitle_mask_covers_gaps()
 
 
-def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration):
+def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration, *, max_chars=None):
     """Subtitle entries for agent-verified original dialogue (`original_subtitles.json`) in gaps.
 
     Never invents cues from coarse ASR and never slices Chinese text mid-sentence.
@@ -128,7 +129,7 @@ def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration):
     gaps = _narration_gap_windows(tts_segments, video_duration)
     if not gaps:
         return []
-    max_chars = CONFIG["subtitle_max_chars"]
+    limit = int(max_chars or CONFIG["subtitle_max_chars"])
     entries = []
     for seg in agent:
         seg_start, seg_end, text = seg["start"], seg["end"], seg["text"]
@@ -139,13 +140,46 @@ def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration):
         )
         cs, ce = best
         if ce - cs >= _MIN_READABLE_SECONDS:
-            entries.extend(_bracketed_original_chunks(text, cs, ce, max_chars))
+            entries.extend(_bracketed_original_chunks(text, cs, ce, limit))
     return entries
 
 
-def _combined_subtitle_entries(narration, work_dir, video_duration):
+def _load_narration_highlights(work_dir):
+    """Load optional per-segment or plan-wide subtitle highlight keywords."""
+    if work_dir is None:
+        return {}, []
+    by_idx = {}
+    narr = _load_work_json(work_dir, "narration.json")
+    if isinstance(narr, list):
+        for idx, row in enumerate(narr):
+            if isinstance(row, dict) and isinstance(row.get("highlights"), list):
+                by_idx[idx] = [str(x).strip() for x in row["highlights"] if str(x).strip()]
+    plan = _load_work_json(work_dir, "packaging_plan.json")
+    global_hl = []
+    if isinstance(plan, dict) and isinstance(plan.get("subtitle_highlights"), list):
+        global_hl = [str(x).strip() for x in plan["subtitle_highlights"] if str(x).strip()]
+    return by_idx, global_hl
+
+
+def _combined_subtitle_entries(
+    narration, work_dir, video_duration, *, max_chars=None, bridge_gap_seconds=None
+):
     """Narration subtitle entries plus verified original-dialogue entries in the gaps."""
-    entries = _subtitle_entries(narration)
-    entries.extend(_original_gap_subtitle_entries(narration, work_dir, video_duration))
+    by_idx, global_hl = _load_narration_highlights(work_dir)
+    entries = _subtitle_entries(narration, max_chars=max_chars, highlights_by_index=by_idx)
+    if global_hl:
+        for item in entries:
+            merged = list(item.get("highlights") or ()) + [
+                h for h in global_hl if h not in (item.get("highlights") or ())
+            ]
+            item["highlights"] = merged
+    entries.extend(
+        _original_gap_subtitle_entries(narration, work_dir, video_duration, max_chars=max_chars)
+    )
     entries.sort(key=lambda x: (x["start"], x["end"]))
-    return entries
+    bridge = (
+        CONFIG.get("subtitle_bridge_gap_seconds", 0.0)
+        if bridge_gap_seconds is None
+        else bridge_gap_seconds
+    )
+    return _bridge_narration_micro_gaps(entries, bridge)

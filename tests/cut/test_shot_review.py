@@ -209,6 +209,38 @@ def test_incomplete_frame_probe_cannot_claim_full_coverage(monkeypatch, last_dur
         shot_review.probe_frame_clock("ignored")
 
 
+def test_mp4_edit_list_subframe_rounding_accepted_but_missing_frame_rejected(monkeypatch):
+    # Real QuickTime/MP4 edit lists on 1/15360 timebase (512 ticks = 1/30s per frame) can
+    # trim declared duration_ts by ~10 ticks (0.65ms) while all 1064 frames decode cleanly.
+    frames_1064 = [{"pts": i * 512, "duration": 512} for i in range(1064)]
+    subframe_elst = {
+        "streams": [{"time_base": "1/15360", "start_pts": 0, "duration_ts": 1064 * 512 - 10}],
+        "frames": frames_1064,
+    }
+    monkeypatch.setattr(
+        shot_review.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(subframe_elst), ""),
+    )
+    pts, end, origin = shot_review.probe_frame_clock("ignored")
+    assert len(pts) == 1064
+    assert origin == Fraction(0)
+    assert end == Fraction(1064 * 512 - 10, 15360)
+
+    # Dropping even a single terminal frame (502 ticks = 32.68ms > 10ms cap) still fails.
+    dropped_one = {
+        "streams": [{"time_base": "1/15360", "start_pts": 0, "duration_ts": 1064 * 512 - 10}],
+        "frames": frames_1064[:-1],
+    }
+    monkeypatch.setattr(
+        shot_review.subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(dropped_one), ""),
+    )
+    with pytest.raises(ValueError, match="coverage"):
+        shot_review.probe_frame_clock("ignored")
+
+
 @pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="needs ffmpeg/ffprobe")
 def test_real_ffmpeg_detects_short_runs_inside_one_continuous_file(tmp_path):
     video = tmp_path / "long-span.mkv"
