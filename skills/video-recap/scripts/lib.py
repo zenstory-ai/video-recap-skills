@@ -135,13 +135,13 @@ def material_id_for(source_path, source_identity):
 
 def ffmpeg_filters():
     """Filters the installed ffmpeg lists; empty when ffmpeg is absent."""
-    ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
-        return set()
+    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
     try:
         result = subprocess.run(
             [ffmpeg, "-hide_banner", "-filters"], text=True, capture_output=True, timeout=20
         )
+    except FileNotFoundError:
+        return set()
     except (OSError, subprocess.SubprocessError) as exc:
         raise RuntimeError(f"`ffmpeg -filters` failed or hung: {exc}") from exc
     if result.returncode != 0:
