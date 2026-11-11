@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "skills" / "video-voiceover" / "scripts"),
+    str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"),
 )
 
 import providers.fish_audio as fish_audio

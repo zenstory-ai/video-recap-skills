@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-voiceover" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 from lib import CONFIG  # noqa: E402
 import voiceover  # noqa: E402
 from tts_audio import implausible_tts_duration, max_plausible_tts_seconds, speech_units  # noqa: E402

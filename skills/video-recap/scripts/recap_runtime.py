@@ -10,30 +10,24 @@ import sys
 from pathlib import Path
 
 import materials as material_lib
-from lib import env_bool, env_int, ffmpeg_has_subtitles_filter, file_identity, load_json, material_id_for
+from lib import env_bool, ffmpeg_has_subtitles_filter, file_identity, load_json, material_id_for
 from recap_source import audio_binding
 
-BUNDLE = Path(__file__).resolve().parents[2]  # the skills/ directory
+SCRIPT_DIR = Path(__file__).resolve().parent
 
 RUN_MANIFEST = "recap_run_manifest.json"
 
 MULTI_SOURCE_MANIFEST = "multi_source_manifest.json"
 
 
-def _run(skill, script, *cli_args):
-    cmd = [sys.executable, str(_entry(skill, script)), *map(str, cli_args)]
-    print(f"[video-recap] ▶ {skill}/{script}", flush=True)
+def _run(stage, script, *cli_args):
+    cmd = [sys.executable, str(_entry(script)), *map(str, cli_args)]
+    print(f"[video-recap] ▶ {stage}/{script}", flush=True)
     # Stage scripts log Chinese; on Windows a piped stdout defaults to cp1252 and the
     # first log line would crash the child with UnicodeEncodeError.
     res = subprocess.run(cmd, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
     if res.returncode != 0:
-        raise SystemExit(f"{skill}/{script} 失败 (exit {res.returncode})")
-
-
-def _optional_env_int(name):
-    """lib.env_int with -1 as the documented "unset" sentinel."""
-    value = env_int(name, None)
-    return None if value == -1 else value
+        raise SystemExit(f"{stage}/{script} 失败 (exit {res.returncode})")
 
 
 def _read_video_duration_or_raise(path):
@@ -66,11 +60,6 @@ def _read_video_duration_or_raise(path):
 # width (or, rotated, the row scale the renderer converts exactly). Same value as the
 # renderer's and the measuring tool's copies (parity-tested).
 SUBTITLE_BAND_SAR_TOLERANCE = 0.02
-
-
-def _probe_display_height_or_raise(path, *, require_near_square_pixels=False):
-    """Return ffmpeg's display-coordinate height, accounting for rotation and SAR."""
-    return _probe_display_size_or_raise(path, require_near_square_pixels=require_near_square_pixels)[1]
 
 
 def _probe_display_size_or_raise(path, *, require_near_square_pixels=False):
@@ -129,16 +118,11 @@ def _analysis_settings(args):
         "edit_mode": args.edit_mode,
         "target_duration": args.target_duration,
         "skip_asr": bool(args.skip_asr),
-        "mimo_video_overview": bool(args.mimo_video_overview),
-        "consolidate": bool(args.consolidate),
-        "consolidate_asr": bool(args.consolidate_asr),
+        # Frozen at False: restore_material compares these settings by equality, so dropping a
+        # retired key would turn every saved material into a paid re-analysis.
+        "mimo_video_overview": False,
+        "consolidate_asr": False,
     }
-
-
-def _coerce_videos(video_or_videos):
-    if isinstance(video_or_videos, (list, tuple)):
-        return [Path(v).resolve() for v in video_or_videos]
-    return [Path(video_or_videos).resolve()]
 
 
 def _run_manifest_payload(video, args):
@@ -154,12 +138,8 @@ def _run_manifest_payload(video, args):
 # Settings main() can take from the environment rather than argv, with their no-env value.
 # A resume shell may not carry the same environment, so the resume argv pins them.
 _ENV_FILLED = (
-    ("edit_mode", "full"),
-    ("target_duration", None),
     ("tts_provider", "auto"),
     ("voice_ref", None),
-    ("subtitle_y_top", None),
-    ("subtitle_y_bot", None),
 )
 
 
@@ -180,17 +160,20 @@ def _resume_argv(work_dir, args):
     return argv
 
 
-def _write_run_manifest(work_dir, video, args):
-    payload = {**_run_manifest_payload(video, args), "argv": _resume_argv(work_dir, args)}
+def _write_manifest_with_argv(work_dir, payload, args):
     (work_dir / RUN_MANIFEST).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+        json.dumps({**payload, "argv": _resume_argv(work_dir, args)}, ensure_ascii=False, indent=2),
+        encoding="utf-8",
     )
-    return payload
+
+
+def _write_run_manifest(work_dir, video, args):
+    _write_manifest_with_argv(work_dir, _run_manifest_payload(video, args), args)
 
 
 def _build_multi_source_records(videos, args):
     records = []
-    for video in _coerce_videos(videos):
+    for video in videos:
         identity = file_identity(video)
         records.append(
             {
@@ -207,7 +190,7 @@ def _build_multi_source_records(videos, args):
     return records
 
 
-def _multi_run_manifest_payload(videos, args, source_records):
+def _multi_run_manifest_payload(args, source_records):
     return {
         "schema_version": 2,
         "mode": "multi_source",
@@ -221,20 +204,13 @@ def _multi_run_manifest_payload(videos, args, source_records):
             }
             for s in source_records
         ],
-        "source_videos": [str(v) for v in _coerce_videos(videos)],
         "settings": _analysis_settings(args),
         "audio": audio_binding(args),
     }
 
 
-def _write_project_run_manifest(work_dir, videos, args, source_records):
-    payload = {
-        **_multi_run_manifest_payload(videos, args, source_records),
-        "argv": _resume_argv(work_dir, args),
-    }
-    (work_dir / RUN_MANIFEST).write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
-    )
+def _write_project_run_manifest(work_dir, args, source_records):
+    _write_manifest_with_argv(work_dir, _multi_run_manifest_payload(args, source_records), args)
 
 
 def _write_multi_source_manifest(work_dir, source_records):
@@ -264,7 +240,7 @@ def _load_run_manifest(work_dir):
 
 
 def _burn_subtitles_intended(args):
-    """Effective burn-subtitles state at orchestrator level. Mirrors video-assemble's
+    """Effective burn-subtitles state at orchestrator level. Mirrors assemble.py's
     CONFIG default `env_bool("BURN_SUBTITLES", True)` (burn is ON by default); an explicit
     CLI flag (--burn-subtitles / --no-burn-subtitles) overrides the env."""
     if args.burn_subtitles is not None:
@@ -295,13 +271,12 @@ def _preflight_burn_subtitles(args):
     lacks libass. An explicit request fails fast here, since otherwise the run only dies at
     the final assemble `-vf subtitles=` step. The default burn only warns: assemble then
     delivers the .srt sidecar and records `subtitle_burn_degraded` in visual_qc.json, which
-    final_qc.json carries in metadata.warnings. Dub renders through its own script, which
-    never burns subtitles, so it is exempt."""
-    if args.edit_mode == "dub" or not _burn_subtitles_intended(args):
+    final_qc.json carries in metadata.warnings."""
+    if not _burn_subtitles_intended(args):
         return
     if not _ffmpeg_present_but_cannot_burn():
         return
-    doctor = f"python3 {shlex.quote(str(_entry('video-recap', 'doctor.py')))}"
+    doctor = f"python3 {shlex.quote(str(_entry('doctor.py')))}"
     if _burn_subtitles_explicit(args):
         raise SystemExit(
             "已显式要求烧录字幕（--burn-subtitles 或 BURN_SUBTITLES），但当前 ffmpeg 不支持"
@@ -314,11 +289,11 @@ def _preflight_burn_subtitles(args):
         "[video-recap] ⚠ 当前 ffmpeg 不支持 subtitles/libass 滤镜：本次成片不烧录字幕。"
         "有字幕条目时改为在成片旁输出同名 .srt 外挂字幕（final_qc.json 的 metadata.warnings"
         " 会记录 subtitle_burn_degraded）；没有字幕条目的运行（如 source 音频模式且没有"
-        " user_subtitles.*）不输出 .srt，也不记警告。要烧录字幕请安装带 libass 的 ffmpeg；"
+        " original_subtitles.json）不输出 .srt，也不记警告。要烧录字幕请安装带 libass 的 ffmpeg；"
         f"自检：{doctor}",
         flush=True,
     )
 
 
-def _entry(skill, script):
-    return BUNDLE / skill / "scripts" / script
+def _entry(script):
+    return SCRIPT_DIR / script

@@ -29,19 +29,16 @@ from lib import load_json, material_id_for, read_json_object, source_id_for
 ALLOWED_ARTIFACTS = {
     "scenes.json",
     "asr_result.json",
-    "asr_clean.json",
     "vlm_analysis.json",
     "silence_periods.json",
     "speech_boundary_anchors.json",
     "speech_boundary_anchors_output.json",
-    "timeline_fusion.json",
-    "understanding_index.json",
-    "understanding_index.md",
-    "consolidation.status.json",
     "agent_narration_brief.md",
     "background_research.json",
     "recap_run_manifest.json",
 }
+# The agent writes this one before understanding, so a restore must not take it away.
+_RESEARCH = "background_research.json"
 # Redaction targets credential VALUE shapes, not English/Chinese dictionary words — the
 # library must stay a faithful copy of the analysis. Bare words like "secret"/"token"
 # legitimately appear in transcripts/summaries and must NOT be touched.
@@ -131,20 +128,17 @@ def copy_artifact_redacted(src: Path, dst: Path) -> None:
 
 
 def summarize_work_dir(work_dir: str | Path, *, source_name: str = "") -> dict:
-    """Grep-friendly tags for material.md/index: character and entity names plus artifact counts."""
+    """Grep-friendly tags for material.md/index: character names plus artifact counts."""
     work = Path(work_dir)
     summary = f"Analyzed video material: {source_name or work.name}"
     tags = []
-    index_path = work / "understanding_index.json"
-    if index_path.exists():
-        # consolidate.py writes {characters, relationships, plot_points, entities,
-        # research_glossary} and no prose summary. The list ITEMS are MiMo output that
-        # consolidate only list-checks, so their shape is still tolerated here.
-        index = load_json(index_path)
-        for key in ("characters", "entities"):
-            for item in index[key][:12]:
-                text = item.get("name", "") if isinstance(item, dict) else item
-                tags.append(_redact_text(str(text))[:80])
+    research_path = work / "background_research.json"
+    if research_path.exists():
+        research = read_json_object(research_path) or {}
+        characters = research.get("characters")
+        if isinstance(characters, dict):
+            for name in list(characters.keys())[:12]:
+                tags.append(_redact_text(str(name))[:80])
     for name, label in (("scenes.json", "scenes"), ("asr_result.json", "asr")):
         if (work / name).exists():
             tags.append(f"{label}:{len(load_json(work / name))}")
@@ -199,7 +193,6 @@ def save_material(
     source_identity: dict,
     settings: dict,
     *,
-    duration: float | None = None,
     source_id: str | None = None,
     material_id: str | None = None,
     now: str | None = None,
@@ -214,8 +207,8 @@ def save_material(
 
     sources = allowed_artifact_paths(work_dir)
     fresh_names = {src.name for src in sources}
-    # Reconcile: drop allowed artifacts left from a previous (larger) save so the on-disk
-    # artifacts/ dir always matches material.json — a stale orphan must not surface in greps.
+    # Reconcile: drop current ALLOWED_ARTIFACTS names left from a previous (larger) save, so a
+    # stale orphan does not surface in greps. Files of retired names are left where they are.
     for stale in artifacts_dir.iterdir():
         if stale.is_file() and stale.name in ALLOWED_ARTIFACTS and stale.name not in fresh_names:
             stale.unlink()
@@ -239,7 +232,6 @@ def save_material(
         "source_name": source_path.name,
         "source_path": str(source_path),
         "source_video_identity": dict(source_identity),
-        "duration": duration,
         "settings": dict(settings),
         "artifacts": copied,
         "created_at": created_at,
@@ -266,6 +258,10 @@ def save_material(
     return metadata
 
 
+def _comparable_settings(settings: dict) -> dict:
+    return {k: v for k, v in settings.items() if k != "consolidate"}
+
+
 def restore_material(
     library_dir: str | Path,
     work_dir: str | Path,
@@ -274,32 +270,31 @@ def restore_material(
     source_identity: dict,
     settings: dict,
     material_id: str,
-    overwrite: bool = True,
-    prune_stale_allowed: bool = True,
 ) -> dict:
     """Restore allowed artifacts when source path, identity and settings all match.
 
     Returns a status dict and never partially restores on mismatch.
 
-    By default the restored material is treated as the authoritative analysis
+    The restored material is treated as the authoritative analysis
     snapshot for ``work_dir``: allowed analysis artifacts are staged first, then
     stale allowed artifacts in the destination are pruned before replacement.
     This prevents reused work dirs from mixing old scenes/ASR/VLM files with a
     newly restored material. Non-allowed files (for example narration.json or
-    clip_plan.json) are never removed here.
+    clip_plan.json) are never removed here, and neither is an agent-written
+    background_research.json: it survives an entry without research, and a work_dir
+    copy newer than the entry's wins.
     """
     meta_path = material_dir(Path(library_dir), material_id) / "material.json"
     meta = _material_cache_entry(meta_path)
     if meta is None:
         return {"restored": False, "reason": "material missing or invalid"}
-    meta["material_dir"] = str(meta_path.parent)
     if meta["source_path"] != str(Path(source_path).resolve()) \
             or meta["source_video_identity"] != source_identity:
         return {"restored": False, "reason": "source identity mismatch", "material_id": meta["material_id"]}
-    if meta["settings"] != settings:
+    if _comparable_settings(meta["settings"]) != _comparable_settings(settings):
         return {"restored": False, "reason": "settings mismatch", "material_id": meta["material_id"]}
 
-    src_dir = Path(meta["material_dir"]) / "artifacts"
+    src_dir = meta_path.parent / "artifacts"
     if not src_dir.exists():
         return {"restored": False, "reason": "material artifacts missing", "material_id": meta["material_id"]}
     dest = Path(work_dir)
@@ -313,27 +308,25 @@ def restore_material(
             copy_artifact_redacted(src_dir / name, tmp / name)
 
         pruned = []
-        if prune_stale_allowed:
-            # Never prune an artifact we are about to restore: the restore loop below honors
-            # `overwrite`, so pruning a staged name would (with overwrite=False) delete it and
-            # then skip the copy, losing the file.
-            for name in sorted(ALLOWED_ARTIFACTS - set(staged)):
-                out = dest / name
-                if out.exists():
-                    out.unlink()
-                    pruned.append(name)
-
-        restored = []
-        for name in staged:
+        for name in sorted(ALLOWED_ARTIFACTS - set(staged) - {_RESEARCH}):
             out = dest / name
-            if out.exists() and not overwrite:
+            if out.exists():
+                out.unlink()
+                pruned.append(name)
+
+        kept_local_research = (
+            _RESEARCH not in staged and (dest / _RESEARCH).is_file()
+        )
+        for name in staged:
+            if name == _RESEARCH and (dest / name).is_file() \
+                    and (dest / name).stat().st_mtime_ns > (src_dir / name).stat().st_mtime_ns:
+                kept_local_research = True
                 continue
-            (tmp / name).replace(out)
-            restored.append(name)
+            (tmp / name).replace(dest / name)
     return {
-        "restored": bool(restored),
+        "restored": True,
         "material_id": meta["material_id"],
-        "artifacts": restored,
+        "artifacts": staged,
         "pruned_artifacts": pruned,
-        "material": meta,
+        "kept_local_research": kept_local_research,
     }

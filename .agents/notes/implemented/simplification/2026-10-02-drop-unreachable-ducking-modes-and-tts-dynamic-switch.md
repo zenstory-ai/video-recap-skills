@@ -2,6 +2,8 @@
 
 Status: implemented
 
+“没有放置信息时恒定 `ducking_orig_volume`”这一分支已被 [合成阶段删掉门禁之后的兜底](2026-11-06-assemble-drop-unreachable-fallbacks.md) 删除。
+
 ## Problem
 
 [[2026-10-02-skill-ownership-function-parity-and-budgets]] 把"没有调用方的模式"和"只有测试在改的开关"列为该删的东西，本篇落地其中两项：

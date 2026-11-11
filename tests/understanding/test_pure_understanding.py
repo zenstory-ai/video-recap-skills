@@ -12,7 +12,7 @@ sys.path.insert(
     str(
         Path(__file__).resolve().parents[2]
         / "skills"
-        / "video-understanding"
+        / "video-recap"
         / "scripts"
     ),
 )
@@ -33,13 +33,8 @@ from lib import (  # noqa: E402
     load_background_research,
     normalize_api_url,
 )
-from timeline_fusion import _build_timeline_fusion  # noqa: E402
 from understanding_brief import _research_context  # noqa: E402
-from vlm import (  # noqa: E402
-    _mimo_video_chunks,
-    analyze_scenes,
-    analyze_video_overview,
-)
+from vlm import analyze_scenes  # noqa: E402
 
 
 def test_get_video_duration_raises_for_unparseable_output(monkeypatch):
@@ -159,8 +154,8 @@ def test_mimo_api_headers_and_payload_mapping(monkeypatch):
     assert "thinking" not in asr_payload
 
 
-def test_mimo_video_401_names_the_env_var_that_supplied_the_key(tmp_path):
-    """A MIMO_VIDEO_API_KEY rejected with 401 is reported under its own name, not MIMO_API_KEY."""
+def test_mimo_asr_401_names_the_env_var_that_supplied_the_key(tmp_path):
+    """A MIMO_ASR_API_KEY rejected with 401 is reported under its own name, not MIMO_API_KEY."""
     script = """
 import io, sys, urllib.error, urllib.request
 sys.path.insert(0, sys.argv[1])
@@ -171,87 +166,19 @@ def reject(*_a, **_k):
 
 urllib.request.urlopen = reject
 try:
-    lib.mimo_video_api_call({"model": "m"}, max_retries=1)
+    lib.mimo_asr_api_call({"model": "m"}, max_retries=1)
 except RuntimeError as exc:
     print(exc)
 """
-    scripts_dir = Path(__file__).resolve().parents[2] / "skills" / "video-understanding" / "scripts"
+    scripts_dir = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"
     env = {k: v for k, v in os.environ.items() if not k.startswith("MIMO_")}
-    env["MIMO_VIDEO_API_KEY"] = "video-only-key"
+    env["MIMO_ASR_API_KEY"] = "asr-only-key"
     env["PYTHONIOENCODING"] = "utf-8"  # the message is Chinese; Windows pipes default to cp1252
     out = subprocess.run(
         [sys.executable, "-c", script, str(scripts_dir)],
         env=env, capture_output=True, text=True, encoding="utf-8", check=True, cwd=tmp_path,
     ).stdout
-    assert "401" in out and "MIMO_VIDEO_API_KEY" in out
-
-
-def test_mimo_video_overview_uses_scene_chunks(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"fake-video")
-    seen_payloads = []
-
-    def fake_api_call(payload):
-        seen_payloads.append(payload)
-        return {
-            "model": "mimo-v2.5",
-            "choices": [
-                {"message": {"content": "分片概览", "reasoning_content": "推理内容"}}
-            ],
-            "usage": {"prompt_tokens_details": {"video_tokens": 12}},
-        }
-
-    def fake_extract(video_path, chunk, output_path):
-        output_path.write_bytes(b"tiny-chunk")
-        return output_path
-
-    monkeypatch.setitem(CONFIG, "mimo_video_api_key", "mimo-secret")
-    monkeypatch.setitem(CONFIG, "mimo_video_model", "mimo-v2.5")
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(CONFIG, "mimo_video_fps", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 0.5)
-    monkeypatch.setitem(CONFIG, "mimo_media_resolution", "max")
-    monkeypatch.setattr("vlm._extract_video_chunk", fake_extract)
-    monkeypatch.setattr("vlm.mimo_video_api_call", fake_api_call)
-
-    overview = analyze_video_overview(
-        video, tmp_path, [{"scene_id": 7, "start": 0.0, "end": 5.0}]
-    )
-
-    assert overview["input"] == "scene_chunks"
-    assert overview["chunk_count"] == 3
-    assert overview["model"] == "mimo-v2.5"
-    assert len(seen_payloads) == 3
-    for payload in seen_payloads:
-        video_part = payload["messages"][0]["content"][0]
-        assert payload["model"] == "mimo-v2.5"
-        assert payload["max_tokens"] == 1200
-        assert video_part["type"] == "video_url"
-        assert video_part["video_url"]["url"].startswith("data:video/mp4;base64,")
-        assert video_part["fps"] == 2
-        assert video_part["media_resolution"] == "max"
-    assert "分片概览" in overview["content"]
-    assert overview["settings"]["mimo_video_chunk_max_seconds"] == 2
-    assert all(not Path(item["clip_path"]).is_absolute() for item in overview["chunks"])
-    assert all(
-        item["clip_path"].startswith("mimo_video_chunks/")
-        for item in overview["chunks"]
-    )
-    assert (tmp_path / "mimo_video_overview.json").exists()
-
-
-def test_mimo_video_chunks_split_on_scene_boundaries(monkeypatch):
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 0.5)
-
-    chunks = _mimo_video_chunks([{"scene_id": 3, "start": 0.0, "end": 5.0}])
-
-    assert [(c["scene_id"], c["start"], c["end"]) for c in chunks] == [
-        (3, 0.0, 2.0),
-        (3, 2.0, 4.0),
-        (3, 4.0, 5.0),
-    ]
+    assert "401" in out and "MIMO_ASR_API_KEY" in out
 
 
 def test_research_context_feeds_vlm_from_background_research(tmp_path):
@@ -325,37 +252,3 @@ def test_load_background_research_missing_is_empty_and_malformed_raises(tmp_path
     with pytest.raises(ValueError, match="JSON 对象"):
         load_background_research(tmp_path)
 
-
-def test_timeline_fusion_aligns_scenes_dialogue_and_quiet_slots():
-    fusion = _build_timeline_fusion(
-        [
-            {
-                "scene_id": 0,
-                "start": 0.0,
-                "end": 10.0,
-                "description": "对峙",
-                "frame_facts": {"1.0": ["看门"]},
-            }
-        ],
-        [
-            {"start": 2.0, "end": 4.0, "text": "你到底是谁"},
-            {"start": 8.0, "end": 12.0, "text": "跨场对白"},
-        ],
-        [
-            {"start": 0.0, "end": 1.0, "duration": 1.0, "has_speech": False},
-            {"start": 5.0, "end": 7.0, "duration": 2.0, "has_speech": False},
-            {"start": 9.0, "end": 9.5, "duration": 0.5, "has_speech": True},
-        ],
-    )
-
-    item = fusion[0]
-    assert item["dialogue_overlap_seconds"] == 4.0
-    assert [seg["text"] for seg in item["dialogue_segments"]] == [
-        "你到底是谁",
-        "跨场对白",
-    ]
-    assert [(slot["start"], slot["end"]) for slot in item["narration_slots"]] == [
-        (0.0, 1.0),
-        (5.0, 7.0),
-    ]
-    assert item["frame_facts"] == {"1.0": ["看门"]}

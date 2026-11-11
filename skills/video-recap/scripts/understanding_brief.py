@@ -1,0 +1,171 @@
+"""Format research context and rebuild briefs from cached analysis."""
+
+import json
+
+from pathlib import Path
+
+from lib import log, load_background_research
+from asr_timing_evidence import asr_evidence_summary_for_brief
+
+
+from detect import detect_speech_boundary_anchors
+
+
+from briefing.builder import build_agent_brief
+from briefing.context import _clip_text, normalize_background_research
+
+
+from understanding_cache import _load_json
+from understanding_storyboard import (
+    _generate_edited_storyboard,
+    _generate_source_storyboard,
+    _prepend_storyboard_brief_header,
+)
+
+
+def _research_context(work_dir):
+    """Fold background_research.json into a compact context string for the VLM prompt.
+
+    The agent does story research first (per references/research-guide.md) and writes
+    work_dir/background_research.json; this surfaces synopsis, named characters,
+    relationships, plot arcs, and cultural notes so scene VLM analysis can name people
+    and read scenes with plot knowledge instead of labelling everyone "黑衣男子".
+    Returns "" when no usable research file is present, so behaviour is unchanged.
+    """
+    data = load_background_research(work_dir)
+    if not data:
+        return ""
+    data = normalize_background_research(data)
+    parts = []
+    for key in ("synopsis", "episode_context", "worldbuilding"):
+        val = _clip_text(data[key], 320)
+        if val:
+            parts.append(val)
+    chars = data["characters"]
+    if chars:
+        named = "；".join(
+            f"{_clip_text(name, 40)}（{_clip_text(desc, 120)}）"
+            for name, desc in list(chars.items())[:12]
+            if _clip_text(name, 40)
+        )
+        if named:
+            parts.append("主要人物：" + named)
+    details = data["character_details"]
+    if details:
+        detail_lines = []
+        for name, info in list(details.items())[:8]:
+            bits = []
+            clean_aliases = [_clip_text(alias, 30) for alias in info["aliases"][:3]]
+            clean_aliases = [alias for alias in clean_aliases if alias]
+            if clean_aliases:
+                bits.append("别名" + "/".join(clean_aliases))
+            role = _clip_text(info["role"], 60)
+            if role:
+                bits.append(role)
+            clean_rels = [_clip_text(rel, 60) for rel in info["relationships"][:3]]
+            bits.extend(rel for rel in clean_rels if rel)
+            clean_name = _clip_text(name, 40)
+            if clean_name and bits:
+                detail_lines.append(f"{clean_name}（{'；'.join(bits)}）")
+        if detail_lines:
+            parts.append("人物关系：" + "；".join(detail_lines))
+    arcs = data["plot_arcs"]
+    if arcs:
+        arc_lines = []
+        for arc in arcs[:6]:
+            name = _clip_text(arc.get("name"), 50)
+            desc = _clip_text(arc.get("description"), 120)
+            status = _clip_text(arc.get("status"), 30)
+            if name or desc:
+                tail = f"[{status}]" if status else ""
+                arc_lines.append(f"{name}：{desc}{tail}".strip("："))
+        if arc_lines:
+            parts.append("剧情线：" + "；".join(arc_lines))
+    notes = data["cultural_notes"]
+    if notes:
+        note_lines = []
+        for note in notes[:4]:
+            item = _clip_text(note.get("item"), 50)
+            expl = _clip_text(note.get("explanation"), 100)
+            if item or expl:
+                note_lines.append(f"{item}：{expl}".strip("："))
+        if note_lines:
+            parts.append("背景注释：" + "；".join(note_lines))
+    return " ".join(parts).strip()[:1200]
+
+
+def _load_understanding_artifacts_for_brief(work_dir):
+    """Load existing analysis artifacts for a brief-only regeneration pass.
+
+    Material-library restores are allowed to reuse expensive analysis artifacts,
+    but cut pass 2 must still rebuild `agent_narration_brief.md` against the
+    rendered OUTPUT timeline. This helper deliberately performs no extraction,
+    ASR, VLM, or external API calls; it only reads already-present JSON. An absent
+    artifact contributes [] (the brief documents the thin substrate); a corrupt one raises.
+    """
+    work_dir = Path(work_dir)
+
+    def _own(name):
+        path = work_dir / name
+        return _load_json(path) if path.exists() else []
+
+    return _own("vlm_analysis.json"), _own("asr_result.json"), _own("silence_periods.json")
+
+
+def _write_brief_from_existing_artifacts(video, work_dir, args, video_duration):
+    """Regenerate only the agent brief from existing artifacts."""
+    scenes, asr_result, silence_periods = _load_understanding_artifacts_for_brief(
+        work_dir
+    )
+    if not (Path(work_dir) / "speech_boundary_anchors.json").exists():
+        detect_speech_boundary_anchors(work_dir, asr_result)
+
+    _finish_brief(
+        video, work_dir, args, video_duration,
+        storyboard_scenes=scenes, brief_scenes=scenes,
+        asr_result=asr_result, silence_periods=silence_periods,
+        status="brief_only", done_label="brief-only 完成", force=False,
+    )
+
+
+def _finish_brief(
+    video, work_dir, args, video_duration, *, storyboard_scenes, brief_scenes,
+    asr_result, silence_periods, status, done_label, force,
+):
+    """Storyboards, writing brief and the JSON status line."""
+    work_dir = Path(work_dir)
+    source_storyboard = None
+    scenes_json = work_dir / "scenes.json"
+    if scenes_json.exists():
+        source_storyboard = _generate_source_storyboard(
+            work_dir, Path(video), storyboard_scenes, scenes_json, force=force
+        )
+    edited_storyboard = _generate_edited_storyboard(work_dir, video, force=force)
+    cut_mode = (work_dir / "clip_plan_validated.json").exists()
+
+    brief_path = build_agent_brief(
+        brief_scenes,
+        asr_result,
+        silence_periods,
+        video_duration,
+        work_dir,
+        args.style,
+        asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
+    )
+    _prepend_storyboard_brief_header(
+        brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode
+    )
+    log("=" * 50)
+    log(f"{done_label}。写作 brief: {brief_path}")
+    print(
+        json.dumps(
+            {
+                "status": status,
+                "work_dir": str(work_dir),
+                "brief": str(brief_path),
+                "scenes": len(storyboard_scenes),
+                "asr_segments": len(asr_result),
+            },
+            ensure_ascii=False,
+        )
+    )

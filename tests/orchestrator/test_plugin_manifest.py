@@ -1,9 +1,9 @@
-"""Plugin packaging guards (no-move variant): plugin.json has exactly the 4 Anthropic keys,
-the 4 pure-tool stage skills are hidden (user-invocable: false) so video-recap is the router,
-video-script and video-reference stay invocable because users name them directly (writing only;
-breaking a finished video down into an on-demand production reference), and marketplace.json is the single Claude-compatible marketplace catalog (also imported by
-OpenClaw's `plugins install`); the plugin version stays single-sourced in plugin.json (bump it
-during explicit release preparation so installed users receive each shipped version)."""
+"""Plugin packaging guards: plugin.json has exactly the 4 Anthropic keys, the two self-contained
+skills (video-recap for unified production and video-reference for on-demand reference breakdown)
+are both user-invocable with single-line frontmatter descriptions, and marketplace.json is the
+single Claude-compatible marketplace catalog (also imported by OpenClaw's `plugins install`); the
+plugin version stays single-sourced in plugin.json (bump it during explicit release preparation so
+installed users receive each shipped version)."""
 import json
 from pathlib import Path
 import re
@@ -86,11 +86,6 @@ def test_skill_descriptions_are_single_line_values():
 def test_skill_frontmatter_exposes_router_writing_and_reference_skills():
     expected_invocability = {
         "video-recap": True,
-        "video-script": True,
-        "video-understanding": False,
-        "video-cut": False,
-        "video-voiceover": False,
-        "video-assemble": False,
         "video-reference": True,
     }
 

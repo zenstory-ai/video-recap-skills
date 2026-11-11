@@ -6,7 +6,7 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 
 CREDENTIAL_MARKERS = ("KEY", "SECRET", "PASSWORD")
-ENV_READERS = {"env_bool", "_env_bool", "env_int", "_optional_env_int", "env_float", "env_str"}
+ENV_READERS = {"env_bool", "_env_bool", "env_int", "env_float", "env_str"}
 
 
 def _skill_script_trees():
@@ -57,7 +57,7 @@ def _credential_shaped(name):
 
 def test_literal_env_reads_are_not_credential_shaped_except_api_keys():
     trees = _skill_script_trees()
-    assert len(trees) >= 6
+    assert len(trees) == 2
     reads = set()
     for tree in trees:
         reads |= _literal_env_reads(tree)

@@ -5,7 +5,7 @@
   "tts_meta": "MEDIA_NOT_DISTRIBUTED/tts_meta.json",
   "tts_segments": 7,
   "assembly_settings": {
-    "user_subtitles": false,
+    "original_subtitles": false,
     "burn_subtitles": false,
     "force_video_reencode": false,
     "encode": {
@@ -15,19 +15,12 @@
     },
     "video_filters": {
       "mask_source_subtitles": false,
-      "source_subtitle_mask_policy": "off",
-      "source_subtitle_mask_policy_declared": false,
-      "source_subtitle_mask_policy_trigger": "policy_off",
       "source_subtitle_mask_ratio": null,
       "source_subtitle_mask_timing": null,
       "subtitle_mask_opacity": null,
       "subtitle_mask_padding": null,
       "subtitle_y_top": -1,
-      "subtitle_y_bot": -1,
-      "visual_overlays": {
-        "artifact": "visual_overlays.json",
-        "present": true
-      }
+      "subtitle_y_bot": -1
     },
     "narration_timing": {
       "fade_ms": 120,
@@ -39,7 +32,6 @@
       "duck_fade_seconds": 0.3,
       "duck_bridge_seconds": 1.5,
       "ducking_narr_weight": 2.4,
-      "ducking_orig_volume": 0.3,
       "idle_orig_volume": 1.0,
       "speech_ducking_volume": 0.2,
       "zone_ducking_volume": 0.12,

@@ -6,12 +6,12 @@
     "REVISION"
   ],
   "core_flow": [
-    "video-understanding",
-    "video-script",
-    "video-cut",
-    "video-script (cut pass 2)",
-    "video-voiceover",
-    "video-assemble"
+    "video-recap: understand.py",
+    "video-recap: creative pass 1 (story & clip plan)",
+    "video-recap: cut.py",
+    "video-recap: creative pass 2 (narration & validate.py)",
+    "video-recap: voiceover.py",
+    "video-recap: assemble.py"
   ],
   "stages": [
     {
@@ -25,8 +25,7 @@
         "sources/*/asr_result.json",
         "sources/*/vlm_analysis.json",
         "sources/*/silence_periods.json",
-        "sources/*/timeline_fusion.json",
-        "sources/*/asr_writing_chunks.json",
+        "sources/*/speech_boundary_anchors.json",
         "sources/*/agent_narration_brief.md",
         "contact sheets and representative frames"
       ]

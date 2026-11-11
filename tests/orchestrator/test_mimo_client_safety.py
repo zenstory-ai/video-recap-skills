@@ -6,9 +6,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 CLIENT_LIBS = [
-    ("understanding", ROOT / "skills" / "video-understanding" / "scripts" / "lib.py"),
-    ("voiceover", ROOT / "skills" / "video-voiceover" / "scripts" / "lib.py"),
-    ("script", ROOT / "skills" / "video-script" / "scripts" / "lib.py"),
+    ("recap", ROOT / "skills" / "video-recap" / "scripts" / "lib.py"),
 ]
 
 

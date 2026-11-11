@@ -9,41 +9,34 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-cut" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 import cut
 import cut_contract
 import cut_qc
 import cut_render
 import frame_grid
 import lib
-import media_geometry
+import media
 import sentence_boundaries
 from cut_contract import normalize_clip_plan, parse_duration_seconds
 from cut_render import build_edited_source_video
-from lib import env_float
 from sentence_boundaries import snap_clip_ends_to_lines, snap_clips_off_shot_changes
 
 _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
 
 
-@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
-def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
-    monkeypatch.setenv("NONFINITE_FLOAT", raw)
-    with pytest.raises(ValueError, match="NONFINITE_FLOAT.*finite"):
-        env_float("NONFINITE_FLOAT", 1.0, min_val=0.0)
-
-
 def _geometry(width, height, fps):
     """A probed geometry as ffprobe reports a square-pixel, unrotated stream."""
-    return media_geometry._geometry_from_stream(
+    return media._geometry_from_stream(
         {"width": width, "height": height, "r_frame_rate": f"{fps}/1"}
     )
 
 
 def _mock_media_probes(monkeypatch):
     """main() probes the (fake) source video for its canvas and shot changes."""
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
     monkeypatch.setattr(sentence_boundaries, "_detect_shot_changes", lambda *_args, **_kwargs: [])
+    monkeypatch.setitem(lib.CONFIG, "cut_shot_review", False)
 
 
 def _make_plan(clips_spec, allow_overlap=False, video_duration=100.0):
@@ -61,7 +54,7 @@ def _fake_detector(changes):
 
 def _with_geometry(plan, source_paths):
     """cut_cli selects the output canvas before rendering; direct render calls must do the same."""
-    _, _, _, geometry_qc = media_geometry._select_output_geometry(source_paths, plan["clips"])
+    _, _, _, geometry_qc = media._select_output_geometry(source_paths, plan["clips"])
     plan.setdefault("qc", {})["output_geometry"] = geometry_qc
     return plan
 
@@ -83,9 +76,9 @@ def _capture_render(monkeypatch, tmp_path, raw_clips, video_duration, *, config=
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
     if probe is None:
-        monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
+        monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
     monkeypatch.setattr("cut_render.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("media.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 2.0)
     if config:
         monkeypatch.setattr("cut_render.CONFIG", {**cut_render.CONFIG, **config})
@@ -128,20 +121,20 @@ def test_cut_main_keeps_sentence_gate_when_line_snapping_is_disabled(monkeypatch
     video.write_bytes(b"v")
     clip = {"start": 3.0, "end": 7.0}
     argv = ["cut.py", str(video), "--work-dir", str(tmp_path), "--normalize-only"]
-    asr = json.dumps({"segments": [{"start": 0.0, "end": 10.0, "text": "完整原声句子。"}]})
+    asr = json.dumps([{"start": 0.0, "end": 10.0, "text": "完整原声句子。"}])
 
     if multi_source:
         clip["source_id"] = "a"
         source_work = tmp_path / "sources" / "a"
         source_work.mkdir(parents=True)
-        (source_work / "asr_clean.json").write_text(asr, encoding="utf-8")
+        (source_work / "asr_result.json").write_text(asr, encoding="utf-8")
         manifest = tmp_path / "sources.json"
         manifest.write_text(json.dumps({"sources": [{
             "source_id": "a", "source_path": str(video), "source_work_dir": "sources/a", "duration": 10.0,
         }]}), encoding="utf-8")
         argv.extend(["--sources-manifest", str(manifest)])
     else:
-        (tmp_path / "asr_clean.json").write_text(asr, encoding="utf-8")
+        (tmp_path / "asr_result.json").write_text(asr, encoding="utf-8")
         monkeypatch.setattr(cut_cli, "get_video_duration", lambda _path: 10.0)
 
     (tmp_path / "clip_plan.json").write_text(json.dumps({"clips": [clip]}), encoding="utf-8")
@@ -166,7 +159,10 @@ def test_parse_duration_seconds_accepts_common_and_compound_forms(raw, expected)
     assert parse_duration_seconds(raw) == expected
 
 
-@pytest.mark.parametrize("raw", ["nope", "-1", "2m30x", "m30"])
+@pytest.mark.parametrize(
+    "raw",
+    ["nope", "-1", "2m30x", "m30", "01:75", "1:60:00", "1:nan", float("nan"), float("inf"), True],
+)
 def test_parse_duration_seconds_rejects_malformed_forms(raw):
     with pytest.raises(ValueError):
         parse_duration_seconds(raw)
@@ -310,7 +306,7 @@ def _seed_cached_cut(tmp_path):
     (work / "clip_plan.json").write_text(json.dumps(raw_plan), encoding="utf-8")
     validated = cut_contract.normalize_clip_plan(raw_plan, video_duration=100.0)
     # cut_cli stamps each clip's frame count; the render cache binds to that too.
-    geometry = media_geometry._select_output_geometry([str(video)], validated["clips"])[3]
+    geometry = media._select_output_geometry([str(video)], validated["clips"])[3]
     frame_grid.record_frame_grid(validated, geometry)
     edited = work / "edited_source.mp4"
     edited.write_bytes(b"cached-edited")
@@ -686,7 +682,7 @@ def test_normalize_multi_source_clip_plan_maps_sources_and_validates_per_source_
 
 
 def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_meta(monkeypatch, tmp_path):
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda _path: _geometry(1280, 720, 30.0))
     a = tmp_path / "a.mp4"
     b = tmp_path / "b.mp4"
     a.write_bytes(b"aaa")
@@ -709,7 +705,7 @@ def test_build_edited_source_video_multi_source_uses_multiple_inputs_and_cache_m
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("cut_render.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("media_geometry.run_cmd", fake_run_cmd)
+    monkeypatch.setattr("media.run_cmd", fake_run_cmd)
     monkeypatch.setattr("cut_render.get_video_duration", lambda path: 3.0)
 
     out = cut_render.build_edited_source_video("ignored.mp4", _with_geometry(plan, [str(a), str(b)]), work_dir)
@@ -877,10 +873,10 @@ def test_snap_multi_source_clips_start_snaps_each_source_silence(tmp_path):
 
 def test_select_output_geometry_uses_all_used_sources_not_first(monkeypatch):
     probes = {"/low.mp4": _geometry(854, 480, 24.0), "/hd.mp4": _geometry(1920, 1080, 30.0)}
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda p: probes[str(p)])
     clips = [{"source_id": "low", "source_path": "/low.mp4", "duration": 1.0},
              {"source_id": "hd", "source_path": "/hd.mp4", "duration": 5.0}]
-    w, h, fps, qc = media_geometry._select_output_geometry(["/low.mp4", "/hd.mp4"], clips)
+    w, h, fps, qc = media._select_output_geometry(["/low.mp4", "/hd.mp4"], clips)
     assert (w, h, fps) == (1920, 1080, 30.0)
     assert qc["source_id"] == "hd"
     assert qc["reason"] == "weighted_orientation_area_fps"
@@ -889,11 +885,11 @@ def test_select_output_geometry_uses_all_used_sources_not_first(monkeypatch):
 def test_select_output_geometry_orientation_duration_and_fps_ties(monkeypatch):
     probes = {"/portrait.mp4": _geometry(1080, 1920, 24.0), "/landscape.mp4": _geometry(1280, 720, 60.0),
               "/landscape2.mp4": _geometry(1920, 1080, 30.0)}
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda p: probes[str(p)])
     clips = [{"source_id": "p", "source_path": "/portrait.mp4", "duration": 2.0},
              {"source_id": "l1", "source_path": "/landscape.mp4", "duration": 1.0},
              {"source_id": "l2", "source_path": "/landscape2.mp4", "duration": 2.0}]
-    w, h, fps, qc = media_geometry._select_output_geometry(
+    w, h, fps, qc = media._select_output_geometry(
         ["/portrait.mp4", "/landscape.mp4", "/landscape2.mp4"], clips)
     assert (w, h) == (1920, 1080)  # landscape wins by total used duration (3s > 2s)
     assert fps == 30.0  # the 30 fps bucket carries 2s of used duration
@@ -904,9 +900,9 @@ def test_probe_video_geometry_is_iterable_and_rotation_sar_aware(monkeypatch):
     payload = {"streams": [{"width": 1920, "height": 1080, "r_frame_rate": "30000/1001",
                             "sample_aspect_ratio": "2:1", "display_aspect_ratio": "16:9",
                             "tags": {"rotate": "90"}}]}
-    monkeypatch.setattr(media_geometry, "run_cmd",
+    monkeypatch.setattr(media, "run_cmd",
                         lambda cmd: CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr=""))
-    geometry = media_geometry._probe_video_geometry("/rotated.mp4")
+    geometry = media._probe_video_geometry("/rotated.mp4")
     width, height, fps = geometry
     assert (width, height) == (1080, 3840)
     assert fps == 29.97
@@ -929,24 +925,24 @@ def test_probe_video_geometry_is_iterable_and_rotation_sar_aware(monkeypatch):
 ])
 def test_cut_probe_video_geometry_uses_display_geometry(monkeypatch, stream, expected):
     """Cut geometry uses display geometry (rotation, SAR), not raw encoded width/height."""
-    monkeypatch.setattr(media_geometry, "run_cmd", lambda cmd: CompletedProcess(
+    monkeypatch.setattr(media, "run_cmd", lambda cmd: CompletedProcess(
         cmd, 0, stdout=json.dumps({"streams": [stream]}), stderr=""))
-    assert media_geometry._probe_video_geometry("probe.mp4") == expected
+    assert media._probe_video_geometry("probe.mp4") == expected
 
 
 def test_select_output_geometry_qc_exposes_rotation_sar_dar_facts(monkeypatch):
     probes = {
-        "/rotated.mp4": media_geometry.VideoGeometry(1080, 1920, 30.0, {
+        "/rotated.mp4": media.VideoGeometry(1080, 1920, 30.0, {
             "coded_width": 1920, "coded_height": 1080, "display_width": 1080, "display_height": 1920,
             "rotation": 90, "rotation_swaps_axes": True, "sample_aspect_ratio": "1:1",
             "sample_aspect_ratio_float": 1.0, "display_aspect_ratio": "16:9",
             "frame_rate": "30/1", "video_start_offset": 0.0}),
         "/landscape.mp4": _geometry(1280, 720, 30.0),
     }
-    monkeypatch.setattr(media_geometry, "_probe_video_geometry", lambda p: probes[str(p)])
+    monkeypatch.setattr(media, "_probe_video_geometry", lambda p: probes[str(p)])
     clips = [{"source_id": "r", "source_path": "/rotated.mp4", "duration": 5.0},
              {"source_id": "l", "source_path": "/landscape.mp4", "duration": 1.0}]
-    w, h, fps, qc = media_geometry._select_output_geometry(["/rotated.mp4", "/landscape.mp4"], clips)
+    w, h, fps, qc = media._select_output_geometry(["/rotated.mp4", "/landscape.mp4"], clips)
     assert (w, h, fps) == (1080, 1920, 30.0)
     assert qc["orientation"] == "portrait"
     assert qc["rotation"] == 90
@@ -1002,21 +998,12 @@ def test_contiguous_same_source_join_does_not_fade_inside_sentence(monkeypatch, 
     assert "[0:a]atrim=start=1.000:end=2.000,asetpts=PTS-STARTPTS,afade=t=in" not in joined
 
 
-@pytest.mark.parametrize("kwargs,allowed_by", [
-    pytest.param({}, None, id="drift_blocks"),
-    pytest.param({"allow_duration_drift": True}, "--allow-duration-drift", id="cli_flag_allows"),
-    pytest.param({"allow_duration_drift": True, "duration_drift_allowed_by": "operator-override"},
-                 "operator-override", id="custom_allowed_by"),
-])
-def test_update_cut_qc_duration_status_and_allow_drift(kwargs, allowed_by):
+def test_update_cut_qc_duration_drift_warns_without_blocking():
     plan = {"clips": [{"duration": 4.0}], "total_duration": 4.0, "target_duration": 10.0}
-    cut_qc.update_cut_qc(plan, **kwargs)
+    cut_qc.update_cut_qc(plan)
     assert plan["qc"]["target_duration_status"] == "under"
-    if allowed_by is None:
-        assert plan["qc"]["blocking"][0]["code"] == "target_duration_drift"
-    else:
-        assert "blocking" not in plan["qc"]
-        assert plan["qc"]["target_duration"]["duration_drift_allowed_by"] == allowed_by
+    assert "blocking" not in plan["qc"]
+    assert plan["qc"]["warnings"][0]["code"] == "target_duration_drift"
 
 
 def test_edited_source_cache_from_content_hash_schema_is_a_miss(tmp_path):

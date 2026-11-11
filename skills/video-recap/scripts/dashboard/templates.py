@@ -14,7 +14,7 @@ from pathlib import Path
 from dashboard.io import media_entry
 
 PROVENANCE_LABELS = {"measured": "实测", "fitted": "调出", "specified": "指定", "unknown": "未知"}
-SIDE_MARGIN_PX = 40  # video-assemble's default left/right subtitle margin; library.py checks against it
+SIDE_MARGIN_PX = 40  # assemble.py's default left/right subtitle margin; library.py checks against it
 SAMPLE_TEXT = "这是按每行字数校准的最长一行字幕示意"
 SUBTITLE_ROWS = (
     ("font", "字体", ""),

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-voiceover" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 from lib import CONFIG  # noqa: E402
 import voiceover  # noqa: E402
 
@@ -35,7 +35,6 @@ def engine_calls(monkeypatch):
     monkeypatch.setitem(CONFIG, "tts_provider", "mimo-tts")
     monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
     monkeypatch.setitem(CONFIG, "voice_ref", "")
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
     monkeypatch.setattr(voiceover, "_run_tts_engine", fake_run)
     monkeypatch.setattr(voiceover, "get_video_duration", lambda _path: 1.0)
     return calls
@@ -71,39 +70,25 @@ def test_only_inserted_and_edited_blocks_reach_the_engine(engine_calls, tmp_path
     assert _audio_by_index(segments) == [f"audio:{text}" for text in edited]
 
 
-def test_mimo_resynthesizes_only_a_block_whose_instruction_changes(engine_calls, tmp_path):
-    """Position sets the nominal rate (+5% inside, -2% second-to-last, -5% last), but MiMo
-    only hears it through the instruction wording, which +5% and -2% share."""
-    voiceover.synthesize_tts(_narration(BLOCKS), tmp_path)
-    engine_calls.clear()
-
-    # Deleting the last block: block 3 goes +5% -> -2% (same wording), block 4 goes
-    # -2% -> -5% ("语速略慢").
-    segments, _engine, _failures = voiceover.synthesize_tts(_narration(BLOCKS[:4]), tmp_path)
-
-    assert engine_calls == [BLOCKS[3]]
-    # The reused take reports its new position's rate, exactly as a fresh synthesis would.
-    assert [s["tts_rate_offset"] for s in segments] == [0.05, 0.05, -0.02, -0.05]
-    assert _audio_by_index(segments) == [f"audio:{text}" for text in BLOCKS[:4]]
-
-
-def test_fish_resynthesizes_every_block_whose_numeric_speed_changes(
+def test_deleting_the_last_block_resynthesizes_nothing_across_providers(
     engine_calls, monkeypatch, tmp_path
 ):
-    """Fish Audio receives the rate as a number, so every rate change is a new request."""
-    monkeypatch.setitem(CONFIG, "tts_provider", "fish-audio")
-    monkeypatch.setitem(CONFIG, "fish_api_key", "fish-test")
-    voiceover.synthesize_tts(_narration(BLOCKS), tmp_path)
-    engine_calls.clear()
+    """Position does not alter rate/pitch, so deleting the tail block is a pure cache hit."""
+    for provider in ("mimo-tts", "fish-audio"):
+        monkeypatch.setitem(CONFIG, "tts_provider", provider)
+        monkeypatch.setitem(CONFIG, "fish_api_key", "fish-test")
+        voiceover.synthesize_tts(_narration(BLOCKS), tmp_path)
+        engine_calls.clear()
 
-    voiceover.synthesize_tts(_narration(BLOCKS[:4]), tmp_path)
+        segments, _engine, _failures = voiceover.synthesize_tts(_narration(BLOCKS[:4]), tmp_path)
 
-    assert sorted(engine_calls) == sorted(BLOCKS[2:4])
+        assert engine_calls == [], provider
+        assert [s["tts_rate_offset"] for s in segments] == [0.0, 0.0, 0.0, 0.0]
+        assert _audio_by_index(segments) == [f"audio:{text}" for text in BLOCKS[:4]]
 
 
 def test_cache_key_is_the_request_the_provider_receives(monkeypatch):
     monkeypatch.setitem(CONFIG, "voice_ref", "")
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
     seg = {"start": 0.0, "end": 3.0, "narration": "同一句。"}
 
     def key(engine, rate, pitch="+0Hz", emotion=None):
@@ -131,20 +116,19 @@ def test_moving_a_window_reuses_the_audio(engine_calls, tmp_path):
     assert [s["end"] for s in segments] == [4.0, 8.0, 12.0, 16.0, 20.0]
 
 
-def test_an_approved_block_moved_into_a_short_window_fails_without_a_provider_call(
-    engine_calls, monkeypatch, tmp_path
+def test_a_block_moved_into_a_short_window_reuses_the_audio_and_leaves_fit_to_assemble(
+    engine_calls, tmp_path
 ):
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
     narration = _narration(BLOCKS[:2])
     voiceover.synthesize_tts(narration, tmp_path)
     engine_calls.clear()
     narration[1]["end"] = narration[1]["start"] + 0.6
 
-    with pytest.raises(voiceover.ApprovedTextDurationError) as raised:
-        voiceover.synthesize_tts(narration, tmp_path)
+    segments, _engine, failures = voiceover.synthesize_tts(narration, tmp_path)
 
     assert engine_calls == []
-    assert raised.value.evidence["segment"] == 2
+    assert failures == []
+    assert [s["fit_status"] for s in segments] == ["pending_assembly", "pending_assembly"]
 
 
 def test_block_files_share_the_cached_audio_instead_of_copying_it(engine_calls, tmp_path):

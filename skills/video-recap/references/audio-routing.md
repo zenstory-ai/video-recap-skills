@@ -1,127 +1,43 @@
 # Recap audio routing
 
-`--edit-mode` selects the picture workflow; `--audio-mode` independently
-selects the final audio workflow:
+The routes that combine `--edit-mode` and `--audio-mode` are in `SKILL.md` §1.
 
-| Audio mode | Narration validation/review | TTS | Assemble input |
+| Audio mode | Narration validation | TTS | Assemble input |
 | --- | --- | --- | --- |
 | `narration` (default) | Runs as before | Runs as before | source or rendered cut |
 | `source-mix` | Not applicable | Not run | current source or rendered cut |
-| `adopted-packet-copy` | Not applicable | Not run | current source or rendered cut |
 
-`full` with either non-narration mode goes directly to assemble and does not
-implicitly run understanding. `cut` still requires the existing `clip_plan`:
-the first run analyzes and pauses for that plan, then later runs the established
-single- or multi-source cut renderer. It does not pause for `narration.json`.
-
-## Local adopted full-sound assembly
-
-The strict local-adoption route accepts one prebuilt picture in `full` mode and
-exactly this all-or-none bundle:
-
-```text
---tts-meta PATH --narration-adoption PATH --audio-mix-adoption PATH
-```
-
-It requires narration mode, stream 0, a new explicit `--work-dir`, and a delivery path
-that does not already exist. `--output-dir` is optional; when omitted, delivery uses the
-new work directory's parent. The route calls only the video-assemble CLI; it does
-not run understanding, script validation, narration review, voiceover, cut,
-continuation, editor export, or material-cache reuse. Ambient TTS provider and voice
-configuration are inert. Explicit TTS/voice/review/editor flags are rejected rather
-than silently ignored.
-
-`recap_run_manifest.json` records the resolved path of all three local artifacts under
-`audio.local_adoption`, and the picture's path plus `{size, mtime_ns}` as
-`source_video_identity`. Analysis settings remain separate and unchanged. Recap validates
-routing and, after the child run, checks that the assembler's binding records reference
-the same adoption files and picture; video-assemble remains authoritative for the adoption
-schemas, PCM shapes, frame clock, mix, bindings, and final media transaction. This path
-executes caller-adopted assets and does not claim that recap authored or approved their
-story, voice, or mix.
-
-## Keep adopted voice after a cut
-
-The single input above is the **finished picture**, which may contain one or many source
-episodes. Use two existing stages rather than sending an old mix binding into a new cut:
-
-1. Finish the selected cut with `video-cut`: either run `recap.py ... --edit-mode cut`,
-   or call that skill's own `scripts/cut.py` from its installed directory, with an
-   existing clip plan and source manifest:
-
-   ```bash
-   python3 <video-cut>/scripts/cut.py ep1.mp4 --work-dir CUT_WORK \
-     --sources-manifest SOURCES_JSON
-   ```
-
-   `SOURCES_JSON` must be `{"sources": [{"source_id": ..., "source_path": ...}]}`
-   (optional per-source `duration` and `source_work_dir`); recap's
-   `multi_source_manifest.json` already has this shape. A single-source cut omits
-   `--sources-manifest`. Read `clip_plan_validated.json` before placing sound.
-2. Keep the selected WAVs, `tts_meta.json`, and `narration_adoption.json` when the words,
-   WAV bytes, and selected voice are unchanged. Do not run voiceover just to move a line.
-   In this explicit mix, new `output_start_sample` values own placement; old generation
-   windows in `tts_meta.json` are not the revised output timeline.
-3. Match source dialogue, ambience and music to the new picture. Reuse the prepared bed
-   only if that sound and its complete sample clock remain appropriate; otherwise rebuild
-   it with the existing `video-assemble` source/score producer. Write a **new** mix adoption
-   with the prepared receipt path, total samples and complete WAV placements for the new
-   picture. Reordering shots can require moving dialogue too; a mix adoption written for
-   the old picture cannot simply be pointed at the new one.
-4. Run the local adopted `full` command in `SKILL.md` with `CUT_WORK/edited_source.mp4` and a new
-   assembly work/delivery directory. Inspect the emitted narration placements and subtitles
-   against that mixed output. Rebind any precise subtitle track to the new finished audio.
-
-The same steps handle a later revision: keep unchanged picture/voice assets, rebuild only
-the affected bed and placement decisions, then assemble into a new directory. The local
-assembly command still does not resume an old work directory or decide new placements.
+`full` with `source-mix` goes directly to assemble and does not implicitly run
+understanding. `cut` still requires the existing `clip_plan`: the first run analyzes
+and pauses for that plan, then later runs the single- or multi-source cut renderer.
+It does not pause for `narration.json`.
 
 ## Identity and resume
 
 `recap_run_manifest.json` binds `{mode, selected_stream_index}` separately from
-understanding/material settings. Changing audio mode or stream requires a new
-work directory; it never reuses narrated TTS accidentally. Legacy manifests
-without the audio field are interpreted as `narration`, stream 0, preserving
-old in-flight narration runs. Continuation commands retain the audio selection.
+understanding/material settings; `selected_stream_index` is always 0 now, and a
+manifest recording another stream is a mismatch. Changing audio mode requires a new
+work directory; it never reuses narrated TTS accidentally. A manifest without the
+audio field is also a mismatch, so resuming such a run needs a new work directory.
+Continuation commands retain the audio mode.
 
 An unbound work directory containing `narration.json` is ambiguous and cannot
-be adopted by a source mode. Existing run-local QC stages are reset after the
-work-directory policy is validated. Source runs record TTS, narration
-validation, and narration review as `not_applicable`; old `tts_meta.json` and
-narration review files are not read as evidence for the current run.
+be adopted by a source mode. Source runs skip TTS and narration
+validation; an old `tts_meta.json` is not read as evidence for the current run.
 
 ## Fail-closed combinations
 
-- `dub` cannot be combined with a non-narration audio mode.
-- Explicit TTS/text-policy options are rejected in source modes rather than
+- Explicit TTS options are rejected in source modes rather than
   ignored. Ambient TTS provider/voice configuration is inert because TTS does
   not run, and continuation commands do not promote it into explicit flags.
-- Cut audio modes support selected stream 0 only. Full mode may pass
-  another stream to assemble, subject to assemble/export support.
-- Local adopted full-sound assembly consumes a prebuilt picture in `full` mode; use the
-  two-stage workflow above for single- or multi-source cuts. That assembly invocation
-  does not resume an old work directory or export an editor draft.
-- `source-mix` rejects an explicit `subtitle_track.json` before analysis or cut,
-  because the precise-track contract only binds adopted packet audio.
 
-`--preserve-approved-text` remains opt-in and is forwarded unchanged to
-voiceover and continuation only in narration mode. The narration validator no longer takes
-it: validation never rewrites narration in any mode.
+## Packaging and audio
 
-Narration may explicitly select `--tts-provider index-tts`; `auto` does not
-select Index TTS. Index TTS cannot be combined with MiMo voice selection,
-`--voice-ref`, or `dub`. Its endpoint and voice remain backend configuration,
-not recap defaults.
+Static image layers in `packaging_layers.json` apply identically across audio modes,
+while work directories remain strictly bound to a single audio mode so narration-mode
+artifacts never leak into `source-mix` runs.
 
-## Packaging and frozen-audio boundary
-
-Source modes never regenerate `visual_overlays.json`. A work directory already
-bound to narration is rejected, preventing narration-derived overlays from
-silently becoming source-mode author input. Otherwise existing overlays are
-treated as caller-authored packaging and preserved.
-
-`adopted-packet-copy` freezes only the selected audio stream on the actual file
-passed to assemble. In `full`, that is the input video. In `cut`, the cut stage
-has already rendered `edited_source.mp4`; packet-copy verification therefore
-applies to that file's audio, **not** to AAC packets from any original source.
-This routing does not prove listening quality or publication approval.
+No route leaves raw source audio packets untouched. The closest settings for unity-gain
+source delivery are `--audio-mode source-mix` with `IDLE_ORIG_VOLUME=1.0`,
+`ENDING_AUDIO_FADE_MS=0`, and `FINAL_LOUDNORM=0`, which keep gain at unity while still
+running the limiter and AAC encoding.

@@ -1,6 +1,5 @@
 """Regression tests for assemble.py graceful-degradation fixes (bugs 6 & 7)."""
 
-import json
 import shutil
 import sys
 import wave
@@ -9,11 +8,10 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 
 import narration_audio  # noqa: E402
 from audio_mix import _seg_place_window  # noqa: E402
-from lib import CONFIG  # noqa: E402
 from subtitles.core import _subtitle_entries  # noqa: E402
 from tts_fixtures import tts_segment
 
@@ -142,94 +140,3 @@ def test_partial_skip_does_not_log_all_skipped_warning(monkeypatch, tmp_path):
 
     assert not any("全部" in m and "跳过" in m for m in logs), logs
 
-
-def test_run_tightening_packs_within_run_and_respects_boundary(monkeypatch, tmp_path):
-    """Within a narration run, beats pack to a fixed tight gap after the previous beat's ACTUAL
-    audio end (not the slot slack) so the spoken gap stays ≤ tight_pause; a deliberate
-    authored gap > run_gap starts a new run anchored at its authored time. Anti-stutter ≤1s."""
-    monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
-    monkeypatch.setitem(CONFIG, "narration_run_gap_seconds", 1.6)
-    monkeypatch.setitem(CONFIG, "narration_max_pull_seconds", 100.0)  # isolate tight-packing from the drift cap
-    monkeypatch.setitem(CONFIG, "fade_ms", 0)
-
-    w = _write_wav(tmp_path / "a.wav", duration=0.8)
-
-    def seg(i, start, end):
-        return tts_segment(index=i, start=start, end=end, narration=f"句{i}。",
-                audio_path=str(w), audio_duration=0.8)
-
-    # run 1: beats 0,1,2 in wide 4s slots but authored contiguous (gap 0) -> pack tight to the front.
-    # run 2: beat 3 after a 3s authored gap (> run_gap) -> new run, anchored to its authored start.
-    segments = [seg(0, 0.0, 4.0), seg(1, 4.0, 8.0), seg(2, 8.0, 12.0), seg(3, 15.0, 19.0)]
-    narration_audio._build_timed_narration(segments, tmp_path / "out.wav", 30.0, tmp_path)
-
-    gap01 = segments[1]["actual_place_start"] - segments[0]["actual_place_end"]
-    gap12 = segments[2]["actual_place_start"] - segments[1]["actual_place_end"]
-    assert abs(gap01 - 0.35) < 0.05, gap01      # within-run gap == tight_pause, not the 4s slot slack
-    assert abs(gap12 - 0.35) < 0.05, gap12
-    assert segments[2]["actual_place_start"] < 3.0          # run packed to the front (far before authored 8s)
-    assert segments[3]["actual_place_start"] >= 14.9        # run boundary respects the deliberate pause
-
-
-def test_run_tightening_drift_cap_keeps_narration_near_picture(monkeypatch, tmp_path):
-    """The drift cap stops a long contiguous run from packing entirely to the front: no beat plays
-    more than narration_max_pull_seconds before its authored time, so narration stays near picture."""
-    monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
-    monkeypatch.setitem(CONFIG, "narration_run_gap_seconds", 1.6)
-    monkeypatch.setitem(CONFIG, "narration_max_pull_seconds", 2.0)
-    monkeypatch.setitem(CONFIG, "fade_ms", 0)
-    w = _write_wav(tmp_path / "a.wav", duration=0.8)
-    # one long contiguous run authored across a wide span (5s slots); without the cap, the last
-    # beat would pack to ~3s; with the 2s cap it must stay within 2s of its authored 20s start.
-    segments = [tts_segment(index=i, start=i * 5.0, end=i * 5.0 + 5.0, narration=f"句{i}。",
-                 audio_path=str(w), audio_duration=0.8) for i in range(5)]
-    narration_audio._build_timed_narration(segments, tmp_path / "out.wav", 40.0, tmp_path)
-    assert segments[4]["actual_place_start"] >= 5.0 * 4 - 2.0 - 0.01      # within max_pull of authored 20s
-    # The good segment was actually placed (non-zero-width window).
-    assert segments[0]["actual_place_end"] - segments[0]["actual_place_start"] > 0.1
-
-
-@pytest.mark.parametrize(
-    ("asr", "silence", "expected_start", "expected_status"),
-    [
-        pytest.param(None, None, 1.8, "paragraph_tightened", id="no-evidence-pulls-to-drift-cap"),
-        pytest.param([{"start": 1.0, "end": 2.5, "text": "他来了。"}], None, 2.5,
-                     "paragraph_tightened", id="pull-stops-after-source-dialogue"),
-        pytest.param([{"start": 2.0, "end": 3.5, "text": "他来了。"}], None, 3.0, None,
-                     id="dialogue-through-written-start-blocks-the-pull"),
-        pytest.param([{"start": 1.0, "end": 2.5, "text": "啊！"}], None, 1.8,
-                     "paragraph_tightened", id="interjection-only-window-is-not-dialogue"),
-        pytest.param([{"start": 1.0, "end": 2.5, "text": " "}], None, 1.8,
-                     "paragraph_tightened", id="empty-asr-text-is-not-dialogue"),
-        pytest.param([{"start": 1.0, "end": 2.5, "text": "他来了。"}],
-                     [{"start": 2.0, "end": 2.6, "has_speech": False}], 2.0,
-                     "paragraph_tightened", id="measured-quiet-inside-asr-window"),
-    ],
-)
-def test_paragraph_pull_never_enters_unchecked_source_dialogue(
-    monkeypatch, tmp_path, asr, silence, expected_start, expected_status
-):
-    """Lint checked only the written start; the pulled stretch before it must hold no dialogue,
-    and a pulled block records that it moved."""
-    monkeypatch.setitem(CONFIG, "narration_tight_pause_seconds", 0.35)
-    monkeypatch.setitem(CONFIG, "narration_run_gap_seconds", 1.6)
-    monkeypatch.setitem(CONFIG, "narration_max_pull_seconds", 1.2)
-    monkeypatch.setitem(CONFIG, "fade_ms", 0)
-    if asr is not None:
-        (tmp_path / "asr_result.json").write_text(json.dumps(asr), encoding="utf-8")
-    if silence is not None:
-        (tmp_path / "silence_periods.json").write_text(json.dumps(silence), encoding="utf-8")
-    w = _write_wav(tmp_path / "a.wav", duration=0.8)
-    segments = [
-        tts_segment(index=0, start=0.0, end=2.0, narration="句0。",
-                    audio_path=str(w), audio_duration=0.8),
-        tts_segment(index=1, start=3.0, end=5.0, narration="句1。",
-                    audio_path=str(w), audio_duration=0.8),
-    ]
-
-    narration_audio._build_timed_narration(segments, tmp_path / "out.wav", 8.0, tmp_path)
-
-    assert segments[1]["actual_place_start"] == pytest.approx(expected_start, abs=1e-3)
-    assert segments[1].get("source_entry_status") == expected_status
-    assert segments[1].get("written_start") == (3.0 if expected_status else None)
-    assert "source_entry_status" not in segments[0]

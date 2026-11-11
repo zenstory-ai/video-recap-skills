@@ -8,13 +8,13 @@ from pathlib import Path
 
 sys.path.insert(
     0,
-    str(Path(__file__).resolve().parents[2] / "skills" / "video-understanding" / "scripts"),
+    str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"),
 )
 
 from lib import CONFIG  # noqa: E402
 from briefing.builder import build_agent_brief  # noqa: E402
 from briefing.timeline import (  # noqa: E402
-    _remap_asr_to_output_for_brief,
+    _remap_segments_to_output_for_brief,
     _remap_prose_times_for_brief,
 )
 
@@ -33,8 +33,7 @@ def _brief(monkeypatch, work_dir, scenes, asr, silence, duration, edit_mode="ful
 
 
 def test_brief_numbers_every_scene_from_one(monkeypatch, tmp_path):
-    """Fusion, ASR chunk and the timing guide name the same scene the same way; the JSON
-    sidecars keep the 0-based scene_id."""
+    """The timing guide numbers scenes starting from 1."""
     scenes = [
         {"scene_id": 0, "start": 0.0, "end": 10.0, "description": "门口对峙"},
         {"scene_id": 1, "start": 10.0, "end": 20.0, "description": "屋内争吵"},
@@ -42,15 +41,8 @@ def test_brief_numbers_every_scene_from_one(monkeypatch, tmp_path):
     asr = [{"start": 12.0, "end": 18.0, "text": "你到底想怎么样。"}]
     text = _brief(monkeypatch, tmp_path, scenes, asr, [], 20.0)
 
-    assert "### Fusion scene 1: 0.0-10.0s" in text
-    assert "### Fusion scene 2: 10.0-20.0s" in text
-    assert "### Fusion scene 0" not in text
-    assert "| scenes 2 |" in text
+    assert "### Scene 0:" not in text
     assert "### Scene 1: 0.0-10.0s" in text and "### Scene 2: 10.0-20.0s" in text
-    fusion = json.loads((tmp_path / "timeline_fusion.json").read_text(encoding="utf-8"))
-    chunks = json.loads((tmp_path / "asr_writing_chunks.json").read_text(encoding="utf-8"))
-    assert [item["scene_id"] for item in fusion] == [0, 1]
-    assert chunks[0]["scene_ids"] == [1]
 
 
 def _cut_pass2(tmp_path, clips):
@@ -86,17 +78,8 @@ def test_cut_pass2_output_sections_quote_no_source_time(monkeypatch, tmp_path):
     part1 = text.split("source scene 1 part 1)")[1].split("### OUTPUT")[0]
     assert "- Deeper analysis: 2.0s 他抬头试探，[cut-away moment] 她转身离开；他停顿了3秒才开口。" in part1
     assert "12.0s 他抬头" not in text and "00:30" not in text
-    assert "### Fusion scene 1 part 1: 0.0-10.0s" in text
-    assert "### Fusion scene 1 part 2: 10.0-20.0s" in text
     assert "[1.0-3.0] 保留的对白。" in part1
     assert "[5.0-10.0] [partial ASR window: only part of it is in the cut, text withheld]" in part1
-    chunks = json.loads((tmp_path / "asr_writing_chunks.json").read_text(encoding="utf-8"))
-    assert "[partial ASR window: only part of it is in the cut, text withheld]" in [
-        piece["text"] for chunk in chunks for piece in chunk["segments"]
-    ]
-    for name in ("asr_writing_chunks.json", "timeline_fusion.json"):
-        written = (tmp_path / name).read_text(encoding="utf-8")
-        assert "已经剪掉" not in written and "前半句" not in written
     assert "已经剪掉" not in text and "前半句" not in text
 
 
@@ -106,9 +89,10 @@ def test_partial_window_rule_keeps_text_covered_across_a_seam():
         {"source_start": 10.0, "source_end": 20.0, "output_start": 0.0, "output_end": 10.0},
         {"source_start": 20.0, "source_end": 30.0, "output_start": 10.0, "output_end": 20.0},
     ]
-    rows = _remap_asr_to_output_for_brief(
+    rows = _remap_segments_to_output_for_brief(
         [{"start": 15.0, "end": 25.0, "text": "整句都在。"}, {"start": 28.0, "end": 31.0, "text": ""}],
         spans,
+        withhold_partial=True,
     )
     assert [(row["start"], row["end"], row["text"]) for row in rows] == [
         (5.0, 10.0, "整句都在。"),

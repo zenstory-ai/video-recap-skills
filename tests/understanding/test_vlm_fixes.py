@@ -11,22 +11,13 @@ sys.path.insert(
     str(
         Path(__file__).resolve().parents[2]
         / "skills"
-        / "video-understanding"
+        / "video-recap"
         / "scripts"
     ),
 )
 
-from lib import CONFIG, file_identity, is_usable_overview_chunk  # noqa: E402
-from vlm import (  # noqa: E402
-    _load_mimo_partial,
-    _mimo_chunk_cache_key,
-    _parse_vlm_depth_response,
-    _save_mimo_partial,
-    analyze_scenes,
-    analyze_video_overview,
-    mimo_video_overview_cache_fresh,
-    mimo_video_settings,
-)
+from lib import CONFIG  # noqa: E402
+from vlm import _parse_vlm_depth_response, analyze_scenes  # noqa: E402
 
 
 def test_parse_frame_facts_splits_chinese_and_english_punctuation():
@@ -292,235 +283,12 @@ def test_scene_failure_does_not_write_placeholder_cache(monkeypatch, tmp_path, a
     assert not (tmp_path / "vlm_analysis.json").exists()
 
 
-# ── MiMo video overview: incremental chunk cache ─────────────────────────────
-
-
-def _chunk_result(chunk_path, chunk, content=None):
-    return {
-        "chunk_id": chunk["chunk_id"],
-        "scene_id": chunk["scene_id"],
-        "start": chunk["start"],
-        "end": chunk["end"],
-        "model": "mimo-v2.5",
-        "content": f"分片{chunk['chunk_id']}" if content is None else content,
-        "reasoning_content": "",
-        "usage": {},
-        "clip_path": f"mimo_video_chunks/{chunk_path.name}",
-    }
-
-
-def _overview_setup(monkeypatch, tmp_path, chunk_api=_chunk_result):
-    """Enable the overview with 2s chunks and stub ffmpeg + the per-chunk API; returns the video."""
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"fake-video")
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(CONFIG, "mimo_video_api_key", "secret")
-    monkeypatch.setitem(CONFIG, "mimo_video_model", "mimo-v2.5")
-    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.5")
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 0.5)
-
-    def fake_extract(video_path, chunk, output_path):
-        output_path.write_bytes(b"tiny-chunk")
-        return output_path
-
-    monkeypatch.setattr("vlm._extract_video_chunk", fake_extract)
-    monkeypatch.setattr("vlm._analyze_mimo_video_chunk", chunk_api)
-    return video
-
-
-ONE_CHUNK = {"chunk_id": 0, "scene_id": 7, "start": 0.0, "end": 2.0}
-ONE_CHUNK_SCENES = [{"scene_id": 7, "start": 0.0, "end": 2.0}]
-
-
-def _saved_partial(tmp_path, video):
-    partial_path = tmp_path / "mimo_video_overview.partial.json"
-    done = {_mimo_chunk_cache_key(ONE_CHUNK): {"chunk_id": 0, "scene_id": 7, "content": "paid"}}
-    _save_mimo_partial(partial_path, done, video, ONE_CHUNK_SCENES)
-    return partial_path, done
-
-
-def test_partial_cache_roundtrips_for_same_video_scenes_and_settings(monkeypatch, tmp_path):
-    video = _overview_setup(monkeypatch, tmp_path)
-    partial_path, done = _saved_partial(tmp_path, video)
-    assert _load_mimo_partial(partial_path, video, ONE_CHUNK_SCENES) == done
-
-
-def _settings_change(monkeypatch, partial_path, video):
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 99)
-    return video, ONE_CHUNK_SCENES
-
-
-def _source_video_mismatch(monkeypatch, partial_path, video):
-    other = video.with_name("new.mp4")
-    other.write_bytes(b"new-video")
-    return other, ONE_CHUNK_SCENES
-
-
-def _scene_plan_mismatch(monkeypatch, partial_path, video):
-    return video, [{"scene_id": 7, "start": 0.0, "end": 4.0}]
-
-
-@pytest.mark.parametrize(
-    "drift",
-    [_settings_change, _source_video_mismatch, _scene_plan_mismatch],
-    ids=lambda fn: fn.__name__.strip("_"),
-)
-def test_partial_cache_rejects_drifted_provenance(monkeypatch, tmp_path, drift):
-    """Paid chunks are reused only for the same settings, source video and scene plan."""
-    video = _overview_setup(monkeypatch, tmp_path)
-    partial_path, _done = _saved_partial(tmp_path, video)
-
-    load_video, load_scenes = drift(monkeypatch, partial_path, video)
-
-    assert _load_mimo_partial(partial_path, load_video, load_scenes) == {}
-
-
-def test_failed_chunk_preserves_completed_chunks_and_resume_skips(monkeypatch, tmp_path):
-    """A mid-loop chunk failure keeps completed chunks; resume only redoes the missing one."""
-    analyzed = []
-
-    def fail_on_last(chunk_path, chunk):
-        analyzed.append(chunk["chunk_id"])
-        if chunk["chunk_id"] == 2:
-            raise RuntimeError("MiMo 分片失败")
-        return _chunk_result(chunk_path, chunk)
-
-    video = _overview_setup(monkeypatch, tmp_path, chunk_api=fail_on_last)
-    monkeypatch.setitem(CONFIG, "mimo_video_fps", 2)
-
-    # 5s span @ max 2s -> 3 chunks. First run: chunk 2 fails.
-    scenes = [{"scene_id": 7, "start": 0.0, "end": 5.0}]
-    with pytest.raises(RuntimeError):
-        analyze_video_overview(video, tmp_path, scenes)
-
-    partial_path = tmp_path / "mimo_video_overview.partial.json"
-    assert partial_path.exists()
-    assert not (tmp_path / "mimo_video_overview.json").exists()
-    assert len(json.loads(partial_path.read_text(encoding="utf-8"))["chunks"]) == 2
-    assert analyzed == [0, 1, 2]
-
-    # Resume: chunks 0 and 1 are cached, only chunk 2 is re-billed.
-    analyzed.clear()
-
-    def all_ok(chunk_path, chunk):
-        analyzed.append(chunk["chunk_id"])
-        return _chunk_result(chunk_path, chunk)
-
-    monkeypatch.setattr("vlm._analyze_mimo_video_chunk", all_ok)
-    overview = analyze_video_overview(video, tmp_path, scenes)
-
-    assert analyzed == [2]
-    assert overview["input"] == "scene_chunks"
-    assert overview["chunk_count"] == 3
-    assert overview["settings"] == mimo_video_settings()
-    assert [c["chunk_id"] for c in overview["chunks"]] == [0, 1, 2]
-    assert (tmp_path / "mimo_video_overview.json").exists()
-    assert not partial_path.exists()
-
-
-# ── MiMo video overview: final artifact cache ────────────────────────────────
-
-
-FINAL_SCENES = [{"scene_id": 1, "start": 0.0, "end": 3.0}]
-
-
-def _fresh_final_overview(monkeypatch, tmp_path):
-    video = _overview_setup(monkeypatch, tmp_path)
-    analyze_video_overview(video, tmp_path, FINAL_SCENES)
-    overview_path = tmp_path / "mimo_video_overview.json"
-    assert mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-    return video, overview_path
-
-
-def test_final_overview_cache_invalidates_on_settings_source_or_chunks(monkeypatch, tmp_path):
-    video, overview_path = _fresh_final_overview(monkeypatch, tmp_path)
-    original_prompt = CONFIG.get("mimo_video_prompt")
-    original_url = CONFIG.get("mimo_video_api_url")
-
-    monkeypatch.setitem(CONFIG, "mimo_video_prompt", "changed prompt")
-    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-
-    monkeypatch.setitem(CONFIG, "mimo_video_prompt", original_prompt)
-    monkeypatch.setitem(CONFIG, "mimo_video_api_url", "https://changed.example/v1/chat/completions")
-    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-
-    monkeypatch.setitem(CONFIG, "mimo_video_api_url", original_url)
-    other_video = tmp_path / "other.mp4"
-    other_video.write_bytes(b"other-video")
-    assert not mimo_video_overview_cache_fresh(overview_path, other_video, FINAL_SCENES)
-
-    changed_scenes = [{"scene_id": 1, "start": 0.0, "end": 5.0}]
-    assert not mimo_video_overview_cache_fresh(overview_path, video, changed_scenes)
-
-
-def test_final_overview_cache_survives_offline_endpoint_change(monkeypatch, tmp_path):
-    """Without a key the key-derived endpoint is not compared: the paid overview stays fresh."""
-    video, overview_path = _fresh_final_overview(monkeypatch, tmp_path)
-    monkeypatch.setitem(CONFIG, "mimo_video_api_key", "")
-    monkeypatch.setitem(CONFIG, "mimo_video_api_url", "https://changed.example/v1/chat/completions")
-    assert mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-    monkeypatch.setitem(CONFIG, "mimo_video_prompt", "changed prompt")
-    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-
-
-def test_final_overview_cache_rejects_unusable_cached_chunk(monkeypatch, tmp_path):
-    video = tmp_path / "video.mp4"
-    video.write_bytes(b"fake-video")
-    monkeypatch.setitem(CONFIG, "mimo_video_model", "mimo-v2.5")
-    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.5")
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 0.5)
-    chunks = [
-        {"chunk_id": 0, "scene_id": 1, "start": 0.0, "end": 2.0, "content": "有效"},
-        {"chunk_id": 1, "scene_id": 1, "start": 2.0, "end": 3.0, "content": ""},
-    ]
-    overview_path = tmp_path / "mimo_video_overview.json"
-    overview_path.write_text(json.dumps({
-        "input": "scene_chunks",
-        "content": "有效\n(MiMo 未返回内容)",
-        "chunks": chunks,
-        "source_video_identity": file_identity(video),
-        "settings": mimo_video_settings(),
-    }), encoding="utf-8")
-
-    assert not mimo_video_overview_cache_fresh(overview_path, video, FINAL_SCENES)
-
-
-# ── MiMo video overview: moderation / empty chunk degradation ────────────────
-
-
-def test_all_rejected_chunks_skip_overview(monkeypatch, tmp_path):
-    """When MiMo rejects every chunk (content moderation) the overview returns None and
-    writes neither the canonical file nor a partial, instead of polluting the brief."""
-    rejected = "The request was rejected because it was considered high risk"
-    video = _overview_setup(
-        monkeypatch, tmp_path, chunk_api=lambda p, c: _chunk_result(p, c, content=rejected)
-    )
-
-    overview = analyze_video_overview(video, tmp_path, FINAL_SCENES)
-    assert overview is None
-    assert not (tmp_path / "mimo_video_overview.json").exists()
-    assert not (tmp_path / "mimo_video_overview.partial.json").exists()
-
-
-def test_is_usable_overview_chunk():
-    assert is_usable_overview_chunk("范闲在竹林中打斗，剑光凌厉") is True
-    assert is_usable_overview_chunk("") is False
-    assert is_usable_overview_chunk(None) is False
-    assert is_usable_overview_chunk("The request was rejected because it was considered high risk") is False
-    assert is_usable_overview_chunk("内容审核未通过") is False
-
-
 def test_refusal_markers_are_defined_once_in_lib():
-    """Narrow (ASR / per-scene VLM) and broad (overview only) marker lists live in lib.py only;
-    the broad list is a superset, so anything the narrow test drops, the overview drops too."""
+    """The provider's refusal wording lives in lib.py only."""
     import ast
 
     import lib
 
-    assert set(lib.MODERATION_REFUSAL_MARKERS) <= set(lib.OVERVIEW_REJECTION_MARKERS)
-    broad = {marker.lower() for marker in lib.OVERVIEW_REJECTION_MARKERS}
     scripts = Path(lib.__file__).parent
     for path in scripts.rglob("*.py"):
         if path.name == "lib.py" or "__pycache__" in path.parts:
@@ -533,33 +301,3 @@ def test_refusal_markers_are_defined_once_in_lib():
                     f"{path.name}:{node.lineno} carries its own MiMo refusal marker; "
                     "import it from lib"
                 )
-            if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
-                members = {
-                    elt.value.lower() for elt in node.elts
-                    if isinstance(elt, ast.Constant) and isinstance(elt.value, str)
-                }
-                assert len(members & broad) < 2, (
-                    f"{path.name}:{node.lineno} carries a private copy of the refusal marker "
-                    "list; import OVERVIEW_REJECTION_MARKERS from lib"
-                )
-
-
-def test_mixed_unusable_chunks_degrade_to_usable_overview(monkeypatch, tmp_path):
-    """A single empty/refused chunk degrades the overview to the usable chunks (partial=true)
-    instead of aborting; the affected scene falls back to its frame description downstream."""
-    video = _overview_setup(
-        monkeypatch,
-        tmp_path,
-        chunk_api=lambda p, c: _chunk_result(p, c, content="" if c["chunk_id"] == 1 else None),
-    )
-
-    overview = analyze_video_overview(video, tmp_path, [{"scene_id": 1, "start": 0.0, "end": 5.0}])
-
-    assert overview is not None
-    assert overview["partial"] is True
-    assert overview["unusable_chunk_count"] >= 1
-    final = json.loads((tmp_path / "mimo_video_overview.json").read_text(encoding="utf-8"))
-    assert len(final["chunks"]) >= 1
-    assert all(item["content"] for item in final["chunks"])
-    # the incremental partial cache is cleaned up once the final overview is written
-    assert not (tmp_path / "mimo_video_overview.partial.json").exists()

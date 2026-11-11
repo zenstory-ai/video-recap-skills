@@ -14,7 +14,7 @@ Status: implemented
 
 - 两份 assemble 快照删掉当前写入方不再产出的键，其余键和全部数值不动；写入方后来新增的键（`audio_mode`、`narration_input_binding`、`audio_mix_binding`、`source_video_identity`、`tempo_source`、逐段 `output_*_sample` / `adopted_gain` 等）不补写，因为原运行没有记录它们，补写就是编造。
 - 新增 `tests/assemble/test_guohuo_example_schema.py`：用 `_assembly_manifest_payload` / `_build_assembly_qc` 生成当前形状，断言样例的嵌套键路径都是它的子集。以后 assemble 再删字段而忘了改样例，测试会失败；新增字段不影响。
-- README（样例与仓库根）把“发布门禁”“字幕溢出”改为 `assembly_qc.json` 的 `verdict` / `blocking_codes`。`skill-runbook.md` 补上：项目级 `background_research.json` 的放置、粗 ASR 窗口导致的边界阻断与处理方式、`--no-burn-subtitles`、超预算块装不下时的处理（`no_safe_fit` / `needed_tempo_factor`、`--preserve-approved-text`）、`ducking_narr_weight` 2.4 不可复现、Remotion 需要重定时的常量与无锁文件的传递依赖、1080p / BT.709 conform 属于项目级、10 MB 码率按新时长重算。
+- README（样例与仓库根）把“发布门禁”“字幕溢出”改为 `assembly_qc.json` 的 `verdict` / `blocking_codes`。`skill-runbook.md` 补上：项目级 `background_research.json` 的放置、粗 ASR 窗口导致的边界阻断与处理方式、`--no-burn-subtitles`、超预算块装不下时的处理（`no_safe_fit` / `needed_tempo_factor`）、`ducking_narr_weight` 2.4 不可复现、Remotion 需要重定时的常量与无锁文件的传递依赖、1080p / BT.709 conform 属于项目级、10 MB 码率按新时长重算。
 - 上面两篇笔记里“不改”的一行事实改为指向本篇。
 
 ## Alternatives considered

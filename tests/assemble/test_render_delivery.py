@@ -11,14 +11,13 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-assemble" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 
 import assemble  # noqa: E402
 import assembly_contract  # noqa: E402
 import loudness  # noqa: E402
 import media  # noqa: E402
 import narration_audio  # noqa: E402
-import render_preflight  # noqa: E402
 import source_subtitles  # noqa: E402
 import timeline_emit  # noqa: E402
 import visual_render  # noqa: E402
@@ -250,8 +249,10 @@ def _degraded(monkeypatch):
 def test_degraded_burn_keeps_user_gap_cues_in_the_sidecar(monkeypatch, tmp_path):
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    (tmp_path / "user_subtitles.srt").write_text(
-        "1\n00:00:01,000 --> 00:00:04,000\n原声台词\n\n", encoding="utf-8")
+    (tmp_path / "original_subtitles.json").write_text(
+        json.dumps([{"start": 1.0, "end": 4.0, "text": "原声台词"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
     segs = [{"actual_place_start": 5.0, "actual_place_end": 8.0, "narration": "解说"}]
     entries = source_subtitles._original_gap_subtitle_entries(segs, tmp_path, 10.0)
     assert entries and all(e["text"].startswith("「") for e in entries)
@@ -263,7 +264,6 @@ def test_degraded_burn_keeps_user_gap_cues_in_the_sidecar(monkeypatch, tmp_path)
 def test_degraded_burn_records_machine_readable_warning(monkeypatch, tmp_path):
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     segs = [tts_segment(start=0.0, end=3.0, actual_place_start=0.5, actual_place_end=2.0,
                         narration="解说", audio_duration=1.5)]
     qc = visual_render._build_visual_qc(segs, tmp_path, 4.0, _canvas())
@@ -277,7 +277,7 @@ def test_degraded_burn_records_machine_readable_warning(monkeypatch, tmp_path):
 
 
 def test_degraded_burn_without_any_subtitles_records_no_warning(monkeypatch, tmp_path):
-    """source-mix / adopted copy without user subtitles: nothing was lost to the missing
+    """source-mix without user subtitles: nothing was lost to the missing
     libass, so nothing is relayed to the user."""
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
@@ -315,36 +315,6 @@ def test_sidecar_ships_next_to_an_unburned_recap_and_is_retired_by_a_burned_one(
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     assert assemble._publish_subtitle_sidecar(work, final) is None
     assert not sidecar.exists()
-
-
-# ── drawtext overlay preflight ──────────────────────────────────────────────────────
-
-
-def _overlays(work_dir, overlays):
-    (work_dir / "visual_overlays.json").write_text(
-        json.dumps({"schema_version": 1, "overlays": overlays}, ensure_ascii=False),
-        encoding="utf-8",
-    )
-
-
-def test_overlay_preflight_fails_before_render_without_drawtext(monkeypatch, tmp_path):
-    _overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    monkeypatch.setattr(render_preflight.shutil, "which", lambda _n: "/usr/bin/ffmpeg")
-    monkeypatch.setattr(render_preflight, "_ffmpeg_filters", lambda: {"drawbox"})
-    with pytest.raises(SystemExit, match="drawtext"):
-        render_preflight._preflight_visual_overlays(tmp_path)
-
-
-@pytest.mark.parametrize("setup", ["no_file", "empty", "drawtext_present", "no_ffmpeg"])
-def test_overlay_preflight_passes(monkeypatch, tmp_path, setup):
-    if setup == "empty":
-        _overlays(tmp_path, [])
-    elif setup != "no_file":
-        _overlays(tmp_path, [{"type": "top_title", "text": "第一章"}])
-    monkeypatch.setattr(render_preflight.shutil, "which",
-                        lambda _n: None if setup == "no_ffmpeg" else "/usr/bin/ffmpeg")
-    monkeypatch.setattr(render_preflight, "_ffmpeg_filters", lambda: {"drawtext"})
-    render_preflight._preflight_visual_overlays(tmp_path)  # must not raise
 
 
 # ── real ffmpeg: what ffprobe reports on the delivered file ─────────────────────────
@@ -397,9 +367,8 @@ def _quiet(monkeypatch):
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
-@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
 @pytest.mark.parametrize("pix_fmt", ["yuv420p", "yuv422p"])
-def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, audio_mode, pix_fmt):
+def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, pix_fmt):
     _quiet(monkeypatch)
     source = tmp_path / "source.mp4"
     work = tmp_path / "work"
@@ -407,7 +376,7 @@ def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, aud
     _make_source(source, pix_fmt=pix_fmt)
     assert _probe(source).get("color_primaries", "unknown") == "unknown"
 
-    output = assemble_video(source, [], work, work / "output.mp4", audio_mode=audio_mode)
+    output = assemble_video(source, [], work, work / "output.mp4", audio_mode="source-mix")
 
     facts = _probe(output)
     assert facts["pix_fmt"] == "yuv420p"
@@ -482,9 +451,8 @@ def test_real_render_preserves_declared_bt601_tags(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
-@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
 @pytest.mark.parametrize("pix_fmt", ["yuv420p", "yuv422p"])
-def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, audio_mode, pix_fmt):
+def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, pix_fmt):
     """A downloaded source's title/comment/URL tags and chapters stay out of the recap,
     on the stream-copy path as well as the re-encode."""
     _quiet(monkeypatch)
@@ -502,7 +470,7 @@ def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, audio_mode,
     _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(source), "-i", str(meta),
          "-map", "0", "-map_metadata", "1", "-map_chapters", "1", "-c", "copy", str(tagged))
 
-    output = assemble_video(tagged, [], work, work / "output.mp4", audio_mode=audio_mode)
+    output = assemble_video(tagged, [], work, work / "output.mp4", audio_mode="source-mix")
 
     probe = json.loads(subprocess.run(
         ["ffprobe", "-v", "error", "-show_chapters", "-show_entries", "format_tags",

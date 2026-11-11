@@ -96,6 +96,11 @@ def test_reference_voice_without_granted_consent_needs_attention(tmp_path):
 def test_finished_run_writes_the_lock_next_to_its_artifacts(monkeypatch, tmp_path):
     video, work = seed_full_work(tmp_path)
     monkeypatch.setattr(recap_runner, "_run", stub_child_run(work, tmp_path / "recap_video.mp4"))
+    monkeypatch.setattr(
+        recap_runner,
+        "_write_final_qc_reports",
+        lambda *_: {"final_qc": {"ok": True, "blocker_count": 0}},
+    )
     monkeypatch.setattr(sys, "argv", ["recap_runner.py", str(video), "--work-dir", str(work)])
 
     recap_runner.main()
@@ -119,6 +124,15 @@ def test_voice_without_an_id_is_not_credited_to_a_reference_voice(tmp_path):
     lock = resource_lock.build_resource_lock(work, library_dir=lib)
 
     assert _by_role(lock)["voice"]["library"] is None
+
+
+def test_a_list_shaped_manifest_never_fails_the_lock(tmp_path):
+    """A finished render's record must not crash on a run manifest that is valid JSON of the wrong shape."""
+    (tmp_path / "recap_run_manifest.json").write_text('["not an object"]', encoding="utf-8")
+
+    lock = resource_lock.write_resource_lock(tmp_path)
+
+    assert lock["resources"] == []
 
 
 def test_a_malformed_library_record_never_fails_the_lock(tmp_path):

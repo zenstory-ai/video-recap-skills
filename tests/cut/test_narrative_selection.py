@@ -1,11 +1,13 @@
 """Required-evidence contracts are judged on retained source spans, not on prose."""
+import json
 import math
+import re
 import sys
 from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-cut" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 
 from narrative_selection import check_required_evidence
 
@@ -156,3 +158,22 @@ def test_invalid_contracts_block_instead_of_raising(tmp_path, make_contract):
     assert report["selection_status"] == "BLOCK"
     assert report["semantic_status"] == "NOT_CHECKED"
     assert report["findings"][0]["code"] == "REQUIRED_EVIDENCE_INVALID"
+
+
+def test_skill_md_clip_plan_example_passes_required_evidence_check(tmp_path):
+    skill_md = (
+        Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+    fences = [json.loads(raw) for raw in re.findall(r"```json\s*\n(.*?)\n```", skill_md, re.DOTALL)]
+    doc_plan = next(item for item in fences if isinstance(item, dict) and "clips" in item)
+    assert "required_evidence" in doc_plan
+    assert all("required_evidence" not in clip for clip in doc_plan["clips"])
+    source = tmp_path / "source.mp4"
+    contract = json.loads(json.dumps(doc_plan["required_evidence"]))
+    for node in contract["nodes"]:
+        assert node["source"].startswith("/")
+        node["source"] = str(source)
+    clips = [_clip(c["start"], c["end"], 0.0) for c in doc_plan["clips"]]
+    report = _check(contract, clips, source)
+    assert report["selection_status"] == "PASS"
+    assert report["findings"] == []

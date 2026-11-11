@@ -14,12 +14,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 LIBS = {
-    "assemble": ROOT / "skills/video-assemble/scripts/lib.py",
-    "cut": ROOT / "skills/video-cut/scripts/lib.py",
-    "voiceover": ROOT / "skills/video-voiceover/scripts/lib.py",
-    "script": ROOT / "skills/video-script/scripts/lib.py",
     "recap": ROOT / "skills/video-recap/scripts/lib.py",
-    "understanding": ROOT / "skills/video-understanding/scripts/lib.py",
 }
 
 # Knobs that shape the rendered audio. A skill is held to these only if it declares them,
@@ -35,7 +30,6 @@ TEMPO_KEYS = (
 MIX_KEYS = (
     "fade_ms",
     "ducking_narr_weight",
-    "ducking_orig_volume",
     "zone_ducking_volume",
     # `zone_fade_seconds` used to sit here. It was declared in all five lib.py copies and
     # read by nothing in the entire repository — kept alive only by the old blanket parity
@@ -113,11 +107,11 @@ def test_tempo_budget_helper_agrees_wherever_the_tempo_knobs_are_declared(libs):
         for name, lib in libs.items()
         if all(key in lib.CONFIG for key in TEMPO_KEYS)
     }
-    assert {"assemble", "voiceover"} <= set(declarers), (
-        "assemble and voiceover both enforce the tempo budget and must declare its inputs"
+    assert "recap" in declarers, (
+        "video-recap enforces the tempo budget and must declare its inputs"
     )
     for offset in (-0.05, 0.0, 0.05, 0.08):
-        expected = declarers["assemble"].narration_tempo_budget(offset)
+        expected = declarers["recap"].narration_tempo_budget(offset)
         for name, lib in declarers.items():
             assert hasattr(lib, "narration_tempo_budget"), name
             assert lib.narration_tempo_budget(offset) == expected, name

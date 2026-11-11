@@ -1,6 +1,6 @@
 # Multi-track timeline (`timeline.json`) + optional 剪映 export
 
-`video-assemble` always emits `timeline.json`: a backend-neutral description of
+`assemble.py` (`video-recap`) always emits `timeline.json`: a backend-neutral description of
 the finished recap. ffmpeg remains the canonical renderer; the optional 剪映
 exporter consumes the same timeline to make an editable sidecar draft. Timeline
 times are seconds and volumes are gains, so this file has no 剪映-only units.
@@ -76,7 +76,7 @@ rejects two kinds of input outright instead of guessing:
 
 ## Optional 剪映 / JianYing export
 
-`--export-jianying` / `EXPORT_JIANYING=1` maps the timeline into a folder with
+`--export-jianying` maps the timeline into a folder with
 `draft_content.json`, `draft_info.json`, and `draft_meta_info.json`. The current
 adapter aligns its local-draft contract with
 [`duoec/duo-video`](https://github.com/duoec/duo-video) commit
@@ -138,7 +138,7 @@ recap pipeline writes:
 | Timeline | Output |
 | --- | --- |
 | `video` clips with original-audio volume automation | `materials.videos` plus video segments with `KFTypeVolume` keyframes |
-| `audio` tracks (narration, BGM, prepared bed) | `materials.audios`; looped BGM is split into windowed pieces |
+| `audio` tracks (narration, BGM) | `materials.audios`; looped BGM is split into windowed pieces |
 | `text` subtitle track | `type: subtitle` text materials with one default UTF-16 rich-text style |
 | `image` overlays with `scale` / `position` | `type: photo` video materials with an editable segment `clip` transform |
 

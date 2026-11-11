@@ -51,7 +51,7 @@ LICENSE_STATUSES = ("unknown", "owned", "licensed", "restricted")
 CONSENT_STATUSES = ("unknown", "granted", "denied")
 TEMPLATE_STATUSES = ("draft", "adopted", "retired")
 PROVENANCES = ("measured", "fitted", "specified", "unknown")
-SUBTITLE_SIDE_MARGIN = 40  # video-assemble's default left/right subtitle margin at PlayRes = canvas
+SUBTITLE_SIDE_MARGIN = 40  # assemble.py's default left/right subtitle margin at PlayRes = canvas
 SUBTITLE_PARAMS = {
     "font", "size_px", "outline_px", "shadow_px", "primary_color", "outline_color",
     "max_chars", "max_lines", "band",

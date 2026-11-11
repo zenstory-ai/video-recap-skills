@@ -10,10 +10,10 @@ from subprocess import CompletedProcess
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-cut" / "scripts"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts"))
 import cut_contract
 import cut_render
-import media_geometry
+import media
 from cut_contract import normalize_clip_plan
 from cut_render import build_edited_source_video
 
@@ -25,7 +25,7 @@ _BT601 = {"color_space": "smpte170m", "color_primaries": "smpte170m",
 
 
 def _with_geometry(plan, source_paths):
-    _, _, _, geometry_qc = media_geometry._select_output_geometry(source_paths, plan["clips"])
+    _, _, _, geometry_qc = media._select_output_geometry(source_paths, plan["clips"])
     plan.setdefault("qc", {})["output_geometry"] = geometry_qc
     return plan
 

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+`asr_clean.json` 优先的部分已被 [[2026-11-06-remove-asr-clean-transcript]] 取代：各处只读 `asr_result.json`；空白文本行的规则不变。
+
 ## Problem
 
 [[2026-10-02-interjection-entry-ownership]] 让 cut 门禁、script 旁白入口检查和 assemble 入口检查共用语气词规则，但三处读的转写和喂给 `_dialogue_speech_spans` 的行仍不一样：
@@ -13,8 +15,8 @@ Status: implemented
 ## Decision
 
 - 三份 `_dialogue_speech_spans`（video-cut `sentence_boundaries.py`、video-script `speech_ownership.py`、video-assemble `audio_mix.py`）同时改：文本为空或只有空白的行是只有时间的证据，直接跳过，不算对白，也不给相邻对白留 1 秒保护；没有 `text` 字段的行仍按对白处理（词未知，不能当作没人说话）。规则放在 helper 里，调用方过滤与否结果相同；`test_interjection_rule_stays_identical_across_cut_script_assemble` 继续按 AST 校验三份一致。
-- video-script 新增 `_source_asr_rows(work_dir)`：有 `asr_clean.json` 就用它的 `segments`，否则读 `asr_result.json`，并去掉空白文本行；full 模式的 `speech_spans`（整段归属）和 `dialogue_spans`（入口）都从这里来。存在即采用，不做新鲜度或来源校验，与 cut、assemble 完全一致。
-- `review_grounding._preferred_asr` 让单视频和多视频评审都优先 `asr_clean.json`。
+- video-script 新增 `_source_asr_rows(work_dir)`：读转写并去掉空白文本行（当时清洗稿优先，现在只读 `asr_result.json`）；full 模式的 `speech_spans`（整段归属）和 `dialogue_spans`（入口）都从这里来。与 cut、assemble 完全一致。
+- 单视频和多视频评审读同一份转写（当时是 `review_grounding._preferred_asr`，清洗稿移除后直接读 `asr_result.json`；评审后来也已移除，见 [[2026-11-06-remove-narration-review-chain]]）。
 - assemble 调用方 `_handoff_speech_evidence` 回退读 ASR 时也先去掉空白文本行，整段 `speech` 行（压低与否、`quiet_source` 判定）同样不含它们；helper 改动单独已经让入口判定不再把空白行当对白。
 - 文档：`video-recap/references/data-schema.md` 入口规则一段、video-script SKILL.md 读取清单同步。
 

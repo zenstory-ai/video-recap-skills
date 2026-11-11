@@ -358,7 +358,7 @@ def test_subtitle_band_sar_tolerance_matches_across_measuring_preflight_and_rend
     paths = [
         ROOT / "tools" / "measure_subtitle.py",
         ROOT / "skills" / "video-recap" / "scripts" / "recap_runtime.py",
-        ROOT / "skills" / "video-assemble" / "scripts" / "subtitles" / "core.py",
+        ROOT / "skills" / "video-recap" / "scripts" / "subtitles" / "core.py",
     ]
     values = {str(path.relative_to(ROOT)): literal(path) for path in paths}
     assert set(values.values()) == {0.02}, values

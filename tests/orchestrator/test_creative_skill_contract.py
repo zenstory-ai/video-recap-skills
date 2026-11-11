@@ -17,6 +17,13 @@ SKILL_NAMES = tuple(
     if path.is_dir() and (path / "SKILL.md").is_file()
 )
 STAGE_SKILL_NAMES = tuple(name for name in SKILL_NAMES if name != "video-recap")
+RETIRED_SKILL_NAMES = (
+    "video-understanding",
+    "video-script",
+    "video-cut",
+    "video-voiceover",
+    "video-assemble",
+)
 
 
 def _skill_path(skill_name: str) -> Path:
@@ -75,14 +82,7 @@ def test_creative_roles_and_artifact_examples_form_a_structured_contract():
     )
     assert recap_roles == ["导演判断", "故事编辑", "画面剪辑", "声音/旁白", "观众复核"]
 
-    script_text = _skill_path("video-script").read_text(encoding="utf-8")
-    script_roles = re.findall(
-        r"(?m)^\d+\. ([^\n]+)$",
-        _markdown_section(script_text, "## 1. 定位"),
-    )
-    assert script_roles == ["导演", "故事编辑", "画面剪辑师", "声音/旁白编辑", "第一次观看的观众"]
-
-    for skill_name in ("video-script",):
+    for skill_name in ("video-recap",):
         playbook = ROOT / "skills" / skill_name / "references" / "creative-editing-playbook.md"
         examples = _json_fences(playbook)
         story_plan = next(item for item in examples if isinstance(item, dict) and "director_intent" in item)
@@ -124,24 +124,20 @@ def test_creative_roles_and_artifact_examples_form_a_structured_contract():
 
 
 def test_research_guides_match_their_own_stage_timing():
-    recap_guide = (SKILLS_ROOT / "video-understanding" / "references" / "research-guide.md").read_text(encoding="utf-8")
-    script_guide = (SKILLS_ROOT / "video-script" / "references" / "research-guide.md").read_text(encoding="utf-8")
+    recap_guide = (SKILLS_ROOT / "video-recap" / "references" / "research-guide.md").read_text(encoding="utf-8")
 
     assert "开始视频理解**之前**" in recap_guide
     assert "继续视频理解" in recap_guide
-    assert "继续写 `narration.json`" not in recap_guide
     assert "直接写解说词" not in recap_guide
-    assert "不会自动重跑或改写已有 VLM / ASR 产物" in script_guide
-    assert "`context-only`" in script_guide
-    assert "开始视频理解**之前**" not in script_guide
-    assert "回到当前创作阶段" in script_guide
-    assert "`recap_story_plan.json`" in script_guide
-    assert "`visual_audio_board.json`" in script_guide
-    assert "直接写解说词" not in script_guide
+    assert "不会自动重跑或改写已有 VLM / ASR 产物" in recap_guide
+    assert "`context-only`" in recap_guide
+    assert "回到当前创作阶段" in recap_guide
+    assert "`recap_story_plan.json`" in recap_guide
+    assert "`visual_audio_board.json`" in recap_guide
 
 
 def test_dense_scene_cut_policy_distinguishes_source_and_edit_created_cuts():
-    for skill_name in ("video-script",):
+    for skill_name in ("video-recap",):
         playbook = (
             SKILLS_ROOT
             / skill_name
@@ -154,30 +150,17 @@ def test_dense_scene_cut_policy_distinguishes_source_and_edit_created_cuts():
         assert "多保留真实源素材" in playbook
         assert "不能用来遮掩坏接点" in playbook
 
-    cut_skill = _skill_path("video-cut").read_text(encoding="utf-8")
-    assert "select='gt(scene,0.35)',showinfo" in cut_skill
-    assert "原片自带的无关短镜头整段删除" in cut_skill
-    assert "由本次拼接制造的切点" in cut_skill
-
-
-def test_deslop_qc_schema_keeps_template_transitions_advisory():
-    marker = "模板化“不是……而是……”转折"
-    for schema_path in (
-        SKILLS_ROOT / "video-recap" / "references" / "data-schema.md",
-    ):
-        lines = schema_path.read_text(encoding="utf-8").splitlines()
-        blocker_line = next(line for line in lines if line.startswith("- `blockers`："))
-        advisory_line = next(line for line in lines if line.startswith("- `advisories`："))
-
-        assert marker not in blocker_line, schema_path
-        assert marker in advisory_line, schema_path
+    recap_skill = _skill_path("video-recap").read_text(encoding="utf-8")
+    assert "select='gt(scene,0.35)',showinfo" in recap_skill
+    assert "原片自带的无关短镜头整段删除" in recap_skill
+    assert "由本次拼接制造的切点" in recap_skill
 
 
 def test_skill_json_examples_are_parseable_and_cut_reason_keeps_editorial_fields():
     for skill_name in SKILL_NAMES:
         _json_fences(_skill_path(skill_name))
 
-    cut_example = _json_fences(_skill_path("video-cut"))[0]
+    cut_example = _json_fences(_skill_path("video-recap"))[0]["clips"][0]
     reason_parts = [part.strip() for part in cut_example["reason"].split("|")]
 
     assert len(reason_parts) == 7
@@ -232,7 +215,7 @@ def test_markdown_references_are_local_and_resolve_inside_each_skill():
                     pytest.fail(f"{markdown_path}: reference escapes its skill: {reference}")
                 assert resolved.is_file(), (markdown_path, reference)
 
-            # A bare script name such as `review.py` still denotes an implementation
+            # A bare script name such as `validate.py` still denotes an implementation
             # reference. It must resolve in this skill's own scripts directory rather
             # than silently relying on a sibling with a matching filename.
             for script_name in re.findall(r"`([A-Za-z0-9_.-]+\.py)`", text):
@@ -256,7 +239,7 @@ def test_stage_sources_never_point_to_a_sibling_skill_path():
     ]
     paths.extend(
         source_path
-        for skill_name in STAGE_SKILL_NAMES
+        for skill_name in SKILL_NAMES
         for source_path in (ROOT / "skills" / skill_name / "scripts").rglob("*.py")
         if "__pycache__" not in source_path.parts
     )
@@ -271,6 +254,20 @@ def test_stage_sources_never_point_to_a_sibling_skill_path():
         if path.suffix == ".md":
             for target_name in re.findall(r"`(video-[a-z-]+)/[^`]+\.(?:py|md)`", text):
                 assert target_name == current_name, (path, target_name)
+
+
+def test_skills_never_name_retired_stage_skills():
+    pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, RETIRED_SKILL_NAMES)) + r")\b")
+    offenders = []
+    for path in sorted(SKILLS_ROOT.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        if path.suffix not in {".py", ".md", ".js"}:
+            continue
+        found = sorted(set(pattern.findall(path.read_text(encoding="utf-8"))))
+        if found:
+            offenders.append((str(path.relative_to(ROOT)), found))
+    assert not offenders, f"Retired stage skill names leaked into skills/: {offenders}"
 
 
 def test_stage_markdown_never_names_a_sibling_skill():

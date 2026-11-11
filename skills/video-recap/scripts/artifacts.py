@@ -1,0 +1,33 @@
+"""File identity and work-directory JSON helpers for the assemble stage."""
+
+import json
+from pathlib import Path
+
+from lib import CONFIG, file_identity
+
+
+def _artifact_identity(path):
+    path = Path(path)
+    return file_identity(path) if path.exists() else None
+
+
+def _source_video_identity():
+    """``{path, size, mtime_ns}`` of the cut-mode --source-video, else None."""
+    source_video = CONFIG["source_video"]
+    if not source_video:
+        return None
+    path = Path(source_video)
+    return {"path": str(path.resolve()), **file_identity(path)}
+
+
+def _timeline_provenance_status(work_dir):
+    data = _load_work_json(work_dir, "timeline.json")
+    return None if data is None else data["provenance"]
+
+
+def _load_work_json(work_dir, name):
+    """Parse a JSON artifact in work_dir; None only when the file does not exist."""
+    path = Path(work_dir) / name
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))

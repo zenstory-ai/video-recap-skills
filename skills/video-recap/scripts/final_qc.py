@@ -21,9 +21,14 @@ from lib import load_json, read_json_object
 
 SCHEMA_VERSION = 2
 FINAL_QC_ARTIFACT = "final_qc.json"
-# Summarised in metadata only. video-assemble exits nonzero on a blocking assembly/visual
+# Summarised in metadata only. assemble.py exits nonzero on a blocking assembly/visual
 # QC before recap reaches final_qc, so their verdicts are recorded, not re-raised.
-_COLLECT_ARTIFACTS = ("assembly_manifest.json", "assembly_qc.json", "visual_qc.json")
+_COLLECT_ARTIFACTS = (
+    "assembly_manifest.json",
+    "assembly_qc.json",
+    "visual_qc.json",
+    "shot_review.json",
+)
 _SUMMARY_KEYS = ("schema_version", "verdict", "blocking", "blocking_codes")
 _PROBE_STREAM_KEYS = (
     "index", "codec_type", "codec_name", "profile", "pix_fmt", "width", "height",
@@ -48,7 +53,7 @@ def _resolve_in_work_dir(work_dir: Path, path: str | Path) -> Path:
 
 def _final_output_path(work_dir: Path, final_output: str | Path | None) -> Path | None:
     """The rendered final output: the caller's path, else assembly_manifest.final_output
-    (video-assemble always writes it; output.mp4 is only the assembler's intermediate).
+    (assemble.py always writes it; output.mp4 is only the assembler's intermediate).
     None when neither exists yet, which the report surfaces as a missing final output."""
     if final_output is None:
         manifest = work_dir / "assembly_manifest.json"
@@ -259,9 +264,9 @@ def _render_warnings(work_dir: Path, final_output: Path | None) -> list[dict[str
     """Non-blocking render facts an agent must relay, e.g. a default subtitle burn that
     degraded to the .srt sidecar because ffmpeg lacks libass (from visual_qc.json).
 
-    Only relayed when assembly_manifest.json says video-assemble rendered `final_output`:
-    a mode that delivers without it (dub) would otherwise inherit a stale visual_qc.json
-    left in the work_dir by an earlier full/cut run."""
+    Only relayed when assembly_manifest.json says assemble.py rendered `final_output`:
+    checking any other file would otherwise inherit a stale visual_qc.json left in the
+    work_dir by an earlier run."""
     manifest = read_json_object(work_dir / "assembly_manifest.json") or {}
     rendered = manifest.get("final_output")
     if final_output is None or not isinstance(rendered, str) or \
@@ -269,9 +274,19 @@ def _render_warnings(work_dir: Path, final_output: Path | None) -> list[dict[str
         return []
     data = read_json_object(work_dir / "visual_qc.json")
     warnings = (data or {}).get("warnings")
-    if not isinstance(warnings, list):
-        return []
-    return [dict(item) for item in warnings if isinstance(item, Mapping) and item.get("code")]
+    relayed = [dict(item) for item in warnings if isinstance(item, Mapping) and item.get("code")] \
+        if isinstance(warnings, list) else []
+    tts_meta = read_json_object(work_dir / "tts_meta.json") or {}
+    if tts_meta.get("partial") is True and manifest.get("audio_mode") != "source-mix":
+        failures = tts_meta.get("failures")
+        count = len(failures) if isinstance(failures, list) else None
+        relayed.append({
+            "code": "partial_tts",
+            "failure_count": count,
+            "message": f"--allow-partial-tts：{count if count is not None else '部分'} 段旁白配音失败，"
+                       "成片缺这些段，只适合预览，不要直接发布",
+        })
+    return relayed
 
 
 def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
@@ -317,6 +332,31 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
                     "final output tail failed to decode (truncated or corrupt media payload)",
                     evidence={"decode_error": decode_detail},
                     next_action="rerender_final_output",
+                ))
+        manifest = read_json_object(root / "assembly_manifest.json") or {}
+        rendered = manifest.get("final_output")
+        bound_to_manifest = (
+            selected is not None
+            and isinstance(rendered, str)
+            and _resolve_in_work_dir(root, rendered).resolve() == selected.resolve()
+        )
+        if bound_to_manifest:
+            assembly_qc = read_json_object(root / "assembly_qc.json") or {}
+            if assembly_qc.get("blocking") is True:
+                findings.append(_finding(
+                    "assembly_qc_blocking",
+                    "assembly_qc.json recorded blocking delivery issues",
+                    evidence={"blocking_codes": assembly_qc.get("blocking_codes", [])},
+                    next_action="fix_assembly_qc_blockers_and_rerender",
+                ))
+            shot_review = read_json_object(root / "shot_review.json") or {}
+            slivers = shot_review.get("flash_slivers")
+            if isinstance(slivers, list) and slivers:
+                findings.append(_finding(
+                    "flash_frame_sliver",
+                    "shot_review.json detected flash-frame slivers in rendered cut",
+                    evidence={"flash_slivers": slivers},
+                    next_action="adjust_clip_boundaries_and_recut",
                 ))
     return {
         "schema_version": SCHEMA_VERSION,

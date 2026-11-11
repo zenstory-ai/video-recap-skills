@@ -1,7 +1,18 @@
 import json
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import sys
+
+import pytest
 
 import materials
-from lib import material_id_for, source_id_for
+import recap_cli
+import recap_runner as recap
+import recap_runtime
+import recap_timeline
+from lib import file_identity, material_id_for, source_id_for
 
 IDENTITY = {"size": 1234, "mtime_ns": 1_700_000_000_000_000_000}
 SETTINGS = {"style": "s1", "context": None}
@@ -38,10 +49,10 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
+    (work / "asr_result.json").write_text(json.dumps([{"text": "clean"}]), encoding="utf-8")
     (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "clean"}]}), encoding="utf-8")
-    (work / "understanding_index.json").write_text(json.dumps({
-        "characters": [{"name": "英雄"}], "relationships": [], "plot_points": [],
-        "entities": [{"name": "hero-sword"}], "research_glossary": [],
+    (work / "background_research.json").write_text(json.dumps({
+        "characters": {"英雄": "主角"}, "terms": {"hero-sword": "名剑"},
     }), encoding="utf-8")
     (work / "audio.wav").write_bytes(b"raw audio should not copy")
     (work / "secret.json").write_text("tp-secret", encoding="utf-8")
@@ -52,7 +63,8 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     assert (mdir / "material.json").exists()
     assert (mdir / "material.md").exists()
     assert (mdir / "artifacts" / "scenes.json").exists()
-    assert (mdir / "artifacts" / "asr_clean.json").exists()
+    assert (mdir / "artifacts" / "asr_result.json").exists()
+    assert not (mdir / "artifacts" / "asr_clean.json").exists()
     assert not (mdir / "artifacts" / "audio.wav").exists()
     assert not (mdir / "artifacts" / "secret.json").exists()
     lines = (lib / "materials_index.jsonl").read_text(encoding="utf-8").splitlines()
@@ -60,7 +72,7 @@ def test_save_material_copies_allowed_files_writes_md_and_append_index(tmp_path)
     rec = json.loads(lines[0])
     assert rec["event"] == "saved"
     assert rec["summary"].startswith("Analyzed video material: ep1.mp4")
-    assert "英雄" in rec["tags"] and "hero-sword" in rec["tags"]
+    assert "英雄" in rec["tags"] and "scenes:1" in rec["tags"] and "asr:1" in rec["tags"]
     assert meta["source_video_identity"] == IDENTITY and meta["settings"] == SETTINGS
     assert all(set(a) == {"name", "path", "bytes"} for a in meta["artifacts"])
 
@@ -73,7 +85,7 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     work = tmp_path / "work"
     work.mkdir()
     (work / "asr_result.json").write_text(json.dumps([{"text": "hello"}]), encoding="utf-8")
-    (work / "asr_clean.json").write_text(json.dumps({"segments": [{"text": "hello。"}]}), encoding="utf-8")
+    (work / "vlm_analysis.json").write_text(json.dumps([{"description": "hello。"}]), encoding="utf-8")
     video = tmp_path / "ep.mp4"
     meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
 
@@ -97,25 +109,22 @@ def test_restore_material_requires_matching_path_identity_and_settings(tmp_path)
     )
     assert ok["restored"] is True
     assert (dest / "asr_result.json").exists()
-    assert (dest / "asr_clean.json").exists()
+    assert (dest / "vlm_analysis.json").exists()
 
 
-def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_not(tmp_path):
-    """brief-only on a restored work_dir still sees a failed consolidate; the ASR timing
+def test_speech_boundary_anchors_round_trip_but_identity_bound_asr_evidence_does_not(tmp_path):
+    """speech_boundary_anchors.json round-trips through the material library; the ASR timing
     sidecar binds files a restore rewrites or never copies, so it is not stored at all."""
     lib = tmp_path / "library"
     work = tmp_path / "work"
     work.mkdir()
-    status = {
-        "stage": "consolidation", "enabled": True, "do_asr": False, "do_index": True,
-        "status": "failed", "message": "MiMo timeout", "artifacts": [],
-    }
+    anchors = {"schema_version": 2, "status": "completed", "sentence_anchors": []}
     (work / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    (work / "consolidation.status.json").write_text(json.dumps(status), encoding="utf-8")
+    (work / "speech_boundary_anchors.json").write_text(json.dumps(anchors), encoding="utf-8")
     (work / "asr_timing_evidence.json").write_text(json.dumps({"status": "x"}), encoding="utf-8")
     video = tmp_path / "ep.mp4"
     meta = materials.save_material(lib, work, video, IDENTITY, SETTINGS)
-    assert {a["name"] for a in meta["artifacts"]} == {"scenes.json", "consolidation.status.json"}
+    assert {a["name"] for a in meta["artifacts"]} == {"scenes.json", "speech_boundary_anchors.json"}
 
     dest = tmp_path / "dest"
     restored = materials.restore_material(
@@ -123,7 +132,7 @@ def test_consolidation_status_round_trips_but_identity_bound_asr_evidence_does_n
         material_id=meta["material_id"],
     )
     assert restored["restored"] is True
-    assert json.loads((dest / "consolidation.status.json").read_text(encoding="utf-8")) == status
+    assert json.loads((dest / "speech_boundary_anchors.json").read_text(encoding="utf-8")) == anchors
     assert not (dest / "asr_timing_evidence.json").exists()
 
 
@@ -160,10 +169,9 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     lib = tmp_path / "library"
     work = tmp_path / "work"
     work.mkdir()
-    (work / "understanding_index.json").write_text(
+    (work / "background_research.json").write_text(
         json.dumps({
-            "characters": [], "relationships": [], "plot_points": [], "entities": [],
-            "research_glossary": [],
+            "characters": {}, "terms": {},
             "summary": "主角发现了一个秘密 secret，一枚 token 在黑市流通",   # legit words -> must survive
             "api_key": "tp-abcdef12345678",                                  # credential key -> value dropped
             "token_economy": "影片解释 token 的发行机制",                     # benign name containing 'token' -> kept
@@ -184,7 +192,7 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     assert "secret" in persisted and "token" in persisted
     assert "token_economy" in persisted
 
-    idx = json.loads((lib / "materials" / meta["material_id"] / "artifacts" / "understanding_index.json")
+    idx = json.loads((lib / "materials" / meta["material_id"] / "artifacts" / "background_research.json")
                      .read_text(encoding="utf-8"))
     assert idx["api_key"] == "[redacted]"                 # value dropped, key name kept, not coalesced
     assert "secret" in idx["summary"] and "token" in idx["summary"]
@@ -193,7 +201,7 @@ def test_allowed_artifacts_redact_secret_values_but_keep_legitimate_words(tmp_pa
     dest = tmp_path / "dest"
     materials.restore_material(lib, dest, source_path=tmp_path / "ep.mp4", source_identity=IDENTITY,
                                settings=SETTINGS, material_id=meta["material_id"])
-    restored = (dest / "understanding_index.json").read_text(encoding="utf-8")
+    restored = (dest / "background_research.json").read_text(encoding="utf-8")
     assert "tp-abcdef12345678" not in restored
     assert "secret" in restored and "token" in restored
 
@@ -221,30 +229,6 @@ def test_redact_text_leaves_plain_words_but_strips_token_shapes():
         "the secret garden hides a golden token"
     assert "tp-" not in materials._redact_text("key is tp-abcdef12345678 ok")
     assert "ghp_" not in materials._redact_text("token ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZ012345")
-
-
-def test_restore_overwrite_false_does_not_prune_then_lose_staged_file(tmp_path):
-    """FF-B: prune_stale_allowed + overwrite=False must NOT prune a staged file and then skip
-    restoring it. The staged file is preserved; only true (non-staged) stale orphans are pruned."""
-    lib = tmp_path / "library"
-    seed = tmp_path / "seed"
-    seed.mkdir()
-    (seed / "scenes.json").write_text(json.dumps([{"start": 0, "end": 1}]), encoding="utf-8")
-    meta = materials.save_material(lib, seed, tmp_path / "ep.mp4", IDENTITY, SETTINGS)
-
-    dest = tmp_path / "dest"
-    dest.mkdir()
-    (dest / "scenes.json").write_text(json.dumps([{"keep": "existing"}]), encoding="utf-8")  # staged name, present
-    (dest / "vlm_analysis.json").write_text(json.dumps({"stale": 1}), encoding="utf-8")        # non-staged orphan
-
-    res = materials.restore_material(lib, dest, source_path=tmp_path / "ep.mp4", source_identity=IDENTITY,
-                                     settings=SETTINGS, material_id=meta["material_id"], overwrite=False)
-
-    assert (dest / "scenes.json").exists(), "staged file must survive (not pruned-then-skipped)"
-    assert json.loads((dest / "scenes.json").read_text(encoding="utf-8")) == [{"keep": "existing"}]
-    assert not (dest / "vlm_analysis.json").exists(), "true stale orphan is pruned"
-    assert "vlm_analysis.json" in res["pruned_artifacts"]
-    assert "scenes.json" not in res["pruned_artifacts"]
 
 
 def test_save_material_reconciles_orphan_artifacts_on_resave(tmp_path):
@@ -283,3 +267,226 @@ def test_save_material_refreshes_malformed_existing_metadata(tmp_path):
 
     assert refreshed["created_at"] == "2026-02-01T00:00:00Z"
     assert refreshed["updated_at"] == "2026-02-01T00:00:00Z"
+
+
+# The exact settings dict a run with default flags recorded before --mimo-video-overview and
+# --consolidate-asr were removed. Written out by hand: it must not follow _analysis_settings.
+_SETTINGS_BEFORE_FLAG_REMOVAL = {
+    "context": "",
+    "scene_threshold": None,
+    "style": "纪录片",
+    "edit_mode": "full",
+    "target_duration": None,
+    "skip_asr": False,
+    "mimo_video_overview": False,
+    "consolidate": True,
+    "consolidate_asr": False,
+}
+
+
+def _material_saved_before_flag_removal(lib, video, settings):
+    """A library entry as the previous release wrote it, asr_clean.json artifact included."""
+    mid = material_id_for(video, IDENTITY)
+    artifacts = lib / "materials" / mid / "artifacts"
+    artifacts.mkdir(parents=True)
+    (artifacts / "asr_result.json").write_text(
+        json.dumps([{"start": 0.0, "end": 1.0, "text": "原始转写"}]), encoding="utf-8")
+    (artifacts / "asr_clean.json").write_text(
+        json.dumps({"segments": [{"start": 0.0, "end": 1.0, "text": "清洗旧稿"}]}), encoding="utf-8")
+    listed = [{"name": name, "path": f"artifacts/{name}", "bytes": 1}
+              for name in ("asr_clean.json", "asr_result.json")]
+    (lib / "materials" / mid / "material.json").write_text(json.dumps({
+        "material_id": mid, "source_path": str(video.resolve()),
+        "source_video_identity": IDENTITY, "settings": settings,
+        "updated_at": "2026-10-03T00:00:00Z", "artifacts": listed,
+    }), encoding="utf-8")
+    return mid
+
+
+def test_entry_saved_before_the_flag_removal_still_restores(tmp_path):
+    video = tmp_path / "ep.mp4"
+    lib = tmp_path / "library"
+    mid = _material_saved_before_flag_removal(lib, video, _SETTINGS_BEFORE_FLAG_REMOVAL)
+    _, args = recap_cli.parse_args([str(video)])
+    settings = recap_runtime._analysis_settings(args)
+    assert {**settings, "consolidate": True} == _SETTINGS_BEFORE_FLAG_REMOVAL
+
+    dest = tmp_path / "dest"
+    restored = materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY, settings=settings, material_id=mid,
+    )
+
+    assert restored["restored"] is True
+    assert sorted(restored["artifacts"]) == ["asr_clean.json", "asr_result.json"]
+    # The restored leftover is inert: readers take the raw transcript.
+    assert [row["text"] for row in recap_timeline._source_speech_rows(dest)] == ["原始转写"]
+
+
+def test_entry_listing_the_removed_markdown_index_still_restores(tmp_path):
+    video = tmp_path / "ep.mp4"
+    lib = tmp_path / "library"
+    mid = _material_saved_before_flag_removal(lib, video, _SETTINGS_BEFORE_FLAG_REMOVAL)
+    entry = lib / "materials" / mid
+    (entry / "artifacts" / "understanding_index.md").write_text("# 旧索引", encoding="utf-8")
+    meta = json.loads((entry / "material.json").read_text(encoding="utf-8"))
+    meta["artifacts"].append(
+        {"name": "understanding_index.md", "path": "artifacts/understanding_index.md", "bytes": 1})
+    (entry / "material.json").write_text(json.dumps(meta), encoding="utf-8")
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "narration.json").write_text("[]", encoding="utf-8")
+
+    restored = materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY,
+        settings=_SETTINGS_BEFORE_FLAG_REMOVAL, material_id=mid,
+    )
+
+    assert restored["restored"] is True
+    assert (dest / "understanding_index.md").read_text(encoding="utf-8") == "# 旧索引"
+    assert (dest / "narration.json").read_text(encoding="utf-8") == "[]"
+
+
+def test_entry_analyzed_with_a_removed_feature_on_is_reanalyzed(tmp_path):
+    video = tmp_path / "ep.mp4"
+    lib = tmp_path / "library"
+    mid = _material_saved_before_flag_removal(
+        lib, video, {**_SETTINGS_BEFORE_FLAG_REMOVAL, "consolidate_asr": True})
+    _, args = recap_cli.parse_args([str(video)])
+
+    restored = materials.restore_material(
+        lib, tmp_path / "dest", source_path=video, source_identity=IDENTITY,
+        settings=recap_runtime._analysis_settings(args), material_id=mid,
+    )
+
+    assert restored == {"restored": False, "reason": "settings mismatch", "material_id": mid}
+
+
+def _restore(lib, dest, video, meta):
+    return materials.restore_material(
+        lib, dest, source_path=video, source_identity=IDENTITY, settings=SETTINGS,
+        material_id=meta["material_id"],
+    )
+
+
+def test_agent_research_survives_a_restore_from_an_entry_without_research(tmp_path):
+    lib, seed, dest, video = tmp_path / "library", tmp_path / "seed", tmp_path / "dest", tmp_path / "ep.mp4"
+    seed.mkdir()
+    dest.mkdir()
+    (seed / "scenes.json").write_text("[]", encoding="utf-8")
+    meta = materials.save_material(lib, seed, video, IDENTITY, SETTINGS)
+    (dest / "background_research.json").write_text('{"story": "agent"}', encoding="utf-8")
+
+    restored = _restore(lib, dest, video, meta)
+
+    assert restored["pruned_artifacts"] == []
+    assert restored["kept_local_research"] is True
+    assert json.loads((dest / "background_research.json").read_text(encoding="utf-8")) == {"story": "agent"}
+
+
+def test_restore_keeps_newer_agent_research_and_replaces_older(tmp_path):
+    lib, seed, dest, video = tmp_path / "library", tmp_path / "seed", tmp_path / "dest", tmp_path / "ep.mp4"
+    seed.mkdir()
+    dest.mkdir()
+    (seed / "background_research.json").write_text('{"story": "saved"}', encoding="utf-8")
+    meta = materials.save_material(lib, seed, video, IDENTITY, SETTINGS)
+    saved = lib / "materials" / meta["material_id"] / "artifacts" / "background_research.json"
+    mine = dest / "background_research.json"
+    mine.write_text('{"story": "agent"}', encoding="utf-8")
+
+    os.utime(mine, ns=(saved.stat().st_mtime_ns + 10**9, saved.stat().st_mtime_ns + 10**9))
+    kept = _restore(lib, dest, video, meta)
+    assert kept["kept_local_research"] is True
+    assert json.loads(mine.read_text(encoding="utf-8")) == {"story": "agent"}
+
+    os.utime(mine, ns=(saved.stat().st_mtime_ns - 10**9, saved.stat().st_mtime_ns - 10**9))
+    replaced = _restore(lib, dest, video, meta)
+    assert replaced["kept_local_research"] is False
+    assert json.loads(mine.read_text(encoding="utf-8")) == {"story": "saved"}
+
+
+def _save_analyzed(lib, seed, video, settings):
+    seed.mkdir(parents=True, exist_ok=True)
+    (seed / "scenes.json").write_text(
+        json.dumps([{"scene_id": 0, "start": 0.0, "end": 1.0, "duration": 1.0}]), encoding="utf-8")
+    (seed / "vlm_analysis.json").write_text(
+        json.dumps([{"scene_id": 0, "start": 0.0, "end": 1.0, "description": "门开了"}]), encoding="utf-8")
+    (seed / "asr_result.json").write_text("[]", encoding="utf-8")
+    (seed / "agent_narration_brief.md").write_text("# stale saved brief without research\n", encoding="utf-8")
+    return materials.save_material(lib, seed, video, file_identity(video), settings)
+
+
+@pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="requires media tools")
+def test_single_video_material_restore_rebuilds_brief_when_local_research_survives(
+    monkeypatch, tmp_path
+):
+    """When background_research.json was authored locally after the material was saved,
+    --use-materials restores the paid artifacts and runs understand.py --brief-only so the
+    restored brief includes the local research."""
+    video = tmp_path / "ep.mp4"
+    subprocess.run(
+        ["ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "testsrc2=s=160x120:r=12:d=1",
+         "-c:v", "libx264", str(video)],
+        check=True, capture_output=True,
+    )
+    lib, work = tmp_path / "library", tmp_path / "work"
+    _, parsed = recap_cli.parse_args([str(video)])
+    _save_analyzed(lib, tmp_path / "seed", video, recap_runtime._analysis_settings(parsed))
+    work.mkdir()
+    (work / "background_research.json").write_text(
+        json.dumps({"synopsis": "范闲夜探监察院", "characters": {"范闲": "主角"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap_runner.py", str(video), "--work-dir", str(work),
+         "--material-library-dir", str(lib), "--use-materials"],
+    )
+
+    recap.main()
+
+    brief = (work / "agent_narration_brief.md").read_text(encoding="utf-8")
+    assert "范闲夜探监察院" in brief
+
+
+def test_multi_video_material_restore_shares_project_research_before_rebuilding_brief(
+    monkeypatch, tmp_path
+):
+    """Project-level background_research.json is copied into each source_work_dir BEFORE
+    restore_material runs, so --use-materials triggers understand.py --brief-only per source."""
+    videos = [tmp_path / "ep1.mp4", tmp_path / "ep2.mp4"]
+    for idx, video in enumerate(videos):
+        video.write_bytes(f"video-{idx}".encode("utf-8"))
+    lib, project = tmp_path / "library", tmp_path / "project"
+    _, parsed = recap_cli.parse_args([str(v) for v in videos] + ["--edit-mode", "cut"])
+    settings = recap_runtime._analysis_settings(parsed)
+    for idx, video in enumerate(videos):
+        _save_analyzed(lib, tmp_path / f"seed_{idx}", video, settings)
+    project.mkdir()
+    (project / "background_research.json").write_text(
+        json.dumps({"characters": {"沈清": "女主"}}, ensure_ascii=False), encoding="utf-8"
+    )
+    calls = []
+
+    def fake_run(stage, script, *cli_args):
+        calls.append((stage, script, list(cli_args)))
+        wd = Path(cli_args[cli_args.index("--work-dir") + 1])
+        research = json.loads((wd / "background_research.json").read_text(encoding="utf-8"))
+        (wd / "agent_narration_brief.md").write_text(
+            f"# rebuilt with {next(iter(research['characters']))}\n", encoding="utf-8"
+        )
+
+    monkeypatch.setattr("recap_runner._run", fake_run)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["recap_runner.py", *(str(v) for v in videos), "--work-dir", str(project),
+         "--edit-mode", "cut", "--material-library-dir", str(lib), "--use-materials"],
+    )
+
+    recap.main()
+
+    assert len(calls) == 2
+    assert all(stage == "understanding" and script == "understand.py" and "--brief-only" in cli
+               for stage, script, cli in calls)
+    manifest = json.loads((project / "multi_source_manifest.json").read_text(encoding="utf-8"))
+    for src in manifest["sources"]:
+        assert "沈清" in (project / src["source_work_dir"] / "agent_narration_brief.md").read_text(encoding="utf-8")

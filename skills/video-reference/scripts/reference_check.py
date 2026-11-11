@@ -140,7 +140,9 @@ def _check_cut_fixes(fixes, cuts, duration, errors):
         for t in values:
             near = any(abs(t - c) <= CUT_MATCH_S for c in cuts)
             if not EDGE_S < t < duration - EDGE_S:
-                errors.append(f"R2 labels.cut_fixes.{key}: {t} 不在 (0, {duration}) 内")
+                errors.append(
+                    f"R2 labels.cut_fixes.{key}: {t} 不在 ({EDGE_S}, {round(duration - EDGE_S, 4)}) 内"
+                )
             elif key == "remove" and not near:
                 errors.append(f"R2 labels.cut_fixes.remove: {t} 附近 ±{CUT_MATCH_S}s 内没有测得的切点")
             elif key == "add" and near:
@@ -282,36 +284,6 @@ def _word_grams(text, size):
     return {tuple(words[i:i + size]) for i in range(len(words) - size + 1)}
 
 
-def _mention_names(value):
-    """Names one aliases/asr_mentions entry contributes.
-
-    The model writes plain strings; video-understanding's deterministic ASR/research fallback writes
-    {text, evidence_id, matched_aliases} dicts, whose names are the matched aliases (the text is the
-    ASR window, already in the source-text corpus). Anything else contributes nothing."""
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, dict):
-        matched = value.get("matched_aliases")
-        return [m for m in matched if isinstance(m, str)] if isinstance(matched, list) else []
-    return []
-
-
-def _index_names(index):
-    """name / aliases / asr_mentions of characters, entities and research_glossary in understanding_index.json."""
-    names = set()
-    for key in ("characters", "entities", "research_glossary"):
-        items = index.get(key) if isinstance(index, dict) else None
-        for item in items if isinstance(items, list) else []:
-            if isinstance(item, dict):
-                if isinstance(item.get("name"), str):
-                    names.add(item["name"])
-                for alias_key in ("aliases", "asr_mentions"):
-                    values = item.get(alias_key)
-                    for value in values if isinstance(values, list) else []:
-                        names.update(_mention_names(value))
-    return names
-
-
 def _strings(node):
     if isinstance(node, str):
         yield node
@@ -360,7 +332,7 @@ def _grams(texts):
             set().union(*(_word_grams(t, LATIN_RUN_MIN) for t in texts)) if texts else set())
 
 
-def leak_corpus(facts, asr_segments, asr_evidence, research, index=None):
+def leak_corpus(facts, asr_segments, asr_evidence, research):
     """Entity names and source text that must never reach a transferable method.
 
     Source text is the ASR (each window and each adjacent pair joined, so a line split by a window
@@ -368,7 +340,6 @@ def leak_corpus(facts, asr_segments, asr_evidence, research, index=None):
     are kept apart so an error can say which side a shared phrase came from.
     """
     names = {e for f in facts for e in (f.get("entities") or []) if isinstance(e, str)}
-    names.update(_index_names(index))
     research = research if isinstance(research, dict) else {}
     asr_evidence = asr_evidence if isinstance(asr_evidence, dict) else {}
     names.update(_research_names(research))
@@ -412,7 +383,7 @@ def leak_errors(text, where, corpus, rule="R6"):
     return errors
 
 
-def _warnings(breakdown, methods, asr_segments, asr_status, research, *, index, asr_evidence, source,
+def _warnings(breakdown, methods, asr_segments, asr_status, research, *, asr_evidence, source,
               review_windows=None):
     warnings = []
     for method in methods:
@@ -423,8 +394,8 @@ def _warnings(breakdown, methods, asr_segments, asr_status, research, *, index, 
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
-    if has_cjk and not ((_research_names(research) | _index_names(index)) - {None, ""}):
-        warnings.append("ASR 有中文对白，但 background_research.json 与 understanding_index.json 都没有给出名字："
+    if has_cjk and not (_research_names(research) - {None, ""}):
+        warnings.append("ASR 有中文对白，但 background_research.json 没有给出名字："
                         "泄漏扫描只认 fact entities 里写到的名字，台词里其他人名、地名、组织名会漏网")
     asr_video = (asr_evidence if isinstance(asr_evidence, dict) else {}).get("source_video")
     if isinstance(asr_video, dict) and {k: asr_video.get(k) for k in ("size", "mtime_ns")} != {
@@ -441,7 +412,7 @@ def _warnings(breakdown, methods, asr_segments, asr_status, research, *, index, 
     return warnings
 
 
-def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None, research=None, index=None):
+def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None, research=None):
     """Run R1–R7; return {derived, errors, warnings}."""
     errors = []
     duration = measurements["source"]["duration_s"]
@@ -470,7 +441,7 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
     _check_facts(facts, measurements, derived, duration, errors)
     _check_methods(methods, fact_ids, measurements, derived, errors)
 
-    corpus = leak_corpus(facts, asr_segments, asr_evidence, research, index)
+    corpus = leak_corpus(facts, asr_segments, asr_evidence, research)
     for method in methods:
         for field in METHOD_TEXT_FIELDS:
             if isinstance(method.get(field), str):
@@ -490,7 +461,7 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
         if dimension not in covered and dimension not in skipped:
             errors.append(f"R7 {dimension}: 至少一条 method，或在 skipped_dimensions 写明原因")
     warnings = _warnings(breakdown, methods, asr_segments, asr_status, research,
-                         index=index, asr_evidence=asr_evidence, source=measurements["source"],
+                         asr_evidence=asr_evidence, source=measurements["source"],
                          review_windows=measurements["shots"].get("review_windows"))
     return {"derived": derived, "errors": errors, "warnings": warnings}
 
@@ -504,7 +475,6 @@ def _load(work_dir):
         "asr_segments": read_json(work_dir / "asr_result.json", []),
         "asr_evidence": read_json(work_dir / "asr_timing_evidence.json"),
         "research": read_json(work_dir / "background_research.json"),
-        "index": read_json(work_dir / "understanding_index.json"),
     }, missing
 
 
@@ -546,7 +516,7 @@ def run_export(work_dir, out_path):
     measurements = apply_cut_fixes(measurements, breakdown.get("labels"))
     production = build_production(breakdown, measurements, report["derived"])
     facts = [f for f in breakdown.get("source_facts") or [] if isinstance(f, dict)]
-    corpus = leak_corpus(facts, extra["asr_segments"], extra["asr_evidence"], extra["research"], extra["index"])
+    corpus = leak_corpus(facts, extra["asr_segments"], extra["asr_evidence"], extra["research"])
     report["errors"] = export_errors(production, corpus)
     if not report["errors"]:
         report["written"] = str(write_json(out_path, production))

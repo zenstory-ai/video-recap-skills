@@ -1,6 +1,6 @@
 import sys
 from pathlib import Path
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-assemble' / 'scripts'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'skills' / 'video-recap' / 'scripts'))
 """Subtitle style must scale to the probed canvas so 竖屏 (9:16) text is not stretched.
 
 Regression guard for the hardcoded 1280x720 PlayRes bug: libass interprets all style
@@ -121,21 +121,21 @@ def json_text(value):
 
 
 @pytest.mark.parametrize(
-    ("text", "canvas", "safe_area", "line_count", "safe_width", "reasons", "kinds"),
+    ("text", "canvas", "safe_area", "line_count", "safe_width", "reasons"),
     [
         # two lines inside an explicit portrait safe area: multi-line, no overflow
         ("第一行\n第二行", (1080, 1920), {"x": 54, "y": 96, "width": 972, "height": 1728},
-         2, 972.0, [], []),
+         2, 972.0, []),
         # default safe area derives from margins; a third line exceeds subtitle_max_lines=2
         ("第一行\n第二行\n第三行", (640, 360), None,
-         3, 600.0, ["max_lines_exceeded"], ["line_count"]),
+         3, 600.0, ["max_lines_exceeded"]),
         # one very long line overflows the safe width
         ("超长字幕" * 120, (360, 640), {"x": 36, "y": 64, "width": 288, "height": 120},
-         1, 288.0, ["safe_width_exceeded"], ["line_width"]),
+         1, 288.0, ["safe_width_exceeded"]),
     ],
 )
 def test_subtitle_layout_qc_reports_multiline_and_safe_area_overflow(
-    monkeypatch, text, canvas, safe_area, line_count, safe_width, reasons, kinds
+    monkeypatch, text, canvas, safe_area, line_count, safe_width, reasons
 ):
     monkeypatch.setitem(CONFIG, "subtitle_max_lines", 2)
     style = _subtitle_style_config({"width": canvas[0], "height": canvas[1]})
@@ -146,6 +146,5 @@ def test_subtitle_layout_qc_reports_multiline_and_safe_area_overflow(
     assert fact["line_count"] == line_count
     assert fact["safe_width"] == safe_width
     assert fact["overflow_reasons"] == reasons
-    assert qc["multi_line"] is (line_count > 1)
     assert qc["overflow"] is bool(reasons)
-    assert [v["kind"] for v in qc["violations"]] == kinds
+    assert [entry["overflow_reasons"] for entry in qc["overflow_entries"]] == ([reasons] if reasons else [])

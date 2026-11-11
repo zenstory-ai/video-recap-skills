@@ -2,20 +2,20 @@
 
 ## 仓库是什么
 
-把一段或几段视频做成中文解说成片的 skill 包。`skills/` 下七个技能：六个生产技能加一个按需参考技能。
+把一段或几段视频做成中文解说成片的 skill 包。`skills/` 下两个自包含技能（1 个生产技能 + 1 个按需拆片参考技能）：
 
-- `video-recap`：编排器，以子进程依次调用 `video-understanding` → Agent 按 `video-script` 写计划与旁白 → `video-cut`（cut 模式）→ `video-voiceover` → `video-assemble`。
-- `video-reference`：不在流水线上，按需把成片拆成 `production_reference.json`。
+- `video-recap`：统一生产技能，一气呵成完成视频理解（`understand.py`）→ Agent 制定故事/声画方案与写稿 → 视频剪辑（`cut.py`）→ 底线门禁校验（`validate.py`）→ TTS 配音（`voiceover.py`）→ 音画混音与字幕渲染（`assemble.py`），由总入口 `recap.py` 编排串联。
+- `video-reference`：不在默认生产流水线上，按需把现有优秀成片拆成 `production_reference.json`。
 - 各阶段拥有什么、入口脚本和功能子包见 `docs/architecture.md`；能力边界与验收原则见 `docs/production-boundaries.md`。
 - 分发渠道：Claude 插件（`.claude-plugin/`，OpenClaw 的 `plugins install` 也读它）、源码 Release（`.release/policy.json`）和 ClawHub（`.clawhub/`）。
 
 ## 改动前必须知道的规矩
 
-- **每个 skill 自包含**：`skills/<name>/scripts/`（含子包）只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；阶段之间只交换 `work_dir` 里的 JSON / MP4。不要把刻意复制的函数抽成共享模块：副本由 `tests/orchestrator/test_brief_narration_parity.py`、`test_audio_policy_parity.py` 守，改一处须同批改副本（见 `architecture/2026-06-14-self-contained-skills-duplicated-libs.md`）。
+- **每个 skill 自包含**：`skills/<name>/scripts/`（含子包）只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；各阶段之间通过 `work_dir` 里的 JSON / MP4 交接数据，`lib.py` 只声明本技能实际读取的配置项（`tests/orchestrator/test_audio_policy_parity.py` 守；见 `architecture/2026-11-10-converge-production-skills-into-video-recap.md`）。
 - **结构上限**：每个脚本模块不超过 800 行，skill 内 import 图无环（`tests/orchestrator/test_test_suite_architecture.py`）。
 - **运行时只用 Python 标准库和 ffmpeg / ffprobe**，README 承诺不需要 `pip install`；最低 Python 3.10（README），CI 用 3.12。
 - **创作产物归 Agent**：`clip_plan.json`、`narration.json` 等由 Agent 写，脚本只准备 brief、做确定性校验、执行 TTS 与渲染（`architecture/2026-05-18-agent-owned-narration-cli-mechanical.md`）。
-- **远程调用必须写明**：任何把数据发出本机的路径，都要在对应 `SKILL.md` 写清发什么、发给谁、怎样关闭；dub 克隆原声必须显式 `--confirm-voice-rights`，没有环境变量形式（`process/2026-10-03-remote-call-disclosure-and-dub-consent.md`）。
+- **远程调用必须写明**：任何把数据发出本机的路径，都要在对应 `SKILL.md` 写清发什么、发给谁、怎样关闭（`process/2026-10-03-remote-call-disclosure-and-dub-consent.md`；dub 已移除，见 `simplification/2026-11-06-remove-dub-mode.md`）。
 - **SKILL.md frontmatter 单行键值**：`description` 写成一行，不用 `>` / `|` 块，不超过 1024 字符（`test_plugin_manifest.py` 守）。
 
 ## 验证
@@ -37,7 +37,7 @@ python3 -m pytest tests/script -q    # 调试单组
 
 - `CHANGELOG.md` 遵循 Keep a Changelog，小节名用 `Added` / `Changed` / `Deprecated` / `Removed` / `Fixed` / `Security` 六个英文类别，正文中文；收紧到会拒绝旧输入的改动记入 `Changed`。按惯例，行为、契约或交付物有变化的 PR 在 `## [Unreleased]` 下记一条。
 - 版本号权威是 `.release/policy.json` 的 `versionFiles`：`VERSION` 与 `.claude-plugin/plugin.json` 的 `version` 一起改，并加带日期的 `## [x.y.z] - YYYY-MM-DD` 标题；只在单独授权的发布准备中切版本。发布流程见 `docs/source-release.md`。
-- ClawHub：`.clawhub/publish.json` 显式列出每个技能，`packageDigest` 锁定包字节。任何改动 `skills/<name>/` 下文件的 PR，都要给该条目升 semver，同步 `video-recap` 的 `skill:` 依赖版本，并用 `validate-clawhub.yml` 固定的中央 `clawhub_release.py lock` 重新锁定；规则见 `.clawhub/README.md`。
+- ClawHub：`.clawhub/publish.json` 显式列出每个技能，`packageDigest` 锁定包字节。任何改动 `skills/<name>/` 下文件的 PR，都要给该条目升 semver，并用 `validate-clawhub.yml` 固定的中央 `clawhub_release.py lock` 重新锁定；规则见 `.clawhub/README.md`。
 - 未经单独授权不推 tag、不手动触发发布或 ClawHub 工作流；`CLAWHUB_QUEUED` 只表示派发被接受，不等于已发布或扫描通过。
 
 ## 重要改动必须留笔记

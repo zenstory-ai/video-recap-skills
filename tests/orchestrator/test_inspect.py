@@ -56,6 +56,38 @@ def test_state_cut_mode_pass2_waits_on_narration(tmp_path):
     assert state["next_pause"]["artifact"] == "narration.json"
 
 
+def test_state_source_modes_do_not_wait_on_narration(tmp_path):
+    """source-mix runs have no narration author pause once clip_plan (if cut) exists."""
+    full_dir = tmp_path / "full_source_mix"
+    full_dir.mkdir()
+    (full_dir / "recap_run_manifest.json").write_text(json.dumps({
+        "source_video": "/videos/movie.mp4",
+        "source_video_identity": {"size": 1, "mtime_ns": 1},
+        "settings": {"edit_mode": "full"},
+        "audio": {"mode": "source-mix"},
+    }), encoding="utf-8")
+    assert recap_inspect.cmd_state(full_dir)["next_pause"] is None
+
+    cut_dir = tmp_path / "cut_source_mix"
+    cut_dir.mkdir()
+    (cut_dir / "recap_run_manifest.json").write_text(json.dumps({
+        "source_video": "/videos/movie.mp4",
+        "source_video_identity": {"size": 1, "mtime_ns": 1},
+        "settings": {"edit_mode": "cut"},
+        "audio": {"mode": "source-mix"},
+    }), encoding="utf-8")
+    assert recap_inspect.cmd_state(cut_dir)["next_pause"]["artifact"] == "clip_plan.json"
+    (cut_dir / "clip_plan.json").write_text("[]", encoding="utf-8")
+    assert recap_inspect.cmd_state(cut_dir)["next_pause"] is None
+
+    asm_dir = tmp_path / "assembly_only_source_mix"
+    asm_dir.mkdir()
+    (asm_dir / "assembly_manifest.json").write_text(json.dumps({
+        "audio_mode": "source-mix",
+    }), encoding="utf-8")
+    assert recap_inspect.cmd_state(asm_dir)["next_pause"] is None
+
+
 def test_state_source_from_assembly_manifest_when_no_run_manifest(tmp_path):
     """When recap_run_manifest.json is absent, the source falls back to assembly_manifest.json."""
     (tmp_path / "assembly_manifest.json").write_text(json.dumps({
@@ -157,8 +189,7 @@ def _write_plan(tmp_path, plan=None):
 def test_clip_map_absent_validated_plan_message(tmp_path):
     """No clip_plan_validated.json → a clear "not a cut run / not yet validated" message."""
     result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=0.0, output_end=5.0,
-        source_start=None, source_end=None, compact=True)
+        tmp_path, output_start=0.0, output_end=5.0, compact=True)
     assert "error" in result
     assert "clip_plan_validated.json" in result["error"]
 
@@ -167,8 +198,7 @@ def test_clip_map_output_to_source_exact_numbers(tmp_path):
     """A within-clip OUTPUT query maps to the exact SOURCE window (offset -10 for clip 0)."""
     _write_plan(tmp_path)
     result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=2.0, output_end=7.0,
-        source_start=None, source_end=None, compact=True)
+        tmp_path, output_start=2.0, output_end=7.0, compact=True)
     q = result["queries"][0]
     assert q["direction"] == "output→source"
     assert q["clips_touched"] == [0]
@@ -176,21 +206,6 @@ def test_clip_map_output_to_source_exact_numbers(tmp_path):
     seg = q["segments"][0]
     assert seg["output"] == [2.0, 7.0]
     assert seg["source"] == [12.0, 17.0]  # 10 + (2-0)=12 ; 10 + (7-0)=17
-    assert q["cut_out_source_gaps"] == []
-
-
-def test_clip_map_source_to_output_exact_numbers(tmp_path):
-    """A within-clip SOURCE query maps to the exact OUTPUT window (clip 1, offset -40)."""
-    _write_plan(tmp_path)
-    result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=None, output_end=None,
-        source_start=51.0, source_end=54.0, compact=True)
-    q = result["queries"][0]
-    assert q["direction"] == "source→output"
-    assert q["clips_touched"] == [1]
-    seg = q["segments"][0]
-    assert seg["source"] == [51.0, 54.0]
-    assert seg["output"] == [11.0, 14.0]  # 10 + (51-50)=11 ; 10 + (54-50)=14
 
 
 def test_clip_map_point_query_inside_clip_resolves(tmp_path):
@@ -198,8 +213,7 @@ def test_clip_map_point_query_inside_clip_resolves(tmp_path):
     that clip instead of silently falling through to 'not in any clip'."""
     _write_plan(tmp_path)
     result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=5.0, output_end=5.0,
-        source_start=None, source_end=None, compact=True)
+        tmp_path, output_start=5.0, output_end=5.0, compact=True)
     q = result["queries"][0]
     assert q["clips_touched"] == [0]
     seg = q["segments"][0]
@@ -212,8 +226,7 @@ def test_clip_map_output_query_straddling_two_clips_flagged(tmp_path):
     mapped segment per clip with exact source numbers."""
     _write_plan(tmp_path)
     result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=5.0, output_end=12.0,
-        source_start=None, source_end=None, compact=True)
+        tmp_path, output_start=5.0, output_end=12.0, compact=True)
     q = result["queries"][0]
     assert q["cross_clip_boundary"] is True
     assert q["clips_touched"] == [0, 1]
@@ -222,46 +235,11 @@ def test_clip_map_output_query_straddling_two_clips_flagged(tmp_path):
     assert by_clip[1]["source"] == [50.0, 52.0]   # output 10-12 -> source 50-52
 
 
-def test_clip_map_source_range_outside_all_clips_flagged_cut_out(tmp_path):
-    """A SOURCE window spanning footage between clips reports the cut-out gap (source range in
-    no clip) and still maps the covered ends."""
-    _write_plan(tmp_path)
-    result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=None, output_end=None,
-        source_start=15.0, source_end=55.0, compact=True)
-    q = result["queries"][0]
-    assert q["cross_clip_boundary"] is True
-    assert q["cut_out_source_gaps"] == [[20.0, 50.0]]  # footage cut away between the two clips
-
-
-def test_clip_map_source_query_entirely_in_cut_out_gap(tmp_path):
-    """A SOURCE window wholly inside cut-away footage maps to no clip and is fully a cut-out gap."""
-    _write_plan(tmp_path)
-    result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=None, output_end=None,
-        source_start=30.0, source_end=40.0, compact=True)
-    q = result["queries"][0]
-    assert q["segments"] == []
-    assert q["clips_touched"] == []
-    assert q["cut_out_source_gaps"] == [[30.0, 40.0]]
-
-
-def test_clip_map_both_windows_in_one_call(tmp_path):
-    """Querying both --output-* and --source-* returns two query blocks."""
-    _write_plan(tmp_path)
-    result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=0.0, output_end=10.0,
-        source_start=50.0, source_end=56.0, compact=True)
-    dirs = {q["direction"] for q in result["queries"]}
-    assert dirs == {"output→source", "source→output"}
-
-
 def test_clip_map_no_window_specified_message(tmp_path):
     """Calling clip-map with no window bounds returns a clear usage message, not a crash."""
     _write_plan(tmp_path)
     result = recap_inspect.cmd_clip_map(
-        tmp_path, output_start=None, output_end=None,
-        source_start=None, source_end=None, compact=True)
+        tmp_path, output_start=None, output_end=None, compact=True)
     assert "error" in result
 
 
@@ -271,8 +249,7 @@ def test_clip_map_malformed_json_raises(tmp_path):
     (tmp_path / "clip_plan_validated.json").write_text("{not json", encoding="utf-8")
     with pytest.raises(ValueError):
         recap_inspect.cmd_clip_map(
-            tmp_path, output_start=0.0, output_end=5.0,
-            source_start=None, source_end=None, compact=True)
+            tmp_path, output_start=0.0, output_end=5.0, compact=True)
 
 
 def test_state_surfaces_multi_source_manifest(tmp_path):
@@ -301,8 +278,7 @@ def test_clip_map_includes_multi_source_provenance(tmp_path):
              "duration": 2.0, "reason": ""},
         ]
     })
-    result = recap_inspect.cmd_clip_map(tmp_path, output_start=0.5, output_end=1.0,
-                                        source_start=None, source_end=None, compact=True)
+    result = recap_inspect.cmd_clip_map(tmp_path, output_start=0.5, output_end=1.0, compact=True)
     seg = result["queries"][0]["segments"][0]
     assert seg["source_id"] == "src_a"
     assert seg["source_path"] == "/videos/a.mp4"

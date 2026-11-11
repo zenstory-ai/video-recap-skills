@@ -252,7 +252,7 @@ def _stage_bar(mode, audio_mode, state, views, qc) -> list:
     blockers = sum(c["blockers"] for c in qc)
     cells = {
         "home": ("", ""),
-        "understanding": ("ok" if {"understanding_index.json", "agent_narration_brief.md"} & set(understanding["present"])
+        "understanding": ("ok" if "agent_narration_brief.md" in set(understanding["present"])
                           else "", f"{len(understanding['present'])}/{total}" if total else ""),
         "cut": {"ok": ("danger" if cut.get("blocking") else "ok", f"{len(cut.get('clips', []))} 段"),
                 "pending": ("todo", "待校验"), "unparseable": ("warn", "无法解析"),

@@ -2,13 +2,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(
-    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-script" / "scripts")
+    0, str(Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts")
 )
 import json
-import os
 import validate as narration_validate
 import pytest
-from lib import CONFIG, env_float, file_identity
+from lib import CONFIG, file_identity
 from agent_text import _text_char_count
 from narration_lint import lint_narration
 from lint_summary import format_lint_failure
@@ -55,20 +54,19 @@ def _run_validate_cut_output(monkeypatch, work_dir):
     _run_validate(monkeypatch, work_dir, "cut_output", "--output-duration", "10")
 
 
+def test_validate_rejects_the_removed_source_time_cut_mode(monkeypatch, tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        _run_validate(monkeypatch, tmp_path, "cut")
+    assert exc.value.code == 2
+    assert "invalid choice: 'cut'" in capsys.readouterr().err
+
+
 def test_text_char_count():
     assert _text_char_count("hello") == 5
     assert _text_char_count("你好世界") == 4
     assert _text_char_count("") == 0
     assert _text_char_count("你好，世界。") == 4
     assert _text_char_count("「你好」 world!") == 7
-
-
-@pytest.mark.parametrize("raw", ["nan", "inf", "-inf"])
-def test_env_float_rejects_nonfinite_values(monkeypatch, raw):
-    monkeypatch.setenv("NONFINITE_FLOAT", raw)
-
-    with pytest.raises(ValueError, match="NONFINITE_FLOAT.*finite"):
-        env_float("NONFINITE_FLOAT", 1.0, minimum=0)
 
 
 def test_lint_narration_reports_warnings_and_errors(tmp_path, monkeypatch):
@@ -107,33 +105,10 @@ def test_lint_narration_rejects_empty_file(tmp_path):
     assert (tmp_path / "narration_lint.json").exists()
 
 
-def test_lint_narration_rejects_malformed_visual_overlays(tmp_path):
-    """Lint is the last cheap place to catch an overlay recap will read after TTS."""
-    segment = {"start": 0.0, "end": 5.0, "narration": "开场的一段解说文字内容。"}
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 5.0}]
-
-    for overlays in (
-        {"type": "top_title", "text": "标题"},          # not an array
-        ["top_title"],                                  # entry is not an object
-        [{"text": "标题"}],                             # missing type
-        [{"type": "top_title"}],                        # missing text
-        [{"type": "top_title", "text": "  "}],          # blank text
-        [{"type": "top_title", "text": "标题", "start": "0"}],  # non-numeric span
-    ):
-        report = lint_narration(
-            [{**segment, "visual_overlays": overlays}], scenes, work_dir=tmp_path
-        )
-        codes = {issue["code"] for issue in report["errors"]}
-        assert codes & {"invalid_visual_overlay", "invalid_visual_overlays"}, overlays
-
-    ok = lint_narration(
-        [{**segment, "visual_overlays": [{"type": "top_title", "text": "标题"}]}],
-        scenes,
-        work_dir=tmp_path,
-    )
-    assert not any(
-        issue["code"].startswith("invalid_visual_overlay") for issue in ok["errors"]
-    )
+def test_lint_reports_a_non_array_narration_file(tmp_path):
+    report = lint_narration({"start": 0}, [], work_dir=tmp_path)
+    assert report["ok"] is False
+    assert any(issue["code"] == "invalid_json_shape" for issue in report["errors"])
 
 
 @pytest.mark.parametrize(
@@ -296,27 +271,6 @@ def test_interrupt_suggestion_skips_the_next_anchor_when_it_would_abut(tmp_path)
     assert issue["suggested_start"] == 7.5
 
 
-def test_cut_interrupt_suggestion_stays_inside_the_blocks_clip(tmp_path):
-    """11.5-13.5 would leave the 0-13 clip; the clip edge is the end of usable footage."""
-    _write_json(
-        tmp_path / "speech_boundary_anchors_output.json",
-        {
-            "sentence_anchors": [_anchor(11.5, "片段尾。"), _anchor(7.0, "片段内。")],
-            "speech_spans": [],
-            "quiet_windows": [],
-        },
-    )
-    report = lint_narration(
-        [_block(10.0, 12.0, overlaps_speech=True)],
-        clip_plan={"clips": [{"clip_id": 1, "start": 0.0, "end": 13.0}]},
-        mode="cut",
-        work_dir=tmp_path,
-    )
-    issue = next(e for e in report["errors"] if e["code"] == "interrupts_source_sentence")
-
-    assert (issue["suggested_start"], issue["suggested_end"]) == (7.0, 9.0)
-
-
 def test_cut_output_interrupt_suggestion_stays_inside_the_output_duration(
     tmp_path, monkeypatch
 ):
@@ -418,7 +372,7 @@ def _write_cut_output_speech_evidence(work_dir):
 
 
 def test_cut_lint_suggests_output_clock_anchor_from_brief_evidence(tmp_path):
-    """Lint reads the output-clock anchors video-understanding writes for cut pass 2."""
+    """Lint reads the output-clock anchors understand.py writes for cut pass 2."""
     _write_output_evidence(
         tmp_path,
         {
@@ -454,7 +408,7 @@ def test_cut_lint_suggests_output_clock_anchor_from_brief_evidence(tmp_path):
                 "overlaps_speech": True,
             },
         ],
-        mode="cut",
+        mode="cut_output",
         work_dir=tmp_path,
     )
 
@@ -473,7 +427,7 @@ def test_validate_cut_output_uses_output_clock_sentence_anchors(
         [
             {
                 "start": 4.0,
-                "end": 6.0,
+                "end": 7.0,
                 "narration": "从剪后句末安全进入。",
                 "overlaps_speech": True,
             }
@@ -610,139 +564,6 @@ def test_lint_does_not_treat_back_to_back_narration_as_new_source_entry(tmp_path
     )
 
 
-def test_lint_counts_leading_original_audio_block_and_interval_union(tmp_path):
-    report = lint_narration(
-        [
-            {"start": 5.81, "end": 18.34, "narration": "第一段旁白讲述选秀夜的起点。"},
-            {
-                "start": 18.34,
-                "end": 30.0,
-                "narration": "第二段旁白继续讲述全明星和季后赛。",
-            },
-        ],
-        [{"scene_id": 0, "start": 0.0, "end": 30.0}],
-        work_dir=tmp_path,
-    )
-
-    codes = {item["code"] for item in report["warnings"]}
-    assert "no_original_blocks" not in codes
-    assert "no_original_breaks" not in codes
-    assert report["metrics"]["original_block_count"] >= 1
-
-
-def test_lint_narration_cut_mode_checks_clip_membership_and_boundaries():
-    """A beat outside the plan is an error; one spilling past its clip is silently trimmed
-    by the mapper, so it must at least warn."""
-    plan = {"clips": [{"clip_id": 0, "source_start": 10.0, "source_end": 20.0}]}
-    scenes = [{"scene_id": 0, "start": 0.0, "end": 30.0}]
-
-    membership = lint_narration(
-        [
-            {"start": 11.0, "end": 15.0, "narration": "片段内解说。"},
-            {"start": 22.0, "end": 24.0, "narration": "片段外解说。"},
-        ],
-        scenes,
-        clip_plan=plan,
-        mode="cut",
-    )
-    assert membership["ok"] is False
-    assert any(issue["code"] == "outside_clip_plan" for issue in membership["errors"])
-    assert "crosses_clip_boundary" not in {i["code"] for i in membership["warnings"]}
-
-    crossing = lint_narration(
-        [{"start": 12.0, "end": 25.0, "narration": "跨过片段边界的解说。"}],
-        scenes,
-        clip_plan=plan,
-        mode="cut",
-    )  # mid 18.5 in clip, end 25 > 20
-    assert "crosses_clip_boundary" in {i["code"] for i in crossing["warnings"]}
-
-
-def test_lint_narration_warns_when_segment_spans_too_many_visual_beats(monkeypatch):
-    monkeypatch.setitem(CONFIG, "visual_beat_max_seconds", 10.0)
-    monkeypatch.setitem(CONFIG, "visual_beat_max_facts", 2)
-    report = lint_narration(
-        [
-            {
-                "start": 0.0,
-                "end": 20.0,
-                "narration": "这段长解说跨过太多画面锚点，应该拆开。",
-            },
-        ],
-        [
-            {
-                "scene_id": 0,
-                "start": 0.0,
-                "end": 25.0,
-                "frame_facts": {
-                    "1.0": ["人物走入房间"],
-                    "6.0": ["人物坐下"],
-                    "12.0": ["人物起身争执"],
-                    "18.0": ["镜头切到门外"],
-                },
-            }
-        ],
-    )
-
-    codes = {issue["code"] for issue in report["warnings"]}
-    assert "visual_beat_too_broad" in codes
-
-
-def test_lint_block_coverage_metrics_and_warnings(monkeypatch):
-    monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
-
-    # Under-narrated: two tiny blocks over a long span -> coverage far below the ~0.7 target.
-    sparse = lint_narration(
-        [
-            {
-                "start": 0.0,
-                "end": 4.0,
-                "narration": "第一句话。",
-                "pause_after_ms": 250,
-            },
-            {
-                "start": 60.0,
-                "end": 64.0,
-                "narration": "很久之后的第二句话。",
-                "pause_after_ms": 250,
-            },
-        ],
-        mode="full",
-    )
-    sparse_codes = {issue["code"] for issue in sparse["warnings"]}
-    assert "under_narrated" in sparse_codes
-    assert sparse["metrics"]["narration_coverage"] < 0.5
-    assert sparse["metrics"]["segment_count"] == 2
-
-    # Healthy block layout: a few big blocks covering most of the span, with deliberate
-    # original-audio gaps between them -> no coverage/fragmentation warnings.
-    block = "范闲表面是个闲散少爷背地里却握着监察院最深的暗线这一次他押上全部身家也要查清楚母亲当年究竟为何而死"
-    healthy = []
-    t = 0.0
-    for _ in range(6):
-        healthy.append(
-            {
-                "start": round(t, 2),
-                "end": round(t + 12.0, 2),
-                "narration": block,
-                "pause_after_ms": 250,
-            }
-        )
-        t += 16.0
-    report = lint_narration(healthy, mode="full")
-    codes = {issue["code"] for issue in report["warnings"]}
-    assert "under_narrated" not in codes
-    assert "no_original_blocks" not in codes
-    assert "fragmented_beats" not in codes
-    assert 0.45 <= report["metrics"]["narration_coverage"] <= 0.85
-    assert report["metrics"]["original_block_count"] >= 2
-
-    # cut mode -> coverage lint is skipped (measured on the mapped output timeline elsewhere)
-    cut_report = lint_narration(sparse, mode="cut")
-    assert cut_report["metrics"] == {}
-
-
 def test_lint_narration_accepts_ascii_period_as_complete_sentence():
     report = lint_narration(
         [
@@ -754,44 +575,29 @@ def test_lint_narration_accepts_ascii_period_as_complete_sentence():
     assert "incomplete_sentence" not in {issue["code"] for issue in report["warnings"]}
 
 
-def test_lint_flags_fragmented_beats(tmp_path, monkeypatch):
-    # The forbidden pattern: many lone short sentences instead of blocks -> each synthesizes as a
-    # separate choppy TTS utterance, so fragmented_beats must fire.
-    monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
-    segs = [
-        {"start": i * 5.0, "end": i * 5.0 + 1.6, "narration": "一句短解说。"}
-        for i in range(8)
+def test_lint_narration_blocks_placeholder_leakage_in_narration_and_original_subtitles(tmp_path):
+    _write_json(
+        tmp_path / "original_subtitles.json",
+        [
+            {"start": 0, "end": 1, "text": "正常台词"},
+            {"start": 1, "end": 2, "text": "【主角】快跑"},
+        ],
+    )
+    report = lint_narration(
+        [
+            {"start": 0.0, "end": 4.0, "narration": "凶手就在其中，TA要做的下一件事，就是灭口。"},
+            {"start": 4.0, "end": 8.0, "narration": "这一次，TA要赌上全部去查清旧案真相。"},
+        ],
+        work_dir=tmp_path,
+    )
+    leak_errors = [e for e in report["errors"] if e["code"] == "placeholder_leakage"]
+    assert [(e["source"], e["index"]) for e in leak_errors] == [
+        ("narration", 1),
+        ("original_subtitles", 1),
     ]
-    report = lint_narration(segs, mode="full", work_dir=tmp_path)
-    codes = {w["code"] for w in report["warnings"]}
-    assert "fragmented_beats" in codes
-    assert report["metrics"]["avg_block_chars"] < 16
-
-
-def test_lint_flags_wall_to_wall_narration_with_no_original_blocks(monkeypatch):
-    # The user's complaint: narration nearly wall-to-wall, the original never gets to breathe.
-    monkeypatch.setitem(CONFIG, "speech_rate", 3.5)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.3)
-    rate = 3.5 * 1.3
-    block = "这是一段连续不断的解说词没有给原声留下任何空隙一路讲到底"
-    spoken = len(block) / rate
-    segs = []
-    t = 0.0
-    for _ in range(6):
-        segs.append(
-            {
-                "start": round(t, 2),
-                "end": round(t + spoken + 0.05, 2),
-                "narration": block,
-            }
-        )
-        t += spoken + 0.1  # next block starts right after -> no original gap
-    report = lint_narration(segs, mode="full")
-    codes = {w["code"] for w in report["warnings"]}
-    assert "no_original_blocks" in codes
-    assert report["metrics"]["original_block_count"] == 0
-    assert report["metrics"]["narration_coverage"] > 0.85
+    summary = format_lint_failure(report)
+    assert "- 段 2 placeholder_leakage：" in summary
+    assert "- 原声字幕第 2 条 placeholder_leakage：" in summary
 
 
 # A beat that is 84% quiet but still covers 0.7s of source speech: the retired full-mode
@@ -835,30 +641,9 @@ def test_full_and_cut_output_measure_speech_ownership_with_one_algorithm(
     assert full is cut_output is True
 
 
-def test_cut_validate_uses_validated_plan_only_when_newer_than_raw(tmp_path):
-    raw_payload = {"clips": [{"start": 40.0, "end": 50.0}]}
-    raw = tmp_path / "clip_plan.json"
-    validated = tmp_path / "clip_plan_validated.json"
-    _write_json(raw, raw_payload)
-    _write_json(
-        validated, {"clips": [{"clip_id": 0, "source_start": 40.0, "source_end": 50.0}]}
-    )
-    os.utime(raw, ns=(2_000_000_000, 2_000_000_000))
-    os.utime(validated, ns=(1_000_000_000, 1_000_000_000))
-    stale = narration_validate._load_cut_clip_plan(tmp_path)
-    assert stale["clips"][0]["start"] == 40.0  # validated older than raw -> raw wins
-
-    os.utime(validated, ns=(2_000_000_000, 2_000_000_000))
-    fresh = narration_validate._load_cut_clip_plan(tmp_path)
-    assert fresh["clips"][0]["source_start"] == 40.0
-
-
-def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
-    """Full mode persists measured ownership without losing render metadata."""
-    overlays = [
-        {"type": "top_title", "text": "二十一年", "start": 0.0, "end": 2.0},
-        {"type": "inline_label_or_callout", "text": "2003", "start": 2.0, "end": 3.0},
-    ]
+def test_full_validation_preserves_custom_metadata(tmp_path, monkeypatch):
+    """Full mode persists measured ownership without losing custom segment metadata."""
+    meta = {"beat_id": "b01", "role": "hook"}
     _write_json(
         tmp_path / "narration.json",
         [
@@ -866,7 +651,7 @@ def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
                 "start": 0.0,
                 "end": 10.0,
                 "narration": "这是一段能够通过完整模式校验的解说。",
-                "visual_overlays": overlays,
+                "custom_meta": meta,
             }
         ],
     )
@@ -879,7 +664,7 @@ def test_full_validation_preserves_visual_overlays(tmp_path, monkeypatch):
     _run_validate(monkeypatch, tmp_path, "full")
 
     rewritten = json.loads((tmp_path / "narration.json").read_text(encoding="utf-8"))
-    assert rewritten[0]["visual_overlays"] == overlays
+    assert rewritten[0]["custom_meta"] == meta
 
 
 def test_cut_output_duration_bounds_reject_out_of_range_and_non_finite_input():
@@ -975,3 +760,17 @@ def test_entry_ignores_interjection_only_window_beyond_the_dialogue_guard(
     )
     codes = [item["code"] for item in report["errors"] if "source_sentence" in item["code"]]
     assert codes == (["interrupts_source_sentence"] if blocked else [])
+
+
+def test_validate_ignores_unreadable_vlm_analysis_json(monkeypatch, tmp_path):
+    _write_json(
+        tmp_path / "narration.json",
+        [{"start": 0.0, "end": 10.0, "narration": "这是一段不依赖画面分析文件也能完成校验的解说。"}],
+    )
+    (tmp_path / "vlm_analysis.json").write_text("{corrupt json", encoding="utf-8")
+    monkeypatch.setitem(CONFIG, "speech_rate", 6.0)
+
+    _run_validate(monkeypatch, tmp_path, "full")
+
+    report = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True

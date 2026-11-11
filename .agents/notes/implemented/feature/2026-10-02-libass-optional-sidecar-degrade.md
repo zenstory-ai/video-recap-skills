@@ -2,6 +2,8 @@
 
 Status: implemented
 
+遮罩策略机后来收成一个开关，`SOURCE_SUBTITLE_MASK_POLICY` 与 `opt_in` / `safe` 不再存在，见 [[2026-11-06-source-subtitle-mask-one-flag]]；下文说的是当时的代码。
+
 ## Problem
 
 - Homebrew 自带的 `ffmpeg`（README 写的安装命令 `brew install ffmpeg`）去掉了 libass，也没有 drawtext。默认运行烧录字幕（`BURN_SUBTITLES` 默认真），recap 与 assemble 的预检都在缺 `subtitles` 滤镜时 `SystemExit`，所以 macOS 上的默认路径一律停在开跑前，用户只能自己去发现 `--no-burn-subtitles`。
@@ -19,7 +21,7 @@ Status: implemented
 - 只要不烧录（降级或显式关闭），assemble 把 `subtitles.srt` 复制到成片旁，名为 `recap_<stem>.srt`；烧录运行删掉同名旧文件，因为这对别名每次运行原地覆盖，旧的外挂字幕会被播放器叠到烧录字幕上。`subtitles.srt` 为空（没有任何字幕条目，如 source-mix 或 adopted-packet-copy 不带用户字幕）时同样删掉旧文件、不写空 `.srt`，`_subtitle_delivery_warnings` 也不记 `subtitle_burn_degraded`：有 libass 时这种运行烧的是空 ASS，画面上本来就什么都没有，降级没有丢任何东西。
 - 降级是机器可读的、不阻断的：`visual_qc.json` 顶层 `warnings` 写一条 `{"code": "subtitle_burn_degraded", "reason", "delivered": "sidecar_srt", "mask_dropped", "message", "next_action"}`，`subtitles.burn_degraded_reason` 写原因；`assembly_manifest.json` 的 `warnings` 照抄并加 `subtitle_sidecar` 路径，`assembly_settings.subtitle_burn_degraded` 记原因；`final_qc.json` 的 `metadata.warnings` 转载 `visual_qc.json` 的 `warnings`，`final_qc.run` 的摘要多一个 `warnings` code 列表；recap 完成时 `_print_render_warnings` 打印警告与 `.srt` 路径。转载和打印 `.srt` 路径都要求 `assembly_manifest.json` 的 `final_output` 就是被检查的成片：dub 不经过 video-assemble、不写这两个文件，否则同一 work_dir 里旧的 full/cut 运行留下的降级警告和旧 `.srt` 路径会被当成本次的。recap 开跑前的提示也写明没有字幕条目的运行（source 音频模式且没有 `user_subtitles.*`）不输出 `.srt`、不记警告。`findings` 仍然全是阻断项，`ok` / `blocker_count` 不受影响。video-recap SKILL.md 要求 Agent 交付时转告 `metadata.warnings`。
 - 遮罩策略先按"假设烧录"算出是否会生效，再套烧录闸门：降级时 `mask.trigger = "burn_subtitles_degraded"`，显式关闭时 `burn_subtitles_disabled`。
-- `visual_overlays` 叠加是写稿时明确加的内容，不是默认项，所以按"显式请求"处理，缺 drawtext 时失败而不是静默跳过：recap 在 `_deliver` 里、评审与 TTS 之前用 `recap_timeline._preflight_visual_overlays` 检查（narration 模式读 `narration.json` 经同一套 canonical 过滤后的叠加，source 模式读已有的 `visual_overlays.json`）；assemble 在渲染前用 `render_preflight._preflight_visual_overlays` 再查一次。报错写明删掉叠加或换带 drawtext 的 ffmpeg。
+- `visual_overlays` 叠加是写稿时明确加的内容，不是默认项，所以按"显式请求"处理，缺 drawtext 时失败而不是静默跳过：recap 在 `_deliver` 里、TTS 之前用 `recap_timeline._preflight_visual_overlays` 检查（narration 模式读 `narration.json` 经同一套 canonical 过滤后的叠加，source 模式读已有的 `visual_overlays.json`）；assemble 在渲染前用 `render_preflight._preflight_visual_overlays` 再查一次。报错写明删掉叠加或换带 drawtext 的 ffmpeg。
 - `--doctor` 的 `system_tools` 新增 `subtitle_delivery`（`burned` / `sidecar_srt` / `fails_explicit_burn` / `unavailable`）、`ffmpeg_drawtext_filter`、`visual_overlays_ready`，warning 文案随之改写。
 
 ## Alternatives considered
