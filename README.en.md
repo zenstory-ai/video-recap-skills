@@ -395,17 +395,17 @@ template for 1080x1920 for me to adopt, then render this series with /path/to/se
 
 Resources, templates and sample films are JSON records in your own directory; licence and "adopted" status are only ever set by you. A binding that conflicts with an explicit setting, or a template whose canvas differs from the output, stops the run before voicing. Each run writes `work_dir/resource_lock.json`, listing what it actually used and whether the licences are clear. Format: [resource library, templates and samples](skills/video-recap/references/resource-library.md).
 
-**Browse projects, runs and the library in a local page (read-only):**
+**Review finished films and browse the studio library locally (read-only):**
 
 ```text
-Open the local dashboard for /path/to/projects so I can see run progress, finished videos and the library.
+Open the local dashboard for /path/to/projects so I can review finished videos, script/shot sync and the studio library.
 ```
 
-The dashboard is read-only and listens on loopback only; wherever something needs doing it gives you one sentence to paste back into the conversation.
+The screening dashboard is strictly read-only on `127.0.0.1` (`GET` and `HEAD` only): switch between finished recaps and pure cuts with click-to-seek narration and shot lists, and preview source series, BGM, SFX, voices, packaging/subtitle styles and reference samples in one place.
 
-<img alt="Dashboard film view: player with picture, narration, BGM and subtitle tracks" src="docs/dashboard-film.png" width="100%">
+<img alt="Screening dashboard film view: finished recap and pure-cut player with synced narration and shot list" src="docs/dashboard-film.png" width="100%">
 
-<img alt="Dashboard template view: canvas schematics for packaging and subtitle style, parameter table with provenance" src="docs/dashboard-templates.png" width="100%">
+<img alt="Screening dashboard library view: five-category studio browser with portrait/landscape packaging, subtitle styles and reference sample preview" src="docs/dashboard-templates.png" width="100%">
 
 **Proofread original-dialogue captions (`「」`):** put verified output-timeline lines into `work_dir/original_subtitles.json` (`[{"start": s, "end": s, "text": "line"}]`) so clean original-audio moments carry accurate `「」` captions without coarse ASR guesswork.
 
