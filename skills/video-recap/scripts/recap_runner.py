@@ -8,7 +8,7 @@ import materials as material_lib
 import resources.project_binding as project_binding
 import resources.lock as resource_lock
 
-from lib import TTS_PROVIDERS, file_identity
+from lib import TTS_PROVIDERS, file_identity, read_json_object
 from recap_cli import parse_args
 from recap_runtime import (
     RUN_MANIFEST,
@@ -216,6 +216,25 @@ def _reject_stale_cut_narration(work_dir, clip_plan_identity):
         )
 
 
+def _refresh_stale_output_anchors(work_dir, source_records=None):
+    """Refresh Pass-2 output speech anchors in-place when cut.py re-snapped clip_plan_validated.json."""
+    validated = work_dir / "clip_plan_validated.json"
+    anchors = read_json_object(work_dir / "speech_boundary_anchors_output.json")
+    if not (validated.exists() and anchors and anchors.get("clip_plan_identity") != file_identity(validated)):
+        return
+    from briefing.timeline import (
+        _sentence_entry_anchors_for_brief,
+        write_multi_source_output_speech_evidence,
+    )
+
+    if source_records is not None:
+        plan = read_json_object(validated)
+        if plan and isinstance(plan.get("clips"), list):
+            write_multi_source_output_speech_evidence(work_dir, source_records, plan)
+    elif (work_dir / "edited_source.mp4").exists():
+        _sentence_entry_anchors_for_brief(work_dir, "cut")
+
+
 def _validate_cut_output_narration(work_dir):
     output_duration = _read_video_duration_or_raise(work_dir / "edited_source.mp4")
     _run(
@@ -322,6 +341,7 @@ def _run_multi_cut(videos, work_dir, args):
                 ),
             )
             return
+        _refresh_stale_output_anchors(work_dir, source_records=source_records)
         _write_phase_ledger(work_dir, cp_identity)
         _validate_cut_output_narration(work_dir)
 
@@ -488,6 +508,7 @@ def _run_single(video, work_dir, args):
                 ),
             )
             return
+        _refresh_stale_output_anchors(work_dir)
         _write_phase_ledger(work_dir, cp_identity)
         _validate_cut_output_narration(work_dir)
     # let the timeline / 剪映 export reference the original clips, not edited_source.mp4

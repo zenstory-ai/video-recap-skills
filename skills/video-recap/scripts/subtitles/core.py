@@ -9,6 +9,7 @@ from assemble_constants import (
     SUBTITLE_STYLE_REF_H,
     SUBTITLE_STYLE_REF_W,
     _SUBTITLE_CLOSING_QUOTES,
+    _SUBTITLE_DISPLAY_STRIP_PUNCTUATION,
     _SUBTITLE_TERMINAL_PUNCTUATION,
 )
 from media import _ratio_to_float
@@ -111,8 +112,8 @@ def _subtitle_style_config(canvas=None):
     font_scale = font_size / base_font
     style.update({
         "font_size": font_size,
-        "outline": max(0, round(float(style["outline"]) * font_scale)),
-        "shadow": max(0, round(float(style["shadow"]) * font_scale)),
+        "outline": max(0.0, round(float(style["outline"]) * font_scale, 2)),
+        "shadow": max(0.0, round(float(style["shadow"]) * font_scale, 2)),
         "margin_l": margin_l,
         "margin_r": margin_r,
         "margin_v": margin_v,
@@ -221,17 +222,20 @@ def _measured_subtitle_safe_area(style, canvas):
 
 
 def _subtitle_display_text(text):
-    """Return display-only subtitle text with trailing sentence punctuation removed.
+    """Return display-only subtitle text with trailing clause/sentence punctuation removed.
 
     Narration/TTS source text stays untouched; this is applied only to SRT/ASS cue text.
-    Closing quotes/brackets are preserved, so 「原声台词。」 renders as 「原声台词」.
+    Closing quotes/brackets are preserved, so 「原声台词，」 renders as 「原声台词」;
+    interrupted ASCII words like ``Sor…`` keep their attached ellipsis.
     """
     text = text.strip()
     suffix = ""
     while text and text[-1] in _SUBTITLE_CLOSING_QUOTES:
         suffix = text[-1] + suffix
         text = text[:-1].rstrip()
-    text = text.rstrip(_SUBTITLE_TERMINAL_PUNCTUATION).rstrip()
+    if len(text) >= 2 and text.endswith("…") and text[-2].isascii() and text[-2].isalpha():
+        return (text + suffix).strip()
+    text = text.rstrip(_SUBTITLE_DISPLAY_STRIP_PUNCTUATION).rstrip()
     return (text + suffix).strip()
 
 
@@ -260,11 +264,54 @@ def _subtitle_entry_chunks(raw_chunks):
     return out
 
 
+_LATIN_APOSTROPHE_RE = re.compile(r"(?<=[A-Za-z])[‘’](?=[A-Za-z])")
+_ATOMIC_ASCII_TOKEN_RE = re.compile(r"[A-Za-z0-9.%+-]+")
+
+
 def _normalize_subtitle_text(text):
-    """Normalize Chinese em-dashes in burned subtitle text: a run of one-or-more "—" (incl. "——")
-    collapses to a single "，". Then collapse any resulting double commas ("，，"→"，") so the dash
-    swap never leaves a doubled comma."""
-    return re.sub(r"，{2,}", "，", re.sub(r"—+", "，", text))
+    """Normalize burned subtitle text: straighten Latin curly apostrophes so CJK fonts never
+    render full-width gaps inside contractions, collapse Chinese em-dashes ("—" / "——") to "，",
+    collapse doubled commas, and strip any dangling comma left if a cue ended with an em-dash."""
+    normalized = _LATIN_APOSTROPHE_RE.sub("'", text)
+    normalized = re.sub(r"，{2,}", "，", re.sub(r"—+", "，", normalized))
+    if normalized.endswith("，"):
+        normalized = normalized[:-1].rstrip()
+    elif len(normalized) >= 2 and normalized[-1] in _SUBTITLE_CLOSING_QUOTES and normalized[-2] == "，":
+        normalized = normalized[:-2].rstrip() + normalized[-1]
+    return normalized
+
+
+def _hard_wrap_clause(clause, max_chars):
+    """Balance an overlong clause across lines without slicing inside ASCII words or numbers."""
+    n = len(clause)
+    if n <= max_chars:
+        return [clause]
+    piece_count = (n + max_chars - 1) // max_chars
+    atomic_spans = [
+        m.span()
+        for m in _ATOMIC_ASCII_TOKEN_RE.finditer(clause)
+        if m.end() - m.start() <= max_chars
+    ]
+    pieces, cursor = [], 0
+    for piece_index in range(piece_count - 1):
+        rem_len = n - cursor
+        rem_pieces = piece_count - piece_index
+        ideal = cursor + (rem_len + rem_pieces - 1) // rem_pieces
+        cut = ideal
+        for ts, te in atomic_spans:
+            if ts < ideal < te:
+                candidates = [
+                    c for c in (ts, te)
+                    if cursor + 2 <= c <= cursor + max_chars
+                    and 2 * (rem_pieces - 1) <= n - c <= (rem_pieces - 1) * max_chars
+                ]
+                if candidates:
+                    cut = min(candidates, key=lambda c: abs(c - ideal))
+                break
+        pieces.append(clause[cursor:cut])
+        cursor = cut
+    pieces.append(clause[cursor:])
+    return pieces
 
 
 def _split_subtitle_chunks(text, max_chars):
@@ -293,16 +340,7 @@ def _split_subtitle_chunks(text, max_chars):
     # not become a readable 20-character cue followed by a 1-character flash.
     sized = []
     for clause in clauses:
-        if len(clause) <= max_chars:
-            sized.append(clause)
-        else:
-            piece_count = (len(clause) + max_chars - 1) // max_chars
-            base, extra = divmod(len(clause), piece_count)
-            cursor = 0
-            for piece_index in range(piece_count):
-                width = base + (1 if piece_index < extra else 0)
-                sized.append(clause[cursor:cursor + width])
-                cursor += width
+        sized.extend(_hard_wrap_clause(clause, max_chars))
     chunks, cur = [], ""
     for clause in sized:
         sentence_closed = cur.rstrip().endswith(tuple(_SUBTITLE_TERMINAL_PUNCTUATION))

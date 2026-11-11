@@ -1610,3 +1610,50 @@ def test_cut_qc_summary_surfaces_canonical_cut_result(tmp_path, capsys):
         "cut QC" in out and "target_duration_status=under" in out and "1920x1080" in out
     )
 
+
+def test_refresh_stale_output_anchors_updates_identity_in_place(tmp_path):
+    (tmp_path / "edited_source.mp4").write_bytes(b"mp4")
+    (tmp_path / "speech_boundary_anchors.json").write_text(
+        json.dumps(
+            {
+                "sentence_anchors": [
+                    {"time": 3.0, "pause_start": 2.8, "confidence": "high"}
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([{"start": 0.4, "end": 2.8, "text": "把门锁死！"}]),
+        encoding="utf-8",
+    )
+    (tmp_path / "silence_periods.json").write_text("[]", encoding="utf-8")
+    validated = tmp_path / "clip_plan_validated.json"
+    validated.write_text(
+        json.dumps(
+            {
+                "clips": [
+                    {
+                        "source_start": 0.0,
+                        "source_end": 5.0,
+                        "output_start": 0.0,
+                        "output_end": 5.0,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    out_anchors = tmp_path / "speech_boundary_anchors_output.json"
+    out_anchors.write_text(
+        json.dumps({"clip_plan_identity": {"size": 1, "mtime_ns": 1}}),
+        encoding="utf-8",
+    )
+
+    recap._refresh_stale_output_anchors(tmp_path)
+
+    refreshed = json.loads(out_anchors.read_text(encoding="utf-8"))
+    assert refreshed["clip_plan_identity"] == recap.file_identity(validated)
+    assert refreshed["sentence_anchors"][0]["time"] == 3.0
+
+

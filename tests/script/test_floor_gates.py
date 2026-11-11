@@ -253,6 +253,25 @@ def test_no_audio_stream_video_allows_narration_while_enforcing_dead_air_and_col
     assert "excessive_dead_air" in [e["code"] for e in dead_air["errors"]]
 
 
+def test_editorial_commentary_tone_emits_advisory_warning_without_blocking(tmp_path):
+    _seed_timing_evidence(
+        tmp_path,
+        silences=[{"start": 0.0, "end": 12.0, "has_speech": False}],
+    )
+    scenes = [{"start": 0.0, "end": 12.0}]
+    report = lint_narration(
+        [
+            {"start": 0.2, "end": 5.5, "narration": "大家好，今天我们来聊聊林砚追查旧案的真相。"},
+            {"start": 6.0, "end": 11.4, "narration": "这说明权力博弈面前，好戏才刚刚开始。"},
+        ],
+        scenes,
+        work_dir=tmp_path,
+    )
+    assert report["ok"] is True
+    codes = [w["code"] for w in report["warnings"]]
+    assert codes.count("editorial_commentary_tone") == 2
+
+
 def test_all_skill_scripts_avoid_unguarded_python310_typing_imports():
     import ast
 

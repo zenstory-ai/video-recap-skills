@@ -59,7 +59,14 @@ def _generate_ass(narration, work_dir, video_duration, canvas):
         (
             "Style: Default,"
             f"{style['font_name']},{style['font_size']},{style['primary_color']},&H000000FF,"
-            f"{style['outline_color']},&H64000000,0,0,0,0,100,100,0,0,1,"
+            f"{style['outline_color']},&H64000000,-1,0,0,0,100,100,0,0,1,"
+            f"{style['outline']},{style['shadow']},{style['alignment']},"
+            f"{style['margin_l']},{style['margin_r']},{style['margin_v']},1"
+        ),
+        (
+            "Style: Dialogue,"
+            f"{style['font_name']},{style['font_size']},&H00FFFFFF,&H000000FF,"
+            f"{style['outline_color']},&H64000000,-1,0,0,0,100,100,0,0,1,"
             f"{style['outline']},{style['shadow']},{style['alignment']},"
             f"{style['margin_l']},{style['margin_r']},{style['margin_v']},1"
         ),
@@ -69,12 +76,14 @@ def _generate_ass(narration, work_dir, video_duration, canvas):
     ]
     # entries are already split into short one-line chunks, so no wrapping here.
     for entry in _combined_subtitle_entries(narration, work_dir, video_duration):
-        text = _escape_ass_text(_normalize_subtitle_text(entry["text"]))
+        raw_text = _normalize_subtitle_text(entry["text"])
+        style_name = "Dialogue" if raw_text.startswith("「") else "Default"
+        text = _escape_ass_text(raw_text)
         ass_lines.append(
             "Dialogue: 0,"
             f"{_seconds_to_ass_time(entry['start'])},"
             f"{_seconds_to_ass_time(entry['end'])},"
-            f"Default,,0,0,0,,{text}"
+            f"{style_name},,0,0,0,,{text}"
         )
 
     ass_path = work_dir / "subtitles.ass"

@@ -8,8 +8,8 @@ track is not the first one.
 ## `narration`
 
 - Requires non-empty `tts_meta.json` segments.
-- Builds/places narration WAV, performs source ducking and optional BGM mix,
-  then applies the configured final loudness/limiter stage and AAC encoding.
+- Builds/places narration WAV, performs source ducking (`SPEECH_DUCKING_VOLUME=0.12` / `ZONE_DUCKING_VOLUME=0.12`, returning to `IDLE_ORIG_VOLUME=1.0` in intentional original-dialogue gaps) and optional BGM mix, then applies the configured linear final loudness/limiter stage and AAC encoding.
+- **BGM purity discipline**: When supplying `BGM_PATH` for narrated recaps, always choose a **pure instrumental** track (zero vocals/lyrics) matched to the scene's emotional register. If the source footage already carries a loud vocal OST song that cannot be cleanly avoided, leave `BGM_PATH` unset so narrator speech, actor lines, and vocal lyrics never collide.
 - Missing source audio may use the existing synthetic-silence fallback.
 
 ## `source-mix`

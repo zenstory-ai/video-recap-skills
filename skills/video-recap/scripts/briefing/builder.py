@@ -87,7 +87,7 @@ def _floor_gates_and_emotion_section():
         f"- **零死气空窗（`excessive_dead_air`）**：全片任何连续 > {CONFIG['max_dead_air_seconds']:.1f}s 既无旁白也无原声对白的空窗都会被硬阻断。",
         "- **旁白与原声双向句末闭环（`incomplete_sentence` / `interrupts_source_sentence` / `unsafe_source_release`）**：旁白必须以句末标点（`！？。…`）完整收句；切入与退出原声对白都必须对齐句末停顿锚点，绝不半句掐断或半句放出。",
         f"- **零残镜头闪帧与自然落点（`flash_frame_sliver` / `shot_speech_conflict`）**：单段 clip 最短 ≥ {CONFIG['min_clip_duration']:.1f}s，成片含 ≤ {CONFIG['flash_sliver_max_seconds']:.2f}s 残帧会被 `shot_review` 硬阻断；句末自动留出呼吸落点与片尾音频淡出，严禁最后 1 秒突兀硬切。",
-        "- **禁看图说话与笼统代称（`generic_character_label`）**：旁白只讲背景、人物关系、动机筹码、潜台词与因果反转；严禁复述画面动作，已有角色名时禁用“黑衣男子/年轻女子”等笼统代称。",
+        "- **禁看图说话、笼统代称与议论升华腔（`generic_character_label` / `editorial_commentary_tone`）**：旁白只讲背景、人物关系、动机筹码、潜台词与因果行动；60s 内短片最多点名 1–2 个核心角色（次要角色用关系/身份称呼）；严禁写“这意味着/这是一场关于……的较量/让权力退场”等评论总结腔，结局由画面与原声演完即可，绝不在结局兑现后再补总结升华旁白。",
         "",
         "## 原声留白字幕 `original_subtitles.json`（校对原声台词）",
         "",
@@ -429,7 +429,7 @@ def write_multi_source_output_brief(work_dir, source_records, validated_plan_pat
     lines.append("## Kept clips (output → source)")
     for c in plan["clips"]:
         src = source_by_id[c["source_id"]]
-        reason = f" — {c['reason']}" if c["reason"] else ""
+        reason = f" — {c['reason']}" if c.get("reason") else ""
         lines.append(
             f"- output {c['output_start']:.3f}-{c['output_end']:.3f}s → "
             f"{c['source_id']} `{src['source_path']}` "

@@ -28,11 +28,15 @@ SUBTITLE_ROWS = (
     ("band", "字幕带", "px"),
 )
 ASS_COLOR_RE = re.compile(r"^&H([0-9A-Fa-f]{2})?([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})&?$")
+HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 
 
 def ass_to_hex(value) -> str | None:
-    """``#RRGGBB`` for an ASS ``&HAABBGGRR`` / ``&HBBGGRR`` colour, else None."""
-    match = ASS_COLOR_RE.match(str(value or "").strip())
+    """``#RRGGBB`` for an ASS ``&HAABBGGRR`` / ``&HBBGGRR`` or ``#RRGGBB`` colour, else None."""
+    raw = str(value or "").strip()
+    if HEX_COLOR_RE.match(raw):
+        return raw.upper()
+    match = ASS_COLOR_RE.match(raw)
     if not match:
         return None
     _, blue, green, red = match.groups()
@@ -105,6 +109,8 @@ def _subtitle_preview(canvas: dict, params: dict) -> dict:
     width, height = canvas["width"], canvas["height"]
     size, per_line = _number(params, "size_px"), _number(params, "max_chars")
     band = _band(params)
+    primary_node = params.get("primary_color")
+    primary_raw = primary_node.get("value") if isinstance(primary_node, dict) else primary_node
     chars = int(per_line) if per_line else 0
     sample = (SAMPLE_TEXT * (chars // len(SAMPLE_TEXT) + 1))[:chars]
     margin_v = height - band["y_bot"] if band else None
@@ -116,7 +122,8 @@ def _subtitle_preview(canvas: dict, params: dict) -> dict:
                  "font_size": _pct(size, width) if size else None,  # percent of canvas width
                  "bottom": _pct(margin_v, height) if margin_v is not None else None,
                  "width_px": size * chars if size and chars else None,
-                 "usable_px": width - 2 * SIDE_MARGIN_PX},
+                 "usable_px": width - 2 * SIDE_MARGIN_PX,
+                 "color": ass_to_hex(primary_raw)},
         "band_px": band, "margin_v": margin_v, "side": _pct(SIDE_MARGIN_PX, width),
     }
 

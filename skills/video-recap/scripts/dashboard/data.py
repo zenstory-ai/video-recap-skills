@@ -235,7 +235,7 @@ def _run_list(root: Path, found: dict) -> list:
     runs = []
     for rel in found["runs"]:
         views = run_views(root, rel, runs_set)
-        brief = {k: v for k, v in views.items() if k not in {"views", "state", "qc"}}
+        brief = {k: v for k, v in views.items() if k not in {"views", "state", "qc", "storyboards"}}
         brief["project"] = nearest(rel, projects_set, include_self=True)
         runs.append(brief)
     return runs
@@ -270,12 +270,9 @@ def _really_waiting(run) -> bool:
     """next_pause only looks at file presence: a source-mix run never writes narration.json, a
     multi-video child waits on nothing of its own, and a saved material's artifacts dir is no run."""
     pause = run["next_pause"]
-    if not pause or run["parent"] is not None:
+    if not pause or run["internal"]:
         return False
-    if run["audio_mode"] != "narration" and pause["artifact"] != "clip_plan.json":
-        return False
-    parts = PurePosixPath(run["path"]).parts
-    return not (len(parts) >= 3 and parts[-3] == "materials" and parts[-1] == "artifacts")
+    return run["audio_mode"] == "narration" or pause["artifact"] == "clip_plan.json"
 
 
 def _attention(libraries, reports, projects, runs) -> list:
