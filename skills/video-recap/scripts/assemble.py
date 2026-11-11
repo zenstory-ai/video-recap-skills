@@ -579,7 +579,7 @@ def main():
 
 def _export_cover_image(final_output: Path, work_dir: Path) -> Path | None:
     """Extract a crisp cover frame (work_dir/cover.jpg) capturing the opening hook header & card."""
-    if not final_output.is_file():
+    if not final_output.is_file() or not shutil.which("ffmpeg"):
         return None
     try:
         dur = lib.get_video_duration(final_output)
@@ -587,14 +587,17 @@ def _export_cover_image(final_output: Path, work_dir: Path) -> Path | None:
         dur = 3.0
     seek_t = min(max(0.9, dur * 0.06), max(0.0, dur - 0.15))
     cover_path = Path(work_dir) / "cover.jpg"
-    res = subprocess.run(
-        [
-            "ffmpeg", "-y", "-ss", f"{seek_t:.3f}", "-i", str(final_output),
-            "-frames:v", "1", "-q:v", "2", str(cover_path),
-        ],
-        capture_output=True,
-        check=False,
-    )
+    try:
+        res = subprocess.run(
+            [
+                "ffmpeg", "-y", "-ss", f"{seek_t:.3f}", "-i", str(final_output),
+                "-frames:v", "1", "-q:v", "2", str(cover_path),
+            ],
+            capture_output=True,
+            check=False,
+        )
+    except OSError:
+        return None
     if res.returncode == 0 and cover_path.is_file() and cover_path.stat().st_size > 0:
         lib.log(f"封面图: {cover_path}")
         return cover_path

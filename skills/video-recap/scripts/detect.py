@@ -249,6 +249,7 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
             )
             if tmp_path.exists():
                 tmp_path.unlink()
+            detect_speech_boundary_anchors(work_dir, asr_result or [])
             return []
         os.replace(str(tmp_path), str(audio_path))
         _write_audio_meta(work_dir, video_path)
