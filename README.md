@@ -380,17 +380,17 @@ flowchart LR
 
 资源、模板和参考样片全部以本地 JSON 管理，版权与采纳状态只能由你本人确认；每次合成后生成的 `work_dir/resource_lock.json` 会完整记录本轮实际使用的资源与授权状态（详见[资源库、模板与样片](skills/video-recap/references/resource-library.md)）。
 
-**在浏览器打开本地只读剪辑台看板：**
+**在浏览器打开本地只读审片台：**
 
 ```text
-在本机打开剪辑台，看看 /path/to/projects 下面的运行进度、成片和资源库。
+在本机打开审片台，看看 /path/to/projects 下面的成片、解说词镜头对照和素材库。
 ```
 
-看板仅监听 `127.0.0.1` 且严格只读，需要调整任何参数时可一键复制指令粘贴回 Agent 对话框。
+审片台仅监听 `127.0.0.1` 且严格只读（仅响应 `GET` 与 `HEAD`），支持成片与无解说原剪切换播放、解说词与镜头时间轴点击跳转，以及原片剧目、配乐、音效、音色、样式与样片五维素材库预览。
 
-<img alt="剪辑台成片视图：播放器与画面、旁白、背景音乐、字幕四轨时间线" src="docs/dashboard-film.png" width="100%">
+<img alt="审片台成片视图：成片与无解说原剪切换播放、解说词与镜头时间轴同步对照" src="docs/dashboard-film.png" width="100%">
 
-<img alt="剪辑台模板视图：包装图层与字幕样式的画布示意、带来源标记的参数表" src="docs/dashboard-templates.png" width="100%">
+<img alt="审片台素材库视图：五维分类检索与竖横屏画面包装、字幕样式及参考样片预览" src="docs/dashboard-templates.png" width="100%">
 
 **精校原声留白字幕：** 当原片角色在旁白留白处开口对白时，由 Agent 核实后写入 `work_dir/original_subtitles.json`（`[{"start": s, "end": s, "text": "台词"}]`），即可在成片与剪映草稿中精准呈现带 `「」` 引号的原声台词。
 
