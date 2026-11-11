@@ -30,9 +30,7 @@ video-recap（多源理解 understand.py）
 
 成片通过 GitHub 附件 CDN 直接播放：
 
-```html
-<video src="https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667" width="720" controls></video>
-```
+https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 交付成片的编码规格与质检读数见 [`delivery-qc.json`](delivery-qc.json)。
 
