@@ -1,4 +1,4 @@
-"""File identity and work-directory JSON helpers for video-assemble."""
+"""File identity and work-directory JSON helpers for the assemble stage."""
 
 import json
 import os

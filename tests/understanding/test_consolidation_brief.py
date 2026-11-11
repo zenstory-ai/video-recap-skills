@@ -1,4 +1,5 @@
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -16,13 +17,8 @@ sys.path.insert(
 )
 
 from lib import CONFIG  # noqa: E402
-import briefing.inputs as brief_inputs  # noqa: E402
 import briefing.timeline as brief_timeline  # noqa: E402
 from briefing.builder import _duration_label, build_agent_brief  # noqa: E402
-from briefing.inputs import (  # noqa: E402
-    _load_mimo_overview_for_brief,
-    _load_optional_stage_status,
-)
 
 SCENES = [{"scene_id": 0, "start": 0.0, "end": 6.0, "description": "门口对峙"}]
 ASR = [{"start": 1.0, "end": 5.0, "text": "第一句对白。第二句反击。"}]
@@ -35,109 +31,13 @@ def _brief_text(tmp_path, **kwargs):
     )
 
 
-def _write_status(work_dir, name, **fields):
-    (work_dir / name).write_text(json.dumps(fields), encoding="utf-8")
-
-
-def test_optional_stage_warnings_surface_failed_overview(tmp_path):
-    _write_status(
-        tmp_path,
-        "mimo_video_overview.status.json",
-        stage="mimo_video_overview",
-        enabled=True,
-        status="failed",
-        message="quota timeout with stack trace that should not be repeated" * 5,
-        artifact=None,
-    )
-
-    text = _brief_text(tmp_path, mimo_overview_enabled=True)
-
-    assert "Optional stage warnings" in text
-    assert "mimo_video_overview: failed" in text
-    assert "quota timeout" in text
-
-
-def test_optional_stage_warnings_flag_missing_enabled_artifacts(tmp_path):
-    _write_status(
-        tmp_path,
-        "mimo_video_overview.status.json",
-        stage="mimo_video_overview",
-        enabled=True,
-        status="ok",
-        message="ok",
-        artifact="mimo_video_overview.json",
-    )
-
-    text = _brief_text(tmp_path, mimo_overview_enabled=True)
-
-    assert "mimo_video_overview: missing_artifact" in text
-
-
-def test_optional_brief_loaders_fall_back_on_invalid_json_schema_and_io(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    (tmp_path / "asr_result.json").write_text(json.dumps(ASR), encoding="utf-8")
-
-    (tmp_path / "mimo_video_overview.json").write_text("[]", encoding="utf-8")
-    assert _load_mimo_overview_for_brief(tmp_path, SCENES) is None
-    (tmp_path / "mimo_video_overview.json").unlink()
-    (tmp_path / "mimo_video_overview.json").mkdir()
-    assert _load_mimo_overview_for_brief(tmp_path, SCENES) is None
-
-    assert _load_optional_stage_status(tmp_path, "missing.status.json") is None
-    (tmp_path / "bad.status.json").write_text("[1, 2, 3]", encoding="utf-8")
-    assert _load_optional_stage_status(tmp_path, "bad.status.json") is None
-    (tmp_path / "bad.status.json").unlink()
-    (tmp_path / "bad.status.json").mkdir()
-    assert _load_optional_stage_status(tmp_path, "bad.status.json") is None
-
-
-def test_brief_ignores_stale_mimo_overview_when_disabled_or_chunk_mismatch(
-    monkeypatch, tmp_path
-):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", False)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 2)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 0.5)
-    (tmp_path / "mimo_video_overview.json").write_text(
-        json.dumps(
-            {
-                "input": "scene_chunks",
-                "content": "STALE MIMO OVERVIEW",
-                "chunks": [
-                    {
-                        "chunk_id": 0,
-                        "scene_id": 99,
-                        "start": 0.0,
-                        "end": 2.0,
-                        "content": "STALE",
-                    }
-                ],
-                "settings": {
-                    "model": CONFIG.get("mimo_video_model")
-                    or CONFIG.get("mimo_model")
-                    or CONFIG.get("vlm_model"),
-                    "mimo_video_fps": CONFIG.get("mimo_video_fps", 2.0),
-                    "mimo_media_resolution": CONFIG.get(
-                        "mimo_media_resolution", "default"
-                    ),
-                    "mimo_video_chunk_max_seconds": 2,
-                    "mimo_video_chunk_min_seconds": 0.5,
-                    "mimo_video_base64_max_mb": CONFIG.get(
-                        "mimo_video_base64_max_mb", 45.0
-                    ),
-                    "mimo_video_prompt": CONFIG.get("mimo_video_prompt", ""),
-                    "mimo_disable_thinking": CONFIG.get("mimo_disable_thinking", True),
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
-
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    assert "STALE MIMO OVERVIEW" not in _brief_text(tmp_path)
+def test_brief_uses_raw_asr_without_leaking_hardcoded_entities_or_removed_sidecars(tmp_path):
+    text = _brief_text(tmp_path, style="纪实复盘")
+    for removed in ("deslop_qc_requirements.json", "asr_writing_chunks.json", "timeline_fusion.json"):
+        assert not (tmp_path / removed).exists()
+    for leaked in ("范闲", "监察院", "五竹", "京都"):
+        assert leaked not in text
+    assert ASR[0]["text"] in text
 
 
 def _write_json(path, payload):
@@ -385,43 +285,7 @@ def test_build_agent_brief_preserves_freeform_style_and_artifact_contract(tmp_pa
     assert "not a preset enum, fixed taxonomy" in text
 
 
-def test_agent_brief_includes_mimo_video_overview(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_max_seconds", 20.0)
-    monkeypatch.setitem(CONFIG, "mimo_video_chunk_min_seconds", 1.0)
-    chunks = [
-        {
-            "chunk_id": 0,
-            "scene_id": 0,
-            "start": 0.0,
-            "end": 3.0,
-            "content": "这是 MiMo 对分片汇总的故事线概览。",
-        }
-    ]
-    overview = {
-        "input": "scene_chunks",
-        "content": "这是 MiMo 对分片汇总的故事线概览。",
-        "reasoning_content": "内部推理",
-        "chunks": chunks,
-        "settings": brief_inputs._mimo_video_settings(),
-    }
-    _write_json(tmp_path / "mimo_video_overview.json", overview)
-    _set_brief_mode(monkeypatch, "full")
-
-    text = _agent_brief_text(
-        [{"scene_id": 0, "start": 0.0, "end": 3.0, "description": "场景"}],
-        [],
-        [],
-        3.0,
-        tmp_path,
-    )
-    assert "MiMo scene-chunk video overview" in text
-    assert "这是 MiMo 对分片汇总的故事线概览。" in text
-    assert "内部推理" not in text
-
-
 def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path):
-    monkeypatch.setitem(CONFIG, "mimo_video_overview", True)
     _set_brief_mode(monkeypatch, "full")
     asr = [{"start": 0.0, "end": 1.0, "text": "原始对白"}]
     _write_json(tmp_path / "asr_result.json", asr)
@@ -684,6 +548,26 @@ def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path)
     assert (mapped["expected_time"], mapped["source_expected_time"]) == (3.5, 103.5)
 
 
+def test_cut_output_speech_spans_keep_raw_text_for_a_partial_window(tmp_path):
+    """The partial-window marker is brief prose. In speech_spans it would turn an
+    interjection-only window into dialogue for the lint and the mix, which read this text."""
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {"clips": [{"source_start": 100.0, "source_end": 110.0,
+                    "output_start": 0.0, "output_end": 10.0}]},
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(tmp_path / "speech_boundary_anchors.json", {"sentence_anchors": []})
+    _write_json(tmp_path / "asr_result.json", [{"start": 108.0, "end": 112.0, "text": "嗯"}])
+
+    brief_timeline._sentence_entry_anchors_for_brief(tmp_path, "cut")
+
+    output = json.loads(
+        (tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8")
+    )
+    assert output["speech_spans"] == [{"start": 8.0, "end": 10.0, "text": "嗯"}]
+
+
 @pytest.mark.parametrize(
     "validated_plan, match",
     [
@@ -706,6 +590,20 @@ def test_cut_output_brief_labels_unverified_anchors_and_maps_pause_end(tmp_path)
             "non-finite clip span",
             id="non_finite_clip_span",
         ),
+        pytest.param(
+            {
+                "clips": [
+                    {
+                        "source_start": 100.0,
+                        "source_end": 110.0,
+                        "output_start": 0.0,
+                        "output_end": 10.0,
+                    }
+                ],
+            },
+            "stale clip_plan_validated.json",
+            id="stale_validated_plan",
+        ),
     ],
 )
 def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
@@ -715,6 +613,9 @@ def test_cut_pass2_agent_brief_fails_closed_on_bad_output_spans(
     (tmp_path / "edited_source.mp4").write_bytes(b"edited")
     if validated_plan is not None:
         _write_json(tmp_path / "clip_plan_validated.json", validated_plan)
+    if match.startswith("stale"):
+        _write_json(tmp_path / "clip_plan.json", {"clips": []})
+        os.utime(tmp_path / "clip_plan_validated.json", ns=(1, 1))
 
     with pytest.raises(SystemExit, match=match):
         build_agent_brief(

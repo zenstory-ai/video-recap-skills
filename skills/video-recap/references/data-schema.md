@@ -86,11 +86,11 @@
 - `unverified`：虽然 ASR 窗口偏粗，但声学停顿吸附误差 `≤1.2s`，仍可作为门禁切入点（简报中会标出 `unverified ±N s`）；
 - `none`：误差过大，不可用作切点。
 
-缺少 `boundary_use` 字段的旧版（schema 1）锚点，会将 `high`/`medium` 归为 `unverified`、其余归为 `none`。理解阶段若发现 `schema_version` 不是 2：只要目录里有 `audio.wav` 就会重新生成；若是从素材库恢复、没有音频文件，则对照 `asr_result.json` 就地补标（锚点时间不变，记 `upgraded_from_schema: 1`）。剪后成片时钟下的 `speech_boundary_anchors_output.json` 中，`time`、`pause_start`、`pause_end` 与 `expected_time` 均为成片输出时间，对应的原片秒数保存在 `source_*` 字段中。
+缺少 `boundary_use` 字段的旧版（schema 1）锚点，下游会将 `high`/`medium` 归为 `unverified`、其余归为 `none`。理解阶段若发现 `schema_version` 小于 2 且目录内存在 `audio.wav`，会基于音频与转写结果重新生成 schema 2 锚点；若是从素材库恢复、没有本地音频文件，则保留原文件并由下游按上述兼容规则读取。剪后成片时钟下的 `speech_boundary_anchors_output.json` 中，`time`、`pause_start`、`pause_end` 与 `expected_time` 均为成片输出时间，对应的原片秒数保存在 `source_*` 字段中。
 
 当某段旁白的 `overlaps_speech=true` 且并非从 0 秒冷开场时，`narration` 校验要求其 `start` 必须贴近 `boundary_use` 不为 `none` 的句末锚点。判断切入点是否踩进原声讲话时，校验、剪辑与合成共用同一套语气词豁免规则：只含单字语气词的 ASR 窗口（如“啊！”、“Hi.”）不算完整讲话，仅在紧挨真实对白的一侧留出 1 秒保护区；空文本或纯空白的 ASR 行只作分窗记录，不算讲话也不留保护；三处统一读取 `asr_result.json`。
 
-一旦旁白起点踩进原声句子中间，校验会在送 TTS 前以 `interrupts_source_sentence` 报错拦截，并给出 `suggested_start`、`suggested_end` 与 `source_text_tail` 供 Agent 调整：推荐位置取入点前后 `max_shift_seconds`（10 秒）内最近的安全锚点，要求整段旁白按原时长平移过去后仍处在相邻两段之间、与前后段间隔均大于 0.15 秒（避免粘连成同一段），且在 `cut` 模式下不越出所属画面片段、在 `cut_output` 模式下不超出成片总时长（距离相等时取靠后的锚点）。常规解说段统一使用 `source_entry_policy: "sentence_boundary"`，系统不提供强行打断原话的绕过开关；若 10 秒范围内找不到合适锚点，`suggested_start` 返回 `null`，Agent 需手动挪位置、缩减字数或删掉该段。
+一旦旁白起点踩进原声句子中间，校验会在送 TTS 前以 `interrupts_source_sentence` 报错拦截，并给出 `suggested_start`、`suggested_end` 与 `source_text_tail` 供 Agent 调整：推荐位置取入点前后 `max_shift_seconds`（10 秒）内最近的安全锚点，要求整段旁白按原时长平移过去后仍处在相邻两段之间、与前后段间隔均大于 0.15 秒（避免粘连成同一段），且在 `cut_output` 模式下不超出成片总时长（距离相等时取靠后的锚点）。常规解说段统一使用 `source_entry_policy: "sentence_boundary"`，系统不提供强行打断原话的绕过开关；若 10 秒范围内找不到合适锚点，`suggested_start` 返回 `null`，Agent 需手动挪位置、缩减字数或删掉该段。
 
 `cut` 模式第二阶段会额外写出 `speech_boundary_anchors_output.json`，把句末锚点、ASR 讲话区间和安静窗口统一换算到剪后成片（OUTPUT）时间轴上。换算后的锚点绝不越出所属片段边界：若某个原片锚点落在片段入点前或出点后 0.05 秒容差内、且没有被相邻片段播放，就会吸附到该片段的入点或出点上（落在 `[0, 成片时长]` 之外的直接丢弃），同时在 `source_time` 中保留原片实测秒数：
 
@@ -138,13 +138,13 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 推荐字数 `budget_chars` 会先从时间窗里扣掉 `tts_overhead_seconds`（约 0.45 秒，即每次 TTS 合成自带的首尾静音）再折算字数，因此比写稿简报窗口上直接标出的字数少一两个字。`full` 模式下凡字数超过推荐值 1.25 倍（`limit_chars`）的段落都会报 `over_budget` error（校验器绝不会越俎代庖替 Agent 删字）；略超推荐值但未越过 1.25 倍硬上限、以及 `cut_output` 模式下的超字数则记为 warning。所有解说段必须按 `start` 严格升序排列，否则报 `out_of_order` error。
 
-常见错误与警告码：`invalid_time`、`out_of_order`、`empty_narration`、`time_overlap`、`outside_clip_plan`、`over_budget`、`incomplete_sentence`、`interrupts_source_sentence`、`placeholder_leakage`。
+常见错误与警告码：`invalid_time`、`out_of_order`、`empty_narration`、`time_overlap`、`over_budget`、`incomplete_sentence`、`interrupts_source_sentence`、`placeholder_leakage`。
 
 ## recap_story_plan.json / visual_audio_board.json（Agent 创作工作产物）
 
 这两份 JSON 是创作阶段的拍板记录：`recap_story_plan.json` 保存导演意图、候选剪辑方案、主视角（POV）/主线与逐拍局势变化；`visual_audio_board.json` 保存每一拍选定的画面表演瞬间、出入点理由、原声锚点、声音主导方（`audio_owner`）与旁白任务（`narration_job`）。完整字段定义见 `./creative-editing-playbook.md`。
 
-渲染管线不拿它们当硬门禁，也不额外部署解析服务；建议型解说评审在它们存在时读取对表，Agent 则靠它们保证选镜、原声留白和旁白词从头到尾咬住同一个故事意图。
+渲染管线不拿它们当硬门禁，也不额外部署解析服务；Agent 靠它们沉淀可复查的创作决定，保证选镜、原声留白和旁白词从头到尾咬住同一个故事意图。
 
 ## style_card.json（Agent 撰写，可选/按 brief 要求）
 
@@ -164,7 +164,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 ## packaging_plan.json（Agent 撰写，可选）
 
-`packaging_plan.json` 是正片内容锁死后按需编写的外层宣发包装方案，涵盖常驻标题、封面帧选择、开场首句、看点承诺与发布文案备注。它用来帮评审核对“外层吆喝的看点”和“正片前 15 秒实际演出的内容”有否货不对板，绝不能反过来绑架正片剪辑去迎合标题党。
+`packaging_plan.json` 是正片内容锁死后按需编写的外层宣发包装方案，涵盖常驻标题、封面帧选择、开场首句、看点承诺与发布文案备注。它用来帮 Agent 交付复核时对齐“外层吆喝的看点”和“正片前 15 秒实际演出的内容”有否货不对板，绝不能反过来绑架正片剪辑去迎合标题党。
 
 它也不替代 `style_card.json` 的口播文风设定；凡是包装层承诺了的爽点或反转，正片里都必须有实打实的画面与原声证据兑现：
 
@@ -366,26 +366,9 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 > `character_details`、`plot_arcs`、`cultural_notes` 为可选扩展字段；仅含 `synopsis`、`characters`、`worldbuilding`、`episode_context` 四个基础字段的旧版 JSON 同样有效。
 
-## narration_review.json
-
-建议型解说评审阶段输出的模型复核报告，核心字段为 `verdict`、`summary`、`findings`，外加记录本次抽样证据范围的 `evidence_contract`（含时间轴类型、时钟、抽样区间、分块数与警告）；长视频分块评审时另附 `chunked_review` 统计，模型返回格式异常无法解析时另附 `parse_error` 与 `raw`。只有在显式开启 `--require-narration-review` 严格模式时，`findings` 里的 `error`（事实矛盾或半截残句）才会拦截流程；顶层 `verdict`（`PASS|REVISE|FAIL`，模型偶发返回 `OK` 时自动归一为 `PASS`）仅作参考信号：
-
-```json
-{
-  "verdict": "PASS|REVISE|FAIL",
-  "summary": "总体判断",
-  "findings": [{"segment": 0, "severity": "warning", "category": "weak_hook", "issue": "问题", "fix": "改法"}],
-  "evidence_contract": {"schema_version": 1, "timeline": "source", "clock": "source", "selected_ranges": [], "chunk_count": 1, "warnings": []}
-}
-```
-
-> 若 `work_dir` 下已有 Agent 编写的 `packaging_plan.json`、`recap_story_plan.json`、`visual_audio_board.json` 或 `style_card.json`，评审会自动读取并对表；缺失时仅根据旁白稿与画面/对白证据审阅，绝不因缺少计划文件报错。
-
-多视频 `cut_output` 模式下，评审器会顺着 `multi_source_manifest.json` 映射各源视频独立的 VLM 与 ASR 证据，不会因为项目根目录没有合并版 ASR 而漏检。
-
 ## tts_meta.json（partial 失败可见性）
 
-配音阶段正常跑完会写出 `{segments, engine, narration}`。若显式开启了部分容错（`--allow-partial-tts` 或 `ALLOW_PARTIAL_TTS=1`）允许个别段落合成失败后继续往下走，失败段的信息会明确记入 `partial: true` 与 `failures[]` 数组，绝不只藏在终端日志里：
+配音阶段正常跑完会写出 `{segments, engine, narration}`。若显式开启了部分容错（`--allow-partial-tts`）允许个别段落合成失败后继续往下走，失败段的信息会明确记入 `partial: true` 与 `failures[]` 数组，绝不只藏在终端日志里：
 
 ```json
 {
@@ -403,7 +386,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 ## resource_lock.json（本次运行用到的资源）
 
-每次 `full` 或 `cut` 流程（含本地采用三件套路径）合成完毕后，编排器都会在 `work_dir` 下写出 `resource_lock.json`，把运行清单、`tts_meta.json.voice` 与 `assembly_manifest.json` 里的源视频、配音音色、BGM 路径与字幕字体汇总到一处；若配置了资源库，还会按解析后的实际文件路径（音色按 `provider + voice_id`）自动对上库内登记条目，一并带出版权与声音授权状态（`dub` 模式不生成该文件）：
+每次 `full` 或 `cut` 流程合成完毕后，编排器都会在 `work_dir` 下写出 `resource_lock.json`，把运行清单、`tts_meta.json.voice` 与 `assembly_manifest.json` 里的源视频、配音音色、BGM 路径与字幕字体汇总到一处；若配置了资源库，还会按解析后的实际文件路径（音色按 `provider + voice_id`）自动对上库内登记条目，一并带出版权与声音授权状态：
 
 ```json
 {
@@ -422,30 +405,13 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 其中 `role` 取值为 `source_video`、`voice`、`bgm`、`subtitle_font`（使用 `--project` 绑定时还会包含模板引用的图片等资源）。`attention` 数组列出需要人工过目的提醒项：版权未确认或受限（`license_unknown` / `license_restricted`）、参考音色授权未确认或被拒（`consent_unknown` / `consent_denied`），以及启用了资源库但该文件尚未入库登记（`unregistered`）。这些提醒仅作合规审计提示，不阻断渲染，也不会写入 `final_qc.json`。
 
+## assembly_manifest.json 的 audio_segments[]
+
 音画组装完成后，`assembly_manifest.json.audio_segments[]` 会逐段记录落点与压低（ducking）明细：`fit_status`、`truncated`、`truncate_reason`、`placed_audio_duration`、`placed_audio_path`、`source_duck_end`、`source_restore_at`、`source_handoff_status`、`source_entry_status` 与 `written_start`。注意以下核心机制：
 
 - **绝不裁切旁白尾音**：若某段配音在允许的倍速上限内仍塞不进可用窗口，合成器直接以 `no_safe_fit` 报错阻断。`placed_audio_path` 指向实际写入 `narration.wav` 的最终逐段音频，`timeline.json` 与剪映草稿必须引用该文件，一旦引用了加速前的原始长音频会以 `timeline_audio_mismatch` 阻断。
-- **原声回升贴紧句末停顿**：一段旁白读完后，原声最多可继续保持压低状态 3 秒，等待这 3 秒内出现的第一个句末锚点——一直压到该锚点的停顿起点 `pause_start`（记为 `source_duck_end`），再在实测停顿区间内平滑渐强，到 `source_restore_at` 恢复原音量，从而避免渐强过早把上一句原话的尾巴漏出来。`source_handoff_status` 记录回升方式：`sentence_boundary`（命中已验证锚点）、`sentence_boundary_unverified`（命中 `unverified` 锚点）、`held_to_timeline_end`（3 秒内无锚点且距片尾不足 3 秒，直接压到片尾）、`bounded_release`（3 秒内无锚点，在旁白结尾处按 `duck_fade_seconds` 平滑回升，不阻断）、`anchors_unavailable`（原声有人说话但无可用锚点，直接阻断）或 `no_source_speech`。
+- **原声回升贴紧句末停顿**：一段旁白读完后，原声最多可保持压低状态 3 秒，等待这 3 秒内出现的第一个句末锚点——一直压到该锚点的停顿起点 `pause_start`（记为 `source_duck_end`），再在实测停顿区间内平滑渐强，到 `source_restore_at` 恢复原音量，从而避免渐强过早把上一句原话的尾巴漏出来。`source_handoff_status` 记录回升方式：`sentence_boundary`（命中已验证锚点）、`sentence_boundary_unverified`（命中 `unverified` 锚点）、`held_to_timeline_end`（3 秒内无锚点且距片尾不足 3 秒，直接压到片尾）、`bounded_release`（3 秒内无锚点，在旁白结尾处按压低淡入淡出时长平滑回升，不阻断）、`anchors_unavailable`（原声有人说话但无可用锚点，直接阻断）或 `no_source_speech`。
 - **切入状态**：每个连续压低区间的首块会记录切入状态 `source_entry_status`（`sentence_boundary`、`sentence_boundary_unverified`、`quiet_source`、`non_dialogue_source`、`unverified`、`unsafe_entry` 或 `anchors_unavailable`），其中落在静音区的 `quiet_source` 与落在纯语气词窗口的 `non_dialogue_source` 均安全放行。单次压低延续时长（`source_restore_at - actual_place_end`）的最大值记入 `assembly_qc.json` 的 `summary.max_source_duck_hold_seconds` 供参考。
-
-## dub_lint.json
-
-`dub` 模式下，脚本在发起昂贵的 `voiceclone` 请求**之前**会先对 `dub_script.json` 跑一遍确定性校验。一旦发现空译文、相邻台词时间重叠、时间戳越界或可用窗口不足 0.4 秒（`room < 0.4s`）等 **error**，立即标 `verdict=FAIL` 并中止渲染；语速偏快（`fast_speech`）或存在加速风险（`trim_risk`，有效字数 ≥ 7 字/秒，而 `dub_brief.md` 建议目标约为 5 字/秒）则记为 warning 放行。
-
-每句克隆出的原始 WAV 都会在同旁生成 `*.wav.meta.json`，记录中文台词、模型与提示词配置及参考音频指纹。重跑时只要台词、参考音频和配置分毫未变且 WAV 完好，就会直接命中缓存并在 `dub_manifest.json.lines[].tts_cache` 中记为 `hit`。若某句克隆出的音频时长远超正常语速下限（`TTS_MIN_SPEECH_RATE`），则判定为模型幻读：自动按 `TTS_RETRIES` 重试且不写缓存元数据，重试耗尽仍异常则中止渲染，并将最后一次被拒的音频留存为 `dub_tts/line_NNN_raw.rejected.wav` 供排查（旧缓存中若检出此类超长音频也会自动作废重录）：
-
-```json
-{
-  "schema_version": 1,
-  "verdict": "PASS|FAIL",
-  "blocking": false,
-  "errors": [],
-  "issues": [{"severity": "warning", "code": "fast_speech", "line": 2, "message": "translation is dense (8.4 chars/s)", "start": 1.0, "end": 2.0}],
-  "summary": {"lines": 12, "errors": 0, "warnings": 1, "max_chars_per_second": 8.4, "trim_risk_lines": []}
-}
-```
-
-> `dub` 模式仅分“准备”与“渲染”两步，渲染前自动写 `dub_lint.json`，非 `PASS` 即停机，不设单独的手动校验命令。最终生成的 `dub_<name>.mp4` 固定封装为 48 kHz AAC，不会沿用 `loudnorm` 滤镜内部升采样分析时的 96 kHz 采样率。
 
 ## final_qc.json
 
@@ -478,7 +444,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 `metadata.artifacts` 汇总了 `assembly_manifest.json`、`assembly_qc.json` 与 `visual_qc.json` 的核心摘要（无法解析时记为 `{"invalid": true}`），仅作归档备查——因为一旦组装或视觉 QC 触发阻断，`assemble.py` 早就以非零退出码停机了，根本走不到 `final_qc`。`metadata.probe` 只摘录检查所需的流与容器规格（编码、宽高、帧率、时长、采样率等），主动剥离了原片容器可能夹带的 `tags`、`disposition` 和文件名，防止原片注释或下载链接混入报告。
 
-`metadata.warnings` 原样承接 `visual_qc.json` 中的非阻断警告：它们不计入 `blocker_count`，但 **Agent 在向用户交付成片时必须明确告知**。当前最典型的是本机 ffmpeg 缺少 `libass` 导致默认烧录字幕自动降级为外挂 `.srt`：
+`metadata.warnings` 原样承接 `visual_qc.json` 等上游写出的非阻断警告：它们不计入 `blocker_count`，但 **Agent 在向用户交付成片时必须明确告知**。常见警告包括开启 `--allow-partial-tts` 后出现的 `partial_tts` 缺段，以及本机 ffmpeg 缺少 `libass` 导致默认烧录字幕自动降级为外挂 `.srt`：
 
 ```json
 {"code": "subtitle_burn_degraded", "reason": "ffmpeg_missing_libass", "delivered": "sidecar_srt",

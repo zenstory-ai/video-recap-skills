@@ -1,4 +1,6 @@
 import json
+from pathlib import Path
+import re
 
 import pytest
 
@@ -335,3 +337,24 @@ def test_leak_scan_handles_text_glued_to_cjk(text, flagged):
         assert errors == []
     else:
         assert any(flagged in error for error in errors), errors
+
+
+def test_reference_schema_doc_example_passes_leak_scan():
+    schema_doc = (
+        Path(__file__).resolve().parents[2]
+        / "skills"
+        / "video-reference"
+        / "references"
+        / "reference-schema.md"
+    ).read_text(encoding="utf-8")
+    fences = [json.loads(raw) for raw in re.findall(r"```json\s*\n(.*?)\n```", schema_doc, re.DOTALL)]
+    doc_breakdown = next(item for item in fences if item.get("schema") == "video-reference.breakdown.v1")
+    corpus = leak_corpus(doc_breakdown["source_facts"], [], None, None)
+    errors = []
+    for idx, method in enumerate(doc_breakdown["methods"]):
+        for field in ("rule", "applies_when", "avoid_when"):
+            if field in method:
+                errors.extend(leak_errors(method[field], f"methods[{idx}].{field}", corpus))
+    for dim, reason in doc_breakdown.get("skipped_dimensions", {}).items():
+        errors.extend(leak_errors(reason, f"skipped_dimensions.{dim}", corpus))
+    assert errors == []

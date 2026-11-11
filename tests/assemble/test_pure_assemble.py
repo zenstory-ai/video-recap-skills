@@ -388,8 +388,6 @@ def test_assemble_main_applies_explicit_measured_subtitle_band(
                 "top": CONFIG["subtitle_y_top"],
                 "bot": CONFIG["subtitle_y_bot"],
                 "mask": CONFIG["mask_source_subtitles"],
-                "policy": CONFIG["source_subtitle_mask_policy"],
-                "declared": CONFIG["source_subtitle_mask_policy_declared"],
                 "opacity": CONFIG["subtitle_mask_opacity"],
             }
         )
@@ -403,8 +401,6 @@ def test_assemble_main_applies_explicit_measured_subtitle_band(
         "subtitle_y_top": -1,
         "subtitle_y_bot": -1,
         "mask_source_subtitles": False,
-        "source_subtitle_mask_policy": "off",
-        "source_subtitle_mask_policy_declared": False,
         "subtitle_mask_opacity": 0.6,
     }.items():
         monkeypatch.setitem(CONFIG, key, value)
@@ -434,8 +430,6 @@ def test_assemble_main_applies_explicit_measured_subtitle_band(
         "top": 610,
         "bot": 660,
         "mask": True,
-        "policy": "opt_in",
-        "declared": True,
         "opacity": expected_opacity,
     }
 
@@ -460,7 +454,6 @@ def test_source_subtitle_mask_filter_toggles_with_effective_burn_policy(monkeypa
     # no-burn means sidecar-subtitle mode: ambient/default source masking must not
     # create a black band without burned recap subtitles.
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.15)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "all")
     assert _source_subtitle_mask_filter(canvas, Path.cwd(), [], 1.0) is None
@@ -479,7 +472,6 @@ def test_source_subtitle_mask_can_restore_opaque_full_timeline_mode(monkeypatch)
     """The enhanced default stays reversible for projects that need the old mask look."""
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 1.0)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "all")
 
@@ -495,7 +487,6 @@ def test_source_subtitle_mask_can_restore_opaque_full_timeline_mode(monkeypatch)
 def test_source_subtitle_mask_can_follow_custom_band_and_narration_windows(monkeypatch):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
     monkeypatch.setitem(CONFIG, "subtitle_y_bot", 660)
     monkeypatch.setitem(CONFIG, "subtitle_mask_padding", 4)
@@ -539,7 +530,6 @@ def test_measured_band_accepts_near_square_pixels_and_masks_frame_rows(
 ):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
     monkeypatch.setitem(CONFIG, "subtitle_y_bot", 660)
     monkeypatch.setitem(CONFIG, "subtitle_mask_padding", 4)
@@ -562,7 +552,6 @@ def test_source_subtitle_mask_opaquely_covers_byo_gap_subtitles(
 ):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
     monkeypatch.setitem(CONFIG, "subtitle_y_bot", 660)
     monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", configured_opacity)
@@ -590,7 +579,6 @@ def test_source_subtitle_mask_opaquely_covers_byo_gap_subtitles(
 def test_source_subtitle_mask_coalesces_overlaps_to_avoid_double_opacity(monkeypatch):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "narration")
 
     filt = _source_subtitle_mask_filter(
@@ -607,7 +595,6 @@ def test_source_subtitle_mask_coalesces_overlaps_to_avoid_double_opacity(monkeyp
 def test_narration_timed_source_mask_without_narration_draws_nothing(monkeypatch):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "narration")
 
     assert (
@@ -674,7 +661,6 @@ def test_mask_band_stays_one_line_small_when_burning(monkeypatch):
     line + margin (small), NOT two lines. A 2-line band ate ~23% of the height and compressed the
     picture; a one-line band keeps it near the raw mask ratio."""
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.14)
     monkeypatch.setitem(CONFIG, "subtitle_font_size", 42)
     monkeypatch.setitem(CONFIG, "subtitle_margin_v", 30)
@@ -984,8 +970,6 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(
 
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy_declared", True)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_timing", "narration")
     monkeypatch.setitem(CONFIG, "subtitle_mask_opacity", 0.6)
     monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
@@ -1027,32 +1011,6 @@ def test_assemble_video_uses_filter_script_for_long_timed_mask(
     assert "-filter_complex" not in ffmpeg_cmd
     assert "[aout]" in audio_graphs[-1][1]
     assert not audio_graphs[-1][0].exists()
-
-
-def test_adopted_copy_removes_the_render_when_packet_verification_fails(monkeypatch, tmp_path):
-    video = tmp_path / "input.mp4"
-    video.write_bytes(b"video")
-    output = tmp_path / "output.mp4"
-    _mock_assemble_media(monkeypatch)
-    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
-    monkeypatch.setitem(CONFIG, "bgm_path", "")
-    monkeypatch.setattr(
-        assemble.frozen_audio, "validate_adopted_source", lambda *_args: {"sample_rate": 48000}
-    )
-
-    def fake_run_cmd(cmd):
-        output.write_bytes(b"mp4")
-        return CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    def packets_changed(*_args):
-        raise RuntimeError("采用音频 packet side data 已改变")
-
-    monkeypatch.setattr("assemble.lib.run_cmd", fake_run_cmd)
-    monkeypatch.setattr(assemble.frozen_audio, "verify_adopted_audio", packets_changed)
-
-    with pytest.raises(RuntimeError, match="side data"):
-        assemble_video(video, [], tmp_path, output, audio_mode="adopted-packet-copy")
-    assert not output.exists()
 
 
 @pytest.mark.parametrize("probe_stderr, expected", [
@@ -1169,7 +1127,7 @@ def test_assemble_video_no_burn_keeps_video_copy_and_ignores_source_mask_default
 
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     monkeypatch.setitem(CONFIG, "force_video_reencode", False)
-    # mask_source_subtitles left at its default (True) on purpose
+    monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
     _mock_assemble_media(monkeypatch)
     monkeypatch.setattr(
         narration_audio,
@@ -1448,7 +1406,6 @@ def _settings_with(monkeypatch, **overrides):
 @pytest.mark.parametrize(
     ("key", "value"),
     [
-        ("mask_source_subtitles", True),
         ("burn_subtitles", True),
         ("narration_speed", 1.2),
         ("bgm_path", "/tmp/bgm.mp3"),
@@ -1467,20 +1424,15 @@ def test_assembly_settings_payload_tracks_render_affecting_settings(
     assert _settings_with(monkeypatch, **{key: value}) != base
 
 
-def test_assembly_settings_payload_records_legacy_implicit_mask_policy(monkeypatch):
-    legacy_implicit = _settings_with(monkeypatch, mask_source_subtitles=True)
-
-    assert (
-        legacy_implicit["video_filters"]["source_subtitle_mask_policy"]
-        == "legacy_implicit"
-    )
-    assert (
-        legacy_implicit["video_filters"]["source_subtitle_mask_policy_declared"]
-        is False
-    )
-    # the mask ratio only matters once a mask is actually burned
+def test_assembly_settings_payload_records_mask_ratio_only_when_masking(monkeypatch):
+    unmasked = _settings_with(monkeypatch)
     monkeypatch.setitem(CONFIG, "source_subtitle_mask_ratio", 0.20)
-    assert assembly_settings_payload() == legacy_implicit
+    assert assembly_settings_payload() == unmasked
+    masked = _settings_with(
+        monkeypatch, burn_subtitles=True, mask_source_subtitles=True, source_subtitle_mask_ratio=0.20
+    )
+    assert masked["video_filters"]["mask_source_subtitles"] is True
+    assert masked["video_filters"]["source_subtitle_mask_ratio"] == 0.20
 
 
 def test_split_subtitle_chunks_breaks_block_into_short_one_line_pieces():
@@ -1696,11 +1648,7 @@ def test_p0_adjust_tts_speed_respects_cumulative_tempo_cap(monkeypatch, tmp_path
         )
     )
 
-    effective_tempo = (
-        float(meta["global_narration_speed"])
-        * (1.0 + float(meta["tts_rate_offset"]))
-        * float(meta["segment_tempo_factor"])
-    )
+    effective_tempo = 1.2 * 1.05 * float(meta["segment_tempo_factor"])
     assert effective_tempo <= 1.35 + 1e-6
     assert meta["fit_status"] in {"fit", "tempo_adjusted", "no_safe_fit"}
     if commands:
@@ -1708,6 +1656,27 @@ def test_p0_adjust_tts_speed_respects_cumulative_tempo_cap(monkeypatch, tmp_path
         assert "atempo=1.120" not in afilter, (
             "raw overrun ratio must not be used after global/rate tempo budget"
         )
+
+
+def test_atempo_output_still_over_target_keeps_the_source_and_records_the_factor(monkeypatch, tmp_path):
+    src = tmp_path / "narr_000.wav"
+    src.write_bytes(b"wav")
+
+    def fake_run_cmd(cmd, **kw):
+        Path(cmd[-1]).write_bytes(b"adjusted")
+        return CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setitem(CONFIG, "narration_speed", 1.0)
+    monkeypatch.setitem(CONFIG, "narration_cumulative_tempo_max", 1.5)
+    monkeypatch.setattr(narration_audio, "get_video_duration", lambda path: 10.5 if Path(path) == src else 10.1)
+    monkeypatch.setattr(narration_audio, "run_cmd", fake_run_cmd)
+
+    out, _dur, meta = _adjust_result_parts(narration_audio._adjust_tts_speed(src, target_duration=10.0))
+
+    assert out == str(src)
+    assert meta["fit_status"] == "no_safe_fit"
+    assert meta["needed_tempo_factor"] == pytest.approx(1.01)
+    assert not list(tmp_path.glob("*_adj*"))
 
 
 def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path, capsys):
@@ -1742,8 +1711,97 @@ def test_p0_adjust_tts_speed_no_safe_fit_does_not_time_cut(monkeypatch, tmp_path
     assert "TTS 无安全放置: 段 3 15.0s" in logged.out + logged.err  # 1-based, as in narration.json
     assert meta["fit_status"] == "no_safe_fit"
     assert meta["truncate_reason"] in {"no_safe_boundary", "no_room"}
-    assert meta.get("blocking") is True
     assert commands == [], "P0 forbids assemble-side atempo or time-only speech cuts"
+
+
+def test_build_timed_narration_no_room_when_clamped_to_slot_end(tmp_path):
+    """A block whose whole slot lies before the previous block's end has no room at all."""
+    first = _write_silent_wav(tmp_path / "first.wav", 1.0, frame=b"\x00\x10")
+    second = _write_silent_wav(tmp_path / "second.wav", 0.2, frame=b"\x00\x10")
+    segs = [
+        tts_segment(index=0, start=0.0, end=2.0, audio_path=str(first), audio_duration=1.0,
+                    tts_rate_offset=0.0),
+        tts_segment(index=1, start=0.5, end=0.8, audio_path=str(second), audio_duration=0.2,
+                    tts_rate_offset=0.0),
+    ]
+
+    narration_audio._build_timed_narration(segs, tmp_path / "narration.wav", 3.0, tmp_path)
+
+    assert segs[0]["placed_audio_duration"] == 1.0
+    assert segs[1]["fit_status"] == "no_safe_fit"
+    assert segs[1]["truncate_reason"] == "no_room"
+    assert segs[1]["blocking"] is True
+    assert segs[1]["actual_place_start"] == segs[1]["actual_place_end"] == 0.5
+    assert segs[1]["placed_audio_duration"] == 0.0
+
+
+def test_build_timed_narration_clamps_negative_pause_to_previous_end(tmp_path):
+    """An unlinted negative pause never moves the next block back over the previous one."""
+    first = _write_silent_wav(tmp_path / "first.wav", 3.0, frame=b"\x00\x10")
+    third = _write_silent_wav(tmp_path / "third.wav", 0.5, frame=b"\x00\x10")
+    segs = [
+        tts_segment(index=0, start=0.0, end=5.0, audio_path=str(first), audio_duration=3.0,
+                    tts_rate_offset=0.0),
+        # An out-of-order missing block: its early end makes the next block a run start.
+        tts_segment(index=1, start=0.0, end=0.1, audio_path=str(tmp_path / "gone.wav"),
+                    audio_duration=0.5, tts_rate_offset=0.0, pause_after_ms=-900),
+        tts_segment(index=2, start=2.0, end=6.0, audio_path=str(third), audio_duration=0.5,
+                    tts_rate_offset=0.0),
+    ]
+
+    narration_audio._build_timed_narration(segs, tmp_path / "narration.wav", 7.0, tmp_path)
+
+    assert segs[2]["fit_status"] == "fits"
+    assert segs[2]["actual_place_start"] == segs[0]["actual_place_end"] == 3.0
+
+
+def test_missing_wav_without_placeholder_fields_reaches_qc_with_tempo(monkeypatch, tmp_path):
+    """Placement sets fit_status, segment_tempo_factor, global_narration_speed, effective_tempo
+    and blocking on every block, so tts_meta need not carry placeholders for them. truncated
+    still comes from voiceover, and truncate_reason too unless the block goes unplaced."""
+    monkeypatch.setitem(CONFIG, "narration_speed", 1.2)
+    placed = _write_silent_wav(tmp_path / "placed.wav", 0.5, frame=b"\x00\x10")
+    common = {"narration": "解说", "spoken_text": "解说", "truncated": False,
+              "truncate_reason": "none", "pause_after_ms": 0, "overlaps_speech": True,
+              "tts_rate_offset": 0.05}
+    segs = [
+        {"index": 0, "start": 0.0, "end": 1.0, "audio_path": str(placed), "audio_duration": 0.5, **common},
+        {"index": 1, "start": 3.0, "end": 4.0, "audio_path": str(tmp_path / "gone.wav"),
+         "audio_duration": 0.5, **common},
+    ]
+
+    narration_audio._build_timed_narration(segs, tmp_path / "narration.wav", 5.0, tmp_path)
+    qc = assembly_contract._build_assembly_qc(
+        segs, 5.0, audio_operations={},
+        render_delivery={"video_encode_passes": 0, "reencode_reason": [],
+                         "audio_sample_rate": None, "final_compat_notes": []},
+    )
+
+    assert segs[1]["fit_status"] == "skipped"
+    assert segs[1]["effective_tempo"] == pytest.approx(1.2 * 1.05)
+    assert qc["summary"]["skipped_segments"] == [1]
+    assert "skipped_segments" in qc["blocking_codes"]
+
+
+def test_tempo_adjusted_placement_records_effective_tempo_as_base_times_tempo(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setitem(CONFIG, "narration_speed", 1.2)
+    fitted = _write_silent_wav(tmp_path / "fitted.wav", 0.9, frame=b"\x00\x10")
+    monkeypatch.setattr(
+        narration_audio,
+        "_adjust_tts_speed",
+        lambda path, target, offset, **_: (
+            str(fitted), 0.9, {"fit_status": "tempo_adjusted", "segment_tempo_factor": 1.1}
+        ),
+    )
+    seg = tts_segment(audio_path=str(fitted), audio_duration=1.1, tts_rate_offset=0.05)
+
+    narration_audio._build_timed_narration([seg], tmp_path / "narration.wav", 2.0, tmp_path)
+
+    assert seg["fit_status"] == "tempo_adjusted"
+    assert seg["segment_tempo_factor"] == 1.1
+    assert seg["effective_tempo"] == pytest.approx(1.2 * 1.05 * 1.1)
 
 
 def test_p0_build_timed_narration_propagates_no_safe_fit_metadata(
@@ -1759,10 +1817,6 @@ def test_p0_build_timed_narration_propagates_no_safe_fit_metadata(
             {
                 "fit_status": "no_safe_fit",
                 "truncate_reason": "no_safe_boundary",
-                "blocking": True,
-                "segment_tempo_factor": 1.0,
-                "effective_tempo": 1.2,
-                "global_narration_speed": 1.15,
             },
         )
 
@@ -1818,49 +1872,6 @@ def test_emit_timeline_uses_exact_placed_audio_not_longer_prefit_source(
     assert narration_track["segments"][0]["source_path"] == str(placed)
 
 
-def test_emit_timeline_maps_adopted_mix_by_index_across_a_skipped_segment(
-    monkeypatch, tmp_path
-):
-    """Adopted mix segments are 1:1 with the unfiltered narration list, not the placed one."""
-    placed = tmp_path / "placed.wav"
-    placed.write_bytes(b"fit")
-    prepared = tmp_path / "prepared_bed.wav"
-    prepared.write_bytes(b"bed")
-    monkeypatch.setattr(timeline_emit, "_timeline_subtitle_segments", lambda *args: [])
-    segments = [
-        tts_segment(index=0, placed_audio_path=str(placed), actual_place_start=0.5,
-                    actual_place_end=1.5, narration="第一句。"),
-        # unplaced: zero-width window, dropped from the timeline but still mixed 1:1
-        tts_segment(index=1, placed_audio_path=str(placed), actual_place_start=2.0,
-                    actual_place_end=2.0, narration="被跳过。"),
-        tts_segment(index=2, placed_audio_path=str(placed), actual_place_start=2.5,
-                    actual_place_end=3.5, narration="第三句。"),
-    ]
-    explicit_audio_mix = {
-        "segments": [
-            {"index": 0, "gain": 0.1, "output_start_sample": 0, "output_end_sample": 10},
-            {"index": 1, "gain": 0.2, "output_start_sample": 10, "output_end_sample": 20},
-            {"index": 2, "gain": 0.3, "output_start_sample": 20, "output_end_sample": 30},
-        ],
-        "prepared": {"prepared_bed.wav": {"path": str(prepared)}},
-        "format": {"total_samples": 30},
-        "master_gain_db": 0.0,
-    }
-
-    timeline = _emit_timeline(
-        tmp_path / "input.mp4", segments, tmp_path, 4.0, _canvas(), False,
-        explicit_audio_mix=explicit_audio_mix,
-    )
-
-    narration_track = next(
-        track for track in timeline["tracks"] if track.get("name") == "narration"
-    )
-    placed_segments = narration_track["segments"]
-    assert [item["gain"] for item in placed_segments] == [0.1, 0.3]
-    assert [item["output_start_sample"] for item in placed_segments] == [0, 20]
-    assert [item["output_end_sample"] for item in placed_segments] == [10, 30]
-
-
 def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
     monkeypatch, tmp_path
 ):
@@ -1878,11 +1889,7 @@ def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
             target_duration + 0.010,
             {
                 "fit_status": "tempo_adjusted",
-                "truncate_reason": "none",
-                "blocking": False,
                 "segment_tempo_factor": 1.0,
-                "effective_tempo": 1.2,
-                "global_narration_speed": 1.15,
             },
         )
 
@@ -1905,6 +1912,24 @@ def test_build_timed_narration_never_trims_even_subframe_speech_overrun(
     assert seg["truncate_reason"] == "no_safe_boundary"
     assert seg["placed_audio_duration"] == 0.0
     assert seg["narration"] == "一段刚好超出零点几帧的解说。"
+
+
+def test_placement_records_the_tempo_a_block_would_have_needed(monkeypatch, tmp_path):
+    wav = _write_silent_wav(tmp_path / "voice.wav", 2.1, frame=b"\x00\x10")
+    monkeypatch.setattr(
+        narration_audio, "_adjust_tts_speed",
+        lambda path, target_duration, tts_rate_offset=0.0, **_kw: (
+            str(path), 2.1,
+            {"fit_status": "no_safe_fit", "truncate_reason": "no_safe_boundary", "needed_tempo_factor": 1.23456},
+        ),
+    )
+    seg = tts_segment(index=0, start=0.0, end=2.0, narration="一段解说。", spoken_text="一段解说。",
+                      audio_path=str(wav), audio_duration=2.1, tts_rate_offset=0.0)
+
+    narration_audio._build_timed_narration([seg], tmp_path / "narration.wav", 2.0, tmp_path)
+
+    assert seg["fit_status"] == "no_safe_fit"
+    assert seg["needed_tempo_factor"] == 1.2346
 
 
 def test_speech_safe_fades_do_not_attenuate_edge_phonemes():
@@ -2341,7 +2366,7 @@ def test_p0_manifest_references_audio_qc_artifact_without_copying_it(tmp_path):
 
     assert manifest["qc_path"].endswith("assembly_qc.json")
     assert {key for key in manifest if key.startswith("qc_")} == {"qc_path"}
-    assert "audio_operations" not in manifest and "adopted_audio" not in manifest
+    assert "audio_operations" not in manifest
     assert manifest["assembly_settings"]["audio_mix"]["loudness_mode"] in {
         "two_pass_linear",
         "equivalent",
@@ -2442,7 +2467,6 @@ _VISUAL_QC_ALLOWED_TOP_LEVEL = {
     "subtitles",
     "overlays",
     "mask",
-    "summary",
 }
 _VISUAL_QC_FORBIDDEN_DELIVERY_KEYS = {
     "video_encode_passes",
@@ -2473,7 +2497,6 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
     assembly_qc rollup, never to the visual layer."""
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "off")
     (tmp_path / "visual_overlays.json").write_text(
         json.dumps(
             {
@@ -2509,8 +2532,8 @@ def test_visual_qc_builder_excludes_delivery_facts_from_visual_layer(
     assert set(qc) <= _VISUAL_QC_ALLOWED_TOP_LEVEL
     assert not (_VISUAL_QC_FORBIDDEN_DELIVERY_KEYS & set(_flatten_keys(qc)))
     assert qc["geometry"]["canvas"]["width"] == 1080
-    assert qc["subtitles"]["multi_line"] is True
-    assert qc["mask"]["policy"] == "off"
+    assert any(entry["line_count"] > 1 for entry in qc["subtitles"]["entry_facts"])
+    assert qc["mask"]["active"] is False
     assert qc["overlays"]["facts"][0]["type"] == "top_title"
     assert filters and all("drawtext=" in f for f in filters)
 
@@ -2533,7 +2556,6 @@ def test_assembly_qc_gates_on_visual_verdict_and_keeps_visual_facts_out(visual_v
         "subtitles": {
             "overflow": False,
             "entries": 1,
-            "multi_line": True,
             "safe_area": {"x": 54},
         },
         "overlays": {
@@ -2544,12 +2566,10 @@ def test_assembly_qc_gates_on_visual_verdict_and_keeps_visual_facts_out(visual_v
             "overflow": [],
         },
         "mask": {
-            "policy": "safe",
             "scope": "bottom_band",
             "trigger": "explicit",
             "reason": "source_subtitles",
         },
-        "summary": {"subtitle_entries": 1, "overlay_rendered": 1},
     }
     delivery_qc = {
         "video_encode_passes": 1,
@@ -2582,24 +2602,21 @@ def test_assembly_qc_gates_on_visual_verdict_and_keeps_visual_facts_out(visual_v
     assert not (_VISUAL_QC_FORBIDDEN_DELIVERY_KEYS & set(_flatten_keys(visual_qc)))
 
 
-def test_mask_policy_must_be_explicit_and_recorded_in_settings(monkeypatch):
-    """Changing source-subtitle mask policy changes rendered pixels, so the
-    effective policy must be declared and included in the assembly settings payload."""
-    monkeypatch.setitem(CONFIG, "burn_subtitles", True)
+def test_mask_flag_alone_masks_and_needs_burned_subtitles(monkeypatch):
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "safe")
-    safe_fp = assembly_settings_payload()
-    assert safe_fp["video_filters"]["source_subtitle_mask_policy"] == "safe"
+    monkeypatch.setitem(CONFIG, "burn_subtitles", True)
+    mask = source_subtitles._source_subtitle_mask()
+    assert mask["active"] is True and mask["trigger"] == "burned_subtitles"
+    assert mask["scope"] == "bottom_source_subtitle_band"
+    assert assembly_settings_payload()["video_filters"]["mask_source_subtitles"] is True
 
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "forced")
-    forced_fp = assembly_settings_payload()
-    assert forced_fp["video_filters"]["source_subtitle_mask_policy"] == "forced"
-    assert forced_fp != safe_fp
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
+    mask = source_subtitles._source_subtitle_mask()
+    assert mask["active"] is False and mask["trigger"] == "burn_subtitles_disabled"
 
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "legacy_implicit")
-    qc = source_subtitles._source_subtitle_mask_policy()
-    assert qc["policy"] == "legacy_implicit"
-    assert qc.get("blocking") is True
+    monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
+    monkeypatch.setitem(CONFIG, "burn_subtitles", True)
+    assert source_subtitles._source_subtitle_mask()["trigger"] == "mask_off"
 
 
 def test_visual_overlay_loader_uses_canonical_artifact_and_rejects_platform_expansion(
@@ -2698,7 +2715,6 @@ def test_assemble_video_render_failure_does_not_leave_pass_assembly_qc(
 
     monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "off")
     monkeypatch.setattr(assemble.lib, "get_video_duration", lambda path: 2.0)
     monkeypatch.setattr(
         media, "_probe_canvas", lambda path: _canvas()
@@ -2775,6 +2791,10 @@ def test_default_path_blocks_no_safe_fit_before_the_video_encode(monkeypatch, tm
     segs = [tts_segment(index=0, start=1.0, end=4.0, audio_duration=5.2,
                         audio_path=str(tmp_path / "narr.wav"))]
 
+    def forbidden_graph(*_args, **_kwargs):
+        raise AssertionError("unplaced narration reached the mix graph")
+
+    monkeypatch.setattr(audio_mix, "_build_audio_filter_complex", forbidden_graph)
     with pytest.raises(RuntimeError, match=r"渲染前阻断: no_safe_fit（段 1 needed_tempo_factor=1\.31）"):
         assemble_video(video, segs, tmp_path, output)
 
@@ -2820,7 +2840,6 @@ def test_measured_subtitle_band_is_the_visual_qc_safe_area(tmp_path, monkeypatch
     """A band too narrow for even the minimum font must block instead of passing canvas QC."""
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
     monkeypatch.setitem(CONFIG, "subtitle_y_bot", 620)
     monkeypatch.setitem(CONFIG, "subtitle_mask_padding", 0)
@@ -2844,7 +2863,6 @@ def test_measured_subtitle_qc_contains_normal_line_above_anchored_bottom(
 ):
     monkeypatch.setitem(CONFIG, "burn_subtitles", True)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     monkeypatch.setitem(CONFIG, "subtitle_y_top", 610)
     monkeypatch.setitem(CONFIG, "subtitle_y_bot", 650)
     monkeypatch.setitem(CONFIG, "subtitle_mask_padding", 4)
@@ -2864,19 +2882,7 @@ def test_measured_subtitle_qc_contains_normal_line_above_anchored_bottom(
     assert qc["subtitles"]["overflow"] is False
 
 
-def test_legacy_mask_env_without_explicit_policy_is_blocking(monkeypatch):
-    probed = _load_lib_with_env(
-        monkeypatch, MASK_SOURCE_SUBTITLES="1", SOURCE_SUBTITLE_MASK_POLICY=None
-    )
+def test_mask_env_alone_turns_the_mask_on(monkeypatch):
+    probed = _load_lib_with_env(monkeypatch, MASK_SOURCE_SUBTITLES="1")
     assert probed.CONFIG["mask_source_subtitles"] is True
-    assert probed.CONFIG["source_subtitle_mask_policy"] == "off"
-    assert probed.CONFIG["source_subtitle_mask_policy_declared"] is False
-    for key in ("mask_source_subtitles", "source_subtitle_mask_policy",
-                "source_subtitle_mask_policy_declared"):
-        monkeypatch.setitem(CONFIG, key, probed.CONFIG[key])
-
-    policy = source_subtitles._source_subtitle_mask_policy()
-
-    assert policy["policy"] == "legacy_implicit"
-    assert policy["declared"] is False
-    assert policy["blocking"] is True
+    assert "source_subtitle_mask_policy" not in probed.CONFIG

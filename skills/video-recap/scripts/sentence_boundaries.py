@@ -30,7 +30,7 @@ def _find_source_artifact(work_dir, filename, source_id=None, source_work_dir=No
 
 
 def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=None):
-    """Load usable sentence-end pause windows produced by video-understanding.
+    """Load usable sentence-end pause windows produced by understand.py.
 
     A sentence anchor's `time` is the acoustic pause end, while `pause_start` is already
     after the final spoken sample. Any cut within that closed interval is word-safe.
@@ -63,7 +63,7 @@ def _load_sentence_boundary_windows(work_dir, source_id=None, source_work_dir=No
 
 
 def _load_source_speech_spans(work_dir, source_id=None, source_work_dir=None):
-    """Merged ASR dialogue spans from asr_result.json.
+    """Merged dialogue spans from asr_result.json.
 
     Only used to decide whether an unsafe edge blocks; a missing transcript means unchecked.
     """

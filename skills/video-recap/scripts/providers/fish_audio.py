@@ -1,4 +1,4 @@
-"""Fish Audio TTS transport for the video-voiceover skill.
+"""Fish Audio TTS transport for voiceover.py.
 
 The provider returns audio bytes rather than JSON. Keep the request, response validation,
 and secret-safe error handling isolated here so voiceover.py only selects an engine.

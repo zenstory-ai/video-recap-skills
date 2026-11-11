@@ -80,7 +80,6 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
     filters = ffmpeg_filters()
     ffmpeg_path = _command_path("ffmpeg") or ""
     ffprobe_path = _command_path("ffprobe") or ""
-    mimo_video_configured = bool(CONFIG["mimo_video_api_key"])
     mimo_tts_configured = bool(CONFIG["mimo_tts_api_key"])
     fish_tts_configured = bool(CONFIG["fish_api_key"])
     index_tts = _index_tts_status()
@@ -92,15 +91,12 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
         )
     if effective_tts_provider == "fish-audio":
         tts_configured = fish_tts_configured
-    elif effective_tts_provider == "index-tts":
-        tts_configured = index_tts["index_tts_configured"]
-    else:
-        tts_configured = mimo_tts_configured
-    if effective_tts_provider == "fish-audio":
         tts_model = CONFIG["fish_tts_model"]
     elif effective_tts_provider == "index-tts":
+        tts_configured = index_tts["index_tts_configured"]
         tts_model = "provider-managed"
     else:
+        tts_configured = mimo_tts_configured
         tts_model = CONFIG["mimo_tts_model"]
     subtitle_filter = "subtitles" in filters
     drawtext_filter = "drawtext" in filters
@@ -154,10 +150,6 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             "vlm_model": CONFIG["vlm_model"],
             "vlm_model_source": CONFIG["vlm_model_source"],
             "vlm_workers": CONFIG["vlm_workers"],
-            "mimo_video_configured": mimo_video_configured,
-            "mimo_video_api_url": CONFIG["mimo_video_api_url"],
-            "mimo_video_model": CONFIG["mimo_video_model"],
-            "mimo_video_model_source": CONFIG["mimo_video_model_source"],
         },
         "python": {
             "executable": sys.executable,
@@ -203,10 +195,6 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
         )
     if not checks["api_config"]["api_key_set"]:
         failures.append("MIMO_API_KEY is not set; the default ASR / VLM path requires MiMo")
-    if not mimo_video_configured:
-        warnings.append(
-            "MiMo VLM not configured: set MIMO_VIDEO_API_KEY or MIMO_API_KEY before video understanding"
-        )
     if not tts_configured and effective_tts_provider in TTS_KEY_HINTS:
         warnings.append(
             f"TTS provider {effective_tts_provider} not configured: "

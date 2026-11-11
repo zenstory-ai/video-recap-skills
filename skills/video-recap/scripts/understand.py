@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for the self-contained video-understanding skill."""
+"""CLI entrypoint for the understanding stage."""
 
 from understanding_runner import main
 

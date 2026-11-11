@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""CLI entrypoint for the self-contained video-cut skill."""
+"""CLI entrypoint for the cut stage."""
 
 from cut_cli import main
 

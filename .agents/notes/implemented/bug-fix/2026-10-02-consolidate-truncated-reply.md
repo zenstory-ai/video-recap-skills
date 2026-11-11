@@ -2,6 +2,8 @@
 
 Status: implemented
 
+ASR 清洗 pass 后来移除，见 [[2026-11-06-remove-asr-clean-transcript]]；索引 pass 的做法不变。
+
 ## Problem
 
 一次真实的 5 分钟解说运行（23 个场景、61 段 ASR）里，`understanding_index.json` 的五个列表全为空，`consolidation.status.json` 却是 `ok`，而 ASR 里明明有范闲、五竹、费介、范建、叶轻眉。复现两次：索引调用 `max_tokens=3000`，模型输出写到第 6500 字左右的 `relationships` 时被截断（`finish_reason=length`）。链路上每一步都把失败吞掉了：
@@ -16,13 +18,13 @@ ASR 清洗调用（`max_tokens=4000`）有同样的问题：截断后 `parse_cle
 
 ## Decision
 
-- `consolidate._complete_json_reply(label, messages, max_tokens)` 包住两次调用：`_response_text` 改为返回 `(content, finish_reason)`。`finish_reason == "length"` 时加倍预算重试一次，再被截断就抛 `ConsolidateIncomplete`；回复不是 JSON 对象时直接抛，不重试（加预算修不好）。抛错发生在写盘之前，索引和清洗结果都不会落盘，旧产物保持原样。
-- 预算：`_INDEX_MAX_TOKENS = _CLEAN_MAX_TOKENS = 8000`，重试 16000。
+- `consolidate._complete_json_reply(messages, max_tokens)` 包住两次调用并返回解析好的对象：`_response_text` 改为返回 `(content, finish_reason)`。`finish_reason == "length"` 时加倍预算重试一次，再被截断就抛 `ConsolidateIncomplete`；回复不是 JSON 对象时直接抛，不重试（加预算修不好）。抛错发生在写盘之前，索引不会落盘（当时的清洗结果也一样），旧产物保持原样。
+- 预算：`_INDEX_MAX_TOKENS = 8000`，重试 16000（当时清洗 pass 的预算相同）。
 - `INDEX_PROMPT` 加一条紧凑规则：description/relation/text 每条不超过 40 字，visual_descriptions 最多 3 条，每项 evidence_ids 最多 6 个，plot_points 最多 20 条。prompt 写在 meta 里，已有索引会重建一次。
-- 状态沿用现成通道：runner 捕获异常写 `status: failed` 和异常文本（含 `finish_reason=length` 与预算），brief 的 `_optional_stage_warning` 照常提示。没有新增状态值，也没有新增默认路径上的门禁。
-- 合法 JSON 但段数对不上的清洗回复仍按原设计原样返回转写（`parse_clean_response` 不变）。
+- 状态沿用现成通道：runner 捕获异常写 `status: failed` 和异常文本（含 `finish_reason=length` 与预算），brief 的 `_format_optional_stage_warnings` 照常提示。没有新增状态值，也没有新增默认路径上的门禁。
+- 当时合法 JSON 但段数对不上的清洗回复仍按原设计原样返回转写（`parse_clean_response`，已随清洗 pass 移除）。
 - `asr._run_asr` 读不到文件时抛 `RuntimeError("ASR: 无法读取音频 …")`；runner 已有的 ASR 失败处理会删掉缓存并报错。空文件和超体积分片仍返回空串。
-- 测试（全部 mock API）：`tests/understanding/test_consolidate.py` 覆盖截断后重试成功、两次截断抛错且不写产物、非 JSON 不重试、清洗调用两次截断；`tests/understanding/test_io_fixes.py` 经 runner 断言截断时状态为 `failed` 且消息含 `finish_reason=length`，以及缺文件时 `_run_asr` 抛错。
+- 测试（全部 mock API）：`tests/understanding/test_consolidate.py` 覆盖截断后重试成功、两次截断抛错且不写产物、非 JSON 不重试；`tests/understanding/test_io_fixes.py` 经 runner 断言截断时状态为 `failed` 且消息含 `finish_reason=length`，以及缺文件时 `_run_asr` 抛错。
 
 ## Alternatives considered
 

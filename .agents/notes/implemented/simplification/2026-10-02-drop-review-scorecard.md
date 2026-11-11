@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：解说评审已整体移除，见 [[2026-11-06-remove-narration-review-chain]]。下文描述的是当时的评审产物；其中不再写 `grounding_qc.json` 和 `deslop_qc.json` 的决定仍然有效。
+
 ## Problem
 
 video-script 的解说评审（`review.py`）在 #49（727a8a5，见 [[2026-05-18-agent-owned-narration-cli-mechanical]] 的来源列表）里加了一层"建议型增强"：每个评审 prompt 末尾要求模型额外给一份 16 键 1-5 分 scorecard（`promise_match` / `hook_3s` / … / `packaging_consistency`），外加 `hook_candidates_review`、`retention_risk_points`、`highest_return_edits`、`information_gain_notes`、`spoken_language_rewrites`、`grounding_assertions` 六个列表。这些内容按契约永远不改 verdict、不作门禁，`recap` 和 dashboard 也不读；它们只占 prompt 和输出 token，并在 `narration_review.md` 里排在真正要处理的 findings 前面。
@@ -32,7 +34,7 @@ video-script 的解说评审（`review.py`）在 #49（727a8a5，见 [[2026-05-1
 - **保留 scorecard，只从 prompt 里去掉不常用的几个维度。** 最强理由：分数给 Agent 一个快速的优先级信号，部分维度（hook、结尾回收）确实有用。没采用：这些维度在 RUBRIC 里都已有对应的 finding 类别（`weak_hook`、`weak_payoff`、`not_write_for_ear` 等），能定位到段落并给出改法；分数本身不能定位、不改 verdict、不进门禁，也没有任何代码读它。保留一半仍要维护解析、归一化和渲染。
 - **把 recap 的 Grounding QC 打印行改读 `narration_review.json`。** 最强理由：用户仍能在成片后看到证据覆盖情况。没采用：紧接着的评审指针行已经打印 verdict 和 findings 数；区间数对用户没有行动意义。直接删除也顺带修好了评审未运行时打印旧文件的问题。
 - **`OK` 按未知值归入 `REVISE`。** 最强理由：词表最干净，所有非标准值走同一条路。没采用：SKILL.md 让 Agent 迭代到 verdict 为通过；模型偶尔返回的 `OK` 本意是通过，归入 `REVISE` 会让 Agent 对已获认可的稿子白白再改一轮。
-- **`review_grounding` 的防御全部删掉。** 最强理由：最少代码。没采用：目录越界检查防的是 manifest 里的相对路径逃出 work_dir；ASR 形状适配是因为 `asr_clean.json` 与 `asr_result.json` 形状确实不同；空文本过滤是语义而不是防御。
+- **`review_grounding` 的防御全部删掉。** 最强理由：最少代码。没采用：目录越界检查防的是 manifest 里的相对路径逃出 work_dir；ASR 形状适配是因为当时 `asr_clean.json` 与 `asr_result.json` 形状确实不同（清洗稿移除后适配也删了，见 [[2026-11-06-remove-asr-clean-transcript]]）；空文本过滤是语义而不是防御。
 
 ## Consequences
 

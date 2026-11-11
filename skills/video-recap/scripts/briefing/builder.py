@@ -10,10 +10,6 @@ from briefing.context import (
     _format_moderation_refusals,
     _scene_number,
 )
-from briefing.inputs import (
-    _format_optional_stage_warnings,
-    _load_mimo_overview_for_brief,
-)
 from briefing.timeline import (
     _format_output_clip_list,
     _format_sentence_entry_anchors_for_brief,
@@ -75,8 +71,6 @@ def build_agent_brief(
     work_dir,
     style="纪录片",
     *,
-    mimo_overview_enabled=None,
-    mimo_overview_video_path=None,
     asr_evidence=None,
 ):
     """Write a compact brief that tells the agent how to author recap artifacts."""
@@ -90,14 +84,14 @@ def build_agent_brief(
     edit_mode = CONFIG["edit_mode"]
     target_duration = CONFIG["target_duration"] or "(not set)"
     output_seconds = video_duration
-    if edit_mode == "cut":
-        spans = _load_cut_output_spans_for_brief(work_dir, required=False)
-        if spans:
-            output_seconds = max(span["output_end"] for span in spans)
-        else:
-            target_seconds = _parse_target_seconds(CONFIG["target_duration"])
-            if target_seconds:
-                output_seconds = min(video_duration, target_seconds)
+    cut_pass2 = edit_mode == "cut" and (Path(work_dir) / "edited_source.mp4").exists()
+    if cut_pass2:
+        spans = _load_cut_output_spans_for_brief(work_dir)
+        output_seconds = max(span["output_end"] for span in spans)
+    elif edit_mode == "cut":
+        target_seconds = _parse_target_seconds(CONFIG["target_duration"])
+        if target_seconds:
+            output_seconds = min(video_duration, target_seconds)
     output_label = _duration_label(output_seconds)
     source_label = _duration_label(video_duration)
 
@@ -115,7 +109,7 @@ def build_agent_brief(
         f"- Effective speech budget: {effective_rate:.2f} Chinese chars/sec after {breath_sec:.2f}s pause allowance",
     ]
     if asr_evidence is None:
-        asr_evidence = {"status": "MISSING_OR_STALE", "glossary_modifications": None}
+        asr_evidence = {"status": "MISSING_OR_STALE"}
 
     lines.extend(
         [
@@ -134,7 +128,7 @@ def build_agent_brief(
             "",
             "## Creative decisions before expression / packaging",
             "",
-            "First determine the creative-control mode from the current user request and existing artifacts: CREATE explores a new cut; DIRECTED implements user-specified structure/shots/lines; REVISION changes an existing viewed version while freezing everything not named in the latest feedback. This is separate from full/cut/dub.",
+            "First determine the creative-control mode from the current user request and existing artifacts: CREATE explores a new cut; DIRECTED implements user-specified structure/shots/lines; REVISION changes an existing viewed version while freezing everything not named in the latest feedback. This is separate from full/cut.",
             "- CREATE compares at least two real editorial hypotheses. DIRECTED/REVISION inherit the user-specified or accepted spine and must not invent alternatives to satisfy a template.",
             "- In REVISION, state the current change list and frozen list first. Update `style_card.json` for expression/subtitle feedback and `visual_audio_board.json` for picture/timing/audio feedback; update `recap_story_plan.json` only when the promise, POV, spine, or story beats change. Remove stale descriptions when content is deleted.",
             "Before `clip_plan.json` or final narration, author or update `recap_story_plan.json` and `visual_audio_board.json` from the applicable director intent, beat changes, and picture/audio decisions described below.",
@@ -146,47 +140,21 @@ def build_agent_brief(
         ]
     )
 
-    mimo_overview = _load_mimo_overview_for_brief(
-        work_dir,
-        scenes_analysis,
-        enabled=mimo_overview_enabled,
-        video_path=mimo_overview_video_path,
-    )
-    lines.extend(
-        _format_optional_stage_warnings(
-            work_dir,
-            mimo_overview_enabled=mimo_overview_enabled,
-            mimo_overview=mimo_overview,
-        )
-    )
     lines.extend(_format_moderation_refusals(scenes_analysis))
     lines.extend(_format_background_research(load_background_research(work_dir)))
 
-    cut_pass2 = edit_mode == "cut" and (Path(work_dir) / "edited_source.mp4").exists()
+    brief_scenes, brief_asr, brief_silence = (
+        scenes_analysis,
+        asr_result,
+        silence_periods,
+    )
     if cut_pass2:
-        guide_scenes, guide_asr, guide_silence = (
+        brief_scenes, brief_asr, brief_silence = (
             _remap_brief_evidence_to_output_timeline(
-                work_dir, scenes_analysis, asr_result, silence_periods, required=True
+                work_dir, scenes_analysis, asr_result, silence_periods
             )
         )
-    else:
-        guide_scenes, guide_asr, guide_silence = (
-            scenes_analysis,
-            asr_result,
-            silence_periods,
-        )
     lines.extend(_format_sentence_entry_anchors_for_brief(work_dir, edit_mode))
-
-    overview_text = (mimo_overview or {}).get("content", "").strip()
-    if overview_text:
-        lines.extend(
-            [
-                "## MiMo scene-chunk video overview",
-                "",
-                overview_text[:2000],
-                "",
-            ]
-        )
 
     if edit_mode == "cut":
         cut_target_example = (
@@ -298,10 +266,10 @@ def build_agent_brief(
     else:
         lines.extend(["## Scene timing guide", ""])
 
-    for scene in guide_scenes:
+    for scene in brief_scenes:
         duration = scene["end"] - scene["start"]
         max_chars = max(5, _recommended_char_budget(scene["start"], scene["end"]))
-        quiets = _quiet_windows_for_scene(guide_silence, scene)
+        quiets = _quiet_windows_for_scene(brief_silence, scene)
         quiet_text = ", ".join(f"{s:.1f}-{e:.1f}s" for s, e in quiets) or "none"
         span = f"{scene['start']:.1f}-{scene['end']:.1f}s"
         lines.extend(
@@ -315,7 +283,6 @@ def build_agent_brief(
                 + (
                     " [moderation_refused]"
                     if scene.get("analysis_status") == "moderation_refused"
-                    and scene.get("description_source") != "mimo_video_overview"
                     else ""
                 ),
             ]
@@ -325,7 +292,7 @@ def build_agent_brief(
         facts = _format_frame_facts(scene)
         if facts:
             lines.append(facts.rstrip())
-        asr_lines = _scene_asr_lines(guide_asr, scene)
+        asr_lines = _scene_asr_lines(brief_asr, scene)
         if asr_lines:
             lines.append("- ASR overlap:")
             lines.extend(asr_lines[:8])

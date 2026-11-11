@@ -1,6 +1,7 @@
 """Regression contract for explicit non-narration assembly audio modes."""
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -13,10 +14,6 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scri
 sys.path.insert(0, str(SCRIPTS))
 
 from assemble import assemble_video  # noqa: E402
-import assembly_contract  # noqa: E402
-from assembly_settings import assembly_settings_payload  # noqa: E402
-import adoption.frozen_audio as frozen_audio  # noqa: E402
-from adoption.frozen_audio import probe_audio_packets, verify_adopted_audio  # noqa: E402
 from lib import CONFIG  # noqa: E402
 import timeline_emit  # noqa: E402
 
@@ -31,14 +28,13 @@ def _run(*args):
     subprocess.run(args, check=True, capture_output=True)
 
 
-def _make_av(path, *, video_seconds=2.0, audio_seconds=None, codec="aac"):
-    audio_seconds = video_seconds if audio_seconds is None else audio_seconds
+def _make_av(path):
     _run(
         "ffmpeg", "-y", "-loglevel", "error",
-        "-f", "lavfi", "-i", f"testsrc2=s=160x120:r=12:d={video_seconds}",
-        "-f", "lavfi", "-i", f"sine=frequency=431:sample_rate=48000:d={audio_seconds}",
+        "-f", "lavfi", "-i", "testsrc2=s=160x120:r=12:d=2.0",
+        "-f", "lavfi", "-i", "sine=frequency=431:sample_rate=48000:d=2.0",
         "-c:v", "libx264", "-preset", "ultrafast", "-pix_fmt", "yuv420p",
-        "-c:a", codec, str(path),
+        "-c:a", "aac", str(path),
     )
 
 
@@ -54,22 +50,6 @@ def _qc(work):
     return json.loads((work / "assembly_qc.json").read_text(encoding="utf-8"))
 
 
-def test_manifest_only_references_current_bound_subtitle_track(tmp_path):
-    track = tmp_path / "subtitle_track.json"
-    track.write_bytes(b"current track")
-    kwargs = dict(settings_payload=lambda _work, **_: {})
-    with pytest.raises(ValueError, match="prepared against current media"):
-        assembly_contract._assembly_manifest_payload(
-            tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
-        )
-
-    track.unlink()
-    stale = assembly_contract._assembly_manifest_payload(
-        tmp_path / "input.mp4", [], tmp_path, tmp_path / "out.mp4", **kwargs
-    )
-    assert "subtitle_track" not in stale
-
-
 def test_default_narration_mode_still_rejects_empty_tts(tmp_path):
     with pytest.raises(RuntimeError, match="没有有效解说音频"):
         assemble_video(tmp_path / "missing.mp4", [], tmp_path, tmp_path / "out.mp4")
@@ -83,12 +63,6 @@ def test_nondefault_modes_reject_misleading_or_unsupported_arguments(tmp_path, m
     _make_av(source)
     with pytest.raises(RuntimeError, match="source-mix.*TTS"):
         assemble_video(source, [{"index": 0}], work, work / "source.mp4", audio_mode="source-mix")
-    with pytest.raises(RuntimeError, match="narration.*audio_stream_index"):
-        assemble_video(source, [{"index": 0}], work, work / "narr.mp4",
-                       audio_mode="narration", audio_stream_index=1)
-    with pytest.raises(RuntimeError, match="非负整数"):
-        assemble_video(source, [], work, work / "bool.mp4",
-                       audio_mode="adopted-packet-copy", audio_stream_index=True)
 
 
 def test_source_mix_declared_missing_bgm_fails_closed(tmp_path, monkeypatch):
@@ -102,7 +76,7 @@ def test_source_mix_declared_missing_bgm_fails_closed(tmp_path, monkeypatch):
         assemble_video(source, [], work, work / "output.mp4", audio_mode="source-mix")
 
 
-def test_adopted_timeline_uses_current_whole_input_and_flat_selected_audio(tmp_path, monkeypatch):
+def test_source_mix_timeline_uses_current_whole_input_and_flat_selected_audio(tmp_path, monkeypatch):
     work = tmp_path / "work"
     work.mkdir()
     rendered = tmp_path / "rendered.mp4"
@@ -117,7 +91,7 @@ def test_adopted_timeline_uses_current_whole_input_and_flat_selected_audio(tmp_p
 
     timeline = timeline_emit._emit_timeline(
         rendered, [], work, 2.0, {"width": 160, "height": 120, "fps": 12}, False,
-        audio_mode="adopted-packet-copy", selected_audio_stream=0,
+        audio_mode="source-mix",
     )
 
     video = timeline["tracks"][0]["clips"]
@@ -125,23 +99,9 @@ def test_adopted_timeline_uses_current_whole_input_and_flat_selected_audio(tmp_p
     assert video[0]["source_path"] == str(rendered)
     assert video[0]["source_start"] == 0.0 and video[0]["source_end"] == 2.0
     assert video[0]["audio"] == {
-        "role": "original", "volume_keyframes": [], "base_gain": 1.0,
-        "selected_stream": 0, "mode": "adopted-packet-copy",
+        "role": "original", "volume_keyframes": [], "base_gain": 0.25,
     }
-    assert timeline["audio_delivery"]["packet_frozen"] is True
-    assert timeline["audio_delivery"]["reconstructable"] is True
-
-
-def test_optional_editor_export_rejects_nonzero_selected_stream(tmp_path, monkeypatch):
-    _quiet_visuals(monkeypatch)
-    monkeypatch.setitem(CONFIG, "export_jianying", True)
-    source = tmp_path / "source.mp4"
-    work = tmp_path / "work"
-    work.mkdir()
-    _make_av(source)
-    with pytest.raises(RuntimeError, match="剪映.*音频流"):
-        assemble_video(source, [], work, work / "output.mp4",
-                       audio_mode="adopted-packet-copy", audio_stream_index=1)
+    assert "audio_delivery" not in timeline
 
 
 def test_source_mix_succeeds_without_tts_and_reports_actual_operations(tmp_path, monkeypatch):
@@ -161,7 +121,7 @@ def test_source_mix_succeeds_without_tts_and_reports_actual_operations(tmp_path,
     assert "missing_narration" not in qc["blocking_codes"]
     assert qc["audio_operations"]["narration"] is False
     assert qc["audio_operations"]["loudness_normalization"] is True
-    assert qc["audio_operations"]["packet_copy"] is False
+    assert "packet_copy" not in qc["audio_operations"]
 
 
 def test_source_mix_executes_declared_bgm_and_volume_processing(tmp_path, monkeypatch):
@@ -211,64 +171,7 @@ def test_source_mix_cli_does_not_read_ambient_tts_meta(tmp_path):
     assert manifest["audio_mode"] == "source-mix"
 
 
-def test_adopted_copy_with_video_reencode_preserves_all_selected_aac_packets(tmp_path, monkeypatch):
-    _quiet_visuals(monkeypatch)
-    monkeypatch.setitem(CONFIG, "force_video_reencode", True)
-    source = tmp_path / "source.mp4"
-    work = tmp_path / "work"
-    work.mkdir()
-    _make_av(source)
-
-    output = assemble_video(
-        source, [], work, work / "output.mp4",
-        audio_mode="adopted-packet-copy", audio_stream_index=0,
-    )
-
-    before = probe_audio_packets(source, 0)
-    after = probe_audio_packets(output, 0)
-    assert before["packet_count"] == after["packet_count"]
-    assert before["payload_bytes"] == after["payload_bytes"]
-    assert before["packets"] == after["packets"]
-    qc = _qc(work)
-    assert qc["verdict"] == "PASS"
-    assert qc["audio_mode"] == "adopted-packet-copy"
-    assert qc["adopted_audio"]["verified"] is True
-    assert qc["adopted_audio"]["input"]["codec"] == "aac"
-    assert qc["adopted_audio"]["selected_audio_stream_index"] == 0
-    assert qc["audio_operations"] == {
-        "narration": False,
-        "source_mix": False,
-        "bgm_mix": False,
-        "ducking": False,
-        "loudness_normalization": False,
-        "limiter": False,
-        "resample": False,
-        "tempo": False,
-        "packet_copy": True,
-    }
-
-
-@pytest.mark.parametrize("conflict", ["tts", "bgm"])
-def test_adopted_copy_rejects_explicit_audio_processing(tmp_path, monkeypatch, conflict):
-    _quiet_visuals(monkeypatch)
-    source = tmp_path / "source.mp4"
-    work = tmp_path / "work"
-    work.mkdir()
-    _make_av(source)
-    segments = [{"index": 0}] if conflict == "tts" else []
-    if conflict == "bgm":
-        bgm = tmp_path / "bgm.wav"
-        _run("ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i", "sine=d=1", str(bgm))
-        monkeypatch.setitem(CONFIG, "bgm_path", str(bgm))
-
-    with pytest.raises(RuntimeError, match="adopted-packet-copy.*(?:TTS|BGM)"):
-        assemble_video(
-            source, segments, work, work / "output.mp4",
-            audio_mode="adopted-packet-copy", audio_stream_index=0,
-        )
-
-
-def test_adopted_copy_rejects_missing_wrong_stream_and_duration_mismatch(tmp_path, monkeypatch):
+def test_source_mix_rejects_missing_audio_stream_before_render(tmp_path, monkeypatch):
     _quiet_visuals(monkeypatch)
     work = tmp_path / "work"
     work.mkdir()
@@ -277,134 +180,53 @@ def test_adopted_copy_rejects_missing_wrong_stream_and_duration_mismatch(tmp_pat
         "ffmpeg", "-y", "-loglevel", "error", "-f", "lavfi", "-i",
         "color=s=160x120:r=12:d=2", "-c:v", "libx264", str(silent),
     )
-    with pytest.raises(RuntimeError, match="音频流"):
-        assemble_video(silent, [], work, work / "silent-out.mp4",
-                       audio_mode="adopted-packet-copy", audio_stream_index=0)
+    with pytest.raises(RuntimeError, match="找不到音频流 a:0"):
+        assemble_video(silent, [], work, work / "silent-out.mp4", audio_mode="source-mix")
+    assert not (work / "silent-out.mp4").exists()
 
+
+def test_isolated_copied_skill_cli_renders_source_mix(tmp_path):
     source = tmp_path / "source.mp4"
     _make_av(source)
-    with pytest.raises(RuntimeError, match="音频流"):
-        assemble_video(source, [], work, work / "wrong-out.mp4",
-                       audio_mode="adopted-packet-copy", audio_stream_index=3)
-
-    mismatch = tmp_path / "mismatch.mp4"
-    _make_av(mismatch, video_seconds=1.0, audio_seconds=2.0)
-    with pytest.raises(RuntimeError, match="时长.*不兼容"):
-        assemble_video(mismatch, [], work, work / "mismatch-out.mp4",
-                       audio_mode="adopted-packet-copy", audio_stream_index=0)
-
-    unsupported = tmp_path / "unsupported.mp4"
-    _make_av(unsupported, codec="mp3")
-    with pytest.raises(RuntimeError, match="只支持.*AAC.*mp3"):
-        assemble_video(unsupported, [], work, work / "unsupported-out.mp4",
-                       audio_mode="adopted-packet-copy", audio_stream_index=0)
-
-
-def test_adopted_audio_verifier_detects_output_tampering(tmp_path):
-    source = tmp_path / "source.mp4"
-    copied = tmp_path / "copied.mp4"
-    tampered = tmp_path / "tampered.mp4"
-    _make_av(source)
-    _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(source),
-         "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", str(copied))
-    evidence = verify_adopted_audio(source, copied, 0)
-    assert evidence["verified"] is True
-    _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(copied),
-         "-map", "0:v:0", "-map", "0:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "64k", str(tampered))
-
-    with pytest.raises(RuntimeError, match="(payload|packet)"):
-        verify_adopted_audio(source, tampered, 0)
-
-
-def test_adopted_settings_payload_ignores_narration_mix_defaults(tmp_path, monkeypatch):
-    _quiet_visuals(monkeypatch)
-    first = assembly_settings_payload(tmp_path, audio_mode="adopted-packet-copy", audio_stream_index=0)
-    monkeypatch.setitem(CONFIG, "narration_speed", 1.91)
-    monkeypatch.setitem(CONFIG, "ducking_orig_volume", 0.01)
-    monkeypatch.setitem(CONFIG, "final_loudnorm", not CONFIG["final_loudnorm"])
-    second = assembly_settings_payload(tmp_path, audio_mode="adopted-packet-copy", audio_stream_index=0)
-    assert first == second
-    assert first["audio"] == {"mode": "adopted-packet-copy", "selected_stream_index": 0}
-    assert assembly_settings_payload(tmp_path, audio_mode="narration") != first
-
-
-def _mock_packet_probe_payload():
-    stream = {
-        "index": 1,
-        "codec_name": "aac",
-        "time_base": "1/48000",
-        "start_time": "0.000000",
-        "duration": "0.021333",
-        "sample_rate": "48000",
-        "channels": 2,
-        "channel_layout": "stereo",
-    }
-    return {
-        "streams": [stream],
-        "packets": [{
-            "pts": -1024,
-            "dts": -1024,
-            "duration": 1024,
-            "size": "7",
-            "side_data_list": [{
-                "side_data_type": "Skip Samples",
-                "skip_samples": 1024,
-                "discard_padding": 211,
-                "skip_reason": 0,
-                "discard_reason": 0,
-            }],
-        }],
-    }
-
-
-def test_packet_probe_captures_decoder_facts_and_packet_side_data(monkeypatch):
-    monkeypatch.setattr(frozen_audio, "_probe", lambda *_args: _mock_packet_probe_payload())
-
-    identity = frozen_audio.probe_audio_packets("unused.mp4", 0)
-
-    assert identity["decoder"] == {
-        "codec": "aac",
-        "sample_rate": 48000,
-        "channels": 2,
-        "channel_layout": "stereo",
-    }
-    assert identity["packet_count"] == 1
-    assert identity["payload_bytes"] == 7
-    assert identity["packets"][0]["side_data_list"] == [{
-        "side_data_type": "Skip Samples",
-        "skip_samples": 1024,
-        "discard_padding": 211,
-        "skip_reason": 0,
-        "discard_reason": 0,
-    }]
-
-
-@pytest.mark.parametrize(
-    ("mutation", "message"),
-    [
-        (("decoder", "sample_rate", 44100), "decoder"),
-        (("decoder", "channels", 1), "decoder"),
-        (("packet_size", "size", 9), "payload"),
-        (("packet_side_data", "discard_padding", 0), "side data"),
-    ],
-)
-def test_verifier_rejects_mutated_decoder_or_packet_side_data(monkeypatch, mutation, message):
-    monkeypatch.setattr(frozen_audio, "_probe", lambda *_args: _mock_packet_probe_payload())
-    expected = frozen_audio.probe_audio_packets("input.mp4", 0)
-    actual = json.loads(json.dumps(expected))
-    if mutation[0] == "decoder":
-        actual["decoder"][mutation[1]] = mutation[2]
-        actual[mutation[1]] = mutation[2]
-    elif mutation[0] == "packet_size":
-        actual["packets"][0]["size"] = mutation[2]
-        actual["payload_bytes"] = mutation[2]
-    else:
-        actual["packets"][0]["side_data_list"][0][mutation[1]] = mutation[2]
-    monkeypatch.setattr(
-        frozen_audio,
-        "probe_audio_packets",
-        lambda path, _stream: expected if path == "input.mp4" else actual,
+    copied = tmp_path / "copied-skill"
+    shutil.copytree(SCRIPTS.parent, copied, ignore=shutil.ignore_patterns("__pycache__"))
+    work = tmp_path / "cli-work"
+    work.mkdir()
+    delivery = tmp_path / "delivery"
+    # -I drops caller/repo imports; only the copied scripts directory is importable.
+    launcher = (
+        "import runpy,sys;sys.path.insert(0,sys.argv[1]);sys.argv=sys.argv[2:];"
+        "runpy.run_path(sys.argv[0],run_name='__main__')"
     )
+    command = [
+        sys.executable, "-I", "-c", launcher, copied / "scripts",
+        copied / "scripts/assemble.py", source, "--work-dir", work,
+        "--audio-mode", "source-mix", "--no-burn-subtitles",
+        "--output-dir", delivery, "--recap-stem", "copied",
+    ]
+    result = subprocess.run(tuple(map(str, command)), env=dict(os.environ), capture_output=True,
+                            text=True, encoding="utf-8", errors="replace", timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (delivery / "recap_copied.mp4").is_file()
+    manifest = json.loads((work / "assembly_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["audio_mode"] == "source-mix"
 
-    with pytest.raises(RuntimeError, match=message):
-        frozen_audio.verify_adopted_audio("input.mp4", "output.mp4", 0)
+
+def test_removed_stream_flag_fails_at_the_parser(tmp_path):
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "assemble.py"), "v.mp4", "--work-dir", str(tmp_path),
+         "--audio-mode", "source-mix", "--audio-stream-index", "1"],
+        capture_output=True, text=True, encoding="utf-8",
+    )
+    assert result.returncode == 2
+    assert "--audio-stream-index" in result.stderr
+
+
+def test_handoff_speech_evidence_ignores_an_old_clean_transcript_left_behind(tmp_path):
+    import audio_mix
+
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([{"start": 0.0, "end": 2.0, "text": "原始转写"}]), encoding="utf-8")
+    (tmp_path / "asr_clean.json").write_text(
+        json.dumps({"segments": [{"start": 0.0, "end": 2.0, "text": "清洗旧稿"}]}), encoding="utf-8")
+    assert [row["text"] for row in audio_mix._asr_segments(tmp_path)] == ["原始转写"]

@@ -42,7 +42,7 @@
 
 **“影视解说”和“外语视频翻译配音”是一回事吗？**
 
-完全是两码事。影视解说需要从几十分钟原片里挑出核心冲突镜头重新拼剪、重写解说词，并与关键原声做声画交接；而视频翻译配音（例如 [pyvideotrans](https://github.com/jianchang512/pyvideotrans)、[YouDub-webui](https://github.com/liuzhao1225/YouDub-webui)）则是原封不动保留原片画面时长，只把外语对白逐句翻译替换成中文配音。如果你只是想把英文播客或公开课转成中文配音，选专业翻译工具更对口（本仓库也内置了实验性的 `--edit-mode dub` 克隆译制路径）。
+完全是两码事。影视解说需要从几十分钟原片里挑出核心冲突镜头重新拼剪、重写解说词，并与关键原声做声画交接；而视频翻译配音（例如 [pyvideotrans](https://github.com/jianchang512/pyvideotrans)、[YouDub-webui](https://github.com/liuzhao1225/YouDub-webui)）则是原封不动保留原片画面时长，只把外语对白逐句翻译替换成中文配音。如果你只是想把英文播客或公开课转成中文配音，选专业翻译工具更对口。
 
 **为什么大家都在看支不支持“导出剪映草稿”？**
 

@@ -263,7 +263,6 @@ def test_degraded_burn_keeps_user_gap_cues_in_the_sidecar(monkeypatch, tmp_path)
 def test_degraded_burn_records_machine_readable_warning(monkeypatch, tmp_path):
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", True)
-    monkeypatch.setitem(CONFIG, "source_subtitle_mask_policy", "opt_in")
     segs = [tts_segment(start=0.0, end=3.0, actual_place_start=0.5, actual_place_end=2.0,
                         narration="解说", audio_duration=1.5)]
     qc = visual_render._build_visual_qc(segs, tmp_path, 4.0, _canvas())
@@ -277,7 +276,7 @@ def test_degraded_burn_records_machine_readable_warning(monkeypatch, tmp_path):
 
 
 def test_degraded_burn_without_any_subtitles_records_no_warning(monkeypatch, tmp_path):
-    """source-mix / adopted copy without user subtitles: nothing was lost to the missing
+    """source-mix without user subtitles: nothing was lost to the missing
     libass, so nothing is relayed to the user."""
     _degraded(monkeypatch)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
@@ -397,9 +396,8 @@ def _quiet(monkeypatch):
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
-@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
 @pytest.mark.parametrize("pix_fmt", ["yuv420p", "yuv422p"])
-def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, audio_mode, pix_fmt):
+def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, pix_fmt):
     _quiet(monkeypatch)
     source = tmp_path / "source.mp4"
     work = tmp_path / "work"
@@ -407,7 +405,7 @@ def test_real_render_delivers_bt709_yuv420p_faststart(monkeypatch, tmp_path, aud
     _make_source(source, pix_fmt=pix_fmt)
     assert _probe(source).get("color_primaries", "unknown") == "unknown"
 
-    output = assemble_video(source, [], work, work / "output.mp4", audio_mode=audio_mode)
+    output = assemble_video(source, [], work, work / "output.mp4", audio_mode="source-mix")
 
     facts = _probe(output)
     assert facts["pix_fmt"] == "yuv420p"
@@ -482,9 +480,8 @@ def test_real_render_preserves_declared_bt601_tags(monkeypatch, tmp_path):
 
 
 @pytest.mark.skipif(not _HAVE_FFMPEG, reason="ffmpeg/ffprobe not available")
-@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
 @pytest.mark.parametrize("pix_fmt", ["yuv420p", "yuv422p"])
-def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, audio_mode, pix_fmt):
+def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, pix_fmt):
     """A downloaded source's title/comment/URL tags and chapters stay out of the recap,
     on the stream-copy path as well as the re-encode."""
     _quiet(monkeypatch)
@@ -502,7 +499,7 @@ def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, audio_mode,
     _run("ffmpeg", "-y", "-loglevel", "error", "-i", str(source), "-i", str(meta),
          "-map", "0", "-map_metadata", "1", "-map_chapters", "1", "-c", "copy", str(tagged))
 
-    output = assemble_video(tagged, [], work, work / "output.mp4", audio_mode=audio_mode)
+    output = assemble_video(tagged, [], work, work / "output.mp4", audio_mode="source-mix")
 
     probe = json.loads(subprocess.run(
         ["ffprobe", "-v", "error", "-show_chapters", "-show_entries", "format_tags",

@@ -1,9 +1,10 @@
-"""Orchestrate the video-understanding stages."""
+"""Orchestrate the understanding stages."""
 
 import argparse
 
 
 import json
+import os
 
 from pathlib import Path
 
@@ -16,11 +17,7 @@ from detect import detect_scenes, detect_silence_periods, detect_speech_boundary
 from asr import transcribe_audio
 from asr_timing_evidence import write_asr_timing_evidence
 
-from vlm import (
-    analyze_scenes,
-    analyze_video_overview,
-    mimo_video_overview_cache_fresh,
-)
+from vlm import analyze_scenes
 
 from understanding_brief import (
     _finish_brief,
@@ -33,14 +30,12 @@ from understanding_cache import (
     _asr_cache_state,
     _frames_cache_valid,
     _load_json,
-    _merge_overview_into_scenes,
     _remove_stage_meta,
     _scene_cache_payload,
     _silence_cache_payload,
     _stage_cache_valid,
     _vlm_cache_payload,
     _write_frames_manifest,
-    _write_mimo_overview_status,
     _write_stage_meta,
 )
 
@@ -69,7 +64,7 @@ def _refuse_keyless_overwrite(asr_json):
 
 def main():
     ap = argparse.ArgumentParser(
-        description="Analyze a video into an understanding index + narration brief."
+        description="Analyze a video into local understanding artifacts + narration brief."
     )
     ap.add_argument("video")
     ap.add_argument("--work-dir", required=True)
@@ -90,7 +85,6 @@ def main():
         help="cut-mode target duration to document in the writing brief",
     )
     ap.add_argument("--skip-asr", action="store_true")
-    ap.add_argument("--mimo-video-overview", action="store_true")
     ap.add_argument(
         "--force", action="store_true", help="ignore cached artifacts and recompute"
     )
@@ -108,6 +102,10 @@ def main():
         ),
     )
     args = ap.parse_args()
+    # Removed after v0.6.2. Refused for one release: an unread EDIT_MODE=cut would silently write a full brief.
+    for name, flag in (("EDIT_MODE", "--edit-mode"), ("TARGET_DURATION", "--target-duration")):
+        if os.environ.get(name):
+            ap.error(f"环境变量 {name} 已移除：请从环境里删掉它，改传 {flag}")
     if args.brief_only and args.edited_storyboard_only:
         ap.error("--brief-only and --edited-storyboard-only are mutually exclusive")
 
@@ -128,8 +126,6 @@ def main():
         CONFIG["edit_mode"] = args.edit_mode
     if args.target_duration is not None:
         CONFIG["target_duration"] = args.target_duration
-    if args.mimo_video_overview:
-        CONFIG["mimo_video_overview"] = True
 
     video_duration = get_video_duration(video)
     if CONFIG["fps"] <= 0:
@@ -235,56 +231,6 @@ def main():
         )
         vlm_analysis = analyze_scenes(scenes, frames, work_dir, resume=not args.force)
         _write_stage_meta(vlm_json, vlm_meta)
-
-    # Step 4.1: optional MiMo scene-chunk video understanding
-    overview_path = work_dir / "mimo_video_overview.json"
-    if CONFIG["mimo_video_overview"]:
-        if not CONFIG["mimo_video_api_key"] and mimo_video_overview_cache_fresh(
-            overview_path, video, scenes
-        ):
-            log("未设置 MIMO_API_KEY，复用已缓存的 MiMo 分片视频概览")
-            _write_mimo_overview_status(
-                work_dir, "cached", "未设置 MIMO_API_KEY，复用缓存", overview_path.name
-            )
-        elif not CONFIG["mimo_video_api_key"]:
-            log("跳过 MiMo 分片视频概览：未设置 MIMO_API_KEY")
-            overview_path.unlink(missing_ok=True)
-            _write_mimo_overview_status(
-                work_dir,
-                "skipped_no_key",
-                "未设置 MIMO_API_KEY，MiMo 分片视频概览未运行",
-                None,
-            )
-        elif mimo_video_overview_cache_fresh(overview_path, video, scenes):
-            log("跳过 MiMo 分片视频概览（缓存匹配）")
-            _write_mimo_overview_status(
-                work_dir, "cached", "缓存匹配", overview_path.name
-            )
-        else:
-            overview_path.unlink(missing_ok=True)
-            try:
-                overview = analyze_video_overview(video, work_dir, scenes)
-            except Exception as e:
-                log(f"MiMo 分片视频概览失败（忽略）: {e}")
-                _write_mimo_overview_status(work_dir, "failed", e, None)
-            else:
-                if overview:
-                    _write_mimo_overview_status(
-                        work_dir, "ok", "MiMo 分片视频概览完成", overview_path.name
-                    )
-                else:
-                    _write_mimo_overview_status(
-                        work_dir, "failed", "MiMo 分片视频概览未产出有效 artifact", None
-                    )
-    else:
-        overview_path.unlink(missing_ok=True)
-        _write_mimo_overview_status(
-            work_dir, "disabled", "MiMo 分片视频概览未启用", None, enabled=False
-        )
-
-    # Make the video-overview the primary per-scene description (frame_facts stay the anchor).
-    # No-op/revert when overview is absent, so disabling it cleanly returns to frame descriptions.
-    vlm_analysis = _merge_overview_into_scenes(vlm_analysis, overview_path)
 
     _finish_brief(
         video, work_dir, args, video_duration,

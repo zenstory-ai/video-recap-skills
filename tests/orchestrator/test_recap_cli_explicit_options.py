@@ -11,16 +11,31 @@ def test_parse_args_records_explicit_options_from_its_own_argv(monkeypatch):
     """Explicitness follows what argparse consumed, not whatever sys.argv happens to say."""
     monkeypatch.setattr(sys, "argv", ["recap.py", "--voice-ref", "/unrelated.wav"])
     _parser, args = recap_cli.parse_args(
-        ["video.mp4", "--edit-mode", "cut", "--no-review-narration"],
+        ["video.mp4", "--edit-mode", "cut", "--allow-partial-tts"],
     )
     assert args.edit_mode == "cut"
     assert args.voice_ref is None
-    assert args._explicit_options == frozenset({"--edit-mode", "--no-review-narration"})
+    assert args._explicit_options == frozenset({"--edit-mode", "--allow-partial-tts"})
 
 
 def test_parse_args_without_options_reports_nothing_explicit():
     _parser, args = recap_cli.parse_args(["video.mp4"])
     assert args._explicit_options == frozenset()
+
+
+@pytest.mark.parametrize(
+    ("typed", "explicit"),
+    [
+        (["--context=x"], {"--context"}),
+        (["--context", "x"], {"--context"}),
+        (["--skip-asr"], {"--skip-asr"}),
+        (["--context=--style"], {"--context"}),  # a value that looks like an option, after =
+        (["--", "--context=x"], set()),  # after -- it is a video path, not an option
+    ],
+)
+def test_explicit_options_follow_what_the_parse_consumed(typed, explicit):
+    _parser, args = recap_cli.parse_args(["video.mp4", *typed])
+    assert args._explicit_options == frozenset(explicit)
 
 
 @pytest.mark.parametrize("abbreviated", ["--voice", "--edit", "--require-narration"])

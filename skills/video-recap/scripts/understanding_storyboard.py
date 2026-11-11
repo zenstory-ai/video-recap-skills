@@ -30,8 +30,8 @@ def _storyboard_sample_policy():
     }
 
 
-def _reuse_cached_storyboard(json_path, meta, label):
-    """The cached storyboard, or None when it is unreadable."""
+def _reuse_cached_storyboard(json_path, label):
+    """The cached storyboard, or None when it is unreadable. Advisory: never raises."""
     try:
         cached = _load_json(json_path)
     except (OSError, ValueError):
@@ -102,7 +102,7 @@ def _generate_source_storyboard(
         "sample_policy": _storyboard_sample_policy(),
     }
     if not force and _stage_cache_valid(json_path, meta):
-        cached = _reuse_cached_storyboard(json_path, meta, "source")
+        cached = _reuse_cached_storyboard(json_path, "source")
         if cached is not None:
             return cached
     result = build_source_storyboard(work_dir, video_path, scenes, CONFIG["fps"])
@@ -111,21 +111,19 @@ def _generate_source_storyboard(
     return result
 
 
-def _multi_source_frame_sets(work_dir, plan_sources, clips=None):
+def _multi_source_frame_sets(work_dir, plan_sources, clips):
     """{source_id: {paths, numbers, fps, source_path}} for a multi-source validated plan.
 
     Each source's frames live in its own work_dir (`sources.<id>.source_work_dir`, relative to
     the project work_dir) at the fps recorded in that source's frames manifest — sources of
     different lengths are extracted at different fps. A source without frames is left out, and
-    so is one no clip in `clips` uses (when given): it would not appear on the sheet, yet it
-    would enter the cache key.
+    so is one no clip in `clips` uses: it must not take an S<n> label, be listed under `sources`,
+    set the tile size or enter the cache key.
     """
-    used = None if clips is None else {
-        clip.get("source_id") for clip in clips if isinstance(clip, dict)
-    }
+    used = {clip.get("source_id") for clip in clips if isinstance(clip, dict)}
     frame_sets = {}
     for source_id, source in plan_sources.items():
-        if used is not None and source_id not in used:
+        if source_id not in used:
             continue
         if not isinstance(source, dict):
             log(f"storyboard edited：来源 {source_id} 不是对象，跳过")
@@ -198,7 +196,7 @@ def _generate_edited_storyboard(work_dir, source_video_path, *, force=False):
         )
     json_path = Path(work_dir) / "storyboard" / "edited_storyboard.json"
     if not force and _stage_cache_valid(json_path, meta):
-        cached = _reuse_cached_storyboard(json_path, meta, "edited")
+        cached = _reuse_cached_storyboard(json_path, "edited")
         if cached is not None:
             return cached
     result = build_edited_storyboard(

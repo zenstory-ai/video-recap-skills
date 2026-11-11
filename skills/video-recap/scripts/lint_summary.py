@@ -4,7 +4,7 @@ narration_lint.json keeps every field; this summary repeats, per flagged block, 
 numbers needed to fix it without opening that file. Errors (failed lint) and warnings
 (passed lint) use the same line format. Block numbers are 1-based ("段 N",
 the block's position in narration.json); the report's `index` fields stay 0-based. A
-deslop blocker found in original_subtitles.json carries `source: "original_subtitles"`
+placeholder-leakage blocker found in original_subtitles.json carries `source: "original_subtitles"`
 and an index into that file, so it is labelled "原声字幕第 N 条", never "段 N".
 """
 
@@ -61,9 +61,6 @@ def _interrupts(e):
 _WARNING_DETAILS = {
     "slot_too_short": lambda e: f"{_window(e)} 只容得下约 {e.get('budget_chars')} 字，TTS 可能放不下",
     "incomplete_sentence": lambda e: f"结尾「{e.get('text_tail', '')}」没有句末标点",
-    "crosses_clip_boundary": lambda e: (
-        f"{_window(e)} 超出所在片段 {_seconds(e.get('clip_start'))}-{_seconds(e.get('clip_end'))}"
-    ),
 }
 
 

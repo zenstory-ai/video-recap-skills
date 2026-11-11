@@ -78,7 +78,7 @@ def _other_block_spans(narration, idx):
     ]
 
 
-# Clip/timeline edges are allowed positions; the open window bound sits this far outside.
+# Timeline edges are allowed positions; the open window bound sits this far outside.
 _EDGE_EPSILON = 1e-6
 
 
@@ -88,8 +88,8 @@ def _suggestion_window(narration, idx, suggested_spans, limits=(None, None)):
     Bounded by the previous and next valid blocks (narration is chronological) with the
     handoff gap. The previous block counts at both its authored and its own suggested
     window, so applying any subset of the suggestions keeps adjacent blocks apart and in
-    order. `limits` is the closed (first, last) range the block must stay in: its clip in
-    cut mode, the output duration in cut_output; either side may be None.
+    order. `limits` is the closed (first, last) range the block must stay in: the output
+    duration in cut_output; either side may be None.
     """
     gap = CONNECTED_HANDOFF_SECONDS
     low = high = None
@@ -114,12 +114,7 @@ def _suggestion_window(narration, idx, suggested_spans, limits=(None, None)):
 def _has_connected_predecessor(narration, idx, start):
     """A back-to-back narration handoff (<=150ms gap) does not expose the source track,
     so the next TTS block is not a new source-speech entry."""
-    for other_idx, other in enumerate(narration):
-        if other_idx == idx or not isinstance(other, dict):
-            continue
-        other_start, other_end = other.get("start"), other.get("end")
-        if not _is_number(other_start) or not _is_number(other_end):
-            continue
-        if other_start < start and -0.001 <= start - other_end <= CONNECTED_HANDOFF_SECONDS:
-            return True
-    return False
+    return any(
+        other_start < start and -0.001 <= start - other_end <= CONNECTED_HANDOFF_SECONDS
+        for other_start, other_end in _other_block_spans(narration, idx)
+    )

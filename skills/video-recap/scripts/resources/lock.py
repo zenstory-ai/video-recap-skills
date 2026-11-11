@@ -12,17 +12,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import library as library_lib
-from lib import file_identity
+from lib import file_identity, read_json_object
 
 LOCK_NAME = "resource_lock.json"
 LOCK_SCHEMA = "video-recap.resource-lock.v1"
-
-
-def _read(path: Path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return None
 
 
 def _file_entry(role: str, path, detail=None) -> dict:
@@ -37,7 +30,7 @@ def _file_entry(role: str, path, detail=None) -> dict:
 
 
 def _source_entries(work_dir: Path) -> list[dict]:
-    manifest = _read(work_dir / "recap_run_manifest.json") or {}
+    manifest = read_json_object(work_dir / "recap_run_manifest.json") or {}
     if manifest.get("mode") == "multi_source":
         return [_file_entry("source_video", s.get("source_path"), {"source_id": s.get("source_id")})
                 for s in manifest.get("sources", [])]
@@ -47,8 +40,8 @@ def _source_entries(work_dir: Path) -> list[dict]:
 
 
 def _voice_entry(work_dir: Path) -> dict | None:
-    meta = _read(work_dir / "tts_meta.json")
-    if not isinstance(meta, dict):
+    meta = read_json_object(work_dir / "tts_meta.json")
+    if meta is None:
         return None
     voice = meta.get("voice") or {"provider": meta.get("engine")}
     reference = voice.get("reference") or {}
@@ -60,7 +53,7 @@ def _voice_entry(work_dir: Path) -> dict | None:
 
 
 def _assembly_entries(work_dir: Path) -> list[dict]:
-    manifest = _read(work_dir / "assembly_manifest.json") or {}
+    manifest = read_json_object(work_dir / "assembly_manifest.json") or {}
     settings = manifest.get("assembly_settings") or {}
     entries = []
     bgm = (settings.get("audio_mix") or {}).get("bgm_path")
@@ -128,7 +121,6 @@ def build_resource_lock(work_dir, *, library_dir=None, project=None) -> dict:
     if voice:
         entries.append(voice)
     entries += _assembly_entries(work_dir)
-    entries += list((project or {}).get("resources", []))
     library_root = None
     if library_dir and Path(library_dir).is_dir():
         library_root = str(Path(library_dir).resolve())

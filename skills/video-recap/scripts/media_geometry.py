@@ -123,7 +123,7 @@ def _geometry_from_stream(stream, format_start=0.0):
         "width": width,
         "height": height,
         "fps": round(fps, 3),
-        # Exact rate and first-frame time: the grid video-cut snaps clip edges onto.
+        # Exact rate and first-frame time: the grid cut.py snaps clip edges onto.
         "frame_rate": frame_rate,
         "video_start_offset": _video_start_offset(stream, format_start),
         "sample_aspect_ratio": stream.get("sample_aspect_ratio", "1:1"),

@@ -272,27 +272,6 @@ def test_lint_failure_summary_also_lists_the_warnings():
     assert lines[3] == "- 段 1 incomplete_sentence：结尾「半句话」没有句末标点"
 
 
-def test_cut_mode_validates_without_writing(monkeypatch, tmp_path):
-    approved = [
-        {
-            "start": 1,
-            "end": 4,
-            "narration": "这段批准稿保持原样。",
-            "pause_after_ms": 123,
-            "overlaps_speech": False,
-            "extra": {"owner": "author"},
-        }
-    ]
-    path, raw = _write_narration(tmp_path, approved, separators=(",", ":"))
-    (tmp_path / "clip_plan.json").write_text(
-        json.dumps({"clips": [{"start": 0, "end": 5}]}), encoding="utf-8"
-    )
-
-    _run_validate(monkeypatch, tmp_path, "cut")
-
-    assert path.read_text(encoding="utf-8") == raw
-
-
 def test_cut_output_preserves_fields_and_derives_only_ownership(monkeypatch, tmp_path):
     _write_output_evidence(tmp_path)
     approved = [

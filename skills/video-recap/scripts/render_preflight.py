@@ -22,7 +22,6 @@ def _ffmpeg_filters():
     return filters
 
 
-SUBTITLE_BURN_DEGRADED = "subtitle_burn_degraded"
 LIBASS_MISSING = "ffmpeg_missing_libass"
 
 

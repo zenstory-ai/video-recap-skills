@@ -26,7 +26,8 @@ def _sample_argv(inline):
     parser, _ = recap_cli.parse_args(["in.mp4"])
     argv = ["in dir/in.mp4"]
     for action in parser._actions:
-        if not action.option_strings or action.dest == "help":
+        if (not action.option_strings or action.dest == "help"
+                or isinstance(action, recap_cli._RemovedFlag)):
             continue
         flag = action.option_strings[-1]
         if action.nargs == 0:
@@ -79,8 +80,7 @@ def test_resume_command_keeps_the_user_spelling_and_pins_cwd_and_env(
     tmp_path, monkeypatch, no_env_defaults
 ):
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("EDIT_MODE", "cut")
-    monkeypatch.setenv("TARGET_DURATION", "90")
+    monkeypatch.setenv("TTS_PROVIDER", "fish-audio")
     _, args = recap_cli.parse_args(
         ["in.mp4", "--style=悬疑", "--output-dir", "out", "--skip-asr"]
     )
@@ -91,8 +91,8 @@ def test_resume_command_keeps_the_user_spelling_and_pins_cwd_and_env(
 
     assert resume == [
         str(tmp_path / "in.mp4"), "--style=悬疑", "--output-dir", str(tmp_path / "out"),
-        "--skip-asr", "--work-dir", str(work), "--edit-mode", "cut",
-        "--target-duration", "90", "--voice-ref", str(tmp_path / "voice.wav"),
+        "--skip-asr", "--work-dir", str(work), "--tts-provider", "fish-audio",
+        "--voice-ref", str(tmp_path / "voice.wav"),
     ]
     video = tmp_path / "in.mp4"
     video.write_bytes(b"v")

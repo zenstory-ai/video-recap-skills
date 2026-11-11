@@ -53,7 +53,7 @@ def test_missing_premise_blocks_before_cached_reuse(run_cut, tmp_path, monkeypat
                      'reason': '拒绝请求→作出决定；标题/说明不能补被删前提'}],
            'required_evidence': contract(video)}
     with pytest.raises(SystemExit, match='QC blocking'):
-        run(raw, '--allow-duration-drift')
+        run(raw)
     current = json.loads((tmp_path / 'clip_plan_validated.json').read_text(encoding='utf-8'))
     assert current['qc']['required_evidence']['selection_status'] == 'BLOCK'
     assert current['qc']['blocking']
@@ -168,7 +168,7 @@ def test_real_render_and_cache_recheck_declared_premise(real_source, tmp_path):
 
     # Identical media plan, but the revised editorial requirement is not in it.
     raw['required_evidence']['nodes'][0].update(start=0.25, end=1.75)
-    blocked, validated = run_real_cut(real_source, work, raw, '--allow-duration-drift')
+    blocked, validated = run_real_cut(real_source, work, raw)
     assert blocked.returncode != 0
     assert 'QC blocking' in blocked.stdout + blocked.stderr
     assert validated['qc']['required_evidence']['selection_status'] == 'BLOCK'

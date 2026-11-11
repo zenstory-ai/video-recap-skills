@@ -17,6 +17,13 @@ SKILL_NAMES = tuple(
     if path.is_dir() and (path / "SKILL.md").is_file()
 )
 STAGE_SKILL_NAMES = tuple(name for name in SKILL_NAMES if name != "video-recap")
+RETIRED_SKILL_NAMES = (
+    "video-understanding",
+    "video-script",
+    "video-cut",
+    "video-voiceover",
+    "video-assemble",
+)
 
 
 def _skill_path(skill_name: str) -> Path:
@@ -208,7 +215,7 @@ def test_markdown_references_are_local_and_resolve_inside_each_skill():
                     pytest.fail(f"{markdown_path}: reference escapes its skill: {reference}")
                 assert resolved.is_file(), (markdown_path, reference)
 
-            # A bare script name such as `review.py` still denotes an implementation
+            # A bare script name such as `validate.py` still denotes an implementation
             # reference. It must resolve in this skill's own scripts directory rather
             # than silently relying on a sibling with a matching filename.
             for script_name in re.findall(r"`([A-Za-z0-9_.-]+\.py)`", text):
@@ -232,7 +239,7 @@ def test_stage_sources_never_point_to_a_sibling_skill_path():
     ]
     paths.extend(
         source_path
-        for skill_name in STAGE_SKILL_NAMES
+        for skill_name in SKILL_NAMES
         for source_path in (ROOT / "skills" / skill_name / "scripts").rglob("*.py")
         if "__pycache__" not in source_path.parts
     )
@@ -247,6 +254,20 @@ def test_stage_sources_never_point_to_a_sibling_skill_path():
         if path.suffix == ".md":
             for target_name in re.findall(r"`(video-[a-z-]+)/[^`]+\.(?:py|md)`", text):
                 assert target_name == current_name, (path, target_name)
+
+
+def test_skills_never_name_retired_stage_skills():
+    pattern = re.compile(r"\b(?:" + "|".join(map(re.escape, RETIRED_SKILL_NAMES)) + r")\b")
+    offenders = []
+    for path in sorted(SKILLS_ROOT.rglob("*")):
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        if path.suffix not in {".py", ".md", ".js"}:
+            continue
+        found = sorted(set(pattern.findall(path.read_text(encoding="utf-8"))))
+        if found:
+            offenders.append((str(path.relative_to(ROOT)), found))
+    assert not offenders, f"Retired stage skill names leaked into skills/: {offenders}"
 
 
 def test_stage_markdown_never_names_a_sibling_skill():

@@ -85,30 +85,29 @@ def write_asr_timing_evidence(
 
 
 def validate_asr_timing_evidence(evidence_path, video_path, asr_result_path):
-    """Return whether a sidecar still matches the current source/audio/result file identities."""
+    """Return whether a sidecar still describes the current source/audio/result files
+    (by size + mtime_ns)."""
     evidence_path = Path(evidence_path)
-    result_path = Path(asr_result_path)
     try:
         evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, TypeError):
         return False
-    if not isinstance(evidence, dict):
+    if not isinstance(evidence, dict) or evidence.get("schema_version") != SCHEMA_VERSION:
         return False
     status = evidence.get("status")
-    if status not in VALID_STATUSES or status.startswith("FAILED_"):
+    if not isinstance(status, str) or status not in VALID_STATUSES or status.startswith("FAILED_"):
         return False
     source_identity = _identity(video_path)
-    result_identity = _identity(result_path)
-    if not source_identity or evidence.get("source_video") != source_identity:
+    if source_identity is None or evidence.get("source_video") != source_identity:
         return False
-    if not result_identity or evidence.get("asr_result") != result_identity:
+    result_identity = _identity(asr_result_path)
+    if result_identity is None or evidence.get("asr_result") != result_identity:
         return False
     audio = evidence.get("audio")
-    if audio is not None:
-        audio_path = evidence_path.parent / "audio.wav"
-        if audio != _identity(audio_path):
-            return False
-    return True
+    if audio is not None and audio != _identity(evidence_path.parent / "audio.wav"):
+        return False
+    windows = evidence.get("windows")
+    return isinstance(windows, list) and all(isinstance(window, dict) for window in windows)
 
 
 def asr_evidence_summary_for_brief(work_dir, video_path):

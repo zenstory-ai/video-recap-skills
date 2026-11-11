@@ -10,9 +10,9 @@ import pytest
 
 
 @pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")), reason="requires local media tools")
-@pytest.mark.parametrize("audio_mode", ["source-mix", "adopted-packet-copy"])
 @pytest.mark.parametrize("picture_mode", ["full", "cut", "multi-cut"])
-def test_source_really_renders_without_narration(tmp_path, audio_mode, picture_mode):
+def test_source_really_renders_without_narration(tmp_path, picture_mode):
+    audio_mode = "source-mix"
     root = Path(__file__).resolve().parents[2]
     source = tmp_path / "source.mp4"
     work = tmp_path / "work"
@@ -53,7 +53,7 @@ if len(videos)==1:
     clips=[{"start":0,"end":1},{"start":1,"end":2}]
 else:
     sources=_build_multi_source_records(videos,args)
-    _write_project_run_manifest(work,videos,args,sources)
+    _write_project_run_manifest(work,args,sources)
     clips=[{"start":0,"end":1,"source_id":s["source_id"]} for s in sources]
 (work/"clip_plan.json").write_text(json.dumps(clips))
 '''
@@ -65,10 +65,10 @@ else:
         sys.executable, str(root / "skills/video-recap/scripts/recap.py"), *cli_args,
     ], env=env, capture_output=True, text=True, timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "video-understanding/" not in result.stdout
-    assert "video-voiceover/" not in result.stdout
+    assert "understanding/" not in result.stdout
+    assert "voiceover/" not in result.stdout
     if picture_mode != "full":
-        assert "video-cut/cut.py" in result.stdout
+        assert "cut/cut.py" in result.stdout
         assert (work / "edited_source.mp4").is_file()
     assert not (work / "narration.json").exists()
     assert not (work / "tts_meta.json").exists()

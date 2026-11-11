@@ -34,13 +34,13 @@
   "source_facts": [
     {"id": "f1", "dimension": "narrative_structure", "statement": "开场旁白用两句话点明主角被夺走工牌的处境，随后直接切进当面质问的原声冲突",
      "t": [0, 13.6], "entities": ["<原片人名>"]},
-    {"id": "f2", "dimension": "pacing", "statement": "原声对白段保留了原片密集的正反打切镜，旁白段则换用较稳的中长镜头托底",
+    {"id": "f2", "dimension": "pacing", "statement": "原声交锋段切镜密集，旁白讲述段则多用较长的单镜头",
      "measure": ["derived.by_owner.original_dialogue.cuts_per_min", "derived.by_owner.narration.cuts_per_min"],
      "entities": []}
   ],
   "methods": [
     {"id": "m1", "dimension": "audio_visual",
-     "rule": "原声对白段保留原片紧凑的正反打切镜，旁白解释段改用较长的稳定镜头托底，避免画面频繁跳切抢走听众对解说词的注意力",
+     "rule": "当面质问或争执时顺着对话保留快频反打，转入解说交代前因时换成稳定画面托底，避免频繁跳切分散听众对信息的注意力",
      "applies_when": "人物当面交锋激烈、又需要旁白穿插交代前因后果的剧情解说",
      "avoid_when": "纯靠连续动作推进、无需旁白解释的追逐或打斗段落",
      "applies_to": "visual_audio_board",
@@ -122,7 +122,7 @@
 
 **正例（可迁移、有条件、有数据支撑）**：
 
-1. `"rule": "原声对白段保留原片紧凑的正反打切镜，旁白解释段改用较长的稳定镜头托底，避免画面频繁跳切抢走听众对解说词的注意力"`，搭配 `"applies_when": "人物当面交锋激烈、又需要旁白穿插交代前因后果的剧情解说"`。注意：规则描述的方向必须与 `check` 算出的 `derived.by_owner.*.cuts_per_min` 实测值一致，不要闭眼瞎写。
+1. `"rule": "当面质问或争执时顺着对话保留快频反打，转入解说交代前因时换成稳定画面托底，避免频繁跳切分散听众对信息的注意力"`，搭配 `"applies_when": "人物当面交锋激烈、又需要旁白穿插交代前因后果的剧情解说"`。注意：规则描述的方向必须与 `check` 算出的 `derived.by_owner.*.cuts_per_min` 实测值一致，不要闭眼瞎写。
 2. `"rule": "开场先用一句旁白点破人物处境与身份落差，紧接着尽早放出第一句原声冲突把观众拽进现场"`，搭配 `"targets": {"first_original": {"from": "derived.first_original_at"}}`。
 3. `"rule": "旁白与原声的交接点尽量卡在画面硬切点上，借镜头切换掩护声音换手"`，搭配 `"evidence": ["measure:derived.switch_on_cut_share"]`。
 

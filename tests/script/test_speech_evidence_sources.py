@@ -1,4 +1,4 @@
-"""Which transcript and which rows decide source-speech ownership in video-script."""
+"""Which transcript and which rows decide source-speech ownership in script validation."""
 
 import sys
 from pathlib import Path
@@ -8,13 +8,52 @@ sys.path.insert(
 )
 import json
 
+from narration_lint import lint_narration
 from speech_ownership import _dialogue_speech_spans, load_source_sentence_evidence
+
+_UNVERIFIED_ANCHOR = {
+    "time": 12.0,
+    "pause_start": 11.8,
+    "confidence": "low",
+    "boundary_use": "unverified",
+    "timing_bound_seconds": 9.0,
+}
 
 
 def _write_json(path, payload):
     path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
 
 
+def _entry_codes(work_dir, start):
+    _write_json(
+        work_dir / "speech_boundary_anchors.json",
+        {"schema_version": 2, "sentence_anchors": [_UNVERIFIED_ANCHOR]},
+    )
+    report = lint_narration(
+        [{"start": start, "end": start + 3.0, "narration": "入口测试。", "overlaps_speech": True}],
+        mode="full",
+        work_dir=work_dir,
+    )
+    return [item["code"] for item in report["errors"] if "source_sentence" in item["code"]]
+
+
+def test_full_mode_lint_ignores_an_old_clean_transcript_left_behind(tmp_path):
+    # Raw ASR heard only "啊！" in 15-30s. Lint, cut and assemble all read raw ASR now, so a
+    # leftover asr_clean.json from a removed run cannot change this verdict for one of them.
+    _write_json(
+        tmp_path / "asr_result.json",
+        [{"start": 0.0, "end": 15.0, "text": "真实对白。"}, {"start": 15.0, "end": 30.0, "text": "啊！"}],
+    )
+    assert _entry_codes(tmp_path, 20.0) == []
+
+    _write_json(
+        tmp_path / "asr_clean.json",
+        {"segments": [
+            {"start": 0.0, "end": 15.0, "text": "真实对白。"},
+            {"start": 15.0, "end": 30.0, "text": "救我！"},
+        ]},
+    )
+    assert _entry_codes(tmp_path, 20.0) == []
 def test_full_mode_evidence_drops_blank_text_rows(tmp_path):
     _write_json(
         tmp_path / "asr_result.json",
@@ -36,7 +75,7 @@ def test_blank_text_rows_are_timing_only_and_guard_nothing():
         {"start": 30.0, "end": 45.0, "text": ""},
     ]
     assert _dialogue_speech_spans(rows) == [{"start": 0.0, "end": 15.0}]
-    # Filtering blank rows first (video-cut's caller) gives the same spans.
+    # Filtering blank rows first (cut.py's caller) gives the same spans.
     assert _dialogue_speech_spans(rows[:1]) == _dialogue_speech_spans(rows)
 
 

@@ -1,7 +1,7 @@
 """Cut QC bookkeeping for clip_plan_validated.json."""
 
 
-def update_cut_qc(plan, *, allow_duration_drift=False, duration_drift_allowed_by=None):
+def update_cut_qc(plan):
     """Populate clip_plan_validated.json['qc'] as the single cut QC source."""
     qc = dict(plan.get("qc", {}))
     warnings = list(qc.get("warnings", []))
@@ -32,23 +32,14 @@ def update_cut_qc(plan, *, allow_duration_drift=False, duration_drift_allowed_by
             "warning_thresholds": {"under": 0.85, "over": 1.15},
         }
         if severity:
-            warning = {
+            warnings.append({
                 "code": "target_duration_drift",
                 "status": target_status,
                 "severity": "warning",
                 "target_duration": round(target, 3),
                 "total_duration": round(total, 3),
                 "ratio": round(ratio, 3),
-            }
-            if allow_duration_drift:
-                warning["allowed"] = True
-                warning["duration_drift_allowed_by"] = (
-                    duration_drift_allowed_by or "--allow-duration-drift"
-                )
-                target_qc["duration_drift_allowed_by"] = warning[
-                    "duration_drift_allowed_by"
-                ]
-            warnings.append(warning)
+            })
     qc["target_duration_status"] = target_status
     qc["target_duration"] = target_qc
     qc.setdefault("boundary_status", {})

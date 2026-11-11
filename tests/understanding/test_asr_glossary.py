@@ -7,8 +7,8 @@ import asr  # noqa: E402
 
 
 def test_strip_reasoning_residue_removes_think_leakage():
-    """Full-mode ASR must strip leaked MiMo <think> reasoning residue too (parity with
-    video-voiceover/scripts/dub.py); clean transcript text stays untouched."""
+    """Full-mode ASR must strip leaked MiMo <think> reasoning residue too; clean transcript
+    text stays untouched."""
     assert asr._strip_reasoning_residue("think>\n 真相比逃跑更狼。").strip() == "真相比逃跑更狼。"
     assert asr._strip_reasoning_residue("<think>x\n</think>\n开门的却是个陌生男人").strip() == "开门的却是个陌生男人"
     assert asr._strip_reasoning_residue("<think>未闭合 后续").strip() == ""

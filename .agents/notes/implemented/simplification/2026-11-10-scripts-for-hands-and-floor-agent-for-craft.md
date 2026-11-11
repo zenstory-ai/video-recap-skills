@@ -13,7 +13,7 @@ Status: implemented
 清理并删除确认随模型增强越发尴尬的四类代码（替模型预处理/归纳/出建议、代码写死的品味规则、自家产物校验、旧兼容层），保留全部 H（执行与测量）与 F（底线门禁）：
 
 1. **删除替模型预消化、归纳与出建议（P）**：
-   - 删除 `skills/video-understanding/scripts/consolidate.py`、`index_normalize.py`、`timeline_fusion.py`，以及 `--consolidate` / `--no-consolidate` / `--consolidate-asr` 参数、`understanding_index.{json,md}`、`asr_clean.json`、`consolidation.status.json`、`timeline_fusion.json`、`asr_writing_chunks.json`（翻转并取代 [[2026-10-03-ordinal-plot-time-reads-unit-start]]、[[2026-10-03-reference-reads-consolidate-asr-mentions]] 中关于 `consolidate` 与 `understanding_index.json` 的约定）。
+   - 删除 `consolidate.py`、`index_normalize.py`、`timeline_fusion.py`，以及 `--consolidate` / `--no-consolidate` / `--consolidate-asr` 参数、`understanding_index.{json,md}`、`asr_clean.json`、`consolidation.status.json`、`timeline_fusion.json`、`asr_writing_chunks.json`（翻转并取代 [[2026-10-03-ordinal-plot-time-reads-unit-start]]、[[2026-10-03-reference-reads-consolidate-asr-mentions]]、[[2026-11-06-consolidation-single-pass-plumbing]]、[[2026-11-06-index-drops-deterministic-asr-fallback]] 中关于 `consolidate` 与 `understanding_index.json` 的约定）。
    - 删除 `detect._merge_short_scenes`（保留原始检测切点，不再把短于 4 秒的镜头并入相邻镜头）与 `asr._correct_text_with_glossary`（保留 ASR 原始观测文本，不再用人名表静默改写转写与绑定 `glossary` 缓存键）。
    - 删除 `briefing/context.py` 的素材薄厚打分与调研指令生成（`assess_understanding_substrate`、`_format_substrate_warning`、`_format_research_directive`）、`builder.py` 的硬编码块数配额 `target_count` 及重复静态写作教条、`recap_timeline.py` 的 `CUT_TIMELINE_CRAFT_BULLETS` / `MULTI_SOURCE_NARRATION_CRAFT_BULLETS` / `_brief_excerpt`、`lint_summary._HINTS` 的固定改法后缀，以及 `audio_mix.py` 的口播段落自动前拉紧凑启发式（`_dialogue_free_pull_start` / `_paragraph_pull_evidence`）。
 2. **删除代码写死的品味与启发式规则（T）**：
@@ -23,8 +23,7 @@ Status: implemented
    - `cut_qc.py` 的 `target_duration_drift` 统一记为 `warning`，不再因时长比例越出 `[0.60, 1.40]` 阻断渲染。
 3. **删除自家产物校验与旧版兼容层（C）**：
    - 删除 `detect.py` 的 schema-1 句末锚点就地升级兼容层（`_upgrade_schema1_anchors`、`anchors_current`、`ensure_speech_boundary_anchors`）。
-   - 删除 `tts_cache.py` 的 `legacy_sidecar_path`、`understanding_cache.py` 的 `_LEGACY_ASR_SETTINGS`、`understanding_storyboard.py` 的旧绝对路径重定位 `_relocated` 与旧标题前缀替换、`recap_runtime._settings_for_compare` 的旧 manifest 键补齐，以及多处 `asr_clean.json` 回退分支。
-   - 精简 `shot_review.py` 的 `_protect_declared_sources` 与 `UnsafeReportTarget` 包装。
+   - 删除 `tts_cache.py` 的 `legacy_sidecar_path`、`understanding_cache.py` 的 `_LEGACY_ASR_SETTINGS`、`understanding_storyboard.py` 的旧绝对路径重定位 `_relocated` 与旧标题前缀替换、`recap_runtime._settings_for_compare` 的旧 manifest 键补齐，以及多处 `asr_clean.json` 回退分支（`shot_review.py` 的 `_protect_declared_sources` 与 `UnsafeReportTarget` 按 [[2026-11-06-one-entry-per-capability]] 保留，防止 `--output` 误覆盖源视频或计划文件）。
 
 ## Alternatives considered
 

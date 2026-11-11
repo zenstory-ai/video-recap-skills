@@ -142,7 +142,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
 - 若命令行或环境变量已显式传入某项配置，且与项目绑定解析出的值不一致，程序会在启动前报错中止并指明冲突项，绝不静默覆盖。
 - 合成前会核对字幕模板、包装模板的画布尺寸与成片实际画布是否一致；尺寸不符立即中止，换画幅必须绑定对应画幅的模板。
-- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定；`dub` 模式和本地采用三件套路径不接受 `--project`。
+- 参考音频的 `consent.status` 为 `denied` 时拒绝绑定。
 - 暂停打印的续跑命令只携带 `--project`，不把绑定展开成一长串散装参数；中途修改 `recap_project.json` 后续跑，会按新绑定重新解析。
 
 ## 运行记录

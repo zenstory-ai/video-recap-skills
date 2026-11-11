@@ -1,4 +1,4 @@
-"""Media probing and source-clip provenance for video-assemble."""
+"""Media probing and source-clip provenance for the assemble stage."""
 
 import json
 import os

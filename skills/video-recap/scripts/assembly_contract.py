@@ -1,23 +1,63 @@
 """Assembly manifest/QC persistence and delivery contract helpers."""
 
 import json
-from fractions import Fraction
 import math
-import subprocess
 import wave
 from pathlib import Path
 
 from lib import CONFIG
 from assemble_constants import ASSEMBLY_MANIFEST, ASSEMBLY_QC
 from loudness import _loudness_mode
-from subtitles.track_binding import manifest_subtitle_evidence
 from artifacts import _source_video_identity, _timeline_provenance_status
+
+# The delivery family (frozen sound, strict adoption, explicit subtitle track) was removed;
+# v0.6.2 is the fallback. These names stay only so an old input fails instead of silently
+# rendering through another route.
+REMOVED_AUDIO_MODE = "adopted-packet-copy"
+_REMOVED_DELIVERY_ARTIFACTS = (
+    "subtitle_track.json",
+    "subtitle_track_validation.json",
+    "audio_mix_binding.json",
+    ".narration_input_snapshots",
+    ".explicit_audio_mix",
+)
+
+
+def removed_route_message(what):
+    return (
+        f"{what} 属于已移除的声音定稿交付路线（adopted-packet-copy、narration/audio-mix adoption、"
+        "subtitle_track）；请使用新的 --work-dir 走当前路线，仍需这些路线请使用 v0.6.2"
+    )
+
+
+def _read_json_object(path):
+    """A readable JSON object, else {}: a malformed file is not evidence of a removed route."""
+    try:
+        value = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def reject_removed_delivery_inputs(work_dir, audio_mode=None):
+    """Refuse the removed audio mode and any work_dir such a route left behind."""
+    if audio_mode == REMOVED_AUDIO_MODE:
+        raise RuntimeError(removed_route_message(f"audio_mode {audio_mode}"))
+    work_dir = Path(work_dir)
+    for name in _REMOVED_DELIVERY_ARTIFACTS:
+        if (work_dir / name).exists():
+            raise RuntimeError(removed_route_message(f"{work_dir / name}"))
+    bound = _read_json_object(work_dir / "narration_input_binding.json")
+    if bound.get("identity_status") == "BOUND_TO_ADOPTION":
+        raise RuntimeError(removed_route_message(f"{work_dir / 'narration_input_binding.json'}"))
+    for name in (ASSEMBLY_MANIFEST, ASSEMBLY_QC):
+        if _read_json_object(work_dir / name).get("audio_mode") == REMOVED_AUDIO_MODE:
+            raise RuntimeError(removed_route_message(f"{work_dir / name}"))
 
 
 def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                                tts_meta_path=None, final_output=None, *, settings_payload,
-                               audio_mode="narration", audio_stream_index=0,
-                               narration_input_binding=None, audio_mix_binding=None):
+                               audio_mode="narration"):
     """Slim render record. The orchestrator reads `final_output` to report the result;
     `source_video` is set only when cut mode passed --source-video. QC results live in
     assembly_qc.json (`qc_path`), not here."""
@@ -25,9 +65,7 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
     output_path = Path(output_path)
     source_video_identity = _source_video_identity()
     qc_path = Path(work_dir) / ASSEMBLY_QC
-    settings = settings_payload(
-        work_dir, audio_mode=audio_mode, audio_stream_index=audio_stream_index
-    )
+    settings = settings_payload(work_dir, audio_mode=audio_mode)
     payload = {
         "schema_version": 2,
         "input_video": str(input_video.resolve()),
@@ -36,17 +74,14 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
         "tts_meta": str(Path(tts_meta_path).resolve()) if tts_meta_path else None,
         "tts_segments": len(tts_segments),
         "audio_mode": audio_mode,
-        "selected_audio_stream_index": audio_stream_index,
+        "selected_audio_stream_index": 0,
         "assembly_settings": settings,
         "output_path": str(output_path.resolve()),
         "qc_path": str(qc_path.resolve()),
-        "narration_input_binding": narration_input_binding,
-        "audio_mix_binding": audio_mix_binding,
         "audio_segments": [
             {
                 "index": seg["index"],
-                # The loudness measurements are None whenever voiceover skipped
-                # normalization (strict adoption fixtures in tests/orchestrator omit them).
+                # The loudness measurements are None whenever voiceover skipped normalization.
                 "narration": seg["narration"],
                 "spoken_text": seg["spoken_text"],
                 "truncated": seg["truncated"],
@@ -69,9 +104,6 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
                 "rms_dbfs_before": seg.get("rms_dbfs_before"),
                 "rms_dbfs_after": seg.get("rms_dbfs_after"),
                 "peak_after": seg.get("peak_after"),
-                "output_start_sample": seg.get("output_start_sample"),
-                "output_end_sample": seg.get("output_end_sample"),
-                "adopted_gain": seg.get("adopted_gain"),
             }
             for seg in tts_segments
         ],
@@ -81,9 +113,6 @@ def _assembly_manifest_payload(input_video, tts_segments, work_dir, output_path,
     provenance = _timeline_provenance_status(work_dir)
     if provenance:
         payload["timeline_provenance"] = provenance
-    subtitle_evidence = manifest_subtitle_evidence(work_dir, input_video, output_path)
-    if subtitle_evidence is not None:
-        payload["subtitle_track"] = subtitle_evidence
     return payload
 
 
@@ -103,21 +132,7 @@ def _placed_audio_matches_timeline(seg):
             placed_duration = placed_wav.getnframes() / placed_wav.getframerate()
             tolerance = 1.0 / placed_wav.getframerate()
     except wave.Error:
-        result = subprocess.run(
-            ["ffprobe", "-v", "error", "-select_streams", "a:0", "-show_entries",
-             "stream=sample_rate,time_base,duration_ts", "-of", "json", str(placed_path)],
-            capture_output=True, text=True, timeout=600,
-        )
-        streams = json.loads(result.stdout).get("streams", []) if not result.returncode else []
-        if len(streams) != 1:
-            return False
-        stream = streams[0]
-        try:
-            rate = int(stream["sample_rate"])
-            placed_duration = float(Fraction(stream["duration_ts"]) * Fraction(stream["time_base"]))
-            tolerance = 1.0 / rate
-        except (KeyError, TypeError, ValueError, ZeroDivisionError):
-            return False
+        return False
     timeline_start = math.floor(float(seg["actual_place_start"]) * 10_000 + 1e-9) / 10_000
     timeline_end = math.ceil(float(seg["actual_place_end"]) * 10_000 - 1e-9) / 10_000
     serialized_span = timeline_end - timeline_start
@@ -130,10 +145,7 @@ def _placed_audio_matches_timeline(seg):
 def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render_delivery,
                        output_path=None, source_has_audio=None, loudness_mode=None,
                        loudnorm_measurement=None, loudnorm_final_pass=None,
-                       visual_qc=None, audio_mode="narration",
-                       adopted_audio=None,
-                       narration_input_binding=None, audio_mix_binding=None,
-                       source_audio_status=None):
+                       visual_qc=None, audio_mode="narration"):
     """Machine-readable assembly release gate.
 
     Only visual_qc.json's verdict and blocking codes are carried here; its facts stay in
@@ -200,9 +212,7 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
     )
     if visual_qc is not None and visual_qc["blocking"]:
         blocking_codes.append("visual_qc_failed")
-    if source_audio_status is not None:
-        source_audio = source_audio_status
-    elif source_has_audio is False:
+    if source_has_audio is False:
         # Not blocking: assemble can synthesize a silent original track.
         source_audio = "synthetic_silence"
     elif source_has_audio is True:
@@ -230,9 +240,6 @@ def _build_assembly_qc(tts_segments, video_duration, *, audio_operations, render
         "duration": round(float(video_duration), 4),
         "audio_mode": audio_mode,
         "audio_operations": audio_operations,
-        "adopted_audio": adopted_audio,
-        "narration_input_binding": narration_input_binding,
-        "audio_mix_binding": audio_mix_binding,
         "source_audio": source_audio,
         "loudness_mode": loudness_mode or _loudness_mode(loudnorm_measurement),
         "loudnorm_measurement": loudnorm_measurement,

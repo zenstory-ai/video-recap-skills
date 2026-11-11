@@ -48,36 +48,31 @@ def _parse_target_seconds(value):
     return seconds
 
 
-def _load_cut_output_spans_for_brief(work_dir, *, required=False):
+def _load_cut_output_spans_for_brief(work_dir):
     """Load fresh source→output spans for cut pass 2 brief evidence.
 
     Pass 2 narration is authored against edited_source.mp4's OUTPUT timeline, so
-    scene timing guide and sentence entry anchors must use the same OUTPUT clock. Before pass 2
-    (no edited_source.mp4 yet), callers may fall back to source-time evidence; once
-    pass 2 exists, missing/stale validated spans are a hard contract failure.
+    scene timing guide and sentence entry anchors must use the same OUTPUT clock. Callers reach
+    this only once edited_source.mp4 exists; missing/stale validated spans are a hard contract failure.
     """
 
     def fail(reason):
-        if required:
-            raise SystemExit(
-                "cut pass2 brief requires fresh clip_plan_validated.json with explicit "
-                f"source/output spans ({reason})"
-            )
-        return None
+        raise SystemExit(
+            "cut pass2 brief requires fresh clip_plan_validated.json with explicit "
+            f"source/output spans ({reason})"
+        )
 
     work_dir = Path(work_dir)
-    if not (work_dir / "edited_source.mp4").exists():
-        return None
     validated_path = work_dir / "clip_plan_validated.json"
     if not validated_path.exists():
-        return fail("missing clip_plan_validated.json")
+        fail("missing clip_plan_validated.json")
     plan = json.loads(validated_path.read_text(encoding="utf-8"))
     raw_path = work_dir / "clip_plan.json"
     if (
         raw_path.exists()
         and validated_path.stat().st_mtime_ns < raw_path.stat().st_mtime_ns
     ):
-        return fail("stale clip_plan_validated.json")
+        fail("stale clip_plan_validated.json")
     spans = []
     for clip in plan["clips"]:
         span = {
@@ -85,9 +80,9 @@ def _load_cut_output_spans_for_brief(work_dir, *, required=False):
             for key in ("source_start", "source_end", "output_start", "output_end")
         }
         if not all(math.isfinite(value) for value in span.values()):
-            return fail("non-finite clip span")
+            fail("non-finite clip span")
         if span["source_end"] <= span["source_start"] or span["output_end"] <= span["output_start"]:
-            return fail("non-positive clip span")
+            fail("non-positive clip span")
         spans.append(span)
     return spans or fail("no clips")
 
@@ -182,39 +177,29 @@ def _remap_scenes_to_output_for_brief(scenes, spans):
     return out
 
 
-def _remap_segments_to_output_for_brief(segments, spans):
-    out = []
-    for seg in segments:
-        for overlap in _source_output_overlaps_for_brief(seg["start"], seg["end"], spans):
-            item = dict(seg)
-            item["start"] = round(overlap["output_start"], 3)
-            item["end"] = round(overlap["output_end"], 3)
-            if "duration" in item:
-                item["duration"] = round(item["end"] - item["start"], 3)
-            out.append(item)
-    out.sort(key=lambda x: (x["start"], x["end"]))
-    return out
-
-
 _COVERAGE_SLACK = 0.05
 # No "." inside: the ASR chunker splits sentences on it.
 _PARTIAL_WINDOW_TEXT = "[partial ASR window: only part of it is in the cut, text withheld]"
 
 
-def _remap_asr_to_output_for_brief(segments, spans):
-    """ASR rows on the OUTPUT clock for the brief's writing evidence.
+def _remap_segments_to_output_for_brief(segments, spans, withhold_partial=False):
+    """Timed rows on the OUTPUT clock, one row per kept piece.
 
-    A coarse window the cut keeps only part of cannot say which of its words survived, so
-    each kept piece shows a partial-window marker instead of the window's text: the
-    brief never quotes dialogue that may not be in the cut. A window the kept clips cover
-    completely (even across a seam) keeps its text. `speech_spans` in
-    speech_boundary_anchors_output.json are remapped separately and keep the raw text."""
+    `withhold_partial` is for the brief's ASR writing evidence. A coarse window the cut keeps
+    only part of cannot say which of its words survived, so each kept piece shows a
+    partial-window marker instead of the window's text: the brief never quotes dialogue that
+    may not be in the cut. A window the kept clips cover completely (even across a seam)
+    keeps its text. `speech_spans` in speech_boundary_anchors_output.json keep the raw text."""
     out = []
     for seg in segments:
         overlaps = _source_output_overlaps_for_brief(seg["start"], seg["end"], spans)
         kept = sum(o["source_end"] - o["source_start"] for o in overlaps)
         window = seg["end"] - seg["start"]
-        partial = bool(str(seg.get("text") or "").strip()) and kept < window - _COVERAGE_SLACK
+        partial = (
+            withhold_partial
+            and bool(str(seg.get("text") or "").strip())
+            and kept < window - _COVERAGE_SLACK
+        )
         for overlap in overlaps:
             item = dict(seg)
             item["start"] = round(overlap["output_start"], 3)
@@ -229,14 +214,12 @@ def _remap_asr_to_output_for_brief(segments, spans):
 
 
 def _remap_brief_evidence_to_output_timeline(
-    work_dir, scenes_analysis, asr_result, silence_periods, *, required=False
+    work_dir, scenes_analysis, asr_result, silence_periods
 ):
-    spans = _load_cut_output_spans_for_brief(work_dir, required=required)
-    if not spans:
-        return scenes_analysis, asr_result, silence_periods
+    spans = _load_cut_output_spans_for_brief(work_dir)
     return (
         _remap_scenes_to_output_for_brief(scenes_analysis, spans),
-        _remap_asr_to_output_for_brief(asr_result, spans),
+        _remap_segments_to_output_for_brief(asr_result, spans, withhold_partial=True),
         _remap_segments_to_output_for_brief(silence_periods, spans),
     )
 
@@ -265,7 +248,7 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
     if edit_mode != "cut" or not (work_dir / "edited_source.mp4").exists():
         return anchors
 
-    spans = _load_cut_output_spans_for_brief(work_dir, required=True)
+    spans = _load_cut_output_spans_for_brief(work_dir)
     output_duration = max(span["output_end"] for span in spans)
     remapped = []
     for anchor in anchors:
@@ -378,10 +361,7 @@ def _format_sentence_entry_anchors_for_brief(work_dir, edit_mode):
 def _format_output_clip_list(work_dir):
     """List the kept clips on the OUTPUT timeline (cut-first/narrate-second pass 2), so the
     agent narrates against the real rendered cut instead of the source timeline."""
-    path = Path(work_dir) / "clip_plan_validated.json"
-    if not path.exists():
-        return []
-    plan = json.loads(path.read_text(encoding="utf-8"))
+    plan = json.loads((Path(work_dir) / "clip_plan_validated.json").read_text(encoding="utf-8"))
     out = ["## Kept clips on the OUTPUT timeline", ""]
     for c in plan["clips"]:
         reason = c.get("reason", "")
@@ -391,4 +371,4 @@ def _format_output_clip_list(work_dir):
             + (f" — {reason}" if reason else "")
         )
     out.append("")
-    return out if len(out) > 2 else []
+    return out

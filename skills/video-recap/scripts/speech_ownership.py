@@ -19,7 +19,7 @@ def _empty_evidence(mode):
 
 # Interjections and common ASR artifacts on screams/music. A window whose text is only these
 # is not dialogue at a clip edge or narration entry; real short lines such as "救我！" still are.
-# Same copy in video-cut, video-script and video-assemble (parity-tested by function).
+# Shared across cut, script validation and assemble within video-recap.
 _NON_DIALOGUE_TOKENS = frozenset(
     "啊 嗯 哼 哦 呃 唉 嘿 呦 哈 呀 hi yeah ok okay oh uh ah hmm".split()
 )
@@ -87,7 +87,7 @@ def _read_json(path):
 
 
 def _source_asr_rows(work_dir):
-    """ASR segments from asr_result.json.
+    """Raw asr_result.json, the one transcript lint, cut and assemble verdicts read.
 
     Blank-text rows are timing-only evidence (ASR heard no words) and are not source speech.
     """
@@ -101,6 +101,14 @@ def _output_payload_is_current(payload, work_dir):
         payload is not None
         and plan_path.exists()
         and payload["clip_plan_identity"] == file_identity(plan_path)
+    )
+
+
+def anchor_boundary_use(anchor):
+    """`boundary_use` (schema 2) keeps coarse-ASR estimates usable as `unverified`; schema-1
+    anchors (no `boundary_use`) were all coarse estimates: high/medium are `unverified`."""
+    return anchor.get("boundary_use") or (
+        "unverified" if anchor["confidence"] in {"high", "medium"} else "none"
     )
 
 
@@ -121,22 +129,12 @@ def load_source_sentence_evidence(work_dir, mode="full"):
         ]
     else:
         payload = _read_json(work_dir / "speech_boundary_anchors_output.json")
-        if mode == "cut_output" and not _output_payload_is_current(payload, work_dir):
+        if not _output_payload_is_current(payload, work_dir):
             return _empty_evidence(mode)
-        if payload is None:
-            payload = {"sentence_anchors": [], "speech_spans": [], "quiet_windows": []}
         speech_spans = payload["speech_spans"]
         quiet_windows = payload["quiet_windows"]
-    # `boundary_use` (schema 2) keeps coarse-ASR estimates usable as `unverified`; schema-1
-    # anchors (no `boundary_use`) were all coarse estimates: high/medium are `unverified`.
     anchors = [
-        anchor
-        for anchor in payload["sentence_anchors"]
-        if (
-            anchor.get("boundary_use")
-            or ("unverified" if anchor["confidence"] in {"high", "medium"} else "none")
-        )
-        != "none"
+        anchor for anchor in payload["sentence_anchors"] if anchor_boundary_use(anchor) != "none"
     ]
     return {
         "anchors": sorted(anchors, key=lambda item: item["time"]),

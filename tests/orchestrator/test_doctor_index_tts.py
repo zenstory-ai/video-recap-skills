@@ -14,7 +14,7 @@ def _base_config(monkeypatch):
         "_command_path",
         lambda name: f"/usr/bin/{name}" if name in {"ffmpeg", "ffprobe"} else None,
     )
-    for key in ("api_key", "mimo_asr_api_key", "mimo_video_api_key"):
+    for key in ("api_key", "mimo_asr_api_key"):
         monkeypatch.setitem(doctor.CONFIG, key, "configured")
 
 

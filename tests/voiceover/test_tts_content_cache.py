@@ -35,7 +35,6 @@ def engine_calls(monkeypatch):
     monkeypatch.setitem(CONFIG, "tts_provider", "mimo-tts")
     monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
     monkeypatch.setitem(CONFIG, "voice_ref", "")
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
     monkeypatch.setattr(voiceover, "_run_tts_engine", fake_run)
     monkeypatch.setattr(voiceover, "get_video_duration", lambda _path: 1.0)
     return calls
@@ -90,7 +89,6 @@ def test_deleting_the_last_block_resynthesizes_nothing_across_providers(
 
 def test_cache_key_is_the_request_the_provider_receives(monkeypatch):
     monkeypatch.setitem(CONFIG, "voice_ref", "")
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", False)
     seg = {"start": 0.0, "end": 3.0, "narration": "同一句。"}
 
     def key(engine, rate, pitch="+0Hz", emotion=None):
@@ -118,20 +116,19 @@ def test_moving_a_window_reuses_the_audio(engine_calls, tmp_path):
     assert [s["end"] for s in segments] == [4.0, 8.0, 12.0, 16.0, 20.0]
 
 
-def test_an_approved_block_moved_into_a_short_window_fails_without_a_provider_call(
-    engine_calls, monkeypatch, tmp_path
+def test_a_block_moved_into_a_short_window_reuses_the_audio_and_leaves_fit_to_assemble(
+    engine_calls, tmp_path
 ):
-    monkeypatch.setitem(CONFIG, "preserve_approved_text", True)
     narration = _narration(BLOCKS[:2])
     voiceover.synthesize_tts(narration, tmp_path)
     engine_calls.clear()
     narration[1]["end"] = narration[1]["start"] + 0.6
 
-    with pytest.raises(voiceover.ApprovedTextDurationError) as raised:
-        voiceover.synthesize_tts(narration, tmp_path)
+    segments, _engine, failures = voiceover.synthesize_tts(narration, tmp_path)
 
     assert engine_calls == []
-    assert raised.value.evidence["segment"] == 2
+    assert failures == []
+    assert [s["fit_status"] for s in segments] == ["pending_assembly", "pending_assembly"]
 
 
 def test_block_files_share_the_cached_audio_instead_of_copying_it(engine_calls, tmp_path):

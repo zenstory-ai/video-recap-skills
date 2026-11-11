@@ -79,7 +79,7 @@ def _timed_rows(rows):
 
 
 def _asr_segments(work_dir):
-    """ASR segments from asr_result.json; [] when absent."""
+    """Raw asr_result.json segments; [] when absent."""
     return _load_work_json(work_dir, "asr_result.json") or []
 
 
@@ -89,8 +89,8 @@ def _handoff_speech_evidence(work_dir, payload):
     decides only whether a narration entry interrupts source speech.
 
     ASR fallback rows with empty text are windows where nothing was recognized, not
-    speech (video-cut and video-script drop them the same way). Output-clock
-    `speech_spans` carry no `text` and stay timing-only dialogue evidence.
+    speech (cut.py and validate.py drop them the same way). Output-clock
+    `speech_spans` keep the raw ASR text; a row with no `text` counts as dialogue.
     """
     rows = payload.get("speech_spans", [])
     quiet = _timed_rows(payload.get("quiet_windows", []))
@@ -331,14 +331,11 @@ def _duck_envelope(tts_segments, idle, speech_vol, quiet_vol, fade, bridge):
     Uses the shared ducking contract: [start-fade,start] pre-roll ramp down,
     [start,end] held at the selected duck level, and [end,end+fade] release.
     Bridged spans use the most-ducked (lowest) level, matching timeline.json /
-    JianYing keyframes. Returns a volume= expression, or None when no beat was
-    placed (caller falls back to a constant).
+    JianYing keyframes. Returns a volume= expression.
     """
     windows = []
     for seg in tts_segments:
         start, narration_end = _seg_place_window(seg)
-        if narration_end <= start:
-            continue
         hold_end = max(narration_end, seg.get("source_duck_end", narration_end))
         restore_at = max(hold_end, seg.get("source_restore_at", hold_end + fade))
         level = speech_vol if seg["overlaps_speech"] else quiet_vol
@@ -384,22 +381,15 @@ def _build_audio_filter_complex(
     if has_bgm:
         base = CONFIG["bgm_volume"]
         bgm_expr = _bgm_envelope(tts_segments, base, CONFIG["bgm_ducking_volume"], fade, bridge)
-        if bgm_expr:
-            bgm_chain = f"{bgm_in}volume='{bgm_expr}':eval=frame,aresample=48000[bgm];"
-        else:
-            bgm_chain = f"{bgm_in}volume={base},aresample=48000[bgm];"
+        bgm_chain = f"{bgm_in}volume='{bgm_expr}':eval=frame,aresample=48000[bgm];"
 
     # Gap-fill ducking envelope on the original track.
     idle = CONFIG["idle_orig_volume"]
     speech_vol = CONFIG["speech_ducking_volume"]
     quiet_vol = CONFIG["zone_ducking_volume"]
     expr = _duck_envelope(tts_segments, idle, speech_vol, quiet_vol, fade, bridge)
-    if expr:
-        n_overlap = sum(1 for s in tts_segments if s["overlaps_speech"])
-        n_quiet = len(tts_segments) - n_overlap
-        log(f"gap-fill ducking: 间隙原声={idle}, 对白段={speech_vol}({n_overlap}), 安静段={quiet_vol}({n_quiet}), 桥接间隙<{bridge}s")
-        orig = f"{original_in}volume='{expr}':eval=frame,aresample=48000[orig];"
-    else:
-        # No placement info at all: hold the original at a constant level.
-        orig = f"{original_in}volume={CONFIG['ducking_orig_volume']},aresample=48000[orig];"
+    n_overlap = sum(1 for s in tts_segments if s["overlaps_speech"])
+    n_quiet = len(tts_segments) - n_overlap
+    log(f"gap-fill ducking: 间隙原声={idle}, 对白段={speech_vol}({n_overlap}), 安静段={quiet_vol}({n_quiet}), 桥接间隙<{bridge}s")
+    orig = f"{original_in}volume='{expr}':eval=frame,aresample=48000[orig];"
     return orig + _amix_tail(narr_vol, bgm_chain)

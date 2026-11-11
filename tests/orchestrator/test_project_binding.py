@@ -100,7 +100,6 @@ def test_font_resource_supplies_family_and_file(tmp_path, clean_env):
         pytest.param(["voice"], {}, {}, "bindings 必须是 object", id="bindings_not_object"),
         pytest.param({"voice": ["narrator-demo"]}, {}, {}, "bindings.voice", id="binding_not_id_string"),
         pytest.param({"voice": "narrator-demo"}, {}, {"VIDEO_RECAP_MATERIAL_LIBRARY_DIR": "/elsewhere"}, "VIDEO_RECAP_MATERIAL_LIBRARY_DIR", id="material_library_env_conflict"),
-        pytest.param({"bgm": "pulse-demo"}, {"audio_mode": "adopted-packet-copy"}, {}, "adopted-packet-copy", id="bgm_with_frozen_audio"),
     ],
 )
 def test_bindings_that_cannot_apply_stop_before_any_stage(tmp_path, clean_env, monkeypatch,

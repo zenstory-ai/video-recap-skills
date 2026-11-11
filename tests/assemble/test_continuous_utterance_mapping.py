@@ -73,7 +73,6 @@ def test_source_srt_through_ass_keeps_first_syllable_and_continuous_display(tmp_
         pytest.skip('ffmpeg unavailable')
     monkeypatch.setitem(CONFIG, 'burn_subtitles', True)
     monkeypatch.setitem(CONFIG, 'subtitle_original_in_gaps', True)
-    monkeypatch.setitem(CONFIG, 'source_subtitle_mask_policy', 'off')
     (tmp_path / 'user_subtitles.srt').write_text(
         '1\n00:00:10,800 --> 00:00:11,600\n老大\n', encoding='utf-8')
     # Same source, continuous speech, but a new picture-shot boundary at output 1s.

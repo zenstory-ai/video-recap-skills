@@ -66,7 +66,6 @@ def _mock_run_cmd_makes_output(monkeypatch):
         return CompletedProcess(cmd, 0, stdout="", stderr="")
 
     monkeypatch.setattr("storyboard.run_cmd", fake_run_cmd)
-    monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
     monkeypatch.setattr("storyboard.get_video_duration", lambda v: 30.0)
     return calls
 
@@ -297,6 +296,18 @@ def test_cache_hit_corrupt_sidecar_rebuilds_without_traceback(monkeypatch, tmp_p
     assert json.loads(json_path.read_text(encoding="utf-8"))["timeline"] == "source"
 
 
+def test_copied_work_dir_storyboard_names_its_own_pages(monkeypatch, tmp_path):
+    """A cache hit in a copied work_dir must not point at the original directory."""
+    generate, builds = _cached_source_storyboard(monkeypatch, tmp_path)
+    first = generate()
+    assert first["page_images"] == ["storyboard/source_storyboard.jpg"]
+
+    reused = generate()
+
+    assert builds["n"] == 1  # cache hit, no rebuild
+    assert reused["page_images"] == ["storyboard/source_storyboard.jpg"]
+    on_disk = json.loads((tmp_path / "storyboard" / "source_storyboard.json").read_text(encoding="utf-8"))
+    assert on_disk["page_images"] == ["storyboard/source_storyboard.jpg"]
 # ── graceful None on no-frames / run_cmd failure / font-probe raise ───────────
 
 
@@ -307,7 +318,6 @@ def _no_frames(monkeypatch, tmp_path):
 def _run_cmd_fails(monkeypatch, tmp_path):
     _stage_frames(tmp_path, [0, 2, 4], fps=2.0)
     _with_font(monkeypatch)
-    monkeypatch.setattr("storyboard._ffmpeg_available", lambda: True)
     monkeypatch.setattr(
         "storyboard.run_cmd",
         lambda cmd, **kwargs: CompletedProcess(cmd, 1, stdout="", stderr="ffmpeg boom"),
@@ -376,6 +386,43 @@ def test_edited_storyboard_skipped_without_validated_plan(tmp_path):
     assert understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4") is None
 
 
+def test_copied_work_dir_edited_storyboard_names_its_own_pages(monkeypatch, tmp_path):
+    """The edited storyboard stores work_dir-relative paths, so a cache hit names its own pages."""
+    _stage_frames(tmp_path, list(range(0, 80, 2)), fps=2.0)
+    monkeypatch.setitem(CONFIG, "storyboard", True)
+    monkeypatch.setitem(CONFIG, "fps", 2.0)
+    _mock_run_cmd_makes_output(monkeypatch)
+    _with_font(monkeypatch)
+    (tmp_path / "clip_plan_validated.json").write_text(
+        json.dumps(_validated_plan()), encoding="utf-8"
+    )
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    builds = {"n": 0}
+    real_build = storyboard.build_edited_storyboard
+
+    def counting_build(*a, **k):
+        builds["n"] += 1
+        return real_build(*a, **k)
+
+    monkeypatch.setattr("understanding_storyboard.build_edited_storyboard", counting_build)
+
+    def generate():
+        return understanding_storyboard._generate_edited_storyboard(tmp_path, "video.mp4")
+
+    first = generate()
+    assert first["page_images"] == ["storyboard/edited_storyboard.jpg"]
+    assert first["edited_video_path"] == "edited_source.mp4"
+
+    reused = generate()
+
+    assert builds["n"] == 1  # cache hit, no rebuild
+    expected = {
+        "page_images": ["storyboard/edited_storyboard.jpg"],
+        "edited_video_path": "edited_source.mp4",
+    }
+    assert {k: reused[k] for k in expected} == expected
+    on_disk = json.loads((tmp_path / "storyboard" / "edited_storyboard.json").read_text(encoding="utf-8"))
+    assert {k: on_disk[k] for k in expected} == expected
 def test_brief_header_branches_on_labels_burned(tmp_path):
     brief = tmp_path / "agent_narration_brief.md"
     brief.write_text("# body\n", encoding="utf-8")
@@ -557,6 +604,24 @@ def test_edited_storyboard_only_points_an_existing_brief_at_the_sheet_once(
     assert status["page_images"]
 
 
+def test_storyboard_brief_header_replaces_its_earlier_header(tmp_path):
+    """Re-running on a brief that already carries the header replaces it, not stacks it."""
+    brief = tmp_path / "agent_narration_brief.md"
+    brief.write_text(
+        "## Storyboard（先看 storyboard 再写；路径相对 work_dir）\n\n"
+        "- 成片(output)时间线 storyboard: /old/work/storyboard/edited_storyboard.jpg\n\n"
+        "# Brief\n\nbody\n",
+        encoding="utf-8",
+    )
+    edited = {"page_images": ["storyboard/edited_storyboard.jpg"], "labels_burned": True}
+
+    understanding_storyboard._prepend_storyboard_brief_header(brief, None, edited, cut_mode=True)
+
+    text = brief.read_text(encoding="utf-8")
+    assert text.count("## Storyboard") == 1
+    assert "/old/work" not in text
+    assert text.startswith("## Storyboard（先看 storyboard 再写；路径相对 work_dir）")
+    assert text.endswith("# Brief\n\nbody\n")
 def _fill_real_frames(work_dir, specs):
     """Replace each source's empty fixture frames with one real still (sid, size, pix_fmt)."""
     for sid, size, pix_fmt in specs:
@@ -584,7 +649,9 @@ def test_real_ffmpeg_multi_source_sheet_letterboxes_mixed_frame_sizes(monkeypatc
     _fill_real_frames(tmp_path, (("src_a", "64x36", "yuvj444p"), ("src_b", "36x64", "yuvj420p")))
     monkeypatch.setitem(CONFIG, "storyboard_columns", 6)
     _no_font(monkeypatch)
-    frame_sets = understanding_storyboard._multi_source_frame_sets(tmp_path, plan["sources"])
+    frame_sets = understanding_storyboard._multi_source_frame_sets(
+        tmp_path, plan["sources"], plan["clips"]
+    )
 
     result = storyboard.build_edited_storyboard(
         tmp_path, "a.mp4", plan, 2.0, source_frames=frame_sets

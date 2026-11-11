@@ -1,1 +1,1 @@
-"""TTS provider transports (fish-audio, index-tts) for the video-voiceover skill."""
+"""TTS provider transports (fish-audio, index-tts) for voiceover.py."""

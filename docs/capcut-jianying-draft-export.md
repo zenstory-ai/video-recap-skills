@@ -19,7 +19,7 @@ Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草�
 
 ## 剪映草稿里包含哪些轨道？
 
-合成阶段（`assemble.py`）通过 `--export-jianying`（或环境变量 `EXPORT_JIANYING=1`）读取标准时间线 `timeline.json`，生成多轨剪映草稿：
+合成阶段（`assemble.py`）通过 `--export-jianying` 读取标准时间线 `timeline.json`，生成多轨剪映草稿：
 
 | 剪映轨道 | 轨道内容说明 |
 |---|---|

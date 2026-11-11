@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""video-script validation entrypoint.
+"""Narration validation entrypoint.
 
-Validate an agent-written narration.json against the local understanding index.
+Validate an agent-written narration.json against the local speech timing evidence.
 Validation never rewrites the agent's text, timing, order or metadata. Full-mode text
 that does not fit its window fails lint and goes back to the author. full and cut_output
 persist only the measured ``overlaps_speech`` ownership.
@@ -14,27 +14,7 @@ from pathlib import Path
 
 from lib import log
 from narration_lint import NarrationLintError, validate_narration_or_raise
-from speech_ownership import measure_narration_speech_ownership
-
-
-def _load(path):
-    path = Path(path)
-    return json.loads(path.read_text(encoding="utf-8")) if path.exists() else None
-
-
-def _load_cut_clip_plan(work_dir):
-    raw_plan = Path(work_dir) / "clip_plan.json"
-    validated_plan = Path(work_dir) / "clip_plan_validated.json"
-    if not validated_plan.exists():
-        return _load(raw_plan)
-    if not raw_plan.exists():
-        return _load(validated_plan)
-
-    # Validation may run before the cut stage refreshes clip_plan_validated.json;
-    # a validated plan older than the raw plan is stale, so lint against the raw plan.
-    if validated_plan.stat().st_mtime_ns >= raw_plan.stat().st_mtime_ns:
-        return _load(validated_plan)
-    return _load(raw_plan)
+from speech_ownership import _read_json, measure_narration_speech_ownership
 
 
 def _validate_output_timeline_bounds(narration, duration, tolerance=0.05):
@@ -85,7 +65,7 @@ def _parse_args():
         description="Validate agent-written narration.json and measure speech ownership."
     )
     ap.add_argument("--work-dir", required=True)
-    ap.add_argument("--mode", default="full", choices=["full", "cut", "cut_output"])
+    ap.add_argument("--mode", default="full", choices=["full", "cut_output"])
     ap.add_argument(
         "--output-duration",
         type=float,
@@ -98,22 +78,21 @@ def _parse_args():
 def _validate(args):
     work_dir = Path(args.work_dir)
     narration_path = work_dir / "narration.json"
-    narration = _load(narration_path)
+    narration = _read_json(narration_path)
     if narration is None:
-        raise SystemExit(f"缺少 {narration_path}；请先按 video-script 规则写解说词")
-    vlm_analysis = _load(work_dir / "vlm_analysis.json")
-    if args.mode == "cut_output":
-        # Two-pass cut: narration is authored in OUTPUT time against edited_source.mp4 — there is
-        # no source-time clip membership check. Lint the authored shape first, then derive speech
-        # ownership from the mapped output evidence and persist that measured flag for
-        # voiceover/assemble instead of trusting JSON.
-        report = validate_narration_or_raise(
-            narration, None, clip_plan=None, mode="cut_output", work_dir=work_dir,
-            output_duration=args.output_duration,
-        )
-        narration = measure_narration_speech_ownership(
-            narration, work_dir, mode="cut_output"
-        )
+        raise SystemExit(f"缺少 {narration_path}；请先按 video-recap 规则写解说词")
+    vlm_analysis = _read_json(work_dir / "vlm_analysis.json")
+    cut_output = args.mode == "cut_output"
+    # Lint the authored shape first, then derive speech ownership (speech spans minus quiet
+    # windows) from the evidence and persist that measured flag for voiceover/assemble instead
+    # of trusting JSON. cut_output narration is authored in OUTPUT time against
+    # edited_source.mp4, so the source-time scene analysis does not apply to it.
+    report = validate_narration_or_raise(
+        narration, None if cut_output else vlm_analysis, mode=args.mode, work_dir=work_dir,
+        output_duration=args.output_duration if cut_output else None,
+    )
+    narration = measure_narration_speech_ownership(narration, work_dir, mode=args.mode)
+    if cut_output:
         try:
             if args.output_duration is None:
                 raise SystemExit("--output-duration is required when --mode cut_output")
@@ -131,24 +110,9 @@ def _validate(args):
                 json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
             )
             raise
-        narration_path.write_text(
-            json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
-    elif args.mode == "cut":
-        clip_plan = _load_cut_clip_plan(work_dir)
-        validate_narration_or_raise(
-            narration, vlm_analysis, clip_plan=clip_plan, mode="cut", work_dir=work_dir
-        )
-    else:
-        # Same contract as cut_output: lint the authored shape, then persist only the
-        # measured speech ownership (speech spans minus quiet windows).
-        validate_narration_or_raise(
-            narration, vlm_analysis, clip_plan=None, mode="full", work_dir=work_dir
-        )
-        narration = measure_narration_speech_ownership(narration, work_dir, mode="full")
-        narration_path.write_text(
-            json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+    narration_path.write_text(
+        json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
 
     log(f"解说词验证完成: {len(narration)} 段")
     print(

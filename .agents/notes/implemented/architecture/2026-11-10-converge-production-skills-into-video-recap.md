@@ -15,12 +15,12 @@ Status: implemented
 将六个生产 skill 合并为单一自包含生产 skill `skills/video-recap/`，保留按需拆片学习的 `skills/video-reference/`，形成 **1 + 1** 双 skill 结构：
 
 - **脚本层合一（`skills/video-recap/scripts/`）**：
-  - 将原 `video-understanding`、`video-script`、`video-cut`、`video-voiceover`、`video-assemble` 的脚本与子包（`briefing/`、`providers/`、`adoption/`、`jianying/`、`subtitles/`、`dashboard/`、`resources/`）统一收入 `skills/video-recap/scripts/`。各阶段 CLI 入口（`recap.py`、`understand.py`、`validate.py`、`review.py`、`cut.py`、`shot_review.py`、`voiceover.py`、`dub.py`、`assemble.py`、`source_score.py`、`doctor.py`、`library.py`、`dashboard_server.py`）保持不变，`recap_runtime._entry` 直接解析本技能 `scripts/<script>`。
+  - 将原 `video-understanding`、`video-script`、`video-cut`、`video-voiceover`、`video-assemble` 的脚本与子包（`briefing/`、`providers/`、`jianying/`、`subtitles/`、`dashboard/`、`resources/`）统一收入 `skills/video-recap/scripts/`。各阶段 CLI 入口（`recap.py`、`understand.py`、`validate.py`、`cut.py`、`shot_review.py`、`voiceover.py`、`assemble.py`、`doctor.py`、`library.py`、`dashboard_server.py`）保持不变，`recap_runtime._entry` 直接解析本技能 `scripts/<script>`（`dub.py`、`adoption/` + `source_score.py`、`review.py` 已分别按 [[2026-11-06-remove-dub-mode]]、[[2026-11-06-remove-delivery-family]]、[[2026-11-06-remove-narration-review-chain]] 移除）。
   - 六份生产 `lib.py` 合并为单一 `skills/video-recap/scripts/lib.py`，两份 `agent_text.py` 合并为单一 `skills/video-recap/scripts/agent_text.py`。
   - 消除原本仅因跨 skill 隔离而复制的同源逻辑：`cut_render.py` 直接从 `media.py` 导入色彩空间标签表与辅助函数（移除 `media_geometry.py` 中的副本）；`sentence_boundaries.py` 与 `audio_mix.py` 直接从 `speech_ownership.py` 导入纯语气词判定与对白区间函数。
   - 删除失去存在前提的跨生产 skill 副本比对测试 `tests/orchestrator/test_brief_narration_parity.py` 与 `tests/orchestrator/test_render_format_parity.py`；保留 `test_audio_policy_parity.py` 守护 `video-recap` 的 `lib.py` 只声明实际读取的配置项。
 - **指令与参考层合一（`skills/video-recap/SKILL.md` 与 `references/`）**：
-  - 原六个生产 skill 的 `SKILL.md` 合并为一篇一气呵成的 `skills/video-recap/SKILL.md`（理解 → 策划选镜与写旁白 → 剪辑/配音/合成 → 成片复核），完整保留远程调用与数据外发说明（MiMo ASR/VLM/`review.py`/TTS、Fish Audio、IndexTTS 及 `dub` 模式 `--confirm-voice-rights` 硬门禁）。
+  - 原六个生产 skill 的 `SKILL.md` 合并为一篇一气呵成的 `skills/video-recap/SKILL.md`（理解 → 策划选镜与写旁白 → 剪辑/配音/合成 → 成片复核），完整保留远程调用与数据外发说明（MiMo ASR/VLM/TTS、Fish Audio、IndexTTS 及 `--voice-ref` 克隆授权要求）。
   - 所有生产 `references/` 迁入 `skills/video-recap/references/`；两份 `research-guide.md` 与两份 `data-schema.md` 各自合一，彻底消除跨阶段暗语。
   - 删除 `skills/video-{understanding,script,cut,voiceover,assemble}/` 五个目录。
 - **分发与清单同步**：
@@ -40,5 +40,5 @@ Status: implemented
   - 删除 5 份生产 `SKILL.md`、5 份 `lib.py`、1 份 `agent_text.py`、重复的 `research-guide.md` / `data-schema.md` 以及跨 skill 复制的色彩标签与语气词函数，大幅减少重复代码与文档。
   - `video-recap` 本身包含全部生产脚本，单目录复制即可独立运行。
 - **代价**：
-  - `skills/video-recap/scripts/` 下的模块数量增加，依靠现有的子包结构（`briefing/`、`providers/`、`adoption/`、`jianying/`、`subtitles/`、`dashboard/`、`resources/`）与无环导入测试保持清晰边界。
+  - `skills/video-recap/scripts/` 下的模块数量增加，依靠现有的子包结构（`briefing/`、`providers/`、`jianying/`、`subtitles/`、`dashboard/`、`resources/`）与无环导入测试保持清晰边界。
   - 现有测试套件中指向 `skills/video-{understanding,script,cut,voiceover,assemble}/scripts` 的路径统一更新到 `skills/video-recap/scripts`。

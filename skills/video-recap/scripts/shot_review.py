@@ -269,6 +269,7 @@ def _atomic_json(path, data):
 
 
 def _report_target(video, output, plan_path):
+    """Unknown existing files are never report targets, even with corrupt source metadata."""
     from cut_contract import _edited_source_meta_path
     protected = {Path(video).resolve(), _edited_source_meta_path(video).resolve()}
     if plan_path is not None:
@@ -276,19 +277,55 @@ def _report_target(video, output, plan_path):
     target = Path(output).resolve()
     if target in protected:
         raise ValueError("report must not overwrite media, source, plan or render metadata")
+    if Path(output).exists():
+        try:
+            old = json.loads(Path(output).read_text(encoding="utf-8"))
+            if (not isinstance(old, dict) or type(old.get("schema_version")) is not int
+                    or old["schema_version"] != 1 or old.get("artifact") != "shot_review"):
+                raise ValueError("not a shot-review artifact")
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise ValueError("report must not overwrite an unknown existing file") from exc
     return target
 
 
+def _protect_declared_sources(video, plan_path, target):
+    """Use both plan and metadata declarations, even when they disagree."""
+    from cut_contract import _edited_source_meta_path
+    if plan_path is None:
+        return
+    paths, errors = set(), []
+    for path, kind in [(Path(plan_path), "plan"), (_edited_source_meta_path(video), "meta")]:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if kind == "plan":
+                paths.update(c["source_path"] for c in data["clips"] if "source_path" in c)
+            else:
+                paths.update(data["sources"])
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            errors.append(exc)
+    if target in {Path(p).resolve() for p in paths}:
+        raise UnsafeReportTarget("report must not overwrite a declared source")
+    if errors:
+        raise ValueError(f"cannot verify declared source protection: {errors[0]}")
+
+
+class UnsafeReportTarget(ValueError):
+    """Do not write even failure evidence to an input file."""
+
+
 def write_scan(video, output, **options):
-    _report_target(video, output, options.get("plan_path"))
+    target = _report_target(video, output, options.get("plan_path"))
     roi = options.get("roi")
     base = {"schema_version": 1, "artifact": "shot_review", "scan_complete": False,
             "normal_speed_review": "NOT_CHECKED",
             "scene_threshold": options.get("threshold", 0.35),
             "scene_roi": None if roi is None else list(roi)}
     try:
+        _protect_declared_sources(video, options.get("plan_path"), target)
         _atomic_json(output, {**base, "status": "SCANNING"})
         report = scan_video(video, **options)
+    except UnsafeReportTarget:
+        raise
     except (OSError, ValueError, RuntimeError, KeyError, TypeError, subprocess.SubprocessError) as exc:
         _atomic_json(output, {**base, "status": "SCAN_FAILED", "error": str(exc)})
         raise

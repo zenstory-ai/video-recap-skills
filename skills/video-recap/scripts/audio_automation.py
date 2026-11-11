@@ -61,8 +61,6 @@ def duck_ramp_expression(start, end, fade):
 
 def ducking_expression(windows, idle, fade):
     """Build the ffmpeg volume expression for coalesced duck windows."""
-    if not windows:
-        return None
     idle = float(idle)
     terms = [
         f"+({float(level) - idle:.3f})*{duck_ramp_expression(s, e, fade)}"
@@ -97,8 +95,6 @@ def release_ducking_expression(windows, idle, attack_fade, bridge=None):
     if bridge is None:
         bridge = default_bridge(attack)
     merged = coalesce_release_duck_windows(windows, bridge)
-    if not merged:
-        return None
     idle = float(idle)
     terms = []
     for start, hold_end, level, restore_at in merged:

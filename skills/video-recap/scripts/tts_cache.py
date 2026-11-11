@@ -12,14 +12,37 @@ import hashlib
 import json
 import os
 import shutil
+import tempfile
 import threading
 from pathlib import Path
 
-from approved_text_policy import write_json_atomically
 from lib import file_identity
 
 CACHE_DIR_NAME = "cache"
 _RECORD_KEYS = ("spoken_text", "audio_duration", "normalization", "provider_receipt")
+
+
+def write_json_atomically(path, payload):
+    """Replace JSON only after a complete same-directory write and fsync."""
+    destination = Path(path)
+    temp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=destination.parent,
+            prefix=f".{destination.stem}.",
+            suffix=".tmp",
+            delete=False,
+        ) as handle:
+            temp_path = Path(handle.name)
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, destination)
+    finally:
+        if temp_path is not None:
+            temp_path.unlink(missing_ok=True)
 
 
 def cache_entry(tts_dir, cache_inputs):

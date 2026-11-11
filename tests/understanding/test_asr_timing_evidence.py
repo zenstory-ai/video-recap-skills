@@ -159,7 +159,6 @@ def test_empty_provider_text_is_unknown_not_proven_silence_and_not_cached(
     assert asr.transcribe_audio(video, tmp_path)[0]["text"] == ""
     evidence = _read_evidence(tmp_path)
     assert evidence["status"] == "EMPTY_UNKNOWN"
-    assert evidence["windows"][0]["text_availability"] == "UNAVAILABLE_UNKNOWN"
     assert "silence" not in evidence["windows"][0]
     # one all-empty run must not become a permanent cache hit
     assert _cache_state_after_meta(tmp_path, video) == "MISS"
@@ -256,15 +255,38 @@ def test_sidecar_rejects_changed_bound_artifact(tmp_path, changed):
     assert not validate_asr_timing_evidence(evidence_path, video, result_path)
 
 
+def test_sidecar_written_with_the_old_window_fields_stays_valid(tmp_path):
+    """Rejecting an old sidecar would make the user pay to transcribe again."""
+    video, result_path, evidence_path = _valid_available_evidence(tmp_path)
+    payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    payload["windows"] = [{
+        "index": 0,
+        "start": 0.0,
+        "end": 1.0,
+        "text_availability": "AVAILABLE",
+        "observed_text": "hello",
+        "post_glossary_text": "hello",
+        "glossary_modified": False,
+    }]
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert validate_asr_timing_evidence(evidence_path, video, result_path)
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
+        lambda p: p.update({"schema_version": True}),
         lambda p: p.update({"source_video": True}),
         lambda p: p.update({"asr_result": {"size": 1, "mtime_ns": 1}}),
-        lambda p: p.update({"status": "INVALID_STATUS"}),
+        lambda p: p.update({"audio": {"size": 1, "mtime_ns": 1}}),
+        lambda p: p.update({"status": "FAILED_PROVIDER"}),
+        lambda p: p.update({"status": ["AVAILABLE_COARSE"]}),
+        lambda p: p.update({"windows": {}}),
+        lambda p: p.update({"windows": ["bad"]}),
     ],
 )
-def test_strict_sidecar_schema_and_status_consistency(tmp_path, mutate):
+def test_sidecar_must_match_its_bindings_and_window_shape(tmp_path, mutate):
     video, result_path, evidence_path = _valid_available_evidence(tmp_path)
     payload = json.loads(evidence_path.read_text(encoding="utf-8"))
     mutate(payload)
@@ -283,7 +305,6 @@ def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
         [],
         2.0,
         tmp_path,
-        mimo_overview_video_path=video,
         asr_evidence=asr_evidence_summary_for_brief(tmp_path, video),
     ).read_text(encoding="utf-8")
     assert "ASR timing evidence" in text

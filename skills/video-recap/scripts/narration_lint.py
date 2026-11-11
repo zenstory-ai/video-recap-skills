@@ -25,6 +25,7 @@ from entry_suggestion import (
 )
 from lint_summary import format_lint_failure, format_lint_warnings
 from speech_ownership import (
+    anchor_boundary_use,
     entry_overlaps_source_speech,
     load_source_sentence_evidence,
 )
@@ -36,6 +37,26 @@ def _lint_issue(level, index, code, message, **extra):
     issue = {"level": level, "index": index, "code": code, "message": message}
     issue.update(extra)
     return issue
+
+
+# Copy of recap_timeline._ALLOWED_VISUAL_OVERLAY_TYPES (recap drops any other type after TTS);
+# test_audio_policy_parity.py holds the two equal.
+_RENDERED_OVERLAY_TYPES = {"top_title", "inline_label_or_callout"}
+
+
+def _unsupported_overlay_warnings(index, seg):
+    overlays = seg.get("visual_overlays")
+    return [
+        _lint_issue(
+            "warning", index, "unsupported_visual_overlay_type",
+            f"visual_overlays[].type {overlay['type']!r} 不会渲染，recap 会丢弃它；"
+            f"只支持 {', '.join(sorted(_RENDERED_OVERLAY_TYPES))}",
+            overlay_index=position,
+        )
+        for position, overlay in enumerate(overlays if isinstance(overlays, list) else [])
+        if isinstance(overlay, dict) and isinstance(overlay.get("type"), str)
+        and overlay["type"].strip() and overlay["type"] not in _RENDERED_OVERLAY_TYPES
+    ]
 
 
 def _visual_overlay_issues(index, seg):
@@ -87,27 +108,6 @@ def _visual_overlay_issues(index, seg):
     return issues
 
 
-def _clip_span(clip):
-    """A validated plan clip carries source_start/source_end; a raw agent plan start/end."""
-    if "source_start" in clip:
-        return clip["source_start"], clip["source_end"]
-    return clip["start"], clip["end"]
-
-
-def _clip_matches_for_segment(seg, clip_plan, requested_clip_id):
-    if not clip_plan:
-        return []
-    clips = clip_plan["clips"]
-    midpoint = (seg["start"] + seg["end"]) / 2
-    if requested_clip_id is not None:
-        clips = [clip for clip in clips if clip.get("clip_id") == requested_clip_id]
-    return [
-        clip
-        for clip in clips
-        if _clip_span(clip)[0] <= midpoint <= _clip_span(clip)[1]
-    ]
-
-
 def _source_sentence_entry_issue(
     index, start, end, anchors, speech_owned, other_spans=(), window=(None, None),
 ):
@@ -153,34 +153,21 @@ def _source_sentence_entry_issue(
         "duration) to the suggested sentence-end anchor, or shorten/move/remove it when no "
         f"anchor within {SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS:g}s keeps it between its neighbours "
         "and clear of the other blocks, then rerun lint before TTS. The window stays inside the "
-        "block's clip (cut) or the output duration (cut_output); full mode does not know the "
-        "video's end, so keep it inside the video. Source sentence interruption has no override.",
+        "output duration (cut_output); full mode does not know the video's end, so keep it "
+        "inside the video. Source sentence interruption has no override.",
         entry_time=round(start, 3),
         suggested_start=round(suggested["time"], 3) if suggested else None,
         suggested_end=round(suggested["time"] + end - start, 3) if suggested else None,
         max_shift_seconds=SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS,
         source_text_tail=str(suggested.get("text_tail", "")).strip() if suggested else "",
         anchor_confidence=suggested["confidence"] if suggested else None,
-        anchor_boundary_use=(
-            suggested.get("boundary_use")
-            or ("unverified" if suggested["confidence"] in {"high", "medium"} else "none")
-        )
-        if suggested
-        else None,
+        anchor_boundary_use=anchor_boundary_use(suggested) if suggested else None,
     )
 
 
-def _suggestion_limits(seg, clip_plan, mode, output_duration):
-    """Closed range a suggested move must stay in: the block's one clip (cut mode, source
-    time), or [0, output_duration] when that is known (cut_output)."""
-    if mode == "cut" and clip_plan:
-        requested = seg.get("source_clip_id")
-        try:
-            requested = None if requested is None else int(requested)
-        except (TypeError, ValueError):
-            return None, None
-        matches = _clip_matches_for_segment(seg, clip_plan, requested)
-        return _clip_span(matches[0]) if len(matches) == 1 else (None, None)
+def _suggestion_limits(output_duration):
+    """Closed range a suggested move must stay in: [0, output_duration] when that is known
+    (cut_output)."""
     usable = _is_number(output_duration) and output_duration > 0
     return 0.0, output_duration if usable else None
 
@@ -244,8 +231,7 @@ def _placeholder_leakage_issues(narration, work_dir):
 
 
 def lint_narration(
-    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
-    output_duration=None,
+    narration, scenes_analysis=None, *, mode="full", work_dir=None, output_duration=None,
 ):
     """Preflight-check agent narration before TTS; write narration_lint.json when work_dir is set.
 
@@ -327,6 +313,7 @@ def lint_narration(
                 )
                 continue
             errors.extend(_visual_overlay_issues(idx, seg))
+            warnings.extend(_unsupported_overlay_warnings(idx, seg))
             if end <= start:
                 errors.append(
                     _lint_issue(
@@ -419,7 +406,7 @@ def lint_narration(
                     _other_block_spans(narration, idx),
                     _suggestion_window(
                         narration, idx, suggested_spans,
-                        _suggestion_limits(seg, clip_plan, mode, output_duration),
+                        _suggestion_limits(output_duration),
                     ),
                 )
                 if entry_issue:
@@ -427,60 +414,6 @@ def lint_narration(
                     if entry_issue.get("suggested_end") is not None:
                         suggested_spans[idx] = (
                             entry_issue["suggested_start"], entry_issue["suggested_end"],
-                        )
-
-            if mode == "cut":
-                requested_clip_id = seg.get("source_clip_id")
-                if requested_clip_id is not None:
-                    try:
-                        requested_clip_id = int(requested_clip_id)
-                    except (TypeError, ValueError):
-                        errors.append(
-                            _lint_issue(
-                                "error",
-                                idx,
-                                "invalid_source_clip_id",
-                                "source_clip_id must be an integer",
-                            )
-                        )
-                        continue
-                matches = _clip_matches_for_segment(seg, clip_plan, requested_clip_id)
-                if not matches:
-                    errors.append(
-                        _lint_issue(
-                            "error",
-                            idx,
-                            "outside_clip_plan",
-                            "Cut-mode narration must fall inside a selected clip",
-                            start=start,
-                            end=end,
-                        )
-                    )
-                elif len(matches) > 1 and requested_clip_id is None:
-                    errors.append(
-                        _lint_issue(
-                            "error",
-                            idx,
-                            "ambiguous_source_clip",
-                            "Repeated/overlapping clips require source_clip_id",
-                            start=start,
-                            end=end,
-                        )
-                    )
-                if len(matches) == 1:
-                    clip_start, clip_end = _clip_span(matches[0])
-                    if start < clip_start or end > clip_end:
-                        warnings.append(
-                            _lint_issue(
-                                "warning",
-                                idx,
-                                "crosses_clip_boundary",
-                                "Narration extends beyond its clip; it will be trimmed to the clip and may describe footage that was cut",
-                                start=start,
-                                end=end,
-                                clip_start=round(clip_start, 3),
-                                clip_end=round(clip_end, 3),
-                            )
                         )
 
             normalized.append(
@@ -539,21 +472,16 @@ class NarrationLintError(ValueError):
 
 
 def validate_narration_or_raise(
-    narration, scenes_analysis=None, *, clip_plan=None, mode="full", work_dir=None,
-    output_duration=None,
+    narration, scenes_analysis=None, *, mode="full", work_dir=None, output_duration=None,
 ):
     report = lint_narration(
-        narration, scenes_analysis, clip_plan=clip_plan, mode=mode, work_dir=work_dir,
-        output_duration=output_duration,
+        narration, scenes_analysis, mode=mode, work_dir=work_dir, output_duration=output_duration,
     )
+    lint_path = None if work_dir is None else Path(work_dir, "narration_lint.json")
     if report["errors"]:
-        raise NarrationLintError(
-            report, None if work_dir is None else Path(work_dir, "narration_lint.json")
-        )
+        raise NarrationLintError(report, lint_path)
     if report["warnings"]:
-        log(format_lint_warnings(
-            report, None if work_dir is None else Path(work_dir, "narration_lint.json")
-        ))
+        log(format_lint_warnings(report, lint_path))
     else:
         log("narration lint：通过")
     return report

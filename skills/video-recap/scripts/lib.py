@@ -161,15 +161,9 @@ def ffmpeg_has_subtitles_filter():
 
 
 _mimo_api_key = os.environ.get("MIMO_API_KEY", "")
-_mimo_video_api_key = os.environ.get("MIMO_VIDEO_API_KEY", "") or _mimo_api_key
 _mimo_tts_api_key = os.environ.get("MIMO_TTS_API_KEY", "") or _mimo_api_key
 _mimo_asr_api_key = os.environ.get("MIMO_ASR_API_KEY", "") or _mimo_api_key
 _raw_api_url = os.environ.get("MIMO_API_URL") or default_mimo_api_url(is_mimo_token_plan_key(_mimo_api_key))
-_raw_mimo_video_api_url = (
-    os.environ.get("MIMO_VIDEO_API_URL")
-    or os.environ.get("MIMO_API_URL")
-    or default_mimo_api_url(is_mimo_token_plan_key(_mimo_video_api_key))
-)
 _raw_mimo_tts_api_url = (
     os.environ.get("MIMO_TTS_API_URL")
     or os.environ.get("MIMO_API_URL")
@@ -192,9 +186,6 @@ CONFIG = {
     "api_env_var": "MIMO_API_KEY",
     "mimo_api_url": normalize_api_url(_raw_api_url),
     "mimo_api_key": _mimo_api_key,
-    "mimo_video_api_url": normalize_api_url(_raw_mimo_video_api_url),
-    "mimo_video_api_key": _mimo_video_api_key,
-    "mimo_video_env_var": "MIMO_VIDEO_API_KEY" if os.environ.get("MIMO_VIDEO_API_KEY") else "MIMO_API_KEY",
     "mimo_tts_api_url": normalize_api_url(_raw_mimo_tts_api_url),
     "mimo_tts_api_url_source": "env" if (
         os.environ.get("MIMO_TTS_API_URL") or os.environ.get("MIMO_API_URL")
@@ -207,34 +198,18 @@ CONFIG = {
     ) else "default",
     "mimo_asr_api_key": _mimo_asr_api_key,
     "mimo_asr_env_var": "MIMO_ASR_API_KEY" if os.environ.get("MIMO_ASR_API_KEY") else "MIMO_API_KEY",
-    "mimo_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
-    "mimo_video_model": os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
-    "mimo_video_model_source": "env" if (
-        os.environ.get("MIMO_VIDEO_MODEL") or os.environ.get("MIMO_MODEL")
-    ) else "default",
     "vlm_model": os.environ.get("MIMO_MODEL", DEFAULT_MIMO_MODEL),
     "vlm_model_source": "env" if os.environ.get("MIMO_MODEL") else "default",
     "mimo_asr_model": os.environ.get("MIMO_ASR_MODEL", DEFAULT_MIMO_ASR_MODEL),
     "mimo_asr_language": os.environ.get("MIMO_ASR_LANGUAGE", "auto"),
-    "mimo_asr_base64_max_mb": env_float("MIMO_ASR_BASE64_MAX_MB", 10.0, minimum=1.0),
+    "mimo_asr_base64_max_mb": 10.0,
     "asr_segment_seconds": env_float("ASR_SEGMENT_SECONDS", 15.0, minimum=5.0),
     "scene_threshold": 0.1,
-    "mimo_media_resolution": os.environ.get("MIMO_MEDIA_RESOLUTION", "default"),
-    "mimo_video_overview": env_bool("MIMO_VIDEO_OVERVIEW", False),
-    "mimo_video_fps": env_float("MIMO_VIDEO_FPS", 3.0, minimum=0.1),
-    "mimo_video_chunk_max_seconds": env_float("MIMO_VIDEO_CHUNK_MAX_SECONDS", 20.0, minimum=1.0),
-    "mimo_video_chunk_min_seconds": env_float("MIMO_VIDEO_CHUNK_MIN_SECONDS", 1.0, minimum=0.2),
-    "mimo_video_chunk_timeout": env_int("MIMO_VIDEO_CHUNK_TIMEOUT", 180, minimum=1),
-    "mimo_video_base64_max_mb": env_float("MIMO_VIDEO_BASE64_MAX_MB", 45.0, minimum=1.0),
+    "mimo_media_resolution": "default",
     "vlm_seconds_per_frame": env_float("VLM_SECONDS_PER_FRAME", 4.0, minimum=0.5),
     "vlm_max_frames": env_int("VLM_MAX_FRAMES", 16, minimum=3),
     "vlm_max_tokens": env_int("VLM_MAX_TOKENS", 1500, minimum=200),
-    "mimo_video_prompt": os.environ.get(
-        "MIMO_VIDEO_PROMPT",
-        "请用中文分析这个视频分片的主要人物、场景变化、关键动作、情绪走向和剧情冲突，"
-        "重点提取适合写短视频解说的故事线索。不要泛泛复述画面，要标出对后续写稿有用的信息。",
-    ),
-    "mimo_disable_thinking": env_bool("MIMO_DISABLE_THINKING", True),
+    "mimo_disable_thinking": True,
     "fps": 0,
     "storyboard": env_bool("STORYBOARD", True),
     "storyboard_max_tiles": env_int("STORYBOARD_MAX_TILES", 30, minimum=1),
@@ -242,7 +217,7 @@ CONFIG = {
     "storyboard_rows_per_page": env_int("STORYBOARD_ROWS_PER_PAGE", 5, minimum=1),
     "storyboard_long_scene_seconds": env_float("STORYBOARD_LONG_SCENE_SECONDS", 6.0, minimum=0.1),
     "speech_rate": env_float("SPEECH_RATE", 3.9, minimum=0.5),
-    "speech_safety_margin": env_float("SPEECH_SAFETY_MARGIN", 0.85, minimum=0.1),
+    "speech_safety_margin": 0.85,
     "breath_ms": 250,
     "narration_speed": env_float("NARRATION_SPEED", 1.15, minimum=0.5),
     "narration_tail_pad_seconds": 0.1,
@@ -262,8 +237,8 @@ CONFIG = {
     "scene_junk_pixel_ratio": env_float("SCENE_JUNK_PIXEL_RATIO", 0.995, minimum=0.0),
     "context_info": "",
     "vlm_workers": env_int("VLM_WORKERS", 8, minimum=1),
-    "edit_mode": os.environ.get("EDIT_MODE", "full"),
-    "target_duration": os.environ.get("TARGET_DURATION", ""),
+    "edit_mode": "full",
+    "target_duration": "",
     "mimo_tts_model": os.environ.get("MIMO_TTS_MODEL", DEFAULT_MIMO_TTS_MODEL),
     "mimo_tts_model_source": "env" if os.environ.get("MIMO_TTS_MODEL") else "default",
     "mimo_tts_voice": os.environ.get("MIMO_TTS_VOICE", "冰糖"),
@@ -287,7 +262,7 @@ CONFIG = {
     "tts_workers": env_int("TTS_WORKERS", 4, minimum=1),
     "tts_retries": env_int("TTS_RETRIES", 3, minimum=1),
     "tts_min_speech_rate": env_float("TTS_MIN_SPEECH_RATE", 2.5, minimum=0.0),
-    "allow_partial_tts": env_bool("ALLOW_PARTIAL_TTS", False),
+    "allow_partial_tts": False,
     "tts_segment_normalize": True,
     "tts_segment_target_rms_dbfs": -20.0,
     "tts_segment_peak_limit": 0.98,
@@ -295,13 +270,12 @@ CONFIG = {
     "clip_snap_max_extend": env_float("CLIP_SNAP_MAX_EXTEND", 2.0, minimum=0.0),
     "clip_start_snap_max_prepend": env_float("CLIP_START_SNAP_MAX_PREPEND", 1.8, minimum=0.0),
     "clip_start_snap_max_trim": env_float("CLIP_START_SNAP_MAX_TRIM", 0.35, minimum=0.0),
-    "clip_join_audio_fade_ms": env_float("CLIP_JOIN_AUDIO_FADE_MS", 30.0, minimum=0.0),
+    "clip_join_audio_fade_ms": 30.0,
     "scene_cut_snap": env_bool("SCENE_CUT_SNAP", True),
     "scene_cut_snap_margin": env_float("SCENE_CUT_SNAP_MARGIN", 0.5, minimum=0.0),
     "scene_cut_detect_threshold": env_float("SCENE_CUT_DETECT_THRESHOLD", 0.4, minimum=0.0),
     "fade_ms": 120,
     "ducking_narr_weight": 1.5,
-    "ducking_orig_volume": 0.3,
     "zone_ducking_volume": env_float(
         "ZONE_DUCKING_VOLUME",
         _foreign_under_narration_volume if _foreign_source_audio else 0.12,
@@ -312,23 +286,18 @@ CONFIG = {
     "duck_bridge_seconds": env_float("DUCK_BRIDGE_SECONDS", 1.5, minimum=0.0),
     "bgm_path": os.environ.get("BGM_PATH", "").strip(),
     "source_video": "",
-    "export_jianying": env_bool("EXPORT_JIANYING", False),
+    "export_jianying": False,
     "jianying_draft_dir": os.environ.get("JIANYING_DRAFT_DIR", "").strip(),
     "jianying_bundle_media": env_bool("JIANYING_BUNDLE_MEDIA", True),
     "bgm_volume": env_float("BGM_VOLUME", 0.18, minimum=0.0),
     "bgm_ducking_volume": env_float("BGM_DUCKING_VOLUME", 0.10, minimum=0.0),
     "mask_source_subtitles": env_bool("MASK_SOURCE_SUBTITLES", False),
-    "source_subtitle_mask_policy_declared": bool(os.environ.get("SOURCE_SUBTITLE_MASK_POLICY", "").strip()),
-    "source_subtitle_mask_policy": (
-        os.environ.get("SOURCE_SUBTITLE_MASK_POLICY", "").strip().lower()
-        or "off"
-    ),
     "source_subtitle_mask_ratio": env_float("SOURCE_SUBTITLE_MASK_RATIO", 0.14, minimum=0.0),
     "source_subtitle_mask_timing": os.environ.get("SOURCE_SUBTITLE_MASK_TIMING", "narration").strip().lower(),
     "subtitle_mask_opacity": min(1.0, env_float("SUBTITLE_MASK_OPACITY", 0.6, minimum=0.0)),
     "subtitle_mask_padding": env_int("SUBTITLE_MASK_PADDING", 4, minimum=0),
-    "subtitle_y_top": env_int("SUBTITLE_Y_TOP", -1, minimum=-1),
-    "subtitle_y_bot": env_int("SUBTITLE_Y_BOT", -1, minimum=-1),
+    "subtitle_y_top": -1,
+    "subtitle_y_bot": -1,
     "quiet_overlap_min_ratio": 0.8,
     "speech_ducking_volume": env_float(
         "SPEECH_DUCKING_VOLUME",
@@ -479,14 +448,6 @@ def load_background_research(work_dir):
 
 
 MODERATION_REFUSAL_MARKERS = ("request was rejected", "considered high risk")
-OVERVIEW_REJECTION_MARKERS = MODERATION_REFUSAL_MARKERS + (
-    "high risk",
-    "content policy",
-    "cannot process",
-    "无法处理",
-    "内容审核",
-    "违规",
-)
 
 
 def is_moderation_refusal(text):
@@ -495,24 +456,9 @@ def is_moderation_refusal(text):
     return len(low) <= 200 and all(marker in low for marker in MODERATION_REFUSAL_MARKERS)
 
 
-def is_usable_overview_chunk(content):
-    """A MiMo overview chunk is usable only if it is non-empty and carries no refusal phrasing."""
-    low = str(content or "").strip().lower()
-    return bool(low) and not any(marker in low for marker in OVERVIEW_REJECTION_MARKERS)
-
-
 def offline_ignored_settings(api_key, endpoint_key):
     """Cache-settings keys not compared when no credential is set."""
     return () if api_key else (endpoint_key,)
-
-
-def settings_match(cached, current, ignore=()):
-    """True when two cache-settings dicts are equal outside the `ignore` keys."""
-    if not isinstance(cached, dict) or not isinstance(current, dict):
-        return False
-    return {k: v for k, v in cached.items() if k not in ignore} == {
-        k: v for k, v in current.items() if k not in ignore
-    }
 
 
 def _retry_after_seconds(value, fallback):
@@ -575,9 +521,8 @@ def _prepare_api_payload(payload):
 
 
 def _mimo_endpoint(kind):
-    """Return per-capability MiMo endpoint settings (video understanding / ASR / TTS)."""
+    """Return per-capability MiMo endpoint settings (ASR / TTS)."""
     by_kind = {
-        "video": ("mimo_video_api_url", "mimo_video_api_key", "mimo_video_env_var"),
         "asr": ("mimo_asr_api_url", "mimo_asr_api_key", "mimo_asr_env_var"),
         "tts": ("mimo_tts_api_url", "mimo_tts_api_key", "mimo_tts_env_var"),
     }
@@ -591,7 +536,7 @@ def _mimo_endpoint(kind):
     }
 
 
-def _call_mimo_endpoint(kind, payload, max_retries=10):
+def _call_mimo_endpoint(kind, payload, max_retries=10, *, timeout=300):
     settings = _mimo_endpoint(kind)
     return api_call(
         payload,
@@ -599,12 +544,8 @@ def _call_mimo_endpoint(kind, payload, max_retries=10):
         api_url=settings["api_url"],
         api_key=settings["api_key"],
         api_env_var=settings["api_env_var"],
+        timeout=timeout,
     )
-
-
-def mimo_video_api_call(payload, max_retries=10):
-    """Call the MiMo video-understanding endpoint."""
-    return _call_mimo_endpoint("video", payload, max_retries=max_retries)
 
 
 def mimo_asr_api_call(payload, max_retries=10):
@@ -614,10 +555,14 @@ def mimo_asr_api_call(payload, max_retries=10):
 
 def mimo_tts_api_call(payload, max_retries=10):
     """Call the MiMo TTS endpoint."""
-    return _call_mimo_endpoint("tts", payload, max_retries=max_retries)
+    return _call_mimo_endpoint(
+        "tts", payload, max_retries=max_retries, timeout=CONFIG["tts_timeout"]
+    )
 
 
-def api_call(payload, max_retries=8, *, api_url=None, api_key=None, api_env_var=None):
+def api_call(
+    payload, max_retries=8, *, api_url=None, api_key=None, api_env_var=None, timeout=300
+):
     """调用 OpenAI-compatible API，带重试。"""
     endpoint = normalize_api_url(api_url if api_url is not None else CONFIG["api_url"])
     headers = _api_headers(api_key=api_key)
@@ -626,7 +571,7 @@ def api_call(payload, max_retries=8, *, api_url=None, api_key=None, api_env_var=
     for attempt in range(max_retries):
         try:
             req = urllib.request.Request(endpoint, data=data, headers=headers)
-            with urllib.request.urlopen(req, timeout=300) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except urllib.error.HTTPError as e:
             body = _sanitize_api_error(e.read().decode("utf-8", errors="replace"))

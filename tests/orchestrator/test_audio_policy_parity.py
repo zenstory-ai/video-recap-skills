@@ -30,7 +30,6 @@ TEMPO_KEYS = (
 MIX_KEYS = (
     "fade_ms",
     "ducking_narr_weight",
-    "ducking_orig_volume",
     "zone_ducking_volume",
     # `zone_fade_seconds` used to sit here. It was declared in all five lib.py copies and
     # read by nothing in the entire repository — kept alive only by the old blanket parity
@@ -137,4 +136,19 @@ def test_no_skill_declares_config_it_never_reads(libs):
     assert not offenders, (
         f"CONFIG keys declared but read by nothing in their own skill: {offenders}. "
         "Declare a knob in the skill that implements it, not in every copy of lib.py."
+    )
+
+
+def _module_set_literal(path, name):
+    for node in ast.parse(path.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.Assign) and any(getattr(t, "id", "") == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(f"{name} not found in {path}")
+
+
+def test_lint_warns_about_exactly_the_overlay_types_recap_drops():
+    assert _module_set_literal(
+        ROOT / "skills/video-recap/scripts/narration_lint.py", "_RENDERED_OVERLAY_TYPES"
+    ) == _module_set_literal(
+        ROOT / "skills/video-recap/scripts/recap_timeline.py", "_ALLOWED_VISUAL_OVERLAY_TYPES"
     )

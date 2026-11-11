@@ -18,7 +18,6 @@ from recap_runtime import (
     _resume_argv,
     _run_manifest_payload,
 )
-from recap_source import audio_binding
 
 ASSEMBLY_MANIFEST = "assembly_manifest.json"
 
@@ -102,22 +101,30 @@ def _write_canonical_visual_overlays(work_dir, narration_path):
     return path
 
 
-def _print_narration_review_pointer(work_dir, *, review_ran=True):
-    """Surface the advisory narration review produced by this run, if any.
+def _settings_for_compare(settings):
+    """Settings that, if changed, invalidate reusing an existing work_dir on resume.
 
-    Review is optional/fail-open: review_ran=False (disabled or failed) prints nothing so a
-    stale narration_review.md from an older run is never surfaced. When it ran, video-script's
-    review_runner has written both narration_review.json and .md.
+    Retired `consolidate` and `consolidate_asr` keys are excluded: an old manifest may
+    still carry them, and their extra artifacts are simply no longer read.
     """
-    if not review_ran:
-        return
-    review_md = Path(work_dir) / "narration_review.md"
-    data = load_json(Path(work_dir) / "narration_review.json")
-    n_err = sum(1 for f in data["findings"] if f["severity"] == "error")
-    print(
-        f"[video-recap] 📋 解说评审（建议性，不拦截）: {data['verdict']} · "
-        f"{len(data['findings'])} 条意见（error {n_err}）→ {review_md}"
-    )
+    s = dict(settings)
+    s.pop("consolidate", None)
+    s.pop("consolidate_asr", None)
+    return s
+
+
+def _settings_and_audio_mismatches(actual, expected):
+    mismatches = []
+    if actual["settings"].get("mimo_video_overview"):
+        mismatches.append(
+            "settings: 这个 work_dir 开启过已移除的 --mimo-video-overview，不能续跑；"
+            "仍需这条路径请使用 v0.6.2"
+        )
+    elif _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
+        mismatches.append("settings: 当前 CLI 参数与 Phase A manifest 不匹配")
+    if actual.get("audio") != expected["audio"]:
+        mismatches.append(f"audio: expected {expected['audio']!r}, got {actual.get('audio')!r}")
+    return mismatches
 
 
 def _manifest_mismatches(work_dir, video, args):
@@ -132,19 +139,11 @@ def _manifest_mismatches(work_dir, video, args):
         for key in ("source_video", "source_video_identity")
         if actual.get(key) != expected[key]
     ]
-    if actual["settings"] != expected["settings"]:
-        mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
-    actual_audio = actual.get("audio")
-    expected_audio = audio_binding(args)
-    if actual_audio != expected_audio:
-        mismatches.append(
-            f"audio: expected {expected_audio!r}, got {actual_audio!r}"
-        )
-    return mismatches
+    return mismatches + _settings_and_audio_mismatches(actual, expected)
 
 
-def _multi_manifest_mismatches(work_dir, videos, args, source_records):
-    expected = _multi_run_manifest_payload(videos, args, source_records)
+def _multi_manifest_mismatches(work_dir, args, source_records):
+    expected = _multi_run_manifest_payload(args, source_records)
     actual = _load_run_manifest(work_dir)
     if actual is None:
         return ["缺少 recap_run_manifest.json；不能证明 work_dir 属于当前多视频/参数"]
@@ -160,15 +159,7 @@ def _multi_manifest_mismatches(work_dir, videos, args, source_records):
         mismatches.append(
             "sources: 当前输入视频列表/顺序/source_id/identity 与 Phase A manifest 不匹配"
         )
-    if actual["settings"] != expected["settings"]:
-        mismatches.append("settings: 当前 CLI/env 参数与 Phase A manifest 不匹配")
-    actual_audio = actual.get("audio")
-    expected_audio = audio_binding(args)
-    if actual_audio != expected_audio:
-        mismatches.append(
-            f"audio: expected {expected_audio!r}, got {actual_audio!r}"
-        )
-    return mismatches
+    return mismatches + _settings_and_audio_mismatches(actual, expected)
 
 
 def _read_assembly_output(work_dir):
@@ -202,7 +193,7 @@ def _cut_narration_is_stale(ledger, current_clip_plan_identity):
 
 def _continuation_command(work_dir, args):
     """Shell command that resumes this run: the original argv, replayable from any cwd."""
-    parts = [sys.executable, str(_entry("video-recap", "recap.py")), *_resume_argv(work_dir, args)]
+    parts = [sys.executable, str(_entry("recap.py")), *_resume_argv(work_dir, args)]
     return " ".join(shlex.quote(part) for part in parts)
 
 
@@ -228,8 +219,6 @@ def _understand_args_for_source(source_record, source_work_dir, args):
         uargs += ["--target-duration", args.target_duration]
     if args.skip_asr:
         uargs.append("--skip-asr")
-    if args.mimo_video_overview:
-        uargs.append("--mimo-video-overview")
     return uargs
 
 
@@ -243,7 +232,7 @@ def _write_multi_source_clip_brief(work_dir, source_records, args):
         "",
         "先判断创作控制模式：CREATE 比较至少两个可行剪辑假设；DIRECTED 落实用户指定结构；REVISION 只改最新反馈点并冻结未点名内容。然后写或更新 `recap_story_plan.json` 与 `visual_audio_board.json`。前者记录观众承诺、POV、戏剧问题、选定主线及 change-based beats；后者记录每拍的具体画面/反应、入点/出点、原声锚点、`audio_owner` 与 `narration_job`。",
         "",
-        "多视频不是把每个来源各做一段小总结。每个来源片段都必须服务同一条主线，并用 `source_id` 保留证据归属。这两份计划是 Agent 与建议型评审使用的工作记录，不是 CLI 渲染门禁。",
+        "多视频不是把每个来源各做一段小总结。每个来源片段都必须服务同一条主线，并用 `source_id` 保留证据归属。这两份计划是 Agent 的工作记录，不是 CLI 渲染门禁。",
         "",
         "## 必须写入的格式",
         "",
@@ -329,7 +318,7 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             if not source_start <= when <= source_end and any(
                     start <= when <= end for start, end in spans_by_source[source_id]):
                 continue
-            # Same default as the single-source remap in video-understanding's timeline brief.
+            # Same default as the single-source remap in briefing.timeline.
             pause = max(source_start, min(float(anchor.get("pause_start", when - 0.12)), when))
             item = dict(anchor)
             item.update(
@@ -375,7 +364,7 @@ def _write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         "artifact": "speech_boundary_anchors_output.json",
         "timeline": "cut_output",
         "source_artifact": "multi_source_manifest.json",
-        # video-script's cut_output lint trusts this evidence only for this exact plan file.
+        # validate.py's cut_output lint trusts this evidence only for this exact plan file.
         "clip_plan_identity": file_identity(Path(work_dir) / "clip_plan_validated.json"),
         "sentence_anchors": sorted(mapped_anchors, key=lambda row: row["time"]),
         "speech_spans": sorted(mapped_speech, key=lambda row: (row["start"], row["end"])),
@@ -460,7 +449,9 @@ def _write_multi_source_output_brief(work_dir, source_records, validated_plan_pa
     )
 
 
-def _cut_qc_summary_line(qc):
+def _surface_cut_qc(work_dir):
+    """Print the cut QC cut.py recorded; cut.py itself already fails on blocking QC."""
+    qc = load_json(Path(work_dir) / "clip_plan_validated.json")["qc"]
     geometry = qc["output_geometry"]
     parts = [
         f"target_duration_status={qc['target_duration_status']}",
@@ -472,13 +463,7 @@ def _cut_qc_summary_line(qc):
     ]
     if qc.get("warnings"):
         parts.append(f"warnings={len(qc['warnings'])}")
-    return "[video-recap] cut QC: " + "; ".join(parts)
-
-
-def _surface_cut_qc(work_dir):
-    """Print the cut QC video-cut recorded; cut.py itself already fails on blocking QC."""
-    qc = load_json(Path(work_dir) / "clip_plan_validated.json")["qc"]
-    print(_cut_qc_summary_line(qc), flush=True)
+    print("[video-recap] cut QC: " + "; ".join(parts), flush=True)
     return qc
 
 
@@ -498,14 +483,16 @@ def _save_materials_enabled(args):
     return bool(_material_library_dir(args) and args.save_materials)
 
 
-def _pause_for_agent(work_dir, need_text, cont, inspect_hint=None, project=None):
+def _pause_for_agent(work_dir, need_text, args, inspect_hint=None):
     brief = Path(work_dir) / "agent_narration_brief.md"
     print("=" * 50)
-    print(f"[video-recap] ⏸  阅读 {brief}（按 video-script 规则）后写入 {need_text}")
+    print(f"[video-recap] ⏸  阅读 {brief}（按 video-recap 规则）后写入 {need_text}")
     if inspect_hint:
         print(f"[video-recap]    先核对状态/时间轴（建议性）: {inspect_hint}")
-    reference_note = project_binding.bound_reference_note(work_dir, project)
+    reference_note = project_binding.bound_reference_note(
+        work_dir, getattr(args, "resolved_project", None)
+    )
     if reference_note:
         print(f"[video-recap]    {reference_note}")
-    print(f"[video-recap]    写完后重跑继续: {cont}")
+    print(f"[video-recap]    写完后重跑继续: {_continuation_command(work_dir, args)}")
     print("=" * 50)

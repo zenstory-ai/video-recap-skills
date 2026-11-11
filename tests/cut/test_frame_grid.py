@@ -517,3 +517,11 @@ def test_clip_past_the_end_of_a_short_video_stream_still_renders_every_frame(
     times = _video_packet_times(work / "edited_source.mp4")
     assert len(times) == plan["qc"]["frame_grid"]["frame_count"] == 100
     assert {round(b - a, 4) for a, b in zip(times, times[1:])} == {0.04}
+
+
+def test_edge_gate_ignores_an_old_clean_transcript_left_behind(tmp_path):
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([{"start": 0.0, "end": 2.0, "text": "原始台词"}]), encoding="utf-8")
+    (tmp_path / "asr_clean.json").write_text(json.dumps(
+        {"segments": [{"start": 5.0, "end": 9.0, "text": "清洗旧稿"}]}), encoding="utf-8")
+    assert sentence_boundaries._load_source_speech_spans(tmp_path) == [{"start": 0.0, "end": 2.0}]

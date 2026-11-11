@@ -138,17 +138,17 @@ Before a single cut, the agent writes [`recap_story_plan.json`](examples/guohuo-
 
 ```json
 "director_intent": {
-  "viewer_promise": "60秒看懂死而复生的白月光为什么让男主一秒破防，并用三个名场面把关系推到婚服送嫁。",
-  "pov": "跟随慕容清峄的认知与反应，让观众和他一起从震惊、发疯走到确认她仍会护他。",
-  "dramatic_question": "她既然装作陌生人，为什么眼神、亲吻和保护都在暴露旧情？",
-  "emotional_start": "荒诞吃瓜式震惊",
-  "emotional_end": "抓马又上头的未完待续",
-  "ending_aftertaste": "明明相爱却要嫁给哥哥的强悬念",
-  "withhold_reveal": "前8秒先揭示准大嫂身份；中段以洗手台和护夫逐步证明旧情；最后才亮婚服。"
+  "viewer_promise": "60秒看懂死而复生的白月光为什么挽着亲哥逼男主当众叫大嫂，又在洗手台狠话强吻、替他挡击和婚服送嫁三场戏里彻底露馅。",
+  "pov": "全程紧贴二少慕容清峄的眼睛：从家宴认出她的荒唐震怒，到洗手台狠话逼问，再到她飞身替自己挡下重击时彻底确认她的真心。",
+  "dramatic_question": "她嘴上死不认账、非要嫁给大哥，为什么眼神闪躲、被强吻不推开、见他挨打还本能冲上去替他挡下重击？",
+  "emotional_start": "前任挽着亲哥现身的抓马暴击",
+  "emotional_end": "明明彼此死死挂念却要亲手送嫁的虐心拉扯",
+  "ending_aftertaste": "两人都知道对方还爱着自己，她却依然穿戴皇冠婚服走向大哥的婚礼",
+  "withhold_reveal": "前8秒先把“死去白月光变成准大嫂”的错位身份砸出来；中段用洗手台强吻和替身挡伤一点点扒下她的冷漠伪装；最后才亮出皇冠婚服把悬念拉满。"
 },
 ```
 
-Translated: the promise is "in 60 seconds, understand why the lover who came back from the dead breaks the hero in one second, and push the relationship to the wedding-dress send-off through three iconic scenes"; the POV follows Murong Qingyi's realisation; the dramatic question is "if she is pretending to be a stranger, why do her eyes, the kiss, and her protecting him all betray the old love?"; the reveal order is "the sister-in-law identity in the first 8 seconds, the washstand and the shielding in the middle, the wedding dress last".
+Translated: the promise is "in 60 seconds, understand why the lover who came back from the dead takes his brother's arm and forces him to call her sister-in-law in public, then gives herself away across the washstand kiss, shielding him from a strike, and the wedding-dress send-off"; the POV stays with second brother Murong Qingyi; the dramatic question is "if she refuses to admit who she is and insists on marrying his brother, why do her eyes, the kiss, and throwing herself in front of him all betray her?"; the reveal order puts the sister-in-law shock in the first 8 seconds, strips her cold mask in the middle, and reveals the crown bridal gown last.
 
 Each beat records not a scene summary but what changes, which question the audience carries in and out, the exact moment that must be kept, and where the evidence comes from (1 of 10 beats):
 
@@ -159,19 +159,19 @@ Each beat records not a scene summary but what changes, which question the audie
   "source_start": 1292.0,
   "source_end": 1305.5,
   "function": "escalation",
-  "event": "男主堵住女主说出日日夜夜想她与挫骨扬灰",
-  "change": "power: 女主回避→男主逼问",
-  "audience_question_in": "男主会忍吗",
-  "audience_question_out": "狠话里全是想念",
+  "event": "慕容清峄把她堵在洗手台前，红着眼逼问并咬牙切齿放狠话",
+  "change": "家宴上的隐忍试探 → 洗手台前撕破脸皮贴脸逼问",
+  "audience_question_in": "男主私下能忍住不找她算账吗？",
+  "audience_question_out": "嘴上喊着抽筋扒皮挫骨扬灰，字字句句全是想念",
   "character_focus": "慕容清峄",
-  "must_keep_moment": "完整原声“我日日夜夜地想你…挫骨扬灰”",
+  "must_keep_moment": "完整原声“我好想你，日日夜夜地想你，想把你抽筋扒皮，挫骨扬灰”",
   "evidence": ["asr", "vlm", "hard_subtitle"]
 },
 ```
 
-Translated: the event is "he corners her and says he thinks of her day and night and wants to grind her bones to dust"; the change is "power: she evades → he interrogates"; the audience goes in asking "will he hold back?" and comes out with "every harsh word is longing"; the moment that must be kept is the complete original line, evidenced by ASR, VLM, and the burned-in subtitle.
+Translated: the event is "he corners her at the washstand, red-eyed, demanding answers and spitting threats"; the change is "restrained probing at the banquet → tearing off the mask face-to-face"; the audience goes in asking "can he hold back in private?" and comes out with "every threat of skinning her alive and grinding her bones to dust is pure longing"; the moment that must be kept is the complete original line, evidenced by ASR, VLM, and the burned-in subtitle.
 
-In [`clip_plan.json`](examples/guohuo-60s/clip_plan.json) this beat becomes one range with a reason; cut mode renders the cut from it first and writes narration afterwards.
+In [`clip_plan.json`](examples/guohuo-60s/clip_plan.json) this beat becomes one range with a 7-part reason; cut mode renders the cut from it first and writes narration afterwards.
 
 ### Narration yields to original dialogue, and the owner of each beat is written down
 
@@ -186,18 +186,18 @@ In [`clip_plan.json`](examples/guohuo-60s/clip_plan.json) this beat becomes one 
   "output_start": 9.206666,
   "output_end": 22.446666,
   "picture_job": "performance",
-  "preferred_moment": "完整原声“我日日夜夜地想你…挫骨扬灰”",
-  "entry_reason": "尽量晚进到信息/动作将发生前",
-  "exit_reason": "台词、动作或反应完整落地后立即离开",
+  "preferred_moment": "完整原声“我好想你，日日夜夜地想你，想把你抽筋扒皮，挫骨扬灰”",
+  "entry_reason": "慕容清峄把她困在洗手台前、欺身逼近时切入",
+  "exit_reason": "“挫骨扬灰”尾音与眼底红血丝完整落地后切出",
   "audio_owner": "original_dialogue",
-  "original_audio_anchor": "完整原声“我日日夜夜地想你…挫骨扬灰”",
+  "original_audio_anchor": "我好想你，日日夜夜地想你，想把你抽筋扒皮，挫骨扬灰",
   "narration_job": "none",
-  "handoff": "旁白先补关系，原声/动作发生时完全让位；下一拍承接人物反应。",
+  "handoff": "整整13秒完全交给男主原声，不插半个字旁白，让那句又恨又疯的“日日夜夜地想你……挫骨扬灰”自己砸进观众耳朵。",
   "playback_speed": 1.0
 },
 ```
 
-Translated: enter "as late as possible, just before the information or action lands"; exit "as soon as the line, action, or reaction has fully landed"; handoff "narration fills in the relationship first, then yields completely while the original sound or action plays; the next beat picks up the character's reaction".
+Translated: enter as he traps her at the washstand and leans in; exit once the final syllable and red-rimmed eyes land; handoff gives all 13 seconds to the actor's original voice without a single word of narration.
 
 So [`narration.json`](examples/guohuo-60s/narration.json) has only 7 narration blocks in the whole piece. The second stops at 10.2 s and the third does not enter until 23.047 s; the 13 seconds between belong entirely to that line:
 
@@ -291,13 +291,13 @@ The mechanical pre-delivery checks are in [`assembly_qc.json`](examples/guohuo-6
 }
 ```
 
-And [`content-qc.md`](examples/guohuo-60s/content-qc.md) checks every narration claim against the footage and public sources, and states the interpretive boundary of each colloquial line (1 of 9 rows):
+And [`content-qc.md`](examples/guohuo-60s/content-qc.md) checks every narration claim against the footage and public sources, and states the interpretive boundary of each colloquial line (1 of 10 rows):
 
 ```markdown
-| “这一下伪装露馅，男主全懂了” | 挡击动作和“有我在”原声连续证明她仍在意男主 | [爱奇艺官方角色片花](https://www.iqiyi.com/v_r8e40v8g54.html)确认二人重逢后身份错位、爱恨拉扯 | **解释成立，但需限定语义**：“全懂”指看懂她仍在意他，不指此刻才第一次认出她是任素素 |
+| “嘴上装不认识，见他挨打却下意识冲去护着，这一下伪装露馅，男主全懂了” | 替身挡击与递蜜饯说“有我在，你别怕”两段戏首尾相接，男主眼眶泛红怔住 | [爱奇艺官方角色片花](https://www.iqiyi.com/v_r8e40v8g54.html)印证两人重逢后表面针锋相对、实则彼此挂念 | **解读立得住**。“全懂了”指男主彻底看穿她心里仍在乎自己，并非指此时才第一次认出她的脸 |
 ```
 
-Translated: claim "the disguise slips and the hero understands everything"; footage evidence: the shielding action and the "I'm here" line together prove she still cares; web evidence: iQIYI's official character trailer confirms the mistaken identity and push-pull after the reunion; verdict: **the interpretation holds, with a semantic limit**: "understands everything" means he sees she still cares, not that this is the first moment he recognises her as Ren Susu.
+Translated: claim "she pretends not to know him, yet instinctively rushes to shield him when he's struck — the disguise slips and the hero understands everything"; footage evidence: the shielding action and handing over candied fruit while saying "I'm here, don't be afraid" sit back to back, leaving the hero stunned with reddening eyes; web evidence: iQIYI's official character trailer confirms their surface hostility and mutual care after the reunion; verdict: **the interpretation holds**: "understands everything" means he sees right through her pretence and knows she still cares, not that this is the first moment he recognises her face.
 
 ### Keep editing in JianYing
 
@@ -349,7 +349,7 @@ The two self-contained skills (`video-recap` for production plus `video-referenc
 
 | Skill | Responsibility | In → Out |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | Unified production skill: scene/ASR/VLM understanding (`understand.py`), story/audiovisual direction, sentence-safe cutting (`cut.py`), baseline floor validation (`validate.py`), TTS voiceover (`voiceover.py` / `dub.py`), multi-track mixing & subtitle burn (`assemble.py`), optional JianYing export, local dashboard & resource library | `video` → `recap_<name>.mp4 + subtitles.srt/.ass + timeline.json` |
+| [`video-recap`](skills/video-recap/) | Unified production skill: scene/ASR/VLM understanding (`understand.py`), story/audiovisual direction, sentence-safe cutting (`cut.py`), baseline floor validation (`validate.py`), TTS voiceover (`voiceover.py`), multi-track mixing & subtitle burn (`assemble.py`), optional JianYing export, local dashboard & resource library | `video` → `recap_<name>.mp4 + subtitles.srt/.ass + timeline.json` |
 | [`video-reference`](skills/video-reference/) | On demand, off the production path: break a finished video down into a reusable production reference (structure, pacing, shots, narration/subtitles, sound-picture handoff); source facts stay local, the export holds only methods and numbers | `finished video + understanding artifacts` → `production_reference.json` |
 
 The recap is always written to `recap_<name>.mp4` alongside `subtitles.srt/.ass`; all intermediate artifacts live in `work_dir/`, with the field contracts in the [data schema](skills/video-recap/references/data-schema.md).
@@ -385,14 +385,6 @@ Use the voice from /path/to/voice-ref.wav for the recap of /path/to/video.mp4. I
 ```
 
 The reference audio is sent to MiMo for synthesis; use it only with the voice owner's authorisation.
-
-**Dub an English video into Chinese while keeping the speaker's voice:**
-
-```text
-Dub /path/to/english.mp4 into Chinese, keeping the original speaker's voice. I have the rights to this video and the speaker consents to having their voice cloned.
-```
-
-This is experimental and replaces the original speech rather than overlaying commentary; the current version supports one speaker and full-track replacement without background-music separation. The source audio is sent to MiMo ASR for transcription and about 10 seconds of the original speaker's voice are sent to MiMo as the voice-clone reference, so the run requires `--confirm-voice-rights`: confirm only when you have the rights to the video and the speaker's consent to clone their voice.
 
 **Reuse subtitle style, voice, BGM and frame across a series:**
 

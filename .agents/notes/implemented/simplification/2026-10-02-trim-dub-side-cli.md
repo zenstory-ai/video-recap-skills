@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：dub 模式已移除，见 `.agents/notes/implemented/simplification/2026-11-06-remove-dub-mode.md`。
+
 ## Problem
 
 PR #49 把 dub 的确定性 lint 和一份 review scaffold 收进 video-voiceover：`dub.py` 除了编排入口调用的 `--stage prepare|render`，还有 `--stage lint|review`（无需视频，单独检查 `dub_script.json`）和 `--print-schema`（打印全部 dub 产物契约）。渲染阶段在克隆前写 `dub_lint.json`，同时写 `dub_review.json`。那次收编没有单独的笔记。

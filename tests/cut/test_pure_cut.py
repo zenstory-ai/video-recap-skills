@@ -994,20 +994,12 @@ def test_contiguous_same_source_join_does_not_fade_inside_sentence(monkeypatch, 
     assert "[0:a]atrim=start=1.000:end=2.000,asetpts=PTS-STARTPTS,afade=t=in" not in joined
 
 
-@pytest.mark.parametrize("kwargs,allowed_by", [
-    pytest.param({}, None, id="drift_warns"),
-    pytest.param({"allow_duration_drift": True}, "--allow-duration-drift", id="cli_flag_allows"),
-    pytest.param({"allow_duration_drift": True, "duration_drift_allowed_by": "operator-override"},
-                 "operator-override", id="custom_allowed_by"),
-])
-def test_update_cut_qc_duration_status_and_allow_drift(kwargs, allowed_by):
+def test_update_cut_qc_duration_drift_warns_without_blocking():
     plan = {"clips": [{"duration": 4.0}], "total_duration": 4.0, "target_duration": 10.0}
-    cut_qc.update_cut_qc(plan, **kwargs)
+    cut_qc.update_cut_qc(plan)
     assert plan["qc"]["target_duration_status"] == "under"
     assert "blocking" not in plan["qc"]
     assert plan["qc"]["warnings"][0]["code"] == "target_duration_drift"
-    if allowed_by is not None:
-        assert plan["qc"]["target_duration"]["duration_drift_allowed_by"] == allowed_by
 
 
 def test_edited_source_cache_from_content_hash_schema_is_a_miss(tmp_path):

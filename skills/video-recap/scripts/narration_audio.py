@@ -6,19 +6,14 @@ from pathlib import Path
 
 from lib import CONFIG, get_video_duration, log, narration_tempo_budget, run_cmd
 
-def _apply_narration_speed(
-    tts_segments,
-    work_dir,
-    *,
-    tempo_policy=None,
-):
+def _apply_narration_speed(tts_segments, work_dir):
     """Globally speed up narration audio via atempo (CONFIG['narration_speed']).
 
     MiMo TTS reads a touch slowly for short-form recaps; a 1.1-1.2x bump makes it
     snappier without the chipmunk effect. Rewrites each segment's audio_path/duration
     to the sped copy so the rest of assembly is unchanged. No-op at speed 1.0.
     """
-    speed = tempo_policy["global_atempo"] if tempo_policy else CONFIG["narration_speed"]
+    speed = CONFIG["narration_speed"]
     if abs(speed - 1.0) <= 1e-3:
         return
     done = 0
@@ -32,7 +27,6 @@ def _apply_narration_speed(
         if res.returncode != 0:
             raise RuntimeError(f"解说提速失败 {src}: {res.stderr}")
         seg["audio_path"] = out
-        seg["narration_conversion_path"] = out
         seg["audio_duration"] = get_video_duration(out)
         done += 1
     log(f"解说整体提速: atempo={speed:.2f} ({done} 段)")
@@ -43,7 +37,6 @@ def _adjust_tts_speed(
     target_duration,
     tts_rate_offset=0.0,
     *,
-    tempo_policy=None,
     segment_index=None,
 ):
     """Fit overlong TTS with bounded atempo; never time-trim speech in assemble.
@@ -55,38 +48,8 @@ def _adjust_tts_speed(
     audio_path = Path(audio_path)
     current_dur = get_video_duration(audio_path)
     budget = narration_tempo_budget(tts_rate_offset)
-    if tempo_policy:
-        budget.update({
-            "global_narration_speed": tempo_policy["global_atempo"],
-            "tts_rate_factor": 1.0,
-            "segment_tempo_max": tempo_policy["segment_tempo_max"],
-            "cumulative_tempo_max": tempo_policy["cumulative_tempo_max"],
-            "cumulative_tempo_hard_max": tempo_policy["cumulative_tempo_hard_max"],
-        })
-    meta = {
-        "fit_status": "fits",
-        "blocking": False,
-        "tempo_factor": 1.0,
-        "segment_tempo_factor": 1.0,
-        "truncated": False,
-        "truncate_reason": "none",
-        "tts_rate_offset": float(tts_rate_offset),
-        "audio_duration": current_dur,
-        "placed_audio_duration": current_dur,
-        "global_narration_speed": budget["global_narration_speed"],
-        "effective_tempo": budget["global_narration_speed"] * budget["tts_rate_factor"],
-        "cumulative_tempo_max": budget["cumulative_tempo_max"],
-        "cumulative_tempo_hard_max": budget["cumulative_tempo_hard_max"],
-    }
+    meta = {"fit_status": "fits", "segment_tempo_factor": 1.0}
     if current_dur <= target_duration:
-        return (str(audio_path), current_dur, meta)
-
-    if tempo_policy and not tempo_policy["bounded_segment_fit"]:
-        meta.update({
-            "fit_status": "no_safe_fit", "blocking": True,
-            "truncate_reason": "no_safe_boundary", "placed_audio_duration": 0.0,
-            "needed_tempo_factor": current_dur / target_duration,
-        })
         return (str(audio_path), current_dur, meta)
 
     ratio = current_dur / target_duration
@@ -94,9 +57,7 @@ def _adjust_tts_speed(
     if ratio > effective_max:
         meta.update({
             "fit_status": "no_safe_fit",
-            "blocking": True,
             "truncate_reason": "no_safe_boundary",
-            "placed_audio_duration": 0.0,
             "needed_tempo_factor": ratio,
         })
         label = "" if segment_index is None else f"段 {segment_index + 1} "
@@ -121,9 +82,7 @@ def _adjust_tts_speed(
         adjusted_path.unlink(missing_ok=True)
         meta.update({
             "fit_status": "no_safe_fit",
-            "blocking": True,
             "truncate_reason": "no_safe_boundary",
-            "placed_audio_duration": 0.0,
             "needed_tempo_factor": new_dur / target_duration,
         })
         log(
@@ -131,13 +90,7 @@ def _adjust_tts_speed(
             "禁止裁尾，交由 Agent 缩短/移动文本"
         )
         return (str(audio_path), current_dur, meta)
-    meta.update({
-        "fit_status": "tempo_adjusted",
-        "tempo_factor": tempo,
-        "segment_tempo_factor": tempo,
-        "placed_audio_duration": new_dur,
-        "effective_tempo": budget["global_narration_speed"] * budget["tts_rate_factor"] * tempo,
-    })
+    meta.update({"fit_status": "tempo_adjusted", "segment_tempo_factor": tempo})
     log(f"  TTS 温和加速: {current_dur:.1f}s → {new_dur:.1f}s (x{tempo:.2f})")
     return (str(adjusted_path), new_dur, meta)
 
@@ -184,41 +137,36 @@ def _build_timed_narration(
     output_wav,
     video_duration,
     work_dir,
-    *,
-    tempo_policy=None,
 ):
     """将 TTS 片段按时间轴放置到一条与视频等长的音轨上"""
     sample_rate = 44100
     total_samples = int(video_duration * sample_rate)
     buffer = bytearray(total_samples * 2)
     last_written_end = 0  # 追踪已写入位置，防止重叠
-    prev_pause_samples = 0  # 前一段的 pause_after_ms，控制段间间隔
-    skipped_count = 0  # 因 WAV 缺失或无安全放置而被跳过的段数
-    placed_count = 0  # 真正写入音频的段数；防止"成功"生成全静音旁白
-    no_safe_fit_count = 0  # 超预算但不能安全截断；交由 QC/manifest 阻断
+    pause_samples = 0  # 这一段的 pause_after_ms（负值按 0），下一段据此留间隔
 
     for seg in tts_segments:
         wav_path = seg["audio_path"]
-        pause_samples = int(seg["pause_after_ms"] * sample_rate / 1000)
+        prev_pause_samples, pause_samples = (
+            pause_samples,
+            max(0, int(seg["pause_after_ms"] * sample_rate / 1000)),
+        )
+
+        # 放置状态的起始值；只有实际加速或未放置才覆盖。缺 WAV 的段也要有，QC 按键直读。
+        tts_rate_offset = seg["tts_rate_offset"]
+        budget = narration_tempo_budget(tts_rate_offset)
+        seg.update({
+            "fit_status": "fits",
+            "segment_tempo_factor": 1.0,
+            "global_narration_speed": budget["global_narration_speed"],
+            "effective_tempo": budget["global_narration_speed"] * budget["tts_rate_factor"],
+            "blocking": False,
+        })
 
         if not os.path.exists(wav_path):
             _unplaced(seg, seg["start"], "skipped", "missing_wav")
-            prev_pause_samples = pause_samples
-            skipped_count += 1
             continue
 
-        original_wav_path = wav_path
-        try:
-            with wave.open(wav_path, "rb") as wf_check:
-                needs_resample = (
-                    wf_check.getnchannels(), wf_check.getsampwidth(), wf_check.getframerate()
-                ) != (1, 2, sample_rate)
-        except (wave.Error, EOFError):
-            # Valid post-processed WAV may use IEEE float, which Python's wave
-            # reader does not support. FFmpeg performs the explicit PCM conversion.
-            needs_resample = True
-
-        tts_rate_offset = seg["tts_rate_offset"]
         tts_dur = seg["audio_duration"]
 
         start_sample = int(seg["start"] * sample_rate)
@@ -229,53 +177,33 @@ def _build_timed_narration(
         actual_start = min(max(start_sample, min_start_with_pause), end_boundary)
 
         # 根据实际可用空间决定是否加速
-        available_samples = end_boundary - actual_start
-        available_duration = max(available_samples / sample_rate, 0)
+        available = end_boundary - actual_start
+        available_duration = max(available / sample_rate, 0)
         if tts_dur > available_duration > 0:
-            if tempo_policy:
-                wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
-                    wav_path, available_duration, tts_rate_offset,
-                    tempo_policy=tempo_policy, segment_index=seg["index"],
-                )
-            else:
-                wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
-                    wav_path, available_duration, tts_rate_offset,
-                    segment_index=seg["index"],
-                )
-            seg.update({
-                "fit_status": fit_meta["fit_status"],
-                "segment_tempo_factor": fit_meta["segment_tempo_factor"],
-                "effective_tempo": fit_meta["effective_tempo"],
-                "global_narration_speed": fit_meta["global_narration_speed"],
-                "blocking": fit_meta["blocking"],
-            })
+            wav_path, _actual_dur, fit_meta = _adjust_tts_speed(
+                wav_path, available_duration, tts_rate_offset,
+                segment_index=seg["index"],
+            )
             if fit_meta["fit_status"] == "no_safe_fit":
                 if "needed_tempo_factor" in fit_meta:
                     seg["needed_tempo_factor"] = round(fit_meta["needed_tempo_factor"], 4)
                 _unplaced(seg, actual_start / sample_rate, "no_safe_fit",
                           fit_meta["truncate_reason"], blocking=True)
-                prev_pause_samples = pause_samples
-                skipped_count += 1
-                no_safe_fit_count += 1
                 continue
-        else:
-            budget = narration_tempo_budget(tts_rate_offset)
-            if tempo_policy:
-                budget.update({
-                    "global_narration_speed": tempo_policy["global_atempo"],
-                    "tts_rate_factor": 1.0,
-                })
-            seg.update({
-                "fit_status": "fits",
-                "segment_tempo_factor": 1.0,
-                "global_narration_speed": budget["global_narration_speed"],
-                "effective_tempo": budget["global_narration_speed"] * budget["tts_rate_factor"],
-                "blocking": False,
-            })
+            seg["fit_status"] = fit_meta["fit_status"]
+            seg["segment_tempo_factor"] = fit_meta["segment_tempo_factor"]
+            seg["effective_tempo"] *= fit_meta["segment_tempo_factor"]
 
-        # _adjust_tts_speed 输出固定 44100Hz mono 16bit，若文件被替换则无需 resample
-        if wav_path != original_wav_path:
-            needs_resample = False
+        # 放在拟合之后判断：_adjust_tts_speed 的输出读回来就是 44100Hz mono 16bit，无需再转
+        try:
+            with wave.open(wav_path, "rb") as wf_check:
+                needs_resample = (
+                    wf_check.getnchannels(), wf_check.getsampwidth(), wf_check.getframerate()
+                ) != (1, 2, sample_rate)
+        except (wave.Error, EOFError):
+            # Valid post-processed WAV may use IEEE float, which Python's wave
+            # reader does not support. FFmpeg performs the explicit PCM conversion.
+            needs_resample = True
         if needs_resample:
             tmp_path = str(Path(work_dir) / f"_rs_{seg['index']}.wav")
             rs_result = run_cmd(["ffmpeg", "-y", "-i", wav_path,
@@ -284,60 +212,30 @@ def _build_timed_narration(
             if rs_result.returncode != 0:
                 log(f"  跳过: 重采样失败 {wav_path}: {rs_result.stderr}")
                 _unplaced(seg, seg["start"], "skipped", "resample_failed")
-                prev_pause_samples = pause_samples
-                skipped_count += 1
                 continue
             wav_path = tmp_path
-            seg["narration_conversion_path"] = tmp_path
 
         with wave.open(wav_path, "rb") as wf:
             wf_data = bytearray(wf.readframes(wf.getnframes()))
 
         # 按场景边界裁剪
-        audio_samples = len(wf_data) // 2
-        available = end_boundary - actual_start
-        write_samples = audio_samples
+        write_samples = len(wf_data) // 2
 
         if write_samples <= 0 or available <= 0:
             log(f"  跳过: {seg['start']:.1f}s-{seg['end']:.1f}s (无空间)")
             _unplaced(seg, seg["start"], "no_safe_fit", "no_room", blocking=True)
-            prev_pause_samples = pause_samples
-            no_safe_fit_count += 1
             continue
 
-        if audio_samples > available:
+        if write_samples > available:
             # No tolerance-based trimming: even a few milliseconds may contain a
             # consonant/vowel release. _adjust_tts_speed must produce a complete file
             # that fits; otherwise block and ask the Agent to shorten/move the block.
-            over = (audio_samples - available) / sample_rate
+            over = (write_samples - available) / sample_rate
             log(f"  TTS 无安全放置: 段 {seg['index'] + 1} 超出可用窗口 {over:.3f}s；禁止裁尾，交由 QC 阻断")
             _unplaced(seg, actual_start / sample_rate, "no_safe_fit", "no_safe_boundary", blocking=True)
-            prev_pause_samples = pause_samples
-            skipped_count += 1
-            no_safe_fit_count += 1
             continue
 
-        # 重叠检测：跳过与前段重叠的部分（在 fade 之前，避免截断后丢失 fade-in）
-        if actual_start < last_written_end:
-            overlap_ms = (last_written_end - actual_start) * 1000 / sample_rate
-            if last_written_end >= actual_start + write_samples:
-                log(f"  跳过重叠段: 段 {seg['index'] + 1} {actual_start/sample_rate:.1f}s "
-                       f"(与前段重叠 {overlap_ms:.0f}ms)")
-                _unplaced(seg, seg["start"], "no_safe_fit", "no_room", blocking=True)
-                prev_pause_samples = pause_samples
-                no_safe_fit_count += 1
-                continue
-            actual_start = last_written_end
-            available = end_boundary - actual_start
-            if write_samples > available:
-                log(f"  重叠 {overlap_ms:.0f}ms 后无安全完整窗口，跳过")
-                _unplaced(seg, actual_start / sample_rate, "no_safe_fit", "no_safe_boundary", blocking=True)
-                prev_pause_samples = pause_samples
-                skipped_count += 1
-                no_safe_fit_count += 1
-                continue
-
-        # fade-in / fade-out（在 overlap 裁剪之后应用，确保正确的音频包络）
+        # fade-in / fade-out
         fade_in_len, fade_out_len = _speech_safe_fade_lengths(
             wf_data, write_samples, sample_rate, CONFIG["fade_ms"]
         )
@@ -350,8 +248,6 @@ def _build_timed_narration(
         for i in range(fade_out_len):
             gain = 1.0 - i / fade_out_len
             s = (write_samples - 1 - i) * 2
-            if s < 0:
-                break
             sample = int.from_bytes(wf_data[s:s+2], 'little', signed=True)
             sample = int(sample * gain)
             wf_data[s:s+2] = sample.to_bytes(2, 'little', signed=True)
@@ -372,8 +268,6 @@ def _build_timed_narration(
         seg["actual_place_end"] = (actual_start + write_samples) / sample_rate
         seg["placed_audio_duration"] = write_samples / sample_rate
         last_written_end = actual_start + write_samples
-        prev_pause_samples = pause_samples
-        placed_count += 1
 
     with wave.open(str(output_wav), "wb") as wf:
         wf.setnchannels(1)
@@ -381,11 +275,11 @@ def _build_timed_narration(
         wf.setframerate(sample_rate)
         wf.writeframes(bytes(buffer))
 
-    if tts_segments and placed_count == 0 and no_safe_fit_count == 0:
+    if tts_segments and all(seg["fit_status"] == "skipped" for seg in tts_segments):
         output_wav.unlink(missing_ok=True)
         raise RuntimeError(
             f"全部 {len(tts_segments)} 段解说均被跳过或未能写入"
-            f"（WAV 缺失或无可用时间；跳过 {skipped_count} 段），"
+            f"（WAV 缺失或无可用时间；跳过 {len(tts_segments)} 段），"
             "已中止以避免生成无解说视频"
         )
 
