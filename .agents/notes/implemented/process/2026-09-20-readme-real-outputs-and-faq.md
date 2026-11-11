@@ -11,7 +11,7 @@ Status: implemented
 两份 README 按姊妹仓库的顺序重排，内容改动如下：
 
 1. **masthead** 沿用 #91，导航的第二个正文锚点从「怎么用」改为「看看它的输出」；徽章在 Stars / Release / Skills 6 / MiMo / License 之外补 Python 3.10+ 与 CI `skill-validate.yml`，与 drama-skills、novel-to-game 一致（#91 的决策记录允许仓库特有的运行事实接在核心四项之后）。一句话定位改为写清六个技能、ffmpeg、一个 key 和剪映草稿。
-2. **首屏视频后一段话**说明这条 59 秒成片是什么、来自哪四集、全部产物在哪。「这是什么」改为一段定位加**五条加粗要点**：一个 key 本地只要 ffmpeg；先做创作决定再分配声音；先剪后配、多视频、素材库；成片之外能继续改（剪映草稿、自带字幕）；每一步都有机器可读记录、MiMo 顾问只建议。原「为什么用它」八条并入这五条。
+2. **首屏视频后一段话**说明这条 59 秒成片是什么、来自哪四集、全部产物在哪（2026-11-11 起首屏与 `examples/guohuo-60s/README.md` 的 `user-attachments` 视频统一改为单独一行裸写 URL，不用 `<video>` 标签或代码块，使 GitHub 渲染器正常签发 `private-user-images.githubusercontent.com` 媒体直链）。「这是什么」改为一段定位加**五条加粗要点**：一个 key 本地只要 ffmpeg；先做创作决定再分配声音；先剪后配、多视频、素材库；成片之外能继续改（剪映草稿、自带字幕）；每一步都有机器可读记录、MiMo 顾问只建议。原「为什么用它」八条并入这五条。
 3. **安装**：前提一句话，最短命令（Claude Code 两行加一句话安装）在前；Codex / OpenCode / OpenClaw 和 Fish Audio 各收进一个 `<details>`；保留自检请求；引用块写 CHANGELOG / Releases 与仓库从 `worldwonderer` 迁移。删除「本 PR 已在 OpenCode 1.14.32 上实际验证」「Codex CLI 0.144.1 smoke-tested」这类过程性句子。Fish Audio 段不再写「当前免费」，只写模型、默认音色和「计费以 Fish Audio 官方为准」，供应商定价链接不进 README。
 4. **新增「看看它的输出」**四个小节，每段逐字摘自 `examples/guohuo-60s/`：
    - 故事计划：`recap_story_plan.json` 的 `director_intent` 完整引用，`beats` 十拍节选 b03 一拍；

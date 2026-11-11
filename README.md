@@ -32,7 +32,7 @@
   <a href="https://github.com/zenstory-ai/video-recap-skills/issues"><img alt="GitHub Issues" src="https://img.shields.io/badge/GitHub%20Issues-181717?style=for-the-badge&logo=github&logoColor=white"></a>
 </p>
 
-<video src="https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667" controls muted playsinline width="100%"></video>
+https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 上面这条 59 秒横屏解说《这一秒过火》，是从四集长剧里跨集选段、剪辑、写稿、配音、混音、加包装并经多轮看片打磨后的最终交付；它的全套创作产物（故事方案、分镜声画板、解说词、多轨时间线、QC 报告、返修账本、Remotion 包装源码）全部公开在 [examples/guohuo-60s/](examples/guohuo-60s/)，下文展示的片段均摘自这些真实文件。
 
