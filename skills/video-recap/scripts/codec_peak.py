@@ -20,7 +20,7 @@ from loudness import (
 )
 
 CODEC_PEAK_MARGIN_DB = 0.1
-CODEC_PEAK_MAX_CORRECTIONS = 2
+CODEC_PEAK_MAX_CORRECTIONS = 4
 
 
 def delivered_loudness(path):

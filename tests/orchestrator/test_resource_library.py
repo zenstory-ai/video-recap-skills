@@ -219,3 +219,105 @@ def test_font_resource_bound_to_subtitles_must_name_its_family(tmp_path):
 
     _edit(root, "resources/font/brand-sans/resource.json", lambda d: d.update(font={"family": "Brand Sans"}))
     assert library.scan_library(root)[1].errors == []
+
+
+def test_categorized_resources_vocal_bgm_guard_and_studio_plan_template(tmp_path):
+    from argparse import Namespace
+    import resources.project_binding as project_binding
+
+    root = _copy_example(tmp_path)
+    cat_bgm = root / "resources/bgm/urban-suspense/night-bed"
+    cat_bgm.mkdir(parents=True)
+    shutil.copy(root / "resources/bgm/pulse-demo/pulse-demo.wav", cat_bgm / "night-bed.wav")
+    (cat_bgm / "resource.json").write_text(
+        json.dumps({
+            "schema": "video-recap.resource.v1",
+            "id": "night-bed",
+            "kind": "bgm",
+            "title": "夜色低频铺底",
+            "files": [{"role": "main", "path": "night-bed.wav"}],
+            "license": {"status": "owned"},
+            "has_vocal": False,
+            "bpm": 96,
+            "moods": ["悬疑", "冷峻"],
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    vocal_bgm = root / "resources/bgm/urban-suspense/vocal-song"
+    vocal_bgm.mkdir(parents=True)
+    shutil.copy(root / "resources/bgm/pulse-demo/pulse-demo.wav", vocal_bgm / "vocal.wav")
+    (vocal_bgm / "resource.json").write_text(
+        json.dumps({
+            "schema": "video-recap.resource.v1",
+            "id": "vocal-song",
+            "kind": "bgm",
+            "title": "带人声插曲",
+            "files": [{"role": "main", "path": "vocal.wav"}],
+            "license": {"status": "owned"},
+            "has_vocal": True,
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    studio_tpl = root / "templates/packaging/stage-portrait/v1"
+    studio_tpl.mkdir(parents=True)
+    (studio_tpl / "template.json").write_text(
+        json.dumps({
+            "schema": "video-recap.template.v1",
+            "id": "stage-portrait",
+            "version": 1,
+            "kind": "packaging",
+            "category": "portrait",
+            "title": "竖屏 4:3 舞台精装",
+            "canvas": {"width": 1080, "height": 1920},
+            "params": {
+                "studio_plan": {
+                    "preset": "portrait_stage",
+                    "backdrop_mode": "blurred_frame",
+                },
+            },
+            "status": "adopted",
+            "adoption": {"date": "2026-11-11", "by": "user", "statement": "确认采纳", "scope": "竖屏解说"},
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    index, report = library.scan_library(root)
+    assert report.errors == []
+    by_id = {r["id"]: r for r in index["resources"]}
+    assert by_id["night-bed"]["category"] == "urban-suspense"
+    assert ("resources/bgm/urban-suspense/vocal-song/resource.json", "bgm_has_vocal") in _codes(report.warnings)
+
+    proj_dir = tmp_path / "proj"
+    proj_dir.mkdir()
+    proj_file = proj_dir / "recap_project.json"
+    proj_file.write_text(
+        json.dumps({
+            "schema": "video-recap.project.v1",
+            "name": "测试项目",
+            "library": str(root),
+            "bindings": {"bgm": "vocal-song", "packaging": "stage-portrait@v1"},
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    args = Namespace(tts_provider="auto", mimo_tts_voice=None, voice_ref=None, material_library_dir=None)
+    with pytest.raises(project_binding.BindingError, match="has_vocal=true"):
+        project_binding.resolve_project(proj_file, args, environ={}, include_voice=True)
+
+    proj_file.write_text(
+        json.dumps({
+            "schema": "video-recap.project.v1",
+            "name": "测试项目",
+            "library": str(root),
+            "bindings": {"bgm": "night-bed", "packaging": "stage-portrait@v1"},
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    resolved = project_binding.resolve_project(proj_file, args, environ={}, include_voice=True)
+    work = tmp_path / "work"
+    work.mkdir()
+    project_binding.sync_packaging_layers(work, resolved)
+    synced = json.loads((work / "packaging_plan.json").read_text(encoding="utf-8"))
+    assert synced["preset"] == "portrait_stage"
+    assert synced["canvas"] == {"width": 1080, "height": 1920}

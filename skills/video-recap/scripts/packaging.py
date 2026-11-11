@@ -11,7 +11,29 @@ from pathlib import Path
 
 import lib
 from artifacts import file_identity
+from packaging_studio import (
+    compose_studio_video_filter,
+    has_packaging_plan,
+    prepare_studio_packaging,
+    resolve_output_canvas,
+    studio_packaging_settings,
+    studio_timeline_segments,
+)
 from visual_render import _escape_subtitle_filter_path
+
+__all__ = [
+    "PACKAGING_LAYERS",
+    "compose_studio_video_filter",
+    "compose_video_filter",
+    "has_packaging_plan",
+    "load_packaging_layers",
+    "packaging_settings",
+    "prepare_studio_packaging",
+    "resolve_output_canvas",
+    "studio_packaging_settings",
+    "studio_timeline_segments",
+    "timeline_image_segments",
+]
 
 PACKAGING_LAYERS = "packaging_layers.json"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}

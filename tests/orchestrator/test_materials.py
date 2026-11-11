@@ -490,3 +490,49 @@ def test_multi_video_material_restore_shares_project_research_before_rebuilding_
     manifest = json.loads((project / "multi_source_manifest.json").read_text(encoding="utf-8"))
     for src in manifest["sources"]:
         assert "沈清" in (project / src["source_work_dir"] / "agent_narration_brief.md").read_text(encoding="utf-8")
+
+
+def test_scan_materials_groups_series_orders_episodes_and_strips_debug_tags(tmp_path):
+    lib = tmp_path / "library"
+    for ep_no, name, syn in (
+        (2, "ep002.mp4", "第二集：对手断供施压，门店反手推出免费试吃。"),
+        (1, "ep001.mp4", "第一集：接盘高速服务区亏损烧烤店。"),
+    ):
+        work = tmp_path / f"work_{ep_no}"
+        work.mkdir()
+        (work / "scenes.json").write_text(
+            json.dumps([{"start_time": 0.0, "end_time": 62.5}]), encoding="utf-8"
+        )
+        (work / "asr_result.json").write_text(
+            json.dumps([{"start": 1.0, "end": 3.0, "text": "开业了"}]), encoding="utf-8"
+        )
+        (work / "background_research.json").write_text(
+            json.dumps({"characters": {"李阳": "店主", "周坤": "对手"}, "synopsis": syn}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        src = tmp_path / name
+        src.write_bytes(b"video" * ep_no)
+        ident = {"size": src.stat().st_size, "mtime_ns": 100 + ep_no}
+        materials.save_material(
+            lib, work, src, ident, SETTINGS,
+            series={
+                "series_id": "highway-bbq",
+                "series_title": "服务区烧烤店",
+                "ep_no": ep_no,
+                "episode_title": f"第 {ep_no:02d} 集",
+                "era": "现代都市",
+                "genre": "创业逆袭",
+            },
+        )
+        # Re-saving the same episode should remain deduplicated in scan_materials
+        materials.save_material(lib, work, src, ident, SETTINGS)
+
+    scanned = materials.scan_materials(lib)
+    assert scanned["total_count"] == 2
+    assert len(scanned["series"]) == 1
+    series = scanned["series"][0]
+    assert series["title"] == "服务区烧烤店"
+    assert [e["ep_no"] for e in series["episodes"]] == [1, 2]
+    assert "第一集" in series["episodes"][0]["synopsis"]
+    assert "李阳" in series["characters"]
+    assert all(not t.startswith(("scenes:", "asr:")) for e in series["episodes"] for t in e["tags"])

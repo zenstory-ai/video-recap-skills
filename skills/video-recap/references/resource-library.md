@@ -5,8 +5,8 @@
 ```text
 <library>/
   library.json                                     # {"schema": "video-recap.library.v1", "name": "…"}
-  materials/…                                      # 视频理解分析缓存（见 data-schema.md）
-  resources/<kind>/<id>/resource.json (+ 资源文件)
+  materials/…                                      # 视频理解分析缓存与剧集分集元数据（见 data-schema.md）
+  resources/<kind>/<id>/resource.json (+ 资源文件) # 或按二级分类目录存放：resources/<kind>/<category>/<id>/resource.json
   templates/<kind>/<id>/v<version>/template.json
   samples/<id>/sample.json (+ 样片文件，或指向库外的绝对路径)
 ```
@@ -49,10 +49,11 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
 | `kind` | 必需文件 | 额外字段 |
 |---|---|---|
-| `bgm` / `sfx` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | — |
-| `voice` | 可选参考音频 | `voice.provider` ∈ `mimo-tts` / `fish-audio` / `index-tts`，并填写 `voice.voice_id` 或附带一个参考音频；附带参考音频时必须填写 `consent.status` ∈ `unknown` / `granted` / `denied` |
-| `font` | 至少一个字体文件（ttf / otf / ttc） | 可选 `font.family`、`font.index` |
-| `image` | 至少一张图片（png / jpg / webp），用于角标、包框或片尾卡 | — |
+| `bgm` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | 可选分类与声学画像：`category`（未填时自动继承二级分类目录名）、`sub_category`、`moods`、`scene_fit`、`energy`、`tempo_band`、`bpm`、`has_vocal`（布尔值；`true` 时 `check` 报警告且解说模式拒绝绑定）、`speech_friendly`、`measured`（如 `{duration_sec, lufs_i}`） |
+| `sfx` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | 可选 `category`（如 `whoosh` / `impact` / `riser` / `accent`）、`tone`、`scene_fit`、`peak_offset_ms`（瞬态峰值毫秒偏移，混音时自动前移对齐切点）、`recommended_gain_db`、`measured` |
+| `voice` | 可选参考音频 | `voice.provider` ∈ `mimo-tts` / `fish-audio` / `index-tts`，并填写 `voice.voice_id` 或附带一个参考音频；附带参考音频时必须填写 `consent.status` ∈ `unknown` / `granted` / `denied`；可选 `category`、`persona`、`gender`、`languages`、`recommended_speed` |
+| `font` | 至少一个字体文件（ttf / otf / ttc） | 可选 `font.family`、`font.index`、`visibility` |
+| `image` | 至少一张图片（png / jpg / webp），用于角标、包框或片尾卡 | 可选 `visibility` ∈ `public` / `internal`（`internal` 供模板内部引用，不在素材库主视图平铺展示） |
 
 `license.status` ∈ `unknown` / `owned` / `licensed` / `restricted`，必须由人工填写；工具不会因为文件放进了资源库就默认已获授权。`unknown` 与 `restricted` 在 `check` 时会报出警告。
 
@@ -82,7 +83,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 - 凡带 `provenance` 的参数都必须包含 `value`，且 `provenance` ∈ `measured`（从成片画面实测）/ `fitted`（调试校准得出）/ `specified`（人工直接指定）/ `unknown`。剪辑软件面板上的字号读数不等于实际像素高，应记为 `specified` 或 `unknown`。
 - 引用库内资源时写 `{"resource": "<id>"}`：`params.font` 必须指向 `font` 资源，包装图层的 `image` 必须指向 `image` 资源。
 - `subtitle_style` 必须包含 `params.font`（填 `resource` 或 `family`）、`params.size_px` 与 `params.max_chars`（按该画布能容纳的最长单行字数校准）；当 `size_px × max_chars` 超过画布宽度减去左右各 40px 默认边距时报错。可选参数为 `outline_px`、`shadow_px`、`primary_color`、`outline_color`、`max_lines`、`band`，出现其他参数名直接报错；若给出 `params.band.value`，需满足 `0 <= y_top < y_bot <= canvas.height`。
-- `packaging` 必须提供非空 `params.layers`，每个图层包含唯一 `name`、`image` 资源引用以及完全落在画布内的整数 `rect {x, y, width, height}`；可选 `params.safe_rect`。
+- `packaging` 支持静态图层 `params.layers` 或声明式演播室版式 `params.studio_plan`（`preset` ∈ `portrait_cinema` / `portrait_stage` / `landscape_cinema`），也可二者同时组合；静态图层包含唯一 `name`、`image` 资源引用以及落在画布内的整数 `rect {x, y, width, height}`；可选 `params.safe_rect`。
 - `production_reference` 模板见下一节。
 - `status` ∈ `draft` / `adopted` / `retired`。状态为 `adopted` 时必须填写 `adoption.date`（YYYY-MM-DD）、`by`、`statement`（用户确认原话）与 `scope`。可选 `adoption.resources` 记录采纳当下底层资源文件的大小与修改时间：
 

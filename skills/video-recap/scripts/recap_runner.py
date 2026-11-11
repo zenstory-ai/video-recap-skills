@@ -255,9 +255,13 @@ def _narrate(work_dir, args):
 def _deliver(work_dir, args, assemble_video, recap_stem, extra_assemble_args=()):
     """Shared tail of every full/cut run: narration (if owned) -> assemble -> final QC."""
     project = getattr(args, "resolved_project", None)
-    if project and any(t["role"] in project_binding.GEOMETRY_ROLES for t in project["templates"]):
-        project_binding.check_canvas(project, *_probe_display_size_or_raise(assemble_video))
     project_binding.sync_packaging_layers(work_dir, project)
+    if project and any(t["role"] in project_binding.GEOMETRY_ROLES for t in project["templates"]):
+        import packaging as packaging_lib
+
+        src_w, src_h = _probe_display_size_or_raise(assemble_video)
+        out_canvas = packaging_lib.resolve_output_canvas(work_dir, {"width": src_w, "height": src_h})
+        project_binding.check_canvas(project, out_canvas["width"], out_canvas["height"])
     if uses_narration(args):
         _narrate(work_dir, args)
     aargs = [str(assemble_video), "--work-dir", str(work_dir), "--recap-stem", recap_stem]

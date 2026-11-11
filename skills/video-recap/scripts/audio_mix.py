@@ -334,7 +334,15 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
 def _amix_tail(narr_vol, bgm_chain=""):
     """Mix the prepared original track [orig] (+ optional BGM bed) with the boosted
     narration [narr] into [aout]. bgm_chain, when given, defines [bgm] from input [2:a]."""
-    narr = f"[1:a]volume={narr_vol},aresample=48000[narr];"
+    vocal_fx = (
+        ",highpass=f=80,equalizer=f=175:t=q:w=1.1:g=1.4,"
+        "equalizer=f=320:t=q:w=1.4:g=-1.6,equalizer=f=3200:t=q:w=1.2:g=1.8,"
+        "equalizer=f=6800:t=q:w=2.0:g=-1.5,"
+        "acompressor=threshold=0.112:ratio=2.4:attack=12:release=140:makeup=1.19"
+        if CONFIG.get("studio_vocal_polish", False)
+        else ""
+    )
+    narr = f"[1:a]volume={narr_vol}{vocal_fx},aresample=48000[narr];"
     if bgm_chain:
         return bgm_chain + narr + "[orig][bgm][narr]amix=inputs=3:duration=first:dropout_transition=0:normalize=0[aout]"
     return narr + "[orig][narr]amix=inputs=2:duration=first:dropout_transition=0:normalize=0[aout]"
@@ -406,12 +414,14 @@ def _build_audio_filter_complex(
     bgm_in = f"[{bgm_audio_label}]"
     tail_fade = _tail_fade_suffix(video_duration)
 
-    # BGM bed (input [2:a]): ducked under each narration window when present.
+    # BGM bed (input [2:a]): ducked under each narration window when present, with a subtle
+    # vocal-presence pocket (-2.2 dB @ 2.2 kHz) when studio_vocal_polish is enabled.
     bgm_chain = ""
     if has_bgm:
         base = CONFIG["bgm_volume"]
         bgm_expr = _bgm_envelope(tts_segments, base, CONFIG["bgm_ducking_volume"], fade, bridge)
-        bgm_chain = f"{bgm_in}volume='{bgm_expr}':eval=frame,aresample=48000{tail_fade}[bgm];"
+        bgm_eq = ",equalizer=f=2200:t=q:w=1.2:g=-2.2" if CONFIG.get("studio_vocal_polish", False) else ""
+        bgm_chain = f"{bgm_in}volume='{bgm_expr}':eval=frame{bgm_eq},aresample=48000{tail_fade}[bgm];"
 
     # Gap-fill ducking envelope on the original track.
     idle = CONFIG["idle_orig_volume"]

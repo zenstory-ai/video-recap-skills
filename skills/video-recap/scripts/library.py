@@ -58,14 +58,20 @@ SUBTITLE_PARAMS = {
 }
 VOICE_PROVIDERS = ("mimo-tts", "fish-audio", "index-tts")
 SAMPLE_EXTS = {".mp4", ".mov", ".mkv", ".webm"}
+STUDIO_PRESETS = ("portrait_cinema", "portrait_stage", "landscape_cinema")
+VISIBILITIES = ("public", "internal")
 
 RESOURCE_KEYS = {
     "schema", "id", "kind", "title", "files", "origin", "license", "tags", "notes",
     "voice", "consent", "font",
+    "category", "sub_category", "moods", "scene_fit", "energy", "tempo_band", "bpm",
+    "has_vocal", "speech_friendly", "measured", "tone", "peak_offset_ms",
+    "recommended_gain_db", "persona", "gender", "languages", "recommended_speed",
+    "visibility",
 }
 TEMPLATE_KEYS = {
     "schema", "id", "version", "kind", "title", "canvas", "params", "samples", "status",
-    "adoption", "notes",
+    "adoption", "notes", "category", "tags",
 }
 SAMPLE_KEYS = {
     "schema", "id", "title", "file", "canvas", "demonstrates", "not_reusable", "templates",
@@ -162,7 +168,15 @@ def resolve_inside(root: Path, base: Path, rel) -> Path | None:
 
 def _check_resource(path: Path, data: dict, report: Report) -> dict | None:
     rdir = path.parent
-    kind = rdir.parent.name
+    try:
+        rel_parts = path.relative_to(report.root / "resources").parts
+    except ValueError:
+        rel_parts = (rdir.parent.name, rdir.name, path.name)
+    kind = rel_parts[0]
+    dir_category = rel_parts[1] if len(rel_parts) == 4 else None
+    if dir_category is not None and not ID_RE.match(dir_category):
+        report.error(path, "category_dir", f"分类目录名 {dir_category} 只能用小写字母、数字、. _ -")
+        return None
     if data.get("id") != rdir.name or not ID_RE.match(str(data.get("id", ""))):
         report.error(path, "id", f"id 必须与目录名 {rdir.name} 一致，且只用小写字母、数字、. _ -")
         return None
@@ -171,6 +185,21 @@ def _check_resource(path: Path, data: dict, report: Report) -> dict | None:
         return None
     if not _nonempty_str(data.get("title")):
         report.error(path, "title", "缺少 title")
+    visibility = data.get("visibility", "public")
+    if visibility not in VISIBILITIES:
+        report.error(path, "visibility", f"visibility 必须是 {VISIBILITIES} 之一")
+        visibility = "public"
+    if "has_vocal" in data:
+        if not isinstance(data["has_vocal"], bool):
+            report.error(path, "has_vocal", "has_vocal 必须是布尔值")
+        elif kind == "bgm" and data["has_vocal"] is True:
+            report.warn(path, "bgm_has_vocal", "BGM 标记了有人声（has_vocal=true），解说成片绑定时会被拦截")
+    if "peak_offset_ms" in data and not (
+        isinstance(data["peak_offset_ms"], (int, float))
+        and not isinstance(data["peak_offset_ms"], bool)
+        and data["peak_offset_ms"] >= 0
+    ):
+        report.error(path, "peak_offset_ms", "peak_offset_ms 必须是非负数")
     files = data.get("files", [])
     if not isinstance(files, list):
         report.error(path, "files", "files 必须是数组")
@@ -213,8 +242,9 @@ def _check_resource(path: Path, data: dict, report: Report) -> dict | None:
                 report.error(path, "consent", f"参考音频需要 consent.status（{CONSENT_STATUSES}）")
             elif consent_status != "granted":
                 report.warn(path, f"consent_{consent_status}", "参考音频的声音授权未确认")
-    return {"id": data["id"], "kind": kind, "title": data.get("title", ""),
-            "license": status, "files": resolved, "record": str(path)}
+    category = data["category"].strip() if _nonempty_str(data.get("category")) else (dir_category or "")
+    return {"id": data["id"], "kind": kind, "category": category, "title": data.get("title", ""),
+            "license": status, "visibility": visibility, "files": resolved, "record": str(path)}
 
 
 def _param_values(node, where="params"):
@@ -349,9 +379,18 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
         ):
             report.error(path, "band", "params.band.value 需要 0 <= y_top < y_bot <= 画布高度")
     if kind == "packaging":
+        studio_plan = params.get("studio_plan")
         layers = params.get("layers")
-        if not isinstance(layers, list) or not layers:
-            report.error(path, "layers", "packaging 需要非空 params.layers")
+        if studio_plan is not None:
+            if not (isinstance(studio_plan, dict) and studio_plan.get("preset") in STUDIO_PRESETS):
+                report.error(path, "studio_plan", f"params.studio_plan.preset 必须是 {STUDIO_PRESETS} 之一")
+            if layers is None:
+                layers = []
+            elif not isinstance(layers, list):
+                report.error(path, "layers", "params.layers 必须是数组")
+                layers = []
+        elif not isinstance(layers, list) or not layers:
+            report.error(path, "layers", "packaging 需要非空 params.layers 或 params.studio_plan")
             layers = []
         names = [layer.get("name") for layer in layers if isinstance(layer, dict)]
         if len(names) != len(set(names)) or not all(_nonempty_str(n) for n in names):
@@ -386,7 +425,8 @@ def _check_template(path: Path, data: dict, report: Report) -> dict | None:
     ):
         report.error(path, "adoption_resources", "adoption.resources 必须是 {资源 id: [{path, size, mtime_ns}]}")
         adoption = {k: v for k, v in adoption.items() if k != "resources"}
-    return {"id": tid, "version": version, "kind": kind, "title": data.get("title", ""),
+    category = data["category"].strip() if _nonempty_str(data.get("category")) else ""
+    return {"id": tid, "version": version, "kind": kind, "category": category, "title": data.get("title", ""),
             "status": status, "canvas": canvas, "refs": refs,
             "samples": samples, "adoption": adoption, "record": str(path)}
 
@@ -483,10 +523,19 @@ def scan_library(root) -> tuple[dict, Report]:
         _load(meta, LIBRARY_SCHEMA, {"schema", "name", "notes"}, report)
     else:
         report.warn(meta, "no_library_json", "缺少 library.json（仍会扫描资源、模板与样片）")
-    for path in sorted(root.glob("resources/*/*/resource.json")):
+    seen_resource_ids: set[str] = set()
+    resource_paths = sorted({
+        *root.glob("resources/*/*/resource.json"),
+        *root.glob("resources/*/*/*/resource.json"),
+    })
+    for path in resource_paths:
         data = _load(path, RESOURCE_SCHEMA, RESOURCE_KEYS, report)
         entry = _guarded(_check_resource, path, data, report)
         if entry:
+            if entry["id"] in seen_resource_ids:
+                report.error(path, "duplicate_id", f"资源 id 重复: {entry['id']}")
+                continue
+            seen_resource_ids.add(entry["id"])
             index["resources"].append(entry)
     for path in sorted(root.glob("templates/*/*/v*/template.json")):
         data = _load(path, TEMPLATE_SCHEMA, TEMPLATE_KEYS, report)

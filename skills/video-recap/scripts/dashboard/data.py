@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import quote
 
 import library
+import materials as material_lib
 import resources.project_binding as project_binding
 from dashboard.io import (LIBRARY_FILE, PROJECT_FILE, RUN_FILE, Refused, dir_of, discover,
                           media_entry, nearest, read_object, rel_of, resolve_under)
@@ -66,7 +67,8 @@ def _record_target(record_rel: str):
     """``(tab, id)`` of the library entry a record path belongs to."""
     parts = PurePosixPath(record_rel).parts
     if len(parts) >= 3 and parts[0] == "resources":
-        return "resources", parts[2]
+        rid = parts[-2] if parts[-1] == "resource.json" else parts[2]
+        return "resources", rid
     if len(parts) >= 4 and parts[0] == "templates":
         return "templates", f"{parts[2]}@{parts[3]}"
     if len(parts) >= 2 and parts[0] == "samples":
@@ -119,6 +121,33 @@ def library_detail(root: Path, rel: str) -> dict:
         record_rel, data = record(res)
         resources.append({
             "id": res["id"], "kind": res["kind"], "title": res["title"], "record": record_rel,
+            "category": res.get("category") or _text(data.get("category")),
+            "sub_category": _text(data.get("sub_category")),
+            "visibility": _text(data.get("visibility")) or "public",
+            "moods": _strings(data.get("moods")), "scene_fit": _strings(data.get("scene_fit")),
+            "energy": _text(data.get("energy")), "tempo_band": _text(data.get("tempo_band")),
+            "bpm": data.get("bpm") if isinstance(data.get("bpm"), (int, float)) and not isinstance(data.get("bpm"), bool) else None,
+            "has_vocal": data.get("has_vocal") if isinstance(data.get("has_vocal"), bool) else None,
+            "speech_friendly": data.get("speech_friendly") if isinstance(data.get("speech_friendly"), bool) else None,
+            "measured": data.get("measured") if isinstance(data.get("measured"), dict) else {},
+            "tone": _text(data.get("tone")),
+            "peak_offset_ms": (
+                data.get("peak_offset_ms")
+                if isinstance(data.get("peak_offset_ms"), (int, float)) and not isinstance(data.get("peak_offset_ms"), bool)
+                else None
+            ),
+            "recommended_gain_db": (
+                data.get("recommended_gain_db")
+                if isinstance(data.get("recommended_gain_db"), (int, float)) and not isinstance(data.get("recommended_gain_db"), bool)
+                else None
+            ),
+            "persona": _text(data.get("persona")), "gender": _text(data.get("gender")),
+            "languages": _strings(data.get("languages")),
+            "recommended_speed": (
+                data.get("recommended_speed")
+                if isinstance(data.get("recommended_speed"), (int, float)) and not isinstance(data.get("recommended_speed"), bool)
+                else None
+            ),
             "license": data.get("license") if isinstance(data.get("license"), dict) else {},
             "consent": data.get("consent"), "voice": data.get("voice"), "origin": data.get("origin"),
             "tags": _strings(data.get("tags")), "notes": _text(data.get("notes")),
@@ -136,6 +165,8 @@ def library_detail(root: Path, rel: str) -> dict:
             "rows": param_rows(tpl["kind"], params, by_id),
             "preview": template_preview(root, tpl["kind"], tpl["canvas"], params, by_id),
             "id": tpl["id"], "version": tpl["version"], "ref": ref, "kind": tpl["kind"],
+            "category": tpl.get("category") or _text(data.get("category")),
+            "tags": _strings(data.get("tags")),
             "title": tpl["title"], "status": tpl["status"], "canvas": tpl["canvas"],
             "adoption": tpl["adoption"] if isinstance(tpl["adoption"], dict) else None,
             "params": params, "notes": data.get("notes", ""), "record": record_rel,
@@ -143,7 +174,8 @@ def library_detail(root: Path, rel: str) -> dict:
             "bound_by": bound_by.get(("template", ref), []), "issues": issues.pop(record_rel, []),
         })
     leftover = [item for items in issues.values() for item in items]
-    return {**summary, "resources": resources, "templates": templates,
+    materials_view = material_lib.scan_materials(lib_dir)
+    return {**summary, "materials": materials_view, "resources": resources, "templates": templates,
             "samples": list(samples.values()), "issues": leftover}
 
 
@@ -398,7 +430,8 @@ def search(root: Path, q) -> dict:
             add("剪辑", f"{rel} · 片段 {clip['id']}", clip["reason"], _href("run", rel, "cut", clip=clip["index"]))
     cache: dict = {}
     for rel in found["libraries"]:
-        index, _ = _scan(dir_of(root, rel).resolve(), cache)
+        lib_dir = dir_of(root, rel).resolve()
+        index, _ = _scan(lib_dir, cache)
         for res in index["resources"]:
             add("资源", f"{res['kind']} · {res['id']}", f"{res['id']} {res['title']}",
                 _href("library", rel, "resources", id=res["id"]))
@@ -407,4 +440,14 @@ def search(root: Path, q) -> dict:
             add("模板", f"{tpl['kind']} · {ref}", f"{ref} {tpl['title']}", _href("library", rel, "templates", id=ref))
         for sample in index["samples"]:
             add("样片", sample["id"], f"{sample['id']} {sample['title']}", _href("library", rel, "samples", id=sample["id"]))
+        mat_view = material_lib.scan_materials(lib_dir)
+        for series in mat_view["series"]:
+            for ep in series["episodes"]:
+                add("原片", f"{series['title']} · {ep['episode_title']}",
+                    f"{series['title']} {ep['episode_title']} {ep['synopsis']} {' '.join(ep['characters'])}",
+                    _href("library", rel, "materials", id=ep["material_id"]))
+        for ep in mat_view["standalone"]:
+            add("原片", ep["episode_title"],
+                f"{ep['episode_title']} {ep['synopsis']} {' '.join(ep['characters'])}",
+                _href("library", rel, "materials", id=ep["material_id"]))
     return {"q": query, "hits": hits}

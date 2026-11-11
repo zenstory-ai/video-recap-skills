@@ -218,6 +218,10 @@ def resolve_project(value, args, environ=None, *, include_voice=True) -> dict:
         env.update(voice_env)
     bgm = resource("bgm")
     if bgm:
+        if include_voice and _record(bgm).get("has_vocal") is True:
+            raise BindingError(
+                f"BGM 资源 {bgm['id']} 标记了有人声（has_vocal=true），解说模式下请换用纯音乐 BGM"
+            )
         env["BGM_PATH"] = bgm["files"][0]["path"]
     material_env = environ.get("VIDEO_RECAP_MATERIAL_LIBRARY_DIR", "").strip()
     if (material_env and not getattr(args, "material_library_dir", None)
@@ -276,6 +280,7 @@ def check_canvas(resolved, width, height) -> None:
 
 
 PACKAGING_LAYERS = "packaging_layers.json"
+PACKAGING_PLAN = "packaging_plan.json"
 REFERENCE_COPY = "production_reference.json"
 _WRITTEN_BY = "video-recap --project"
 
@@ -300,21 +305,49 @@ def _sync_bound_file(work_dir, name, payload) -> None:
 
 
 def sync_packaging_layers(work_dir, resolved) -> None:
-    """Write the bound packaging template's layers for assemble.py, or retire our old copy."""
+    """Write the bound packaging template's layers / studio_plan for assemble.py, or retire our old copy."""
     packaging = (resolved or {}).get("packaging")
     if not packaging:
         _sync_bound_file(work_dir, PACKAGING_LAYERS, None)
+        _sync_bound_file(work_dir, PACKAGING_PLAN, None)
         return
     record, resources = packaging["record"], packaging["resources"]
-    layers = [{"name": layer["name"],
-               "path": resources[layer["image"]["resource"]]["files"][0]["path"],
-               "rect": layer["rect"]}
-              for layer in record["params"]["layers"]]
-    _sync_bound_file(work_dir, PACKAGING_LAYERS, {
-        "template": {"id": record["id"], "version": record["version"]},
-        "canvas": record["canvas"],
-        "layers": layers,
-    })
+    raw_layers = record["params"].get("layers") or []
+    if raw_layers:
+        layers = [{"name": layer["name"],
+                   "path": resources[layer["image"]["resource"]]["files"][0]["path"],
+                   "rect": layer["rect"]}
+                  for layer in raw_layers]
+        _sync_bound_file(work_dir, PACKAGING_LAYERS, {
+            "template": {"id": record["id"], "version": record["version"]},
+            "canvas": record["canvas"],
+            "layers": layers,
+        })
+    else:
+        _sync_bound_file(work_dir, PACKAGING_LAYERS, None)
+
+    studio_plan = record["params"].get("studio_plan")
+    if isinstance(studio_plan, dict):
+        plan_path = Path(work_dir) / PACKAGING_PLAN
+        if plan_path.exists():
+            current = read_json_object(plan_path)
+            if not _ours(current):
+                cur_canvas = (current or {}).get("canvas")
+                if isinstance(cur_canvas, dict) and (
+                    cur_canvas.get("width"), cur_canvas.get("height")
+                ) != (record["canvas"]["width"], record["canvas"]["height"]):
+                    raise BindingError(
+                        f"{plan_path} 的画布与绑定的包装模板 {record['id']}@v{record['version']} 冲突"
+                    )
+                return
+        _sync_bound_file(work_dir, PACKAGING_PLAN, {
+            "schema": "video-recap.packaging_plan.v1",
+            "template": {"id": record["id"], "version": record["version"]},
+            "canvas": record["canvas"],
+            **studio_plan,
+        })
+    else:
+        _sync_bound_file(work_dir, PACKAGING_PLAN, None)
 
 
 def sync_production_reference(work_dir, resolved) -> None:

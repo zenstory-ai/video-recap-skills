@@ -294,6 +294,7 @@ CONFIG = {
     "max_dead_air_seconds": env_float("MAX_DEAD_AIR_SECONDS", 5.0, minimum=0.0),
     "max_cold_open_silence_seconds": env_float("MAX_COLD_OPEN_SILENCE_SECONDS", 2.5, minimum=0.0),
     "ending_audio_fade_ms": env_float("ENDING_AUDIO_FADE_MS", 350.0, minimum=0.0),
+    "studio_vocal_polish": env_bool("STUDIO_VOCAL_POLISH", True),
     "fade_ms": 120,
     "ducking_narr_weight": 1.6,
     "zone_ducking_volume": env_float(
@@ -353,6 +354,10 @@ CONFIG = {
     "subtitle_max_lines": env_int("SUBTITLE_MAX_LINES", 2, minimum=1),
     "subtitle_play_res_x": env_int("SUBTITLE_PLAY_RES_X", 1280, minimum=1),
     "subtitle_play_res_y": env_int("SUBTITLE_PLAY_RES_Y", 720, minimum=1),
+    "subtitle_glow": env_float("SUBTITLE_GLOW", 0.0, minimum=0.0),
+    "subtitle_fade_ms": env_int("SUBTITLE_FADE_MS", 0, minimum=0),
+    "subtitle_highlight_color": os.environ.get("SUBTITLE_HIGHLIGHT_COLOR", "&H004CD2FF"),
+    "subtitle_bridge_gap_seconds": env_float("SUBTITLE_BRIDGE_GAP_SECONDS", 0.0, minimum=0.0),
 }
 
 SCRIPT_DIR = Path(__file__).parent

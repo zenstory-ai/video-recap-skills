@@ -140,7 +140,7 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 
 1. **本地确定性校验（`validate.py`）**：生成 `narration_lint.json`，对时间重叠、越界、字数超预算、残句、开场冷场、超过 5 秒的死气空窗、抢断原话、半句放回原声、笼统角色代称与占位符泄漏做硬门禁检查，存在 error 立即停机。
 2. **TTS 配音（`voiceover.py`）**：逐段合成语音并写入 `tts_segments/` 与 `tts_meta.json`。缓存按文本、音色、模型与参考音频指纹精确命中；若某段音频时长低于正常语速下限（`TTS_MIN_SPEECH_RATE`）疑似模型幻读，会自动重试并留存 `*.rejected.wav` 拒止入库。
-3. **音画合成（`assemble.py`）**：将画面、逐段旁白、压低与句末回升后的原声（详见 `references/data-schema.md` 中 `source_handoff_status` 说明）、可选 BGM（`BGM_PATH`）、片尾平滑淡出（默认 `350ms`）、底部字幕带遮罩、ASS/SRT 字幕及可选静态包装图层一并混音渲染为最终 MP4，并输出后端无关的 `timeline.json`（传 `--export-jianying` 可同步导出剪映草稿）。
+3. **音画合成（`assemble.py`）**：将画面、逐段旁白、压低与句末回升后的原声（详见 `references/data-schema.md` 中 `source_handoff_status` 说明）、可选 BGM（`BGM_PATH`）、可选点缀转场音效与精装视觉包装（`work_dir/packaging_plan.json`：支持 `9:16` 竖版舞台/剧集双金线画幅、`16:9` 影院印章与米白纸感字幕条、`@2x` 超采样人物铭牌/数据卡/书法花字，以及双层柔光重点词点亮字幕；或 `packaging_layers.json` 静态贴图）、片尾平滑淡出（默认 `350ms`）一并混音渲染为最终 MP4，并输出后端无关的 `timeline.json`（传 `--export-jianying` 可同步导出剪映草稿）。
 
 任何一段旁白若在允许的微加速上限内仍塞不进可用时间窗，合成器直接报 `no_safe_fit` 阻断，**绝不削断旁白尾音**。更多声音模式、音频路由与外层视觉包装规范分别见 `references/audio-modes.md`、`references/audio-routing.md` 与 `references/packaging.md`。
 

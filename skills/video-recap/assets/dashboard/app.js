@@ -204,6 +204,20 @@ async function render() {
     return;
   }
 
+  if (
+    target.page === "library" &&
+    S.activePage === "library" &&
+    S.activePath === target.path &&
+    S.data
+  ) {
+    view.innerHTML = viewLibrary(S.overview, S.data, target);
+    applyCss(view);
+    view.dataset.route = location.hash || "#/";
+    view.dataset.state = "ready";
+    focusTarget(target);
+    return;
+  }
+
   view.dataset.state = "loading";
   let detail = null;
   if (target.page === "run" || target.page === "library") {
