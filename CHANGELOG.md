@@ -10,6 +10,16 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-11
+
+六个生产技能合并为单一自包含技能 `video-recap`（搭配按需拆片技能 `video-reference` 形成 `1 + 1` 结构），新增声明式精装包装引擎、录音室级混音链路、五维分类素材库与极简只读审片台，并落地五道成片底线质量硬门禁。升级前请清理已移除的 `dub`、`adopted-packet-copy`、`--mimo-video-overview`、`--review-narration` 与 `EDIT_MODE` / `TARGET_DURATION` 环境变量（详见 Changed 与 Removed）。
+
+### Added
+
+- **新增声明式精装包装引擎（`packaging_plan.json`）与自动封面导出。** 支持 `portrait_stage`（竖屏 `4:3` 黄金舞台）、`portrait_cinema`（竖屏黑金电影画框）与 `landscape_cinema`（横屏温润纸感字幕带）三套精装预设，内置 `@2x` 超采样双行重点词高亮标题、花字条、人物名牌、数据卡、时间线动态进度条与重字重中文字体渲染（缺少 Pillow 时自动退化为标准库 RGBA PNG 渲染），并在成片合成时自动抽取首段关键画面导出 `cover.jpg`。
+- **新增录音室级多轨混音链路与瞬态对齐音效轨（`sfx`）。** 人声旁白内置高通去轰鸣、中高频清晰度提亮与动态压缩；配乐支持 `2.2kHz` 人声让位凹槽与闪避平滑恢复；新增 `sfx` 音效轨并支持按 `peak_offset_ms` 将音效瞬态峰值精确对齐镜头切点或信息卡落点；终混引入编码器闭环真峰值校验（锁死 `<= -1.0 dBTP`）。
+- **重构五维分类素材库与极简只读审片台（`审片台`）。** 素材库统一收敛为**原片剧目、配乐、音效、音色、样式与样片**五维结构，支持剧目分集聚合、曲风/情绪/BPM/LUFS 元数据筛选、解说模式带人声 BGM 自动拦截（`has_vocal`）与内部图层隐藏（`visibility: "internal"`）；本地只读审片台精简为清爽的 **成片**（精装成片播放 + 逐句解说词/分镜联动）与 **素材库** 双视图。
+
 ### Changed
 
 - **六个生产技能收敛为单一自包含技能 `video-recap`（`1 + 1` 技能结构）。** 将原 `video-understanding`、`video-script`、`video-cut`、`video-voiceover`、`video-assemble` 的脚本、子包与参考手册统一并入 `skills/video-recap/`，让视频理解、立意选镜、画面剪辑、旁白创作校验、TTS 配音与音画混音合成在同一个自包含技能内一气呵成完成，并解除 ClawHub 上主入口的伴随安装阻断（转为 `publish`）；`skills/video-reference/` 保持为独立的按需拆片参考技能。合并后消除重复的 `lib.py`、`agent_text.py`、色彩标签推导与纯语气词对白区间计算副本，合并原本拆开的两份 `data-schema.md` 与 `research-guide.md`。
@@ -503,7 +513,8 @@ recap feels like a recap, not captions over a clip.
   MiMo API key. Five independent skills (understanding, script, cut, voiceover, assemble)
   plus a thin orchestrator; optional 剪映 draft export.
 
-[Unreleased]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.2...HEAD
+[Unreleased]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.5.0...v0.6.0
