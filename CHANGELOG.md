@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Changed
+
+- **去黑话精修技能与参考手册、放宽语境依赖型校验门禁、分离宣发备忘 `promo_copy.json` 并统一中文化动态简报。** ① 校验分层：将 `narration_lint.py` 中依赖题材语境的 `weak_cold_open_silence`、`excessive_dead_air`、`generic_character_label` 由阻断错误降级为非阻断 `warning`，并从影评套话正则中放行普通因果连接词（`这说明`/`这意味着`/`这证明了`）；`voiceover.py` 停止静默剥离圆括号 `（...）`/`(...)` 正文补充（仅剥离方括号 `[...]` 舞台提示）；`video-reference` 的 `reference_check.py` 将 `method` 与 `source_facts` 连续 8 字/5 词重合及五大维度未全覆盖均改为非阻断 `warning`（保留 `methods` 至少一条为 `R7` 阻断，原片专名/台词/资料重合仍为 `R6` 阻断）。② 消除契约冲突与形式负担：`work_dir/packaging_plan.json` 专用于画布视觉包装（`video-recap.packaging_plan.v1`），平台发布标题与封面看点备忘迁至 `work_dir/promo_copy.json`；`CREATE` 新创任务仅在方向确有分歧或用户要求比选时列 2–3 套候选方案，`clip_plan.json` 的 `reason` 改为自然中文短句。③ 统一中文化与合并参考文档：动态生成的 `agent_narration_brief.md`、`storyboard_manifest.json` 提示与 `narration_lint.json` 诊断消息全面中文化，并根据 `tts_provider`（MiMo / Fish Audio / IndexTTS）按需输出 `emotion` 字段说明；将原英文 `audio-routing.md` 并入中文 `audio-modes.md` 并中文化 `config-playbook.md`。
+
 ## [0.7.0] - 2026-11-11
 
 六个生产技能合并为单一自包含技能 `video-recap`（搭配按需拆片技能 `video-reference` 形成 `1 + 1` 结构），新增声明式精装包装引擎、录音室级混音链路、五维分类素材库与极简只读审片台，并落地五道成片底线质量硬门禁。升级前请清理已移除的 `dub`、`adopted-packet-copy`、`--mimo-video-overview`、`--review-narration` 与 `EDIT_MODE` / `TARGET_DURATION` 环境变量（详见 Changed 与 Removed）。

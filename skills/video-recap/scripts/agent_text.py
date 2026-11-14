@@ -8,12 +8,13 @@ TTS_UTTERANCE_OVERHEAD_SECONDS = 0.45
 
 
 def _text_char_count(text):
-    """计算文本的有效字数（去除标点和空白，这些不占 TTS 朗读时间）。"""
+    """计算文本的有效字数（去除方括号舞台提示、标点和空白，这些不占 TTS 朗读时间）。"""
+    without_stage_tags = re.sub(r"\[[^\]]*\]", "", text)
     return len(
         re.sub(
             r'[，。！？、；：…“”‘’《》〈〉\s"\'「」『』（）()【】\[\]—～·,.!?;:\\-]',
             "",
-            text,
+            without_stage_tags,
         )
     )
 

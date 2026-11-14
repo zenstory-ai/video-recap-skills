@@ -297,3 +297,25 @@ def test_cjk_compound_wrap_multi_chunk_dialogue_style_and_sfx_peak_offset(tmp_pa
     # Placed 150ms early so the whoosh transient peak lands right on 1.00s
     assert applied[0]["start"] == pytest.approx(0.85, abs=0.01)
     assert applied[0]["peak_offset_ms"] == 150.0
+
+
+@pytest.mark.parametrize(
+    "promo_payload",
+    [
+        {
+            "schema": "video-recap.promo_copy.v1",
+            "titles": ["死去三年的恋人挽着亲哥进门"],
+            "cover": {"timestamp": 12.4, "top_line": "昔日恋人变未来大嫂"},
+        },
+        {
+            "titles": ["死去三年的恋人挽着亲哥进门"],
+            "description": "片段解说",
+        },
+    ],
+)
+def test_promo_copy_written_to_packaging_plan_raises_with_promo_copy_guidance(
+    tmp_path, promo_payload
+):
+    _write_plan(tmp_path, promo_payload)
+    with pytest.raises(RuntimeError, match="promo_copy\\.json"):
+        packaging.resolve_output_canvas(tmp_path, {"width": 1920, "height": 1080, "fps": 25.0})

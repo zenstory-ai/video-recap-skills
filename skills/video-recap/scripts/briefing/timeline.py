@@ -91,7 +91,7 @@ _PROSE_TIME_RE = re.compile(
     r"|(\d+(?:\.\d+)?)\s*(?:s|秒)(?![A-Za-z]))"
 )
 _PROSE_TIME_SLACK = 0.25
-_CUT_AWAY_TIME = "[cut-away moment]"
+_CUT_AWAY_TIME = "[已剪除时刻]"
 
 
 def _remap_prose_times_for_brief(text, scene, overlap):
@@ -144,7 +144,7 @@ def _remap_scenes_to_output_for_brief(scenes, spans):
 
 _COVERAGE_SLACK = 0.05
 # No "." inside: the ASR chunker splits sentences on it.
-_PARTIAL_WINDOW_TEXT = "[partial ASR window: only part of it is in the cut, text withheld]"
+_PARTIAL_WINDOW_TEXT = "[ASR 粗窗口仅部分保留，原词隐去]"
 
 
 def _remap_segments_to_output_for_brief(segments, spans, withhold_partial=False):
@@ -301,14 +301,12 @@ def _format_sentence_entry_anchors_for_brief(work_dir, edit_mode):
     lines = [
         "## 原声句末安全切入点",
         "",
-        "这些时间是 ASR 句末标点与短声学停顿对齐后的旁白入口。旁白在原声已开始后切入时，"
-        "必须从其中一个点开始；否则会在 TTS 前被 `interrupts_source_sentence` 硬阻断。",
-        "- 标 `unverified` 的点是由粗粒度 ASR 窗口里的标点位置估计、再吸附到短停顿得到的："
-        "落在停顿里，不会切断单词，但不保证原声句子已经说完（误差上限见 `±`）。请自己听一下再定；"
-        "门禁本身照常生效。",
-        "- 调整方式：优先把 `start` 移到建议锚点；放不下时缩短文本、移动整块或删除该旁白，不能让脚本静默挪音频。",
-        '- 原声句子完整性是硬约束：切入块写 `"source_entry_policy": "sentence_boundary"`；'
-        "不存在 `intentional_interrupt` 绕过方式。没有后续可靠句末锚点时，移动、缩短或删除旁白块。",
+        "以下时间点将 ASR 句末标点与短声学停顿对齐，作为原声开始后的安全旁白切入锚点；"
+        "若旁白落在原声句子中途，会在 TTS 前被 `interrupts_source_sentence` 拦截。",
+        "- 标 `unverified` 的点由粗粒度 ASR 窗口估算并吸附到短停顿：落在停顿里不会切断字词，"
+        "但未必是整句结束（误差上限见 `±`），切入前请试听确认。",
+        "- 调整方式：优先把 `start` 移到建议锚点（切入块保持 `\"source_entry_policy\": \"sentence_boundary\"`）；"
+        "附近没有合适句末锚点时，请缩短、平移或删除该段旁白。",
     ]
     for anchor in anchors:
         source_suffix = (
@@ -335,7 +333,7 @@ def _format_output_clip_list(work_dir):
     """List the kept clips on the OUTPUT timeline (cut-first/narrate-second pass 2), so the
     agent narrates against the real rendered cut instead of the source timeline."""
     plan = json.loads((Path(work_dir) / "clip_plan_validated.json").read_text(encoding="utf-8"))
-    out = ["## Kept clips on the OUTPUT timeline", ""]
+    out = ["## 成片保留片段映射（OUTPUT 时间轴）", ""]
     for c in plan["clips"]:
         reason = c.get("reason", "")
         out.append(

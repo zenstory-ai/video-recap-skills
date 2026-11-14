@@ -104,6 +104,13 @@ def test_cache_key_is_the_request_the_provider_receives(monkeypatch):
     assert key("fish-audio", "+5%") != key("fish-audio", "-2%")
     assert key("fish-audio", "+5%", pitch="+3Hz", emotion="紧张") == key("fish-audio", "+5%")
     assert key("fish-audio", "+5%")["provider_request"] == {"speed": 1.05}
+    # Parenthetical prose is spoken aloud and therefore changes the TTS cache key.
+    with_paren = voiceover._clean_narration_text("他转身离开（手攥着信）。")
+    without_paren = voiceover._clean_narration_text("他转身离开。")
+    assert (
+        voiceover._tts_segment_cache_inputs("mimo-tts", seg, with_paren, "+0%", "+0Hz")
+        != voiceover._tts_segment_cache_inputs("mimo-tts", seg, without_paren, "+0%", "+0Hz")
+    )
 
 
 def test_moving_a_window_reuses_the_audio(engine_calls, tmp_path):

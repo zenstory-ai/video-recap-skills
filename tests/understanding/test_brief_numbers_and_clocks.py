@@ -41,8 +41,8 @@ def test_brief_numbers_every_scene_from_one(monkeypatch, tmp_path):
     asr = [{"start": 12.0, "end": 18.0, "text": "你到底想怎么样。"}]
     text = _brief(monkeypatch, tmp_path, scenes, asr, [], 20.0)
 
-    assert "### Scene 0:" not in text
-    assert "### Scene 1: 0.0-10.0s" in text and "### Scene 2: 10.0-20.0s" in text
+    assert "### 场景 0:" not in text
+    assert "### 场景 1: 0.0-10.0s" in text and "### 场景 2: 10.0-20.0s" in text
 
 
 def _cut_pass2(tmp_path, clips):
@@ -75,11 +75,11 @@ def test_cut_pass2_output_sections_quote_no_source_time(monkeypatch, tmp_path):
     ]
     text = _brief(monkeypatch, tmp_path, scenes, asr, [], 60.0, edit_mode="cut")
 
-    part1 = text.split("source scene 1 part 1)")[1].split("### OUTPUT")[0]
-    assert "- Deeper analysis: 2.0s 他抬头试探，[cut-away moment] 她转身离开；他停顿了3秒才开口。" in part1
+    part1 = text.split("源场景 1 第1段）")[1].split("### 成片")[0]
+    assert "- 深层分析: 2.0s 他抬头试探，[已剪除时刻] 她转身离开；他停顿了3秒才开口。" in part1
     assert "12.0s 他抬头" not in text and "00:30" not in text
     assert "[1.0-3.0] 保留的对白。" in part1
-    assert "[5.0-10.0] [partial ASR window: only part of it is in the cut, text withheld]" in part1
+    assert "[5.0-10.0] [ASR 粗窗口仅部分保留，原词隐去]" in part1
     assert "已经剪掉" not in text and "前半句" not in text
 
 
@@ -106,5 +106,5 @@ def test_prose_times_outside_the_scene_are_left_alone():
     overlap = {"source_start": 100.0, "source_end": 105.0, "output_start": 0.0, "output_end": 5.0}
     assert (
         _remap_prose_times_for_brief("1:42 他回头，107.5秒 再出手，墙上时钟 12:30，等了5s", scene, overlap)
-        == "2.0s 他回头，[cut-away moment] 再出手，墙上时钟 12:30，等了5s"
+        == "2.0s 他回头，[已剪除时刻] 再出手，墙上时钟 12:30，等了5s"
     )

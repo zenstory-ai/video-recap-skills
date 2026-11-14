@@ -161,8 +161,17 @@ def _resume_argv(work_dir, args):
 
 
 def _write_manifest_with_argv(work_dir, payload, args):
+    extra = {}
+    if getattr(args, "audio_mode", "narration") == "narration":
+        provider = getattr(args, "tts_provider", None)
+        if isinstance(provider, str) and provider.strip():
+            extra["tts_provider"] = provider.strip().lower()
     (work_dir / RUN_MANIFEST).write_text(
-        json.dumps({**payload, "argv": _resume_argv(work_dir, args)}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {**payload, **extra, "argv": _resume_argv(work_dir, args)},
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
 

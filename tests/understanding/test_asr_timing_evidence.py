@@ -307,11 +307,11 @@ def test_brief_surfaces_validated_coarse_evidence_and_no_safe_asr_end_claim(
         tmp_path,
         asr_evidence=asr_evidence_summary_for_brief(tmp_path, video),
     ).read_text(encoding="utf-8")
-    assert "ASR timing evidence" in text
+    assert "ASR 时间证据说明" in text
     assert "AVAILABLE_COARSE" in text
-    assert "word alignment: NOT_PERFORMED" in text
+    assert "逐词对齐: NOT_PERFORMED" in text
     assert "ASR [start–end] times + Quiet windows below as safe cut points" not in text
-    assert "direct listening" in text
+    assert "直接试听" in text
 
 
 def test_brief_only_validates_stale_sidecar_and_warns_without_network(
@@ -338,7 +338,7 @@ def test_brief_only_validates_stale_sidecar_and_warns_without_network(
     )
     text = (tmp_path / "agent_narration_brief.md").read_text(encoding="utf-8")
     assert "MISSING_OR_STALE" in text
-    assert "must not be treated as verified dialogue boundaries" in text
+    assert "不能直接当作已验证的对白切点" in text
 
 
 TOKEN_PLAN_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"

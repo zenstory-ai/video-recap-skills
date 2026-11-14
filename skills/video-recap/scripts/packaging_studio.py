@@ -68,12 +68,17 @@ def load_raw_packaging_plan(work_dir: str | Path | None) -> dict | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise RuntimeError(f"{PACKAGING_PLAN} 顶层必须是 JSON 对象")
+    _promo_hint = "若要保存平台标题与封面文案备忘，请写入 promo_copy.json"
     schema = data.get("schema", PACKAGING_SCHEMA)
     if schema != PACKAGING_SCHEMA:
-        raise RuntimeError(f"{PACKAGING_PLAN} schema 不受支持: {schema!r}")
+        raise RuntimeError(
+            f"{PACKAGING_PLAN} schema 不受支持: {schema!r}（画布包装须为 {PACKAGING_SCHEMA!r}）；{_promo_hint}"
+        )
     preset = str(data.get("preset") or "").strip()
     if preset not in PRESETS:
-        raise RuntimeError(f"{PACKAGING_PLAN} preset 必须是 {PRESETS} 之一，当前为 {preset!r}")
+        raise RuntimeError(
+            f"{PACKAGING_PLAN} 用于成片画布包装，preset 必须是 {PRESETS} 之一（当前为 {preset!r}）；{_promo_hint}"
+        )
     return data
 
 

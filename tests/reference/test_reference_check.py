@@ -89,7 +89,7 @@ REJECTIONS = [
     ("target-with-value", _set(["methods", 2, "targets"], {"x": {"from": "shots.median_s", "value": 3}}), "R5"),
     ("unresolvable-from", _set(["methods", 2, "targets"], {"x": {"from": "derived.nope"}}), "R5"),
     ("from-outside-measurements", _set(["methods", 2, "targets"], {"x": {"from": "source.size"}}), "R5"),
-    ("missing-dimension", _drop_method("narration_subtitles"), "R7"),
+    ("empty-methods", _set(["methods"], []), "R7"),
     ("fact-with-rule", _set(["source_facts", 0, "rule"], "x"), "R1"),
     ("method-with-statement", _set(["methods", 0, "statement"], "x"), "R1"),
     ("unknown-owner", _set(["labels", "audio_spans", 4, "owner"], "bgm"), "R1"),
@@ -119,9 +119,14 @@ def test_check_rejects(work_dir, breakdown, research, mutate, rule):
 
 def test_skipped_dimension_with_a_reason_satisfies_coverage(work_dir, breakdown, research):
     _drop_method("narration_subtitles")(breakdown, research)
-    breakdown["skipped_dimensions"] = {"narration_subtitles": "ASR 不可用，未测语速"}
+    unexplained = run_check(work_dir(breakdown))
+    assert unexplained["errors"] == []
+    assert any(w.startswith("R7 narration_subtitles:") for w in unexplained["warnings"])
 
-    assert run_check(work_dir(breakdown))["errors"] == []
+    breakdown["skipped_dimensions"] = {"narration_subtitles": "ASR 不可用，未测语速"}
+    explained = run_check(work_dir(breakdown))
+    assert explained["errors"] == []
+    assert not any(w.startswith("R7 narration_subtitles:") for w in explained["warnings"])
 
 
 def test_labels_only_breakdown_prints_derived_and_asks_for_methods(work_dir, breakdown):
@@ -130,8 +135,8 @@ def test_labels_only_breakdown_prints_derived_and_asks_for_methods(work_dir, bre
     report = run_check(work_dir(labels_only))
 
     assert report["derived"]["by_owner"]["narration"]["share"] == 0.5
-    assert {error.split()[1].rstrip(":") for error in report["errors"]} == {
-        "narrative_structure", "pacing", "shots_editing", "narration_subtitles", "audio_visual"}
+    assert [error.split()[0] for error in report["errors"]] == ["R7"]
+    assert "至少提炼一条可迁移方法" in report["errors"][0]
 
 
 def test_export_with_errors_exits_1_and_writes_nothing(work_dir, breakdown, research, tmp_path):
@@ -229,9 +234,13 @@ def test_research_aliases_cultural_items_and_quoted_terms_feed_the_name_scan(bre
 def test_shared_wording_with_a_fact_names_the_fact_side(breakdown, measurements):
     breakdown["methods"][0]["rule"] += "，开场旁白交代主角身世"
 
-    errors = check_breakdown(breakdown, measurements)["errors"]
+    report = check_breakdown(breakdown, measurements)
 
-    assert any(e.startswith("R6 methods.m1.rule") and "source_facts" in e for e in errors), errors
+    assert report["errors"] == []
+    assert any(
+        w.startswith("R6 methods.m1.rule") and "source_facts" in w
+        for w in report["warnings"]
+    ), report["warnings"]
 
 
 @pytest.mark.parametrize("malformed", [
@@ -358,3 +367,53 @@ def test_reference_schema_doc_example_passes_leak_scan():
     for dim, reason in doc_breakdown.get("skipped_dimensions", {}).items():
         errors.extend(leak_errors(reason, f"skipped_dimensions.{dim}", corpus))
     assert errors == []
+
+
+def test_export_succeeds_with_partial_dimensions_and_source_fact_overlap_and_passes_library_check(
+    work_dir, breakdown, tmp_path
+):
+    import shutil
+    import subprocess
+    import sys
+
+    # Keep only 2 dimensions AND overlap >= 8 CJK chars with source_facts[0].statement (both warnings now)
+    breakdown["source_facts"][0]["statement"] = "开场在句末停顿处切入主角反应镜头"
+    breakdown["methods"] = [
+        {
+            **breakdown["methods"][0],
+            "rule": "开场在句末停顿处切入主角反应镜头，等人物落定再接旁白",
+        },
+        breakdown["methods"][1],
+    ]
+    breakdown.pop("skipped_dimensions", None)
+    out = tmp_path / "out" / "production_reference.json"
+    assert reference.main(["export", "--work-dir", str(work_dir(breakdown)), "--out", str(out)]) == 0
+    assert out.is_file()
+
+    # Verify video-recap library.py check accepts the exported production_reference.json
+    repo_root = Path(__file__).resolve().parents[2]
+    lib_root = tmp_path / "lib"
+    shutil.copytree(repo_root / "examples" / "resource-library", lib_root)
+    (
+        lib_root
+        / "templates"
+        / "production_reference"
+        / "demo-pacing"
+        / "v1"
+        / "production_reference.json"
+    ).write_text(out.read_text(encoding="utf-8"), encoding="utf-8")
+    library_py = repo_root / "skills" / "video-recap" / "scripts" / "library.py"
+    res = subprocess.run(
+        [sys.executable, str(library_py), "--library-dir", str(lib_root), "check"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert res.returncode == 0, res.stderr
+
+    # Empty methods still hard-blocks export without writing an output file
+    breakdown["methods"] = []
+    blocked_out = tmp_path / "blocked" / "production_reference.json"
+    assert reference.main(["export", "--work-dir", str(work_dir(breakdown)), "--out", str(blocked_out)]) != 0
+    assert not blocked_out.exists()

@@ -746,7 +746,7 @@ def test_recap_rejects_multi_video_non_cut(monkeypatch, tmp_path):
     )
     _argv(monkeypatch, v1, v2, "--edit-mode", "full")
 
-    with pytest.raises(SystemExit, match="多视频输入当前 MVP 只支持 --edit-mode cut"):
+    with pytest.raises(SystemExit, match="多视频输入只支持 --edit-mode cut"):
         recap.main()
 
 
@@ -1231,21 +1231,15 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
         for item in _json_fences(clip_text)
         if isinstance(item, dict) and "clips" in item
     )
-    reason_parts = [
-        part.strip() for part in clip_example["clips"][0]["reason"].split("|")
-    ]
+    clip_reason = clip_example["clips"][0]["reason"].strip()
 
-    assert {"创作决定", "必须写入的格式", "Sources"} <= clip_headings
+    assert {"创作决定", "必须写入的格式", "片源列表（Sources）"} <= clip_headings
     assert (
         "recap_story_plan.json" in clip_text and "visual_audio_board.json" in clip_text
     )
     assert "clip_plan.json.required_evidence" in clip_text
-    assert len(reason_parts) == 7
-    assert reason_parts[0].startswith("b")
-    assert "→" in reason_parts[2]
-    assert reason_parts[3].startswith("POV=")
-    assert reason_parts[-2].startswith("入点=")
-    assert reason_parts[-1].startswith("出点=")
+    assert len(clip_reason) >= 12 and "|" not in clip_reason
+    assert "入点" in clip_reason and "出点" in clip_reason
     assert "sources/<source_id>" in clip_text
 
     plan = work / "clip_plan_validated.json"
@@ -1277,7 +1271,7 @@ def test_multi_source_briefs_include_clip_and_narration_craft(tmp_path):
     assert {
         "更新创作决定",
         "narration.json 格式",
-        "Kept clips (output → source)",
+        "成片保留片段映射（output → source）",
     } <= output_headings
     assert set(narration_example[0]) == {
         "start",
@@ -1562,7 +1556,7 @@ def test_multi_source_pass2_builds_the_output_storyboard_after_the_brief(
 
     def understand(cli):
         assert (work / "agent_narration_brief.md").read_text(encoding="utf-8").startswith(
-            "# Multi-source Output Narration Brief"
+            "# 多视频成片解说简报"
         )
         if storyboard_fails:
             raise SystemExit("understanding/understand.py 失败 (exit 1)")

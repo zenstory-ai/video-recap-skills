@@ -132,8 +132,8 @@ def test_full_over_budget_text_fails_lint_with_actionable_budget(monkeypatch, tm
     assert error["actual_chars"] == 42
     assert error["over_chars"] == 32
     assert error["tts_overhead_seconds"] == 0.45
-    assert "段 2 [10.00-13.00s] has 42 chars" in error["message"]
-    assert "32 over the limit" in error["message"]
+    assert "段 2 [10.00-13.00s] 写了 42 字" in error["message"]
+    assert "超出 32 字" in error["message"]
     assert not any(item["code"] == "over_budget" for item in lint["warnings"])
 
 
@@ -370,7 +370,7 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
 
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
-    assert "段 1 invalid_narration：narration must be a string" in result.stderr
+    assert "段 1 invalid_narration：narration 字段必须是字符串" in result.stderr
     assert str(tmp_path / "narration_lint.json") in result.stderr
     assert narration_path.read_text(encoding="utf-8") == raw
     current = _read_json(tmp_path / "narration_lint.json")

@@ -371,11 +371,6 @@ def leak_errors(text, where, corpus, rule="R6"):
         errors.append(f"{rule} {where}: 与原片台词/背景资料共有连续 {CJK_RUN_MIN}+ 字「{gram}」")
     for gram in sorted(words & corpus["latin"])[:1]:
         errors.append(f"{rule} {where}: 与原片台词/背景资料共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」")
-    for gram in sorted(cjk & corpus.get("fact_cjk", set()))[:1]:
-        errors.append(f"{rule} {where}: 与 source_facts 的描述共有连续 {CJK_RUN_MIN}+ 字「{gram}」"
-                      "（若这是通用剪辑措辞，改写 fact 或方法任一侧）")
-    for gram in sorted(words & corpus.get("fact_latin", set()))[:1]:
-        errors.append(f"{rule} {where}: 与 source_facts 的描述共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」")
     for match in _TIMECODE.finditer(text):
         errors.append(f"{rule} {where}: 含绝对时间「{match.group(0)}」，改用相对位置或 targets")
     for match in _ABS_PATH.finditer(text):
@@ -383,14 +378,45 @@ def leak_errors(text, where, corpus, rule="R6"):
     return errors
 
 
+def _fact_overlap_warnings(text, where, corpus):
+    """Advisory check when a method shares an 8+ char / 5+ word phrase only with source_facts."""
+    warnings = []
+    cjk, words = _ngrams(text, CJK_RUN_MIN), _word_grams(text, LATIN_RUN_MIN)
+    for gram in sorted(cjk & corpus.get("fact_cjk", set()))[:1]:
+        warnings.append(
+            f"R6 {where}: 与 source_facts 的描述共有连续 {CJK_RUN_MIN}+ 字「{gram}」"
+            "（请确认未带入原片具体情节；若只是通用剪辑表述可忽略）"
+        )
+    for gram in sorted(words & corpus.get("fact_latin", set()))[:1]:
+        warnings.append(
+            f"R6 {where}: 与 source_facts 的描述共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」"
+            "（请确认未带入原片具体情节；若只是通用剪辑表述可忽略）"
+        )
+    return warnings
+
+
 def _warnings(breakdown, methods, asr_segments, asr_status, research, *, asr_evidence, source,
-              review_windows=None):
+              review_windows=None, corpus=None, skipped=None):
     warnings = []
     for method in methods:
         if not method.get("applies_when"):
             warnings.append(f"methods.{method.get('id')}: 没写 applies_when，后续制作难判断何时套用")
         if _NUMBER_IN_RULE.search(str(method.get("rule") or "")):
             warnings.append(f"methods.{method.get('id')}: rule 正文含数字，建议把数值放进 targets")
+        if corpus is not None:
+            for field in METHOD_TEXT_FIELDS:
+                if isinstance(method.get(field), str):
+                    warnings.extend(
+                        _fact_overlap_warnings(method[field], f"methods.{method.get('id')}.{field}", corpus)
+                    )
+    if methods:
+        covered = {m.get("dimension") for m in methods}
+        skipped_set = set(skipped or ())
+        for dimension in DIMENSIONS:
+            if dimension not in covered and dimension not in skipped_set:
+                warnings.append(
+                    f"R7 {dimension}: 未提炼该维度方法，也未在 skipped_dimensions 说明原因（按需补充）"
+                )
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
@@ -456,13 +482,12 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
             errors.append(f"R1 skipped_dimensions.{dimension}: 原因必须是非空字符串")
         else:   # exported verbatim, so scanned now rather than only at export (R8)
             errors.extend(leak_errors(reason, f"skipped_dimensions.{dimension}", corpus))
-    covered = {m.get("dimension") for m in methods}
-    for dimension in DIMENSIONS:
-        if dimension not in covered and dimension not in skipped:
-            errors.append(f"R7 {dimension}: 至少一条 method，或在 skipped_dimensions 写明原因")
+    if not methods:
+        errors.append("R7 methods: 至少提炼一条可迁移方法")
     warnings = _warnings(breakdown, methods, asr_segments, asr_status, research,
                          asr_evidence=asr_evidence, source=measurements["source"],
-                         review_windows=measurements["shots"].get("review_windows"))
+                         review_windows=measurements["shots"].get("review_windows"),
+                         corpus=corpus, skipped=skipped)
     return {"derived": derived, "errors": errors, "warnings": warnings}
 
 

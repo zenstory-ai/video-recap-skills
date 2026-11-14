@@ -312,6 +312,13 @@ def test_synthesize_tts_rejects_cleaned_empty_narration(monkeypatch, tmp_path):
         synthesize_tts([{"start": 0.0, "end": 1.0, "narration": "[stage direction]"}], tmp_path)
 
 
+def test_clean_narration_text_preserves_parenthetical_prose_and_strips_square_brackets():
+    cleaned = voiceover._clean_narration_text(
+        "[开场压低]他转身离开（手还攥着那封信），(1998年)[低声停顿]再没回头。"
+    )
+    assert cleaned == "他转身离开（手还攥着那封信），(1998年)再没回头。"
+
+
 def test_synthesize_tts_raises_on_failed_segment_by_default(monkeypatch, tmp_path):
     monkeypatch.setitem(CONFIG, "mimo_tts_api_key", "tp-test")
     monkeypatch.setitem(CONFIG, "tts_workers", 2)

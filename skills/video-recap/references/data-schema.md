@@ -90,7 +90,7 @@
 
 当某段旁白的 `overlaps_speech=true` 且并非从 0 秒冷开场时，`narration` 校验要求其 `start` 必须贴近 `boundary_use` 不为 `none` 的句末锚点。判断切入点是否踩进原声讲话时，校验、剪辑与合成共用同一套语气词豁免规则：只含单字语气词的 ASR 窗口（如“啊！”、“Hi.”）不算完整讲话，仅在紧挨真实对白的一侧留出 1 秒保护区；空文本或纯空白的 ASR 行只作分窗记录，不算讲话也不留保护；三处统一读取 `asr_result.json`。
 
-一旦旁白起点踩进原声句子中间，校验会在送 TTS 前以 `interrupts_source_sentence` 报错拦截，并给出 `suggested_start`、`suggested_end` 与 `source_text_tail` 供 Agent 调整：推荐位置取入点前后 `max_shift_seconds`（10 秒）内最近的安全锚点，要求整段旁白按原时长平移过去后仍处在相邻两段之间、与前后段间隔均大于 0.15 秒（避免粘连成同一段），且在 `cut_output` 模式下不超出成片总时长（距离相等时取靠后的锚点）。常规解说段统一使用 `source_entry_policy: "sentence_boundary"`，系统不提供强行打断原话的绕过开关；若 10 秒范围内找不到合适锚点，`suggested_start` 返回 `null`，Agent 需手动挪位置、缩减字数或删掉该段。
+一旦旁白起点踩进原声句子中间，校验会在送 TTS 前以 `interrupts_source_sentence` 报错拦截，并给出 `suggested_start`、`suggested_end` 与 `source_text_tail` 供 Agent 调整：推荐位置取入点前后 `max_shift_seconds`（10 秒）内最近的安全锚点，要求整段旁白按原时长平移过去后仍处在相邻两段之间、与前后段间隔均大于 0.15 秒（避免粘连成同一段），且在 `cut_output` 模式下不超出成片总时长（距离相等时取靠后的锚点）。常规解说段统一使用 `source_entry_policy: "sentence_boundary"`；若 10 秒范围内找不到合适锚点，`suggested_start` 返回 `null`，Agent 需手动挪位置、缩减字数或删掉该段。
 
 `cut` 模式第二阶段会额外写出 `speech_boundary_anchors_output.json`，把句末锚点、ASR 讲话区间和安静窗口统一换算到剪后成片（OUTPUT）时间轴上。换算后的锚点绝不越出所属片段边界：若某个原片锚点落在片段入点前或出点后 0.05 秒容差内、且没有被相邻片段播放，就会吸附到该片段的入点或出点上（落在 `[0, 成片时长]` 之外的直接丢弃），同时在 `source_time` 中保留原片实测秒数：
 
@@ -127,24 +127,27 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
   "error_count": 2,
   "warning_count": 1,
   "errors": [
-    {"level": "error", "index": 2, "code": "time_overlap", "message": "Segment overlaps the previous narration segment"},
+    {"level": "error", "index": 2, "code": "time_overlap", "message": "该段与上一段旁白时间重叠"},
     {"level": "error", "index": 5, "code": "over_budget", "budget_chars": 28, "limit_chars": 35, "actual_chars": 42, "over_chars": 7, "tts_overhead_seconds": 0.45}
   ],
   "warnings": [
-    {"level": "warning", "index": 0, "code": "over_budget", "budget_chars": 28, "actual_chars": 42}
+    {"level": "warning", "index": 0, "code": "weak_cold_open_silence", "message": "成片前 3.2s 既无旁白也无原声对白（建议 <= 2.5s），若非有意无声冷开场请将首句前移", "first_audio_onset": 3.2, "max_cold_open_silence_seconds": 2.5}
   ]
 }
 ```
 
-推荐字数 `budget_chars` 会先从时间窗里扣掉 `tts_overhead_seconds`（约 0.45 秒，即每次 TTS 合成自带的首尾静音）再折算字数，因此比写稿简报窗口上直接标出的字数少一两个字。`full` 模式下凡字数超过推荐值 1.25 倍（`limit_chars`）的段落都会报 `over_budget` error（校验器绝不会越俎代庖替 Agent 删字）；略超推荐值但未越过 1.25 倍硬上限、以及 `cut_output` 模式下的超字数则记为 warning。所有解说段必须按 `start` 严格升序排列，否则报 `out_of_order` error。
+推荐字数 `budget_chars` 会先从时间窗里扣掉 `tts_overhead_seconds`（约 0.45 秒，即每次 TTS 合成自带的首尾静音）再折算字数，因此比写稿简报窗口上直接标出的字数少一两个字。`full` 模式下凡字数超过推荐值 1.25 倍（`limit_chars`）的段落都会报 `over_budget` error（校验器不会自动替 Agent 删字）；略超推荐值但未越过 1.25 倍上限、以及 `cut_output` 模式下的超字数则记为 warning（交由配音阶段按实测音频时长与倍速上限裁决）。所有解说段必须按 `start` 严格升序排列，否则报 `out_of_order` error。
 
-常见错误与警告码：`invalid_time`、`out_of_order`、`empty_narration`、`time_overlap`、`over_budget`、`incomplete_sentence`（残句硬阻断）、`interrupts_source_sentence`（抢断原话）、`unsafe_source_release`（旁白结束在角色半句台词中间突然放回原声）、`weak_cold_open_silence`（总长 `>= 8s` 时片头超过 `2.5s` 既无旁白也无原声对白）、`excessive_dead_air`（连续超过 `5.0s` 既无旁白也无原声对白）、`generic_character_label`（`background_research.json` 已提供具名角色时仍使用“黑衣男子”“年轻女子”等笼统外貌词）、`placeholder_leakage`。
+阻断错误（`errors`）与质量提示（`warnings`）分层：
+
+- **阻断项（`errors`）**：`invalid_time`、`out_of_order`、`empty_narration`、`time_overlap`、`incomplete_sentence`（残句阻断）、`interrupts_source_sentence`（抢断原话）、`unsafe_source_release`（旁白结束在角色半句台词中间突然放回原声）、`placeholder_leakage`，以及 `full` 模式下超过 `1.25x` 上限的 `over_budget`。
+- **提示项（`warnings`，不阻断）**：`weak_cold_open_silence`（总长 `>= 8s` 时片头超过 `2.5s` 既无旁白也无原声对白，无声或纯环境音开场属正常提示）、`excessive_dead_air`（连续超过 `5.0s` 既无旁白也无原声对白，刻意动作戏或留白可保留）、`generic_character_label`（`background_research.json` 已提供具名角色时仍使用“黑衣男子”“年轻女子”等泛称）、`editorial_commentary_tone`（影评套话提示），以及 `cut_output` 模式或 `full` 模式 `<= 1.25x` 的 `over_budget`。
 
 ## recap_story_plan.json / visual_audio_board.json（Agent 创作工作产物）
 
-这两份 JSON 是创作阶段的拍板记录：`recap_story_plan.json` 保存导演意图、候选剪辑方案、主视角（POV）/主线与逐拍局势变化；`visual_audio_board.json` 保存每一拍选定的画面表演瞬间、出入点理由、原声锚点、声音主导方（`audio_owner`）与旁白任务（`narration_job`）。完整字段定义见 `./creative-editing-playbook.md`。
+这两份 JSON 是创作阶段的结构化记录：`recap_story_plan.json` 保存导演意图、候选剪辑方案、主视角（POV）/主线与逐拍局势变化；`visual_audio_board.json` 保存每一拍选定的画面表演瞬间、出入点理由、原声锚点、声音主导方（`audio_owner`）与旁白任务（`narration_job`）。完整字段定义见 `./creative-editing-playbook.md`。
 
-渲染管线不拿它们当硬门禁，也不额外部署解析服务；Agent 靠它们沉淀可复查的创作决定，保证选镜、原声留白和旁白词从头到尾咬住同一个故事意图。
+渲染管线不把它们当作硬门禁；Agent 用它们记录选镜、原声留白和旁白意图，方便后续复查与按反馈定向修改。
 
 ## style_card.json（Agent 撰写，可选/按 brief 要求）
 
@@ -162,20 +165,45 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 }
 ```
 
-## packaging_plan.json（Agent 撰写，可选）
+## packaging_plan.json（画布视觉包装，可选）
 
-`packaging_plan.json` 是正片内容锁死后按需编写的外层宣发包装方案，涵盖常驻标题、封面帧选择、开场首句、看点承诺与发布文案备注。它用来帮 Agent 交付复核时对齐“外层吆喝的看点”和“正片前 15 秒实际演出的内容”有否货不对板，绝不能反过来绑架正片剪辑去迎合标题党。
-
-它也不替代 `style_card.json` 的口播文风设定；凡是包装层承诺了的爽点或反转，正片里都必须有实打实的画面与原声证据兑现：
+`packaging_plan.json` 由合成阶段（`assemble.py`）读取，用于在改画幅或需要演播室版式时生成虚化/纯色背景、主画面取景窗口、顶部常驻标题条、分段花字与角标。完整字段规范、预设版式（`portrait_cinema` / `portrait_stage` / `landscape_cinema`）与质检门禁见 `./packaging.md`：
 
 ```json
 {
-  "title": "死去三年的白月光挽着亲哥进门，逼我当众改口叫大嫂",
-  "cover_frame": {"time": 12.4, "reason": "沈清欢挽着大哥亮相、裴钧庭瞳孔骤缩的同框对峙帧"},
-  "first_line": "三年前他以为沈清欢已经死在火海，三年后她却挽着他亲哥回来，成了人人得叫一声的未来大嫂。",
-  "viewer_promise": "60 秒看懂一对昔日恋人如何在叔嫂名分下嘴硬试探、步步失守",
-  "selling_points": ["死而复生变大嫂的身份反差", "暗处强吻与耳光划界的原声高光"],
-  "packaging_notes": "横屏成片搭配上下双行常驻标题，花字只点破口是心非，不复读对白"
+  "schema": "video-recap.packaging_plan.v1",
+  "preset": "portrait_cinema",
+  "canvas": {"width": 1080, "height": 1920},
+  "header": {
+    "kicker": "悬疑短剧 · 第一集",
+    "title": "结案报告签名被换"
+  }
+}
+```
+
+> 不要把平台发布标题、封面帧与看点备忘写进 `packaging_plan.json`；平台宣发文案统一写到下方的 `promo_copy.json`，避免触发画布包装解析报错。
+
+## promo_copy.json（平台发布文案备忘，可选）
+
+`promo_copy.json` 是正片定稿后按需编写的外部平台标题、封面帧与封面字、看点兑现时间及简介标签备忘（脚本不消费），用于在交付复核时核对外层标题承诺是否在正片内有真实画面与原声兑现。字段说明见 `./promotional-copy.md`：
+
+```json
+{
+  "schema": "video-recap.promo_copy.v1",
+  "core_angle": "葬身火海三年的昔日恋人挽着亲哥进门，两人在叔嫂名分下当众试探交锋",
+  "payoff_timestamp": 22.4,
+  "titles": [
+    "死去三年的恋人挽着亲哥进门，逼我当众改口叫大嫂",
+    "明明一个眼神就露了旧情，她却当众划清界限转身离开"
+  ],
+  "cover": {
+    "timestamp": 12.4,
+    "frame_reason": "沈清欢挽着大哥亮相、裴钧庭怔住的同框对峙中近景",
+    "top_line": "昔日恋人变未来大嫂",
+    "bottom_line": "当众改口暗处对峙"
+  },
+  "description": "《这一秒过火》片段解说：阔别三年重逢，看两人如何在试探中掀开旧账。",
+  "tags": ["影视解说", "短剧推荐", "对手戏"]
 }
 ```
 
@@ -207,7 +235,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 {
   "target_duration": "10m",
   "clips": [
-    {"start": 12.0, "end": 38.0, "reason": "b01 | hook | knowledge: unknown→threat | POV=沈曼 | 撞见未婚夫搂着千金谈联姻 | 入点=推门看清两人动作 | 出点=转身攥紧户口本"}
+    {"start": 12.0, "end": 38.0, "reason": "b01 (hook)：沈曼推门撞见未婚夫与千金谈联姻，入点卡推门看清两人动作，出点卡转身攥紧户口本"}
   ]
 }
 ```
@@ -216,7 +244,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 |------|------|------|
 | `start` | float | 原视频片段开始秒数 |
 | `end` | float | 原视频片段结束秒数 |
-| `reason` | string | 选入该片段的节拍、变化、POV 与出入点依据 |
+| `reason` | string | 选入该片段的叙事作用与出入点画面依据（自然中文短句即可） |
 
 多视频 `cut` 的 `clip_plan.json` 必须为每个片段标明 `source_id`（重叠检查按 `source_id` 分别计算，不同源视频的相同秒数互不冲突）：
 
@@ -224,8 +252,8 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 {
   "target_duration": "10m",
   "clips": [
-    {"source_id": "src_episode1_734003200", "start": 12.0, "end": 38.0, "reason": "b01 | setup | knowledge: unknown→clue | POV=沈曼 | 门外听见联姻实情 | 入点=脚步停在门边 | 出点=听完冷笑转身"},
-    {"source_id": "src_episode2_689110016", "start": 4.0, "end": 22.0, "reason": "b02 | payoff | power: passive→counterattack | POV=沈曼 | 转头与死对头同日领证 | 入点=红本盖章落定 | 出点=抬头迎上视线"}
+    {"source_id": "src_episode1_734003200", "start": 12.0, "end": 38.0, "reason": "b01 (setup)：沈曼在门外听见联姻实情，入点卡脚步停在门边，出点卡听完冷笑转身"},
+    {"source_id": "src_episode2_689110016", "start": 4.0, "end": 22.0, "reason": "b02 (payoff)：沈曼转头与死对头同日领证，入点卡红本盖章落定，出点卡抬头迎上视线"}
   ]
 }
 ```
@@ -245,7 +273,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
       "output_end": 26.0,
       "duration": 26.0,
       "frame_count": 650,
-      "reason": "b01 | hook | knowledge: unknown→threat | POV=沈曼 | 撞见未婚夫搂着千金谈联姻 | 入点=推门看清两人动作 | 出点=转身攥紧户口本"
+      "reason": "b01 (hook)：沈曼推门撞见未婚夫与千金谈联姻，入点卡推门看清两人动作，出点卡转身攥紧户口本"
     }
   ],
   "total_duration": 26.0,
@@ -264,7 +292,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 边界吸附按三步顺序执行，确保视觉防闪切绝不破坏原声完整：
 
 1. **先做镜头硬切吸附（shot snap）**，避开原片硬切边缘的残留闪帧（片段最短不低于 `0.8s`）；
-2. **再做句末与静音吸附（sentence snap）**：出点吸附到句末停顿起点后，会在静音窗口内自动顺延最多 `0.22s` 反应/呼吸气口（绝不跨越原片硬切点），消除话音未落就硬切的突兀落点；若附近没有停顿窗、句末吸附修不回来，且某条原本能过语音门禁的切点是被第一步硬切吸附推进对白里的，脚本会在不暴露 `<= 0.20s` 闪帧的前提下把它退回原位（记下 `start_action`/`end_action: "reverted_unsafe"`），若退回原位会重新暴露 `<= 0.20s` 闪帧则直接报 `shot_speech_conflict` 阻断；
+2. **再做句末与静音吸附（sentence snap）**：出点吸附到句末停顿起点后，会在静音窗口内自动顺延最多 `0.30s` 反应/呼吸气口（绝不跨越原片硬切点），消除话音未落就硬切的突兀落点；若附近没有停顿窗、句末吸附修不回来，且某条原本能过语音门禁的切点是被第一步硬切吸附推进对白里的，脚本会在不暴露 `<= 0.20s` 闪帧的前提下把它退回原位（记下 `start_action`/`end_action: "reverted_unsafe"`），若退回原位会重新暴露 `<= 0.20s` 闪帧则直接报 `shot_speech_conflict` 阻断；
 3. **最后对齐到源视频帧网格与整数输出帧（frame snap）**，并在渲染 `edited_source.mp4` 后自动运行 `shot_review` 写入 `shot_review.json`（检出 `<= 0.20s` 的 `flash_slivers` 直接阻断）：微调幅度不超过一帧，优先选语音门禁仍判安全、仍在停顿区内且不丢失必保画面证据（`required_evidence`）的一侧；若两侧同样安全，则选不跨越原片硬切的一侧（入点落在切点上或之后，出点落在切点上或之前），彻底杜绝夹带一帧隔壁镜头。
 
 每段实际渲染出的帧数记入 `frame_count`，从而保证拼接出的 `edited_source.mp4` 为严格恒定帧率（CFR）；帧对齐前后的秒数明细记在 `qc.boundary_status.frame_snaps`，全局帧率汇总记在 `qc.frame_grid`：
@@ -292,7 +320,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
       "output_end": 26.0,
       "duration": 26.0,
       "frame_count": 780,
-      "reason": "b01 | hook | knowledge: unknown→threat | POV=沈曼 | 撞见未婚夫搂着千金谈联姻 | 入点=推门看清两人动作 | 出点=转身攥紧户口本"
+      "reason": "b01 (hook)：沈曼推门撞见未婚夫与千金谈联姻，入点卡推门看清两人动作，出点卡转身攥紧户口本"
     }
   ]
 }
@@ -319,7 +347,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 每次归档都会往 `materials_index.jsonl` 末尾追加一行（含 `schema_version`、`event`、`material_id`、`source_name`、`source_path`、`source_video_identity`、`summary`、`tags`、`material_dir`、`updated_at`），而 `material.json` 额外记下分析参数 `settings` 与各文件字节数；当前有效状态一律以 `materials/<material_id>/material.json` 为准。检索时直接用 `grep -R "关键词" <library>` 即可。
 
-归档保存时会自动扫描常见密钥格式（如 `tp-`/`sk-`/`gh*_`/`AKIA`/JWT 及 `KEY=VALUE` 赋值）和敏感字段名并做脱敏替换，但这只是兜底防呆：请从源头保证 API key 只走环境变量或 `.env`，不要写进上下文提示词或分析文件里。
+归档保存时会自动扫描常见密钥格式（如 `tp-`/`sk-`/`gh*_`/`AKIA`/JWT 及 `KEY=VALUE` 赋值）和敏感字段名并做脱敏替换，但这只是归档阶段的补充过滤：请从源头保证 API key 只走环境变量或 `.env`，不要写进上下文提示词或分析文件里。
 
 ## original_subtitles.json（可选，原声留白字幕）
 

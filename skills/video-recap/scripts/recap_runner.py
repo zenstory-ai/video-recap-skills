@@ -145,7 +145,9 @@ def _run_or_restore_understanding(source_record, source_work_dir, args, project_
             "understand.py",
             *_understand_args_for_source(source_record, source_work_dir, args),
         )
-    elif kept_local_research:
+    elif kept_local_research or (
+        uses_narration(args) and args.tts_provider not in {"auto", "mimo-tts"}
+    ):
         _run(
             "understanding",
             "understand.py",
@@ -165,7 +167,7 @@ def _run_or_restore_understanding(source_record, source_work_dir, args, project_
         )
         source_record["material_id"] = meta["material_id"]
         print(
-            f"[video-recap] 💾 已沉淀素材: {meta['material_id']} → {lib_dir}",
+            f"[video-recap] 💾 已保存理解缓存: {meta['material_id']} → {lib_dir}",
             flush=True,
         )
     return restored
@@ -190,7 +192,7 @@ def _reject_stale(mismatches, label):
         details = "\n  - ".join(mismatches)
         raise SystemExit(
             f"work_dir 与当前{label}recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
-            "请使用新的 --work-dir，或删除旧产物后重新运行 Phase A。\n"
+            "请使用新的 --work-dir，或删除旧产物后重新运行理解阶段。\n"
             f"  - {details}"
         )
 
@@ -295,7 +297,7 @@ def _deliver(work_dir, args, assemble_video, recap_stem, extra_assemble_args=())
 
 
 def _run_multi_cut(videos, work_dir, args):
-    """Multi-video MVP: cut-first/narrate-second over a project work_dir."""
+    """Multi-video cut: cut-first/narrate-second over a project work_dir."""
     project_binding.sync_production_reference(work_dir, getattr(args, "resolved_project", None))
     source_records = _build_multi_source_records(videos, args)
     narration_json = work_dir / "narration.json"
@@ -330,8 +332,13 @@ def _run_multi_cut(videos, work_dir, args):
     _render_cut(videos[0], work_dir, args, "--sources-manifest", str(manifest_path))
     if uses_narration(args):
         if not narration_json.exists():
+            if args.tts_provider != "auto":
+                _write_project_run_manifest(work_dir, args, source_records)
             _write_multi_source_output_brief(
-                work_dir, source_records, work_dir / "clip_plan_validated.json"
+                work_dir,
+                source_records,
+                work_dir / "clip_plan_validated.json",
+                tts_provider=args.tts_provider,
             )
             _write_multi_source_edited_storyboard(work_dir, videos[0])
             _write_phase_ledger(work_dir, cp_identity)
@@ -394,7 +401,7 @@ def main():
     videos = [Path(v).resolve() for v in args.video]
     if len(videos) > 1 and args.edit_mode != "cut":
         raise SystemExit(
-            "多视频输入当前 MVP 只支持 --edit-mode cut；full 请一次输入一个视频。"
+            "多视频输入只支持 --edit-mode cut；full 模式请一次输入一个视频。"
         )
     if len(videos) > 1 and args.subtitle_y_top is not None:
         ap.error("多视频 cut 暂不支持全局 subtitle Y 坐标；各源字幕带可能不同")
@@ -490,6 +497,8 @@ def _run_single(video, work_dir, args):
     _render_cut(video, work_dir, args)
     if uses_narration(args):
         if not narration_json.exists():
+            if args.tts_provider != "auto":
+                _write_run_manifest(work_dir, video, args)
             # PASS 2: rebuild the brief (now an OUTPUT-timeline variant) and pause for narration.
             # Rebuilt from cached/restored analysis only: a material restore may have supplied
             # pass-1 artifacts (even a source-time brief), but must not skip this rebuild.

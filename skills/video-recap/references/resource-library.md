@@ -95,7 +95,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 
 ### 制作参考模板 `production_reference`
 
-把 `video-reference` 导出的 `production_reference.json`（仅含可迁移方法与实测数值，不含原片剧情与人名）登记为带版本、需确认采纳的模板：
+把独立拆片技能导出的 `production_reference.json`（仅含可迁移方法与实测数值，不含原片剧情与人名）登记为带版本、需确认采纳的模板：
 
 1. 创建 `templates/production_reference/<id>/v1` 目录，把导出的 `production_reference.json` 原样复制进去，保持文件名不变。
 2. 编写 `template.json`：`params` 固定写 `{"reference": {"path": "production_reference.json"}}`；`canvas` 从导出物复制，仅作信息展示，项目绑定时不校验画布尺寸。
@@ -139,7 +139,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 | `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |
 | `bgm` | `BGM_PATH` ← 该资源下的第一个音频文件 |
 | `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`（保留导出物原内容并附上 `written_by` 与 `template {id, version}`），仅供写稿 Agent 阅读，无任何脚本消费，也不校验画布。若该路径已有非 `--project` 生成的文件：内容与导出物一致则原样保留，不一致则直接报错中止；解除绑定后只删除编排器自己写出的副本，不碰调用方手动放置的文件 |
-| `packaging` | 合成前写出 `work_dir/packaging_layers.json`（包含每个图层的首个图片文件路径与 `rect`），由合成阶段叠加到成片画面并同步写入 `timeline.json` 的 image 轨 |
+| `packaging` | 合成前将模板 `params.layers` 写出到 `work_dir/packaging_layers.json`（含图层图片路径与 `rect`），并将 `params.studio_plan` 写出到 `work_dir/packaging_plan.json`（`video-recap.packaging_plan.v1`），由合成阶段渲染画布包装并同步写入 `timeline.json` |
 
 - 若命令行或环境变量已显式传入某项配置，且与项目绑定解析出的值不一致，程序会在启动前报错中止并指明冲突项，绝不静默覆盖。
 - 合成前会核对字幕模板、包装模板的画布尺寸与成片实际画布是否一致；尺寸不符立即中止，换画幅必须绑定对应画幅的模板。

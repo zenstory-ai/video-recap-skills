@@ -1,6 +1,6 @@
 # 仓库架构说明
 
-本仓库包含两个自包含技能（`1 + 1` 结构）：生产主技能 `skills/video-recap/` 将视频理解、故事与选镜策划、画面剪辑、旁白创作校验、TTS 配音和音画混音合成收敛在同一技能内一气呵成完成；按需拆片技能 `skills/video-reference/` 独立于日常生产流水线之外，用于将优秀成片拆解为可复用的 `production_reference.json`。各技能的完整命令与参数见对应目录下的 `SKILL.md` 及 `--help` 输出；历次架构取舍笔记可通过 `rg --hidden <关键词> .agents/notes/` 检索。
+本仓库包含两个自包含技能（`1 + 1` 结构）：生产主技能 `skills/video-recap/` 将视频理解、故事与选镜策划、画面剪辑、旁白创作校验、TTS 配音和音画混音合成收敛在同一技能内串联完成；按需拆片技能 `skills/video-reference/` 独立于日常生产流水线之外，用于将优秀成片拆解为可复用的 `production_reference.json`。各技能的完整命令与参数见对应目录下的 `SKILL.md` 及 `--help` 输出；历次架构取舍笔记可通过 `rg --hidden <关键词> .agents/notes/` 检索。
 
 ## 技能拓扑与数据交接
 
@@ -10,7 +10,7 @@
 understand.py ─▶ Agent 制定方案并写 clip_plan.json / narration.json ─▶ [cut.py] ─▶ validate.py ─▶ voiceover.py ─▶ assemble.py
 ```
 
-- **创作一气呵成**：导演立意（`recap_story_plan.json`）、分镜与声画让位（`visual_audio_board.json`）、选镜剪辑（`clip_plan.json`）和解说撰稿（`narration.json`）同属一个连续创作过程，不再拆成多个技能目录来回跳转（见 `architecture/2026-11-10-converge-production-skills-into-video-recap.md`）。
+- **创作链路连续不断档**：导演立意（`recap_story_plan.json`）、分镜与声画让位（`visual_audio_board.json`）、选镜剪辑（`clip_plan.json`）和解说撰稿（`narration.json`）同属一个连续创作过程，不再拆成多个技能目录来回跳转（见 `architecture/2026-11-10-converge-production-skills-into-video-recap.md`）。
 - **按需参考技能独立于主链之外**：`video-reference` 不在日常生产流水线上，仅在用户需要拆解优秀成片时按需运行；它导出的 `production_reference.json` 仅供写稿 Agent 阅读参考，无任何生产脚本机械消费该文件（登记为资源库模板并通过 `--project` 绑定时，编排器也只是把副本拷进 `work_dir`）。
 - **每个技能彻底自包含**：两个技能均可单独拷贝安装；`skills/<name>/scripts/`（含子包）只允许 `import` 本技能内部的模块，源码与文档中严禁引用兄弟技能的路径。
 - **创作拍板权归 Agent，机械执行与底线防守归脚本**：`clip_plan.json`、`narration.json` 以及 `recap_story_plan.json`、`visual_audio_board.json` 全部由 Agent 编写；Python 脚本只负责生成创作简报、执行确定性底线门禁（防残镜/碎镜、防台词截断、防旁白抢话、防时间窗超载与超长削尾、防必保画面丢失、防占位符泄漏）、调用 TTS 接口与运行 ffmpeg 渲染（见 `architecture/2026-05-18-agent-owned-narration-cli-mechanical.md` 与 `simplification/2026-11-10-scripts-for-hands-and-floor-agent-for-craft.md`）。

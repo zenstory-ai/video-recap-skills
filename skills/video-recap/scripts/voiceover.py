@@ -44,10 +44,8 @@ def _clean_narration_text(text):
     text = re.sub(r'\*(.+?)\*', r'\1', text)       # *italic* → italic
     text = re.sub(r'「(.+?)」', r'\1', text)        # 「quote」 → quote
     text = re.sub(r'」|「|『|』', '', text)
-    # 移除方括号标注（[climax]、[suspense] 等舞台指示）
+    # 移除方括号舞台指示（[climax]、[suspense] 等），保留圆括号内的作者正文
     text = re.sub(r'\[[^\]]*\]', '', text)
-    # 移除圆括号标注（（旁白）、（转场）等）
-    text = re.sub(r'[（(][^）)]*[）)]', '', text)
     # 规范化省略号和重复标点
     text = re.sub(r'\.{3,}|…{2,}', '……', text)
     text = re.sub(r'……+', '……', text)

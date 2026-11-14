@@ -1,4 +1,4 @@
-<!-- Last synced with README.md: 2026-11-11 -->
+<!-- Last synced with README.md: 2026-11-14 -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/zenstory-ai/zenstory/main/apps/web/public/brand/zenstory-ai-mark.svg" alt="ZenStory AI" width="76" height="76">
 </p>
@@ -45,7 +45,7 @@ The 59-second landscape recap above, *Guohuo (这一秒过火)*, was selected ac
 
 - **One API key remotely, zero third-party Python packages locally** — Speech recognition (ASR), visual understanding (VLM), and default voiceover (TTS) all run through [Xiaomi MiMo](https://platform.xiaomimimo.com). Locally you need only Python's standard library and `ffmpeg`—no GPU, no `pip install`, and no model weights. Voiceover can optionally switch to Fish Audio or self-hosted IndexTTS.
 - **Editorial POV and sound handoff before scripting** — Before writing narration, the agent locks the viewer promise, point of view, and beat-by-beat state turns in `recap_story_plan.json`, then assigns an audio owner per beat in `visual_audio_board.json`: peak acting stays at `1.0x` in original dialogue, physical conflict belongs to action sound, and narration steps in only for context and subtext.
-- **Cut first, narrate second, guarded by five deterministic floor gates** — Cut mode (`cut`) renders a constant-frame-rate shortened master aligned to sentence pauses and hard shot cuts first, then scripts against the real output timeline while blocking `<= 0.20s` flash slivers, mid-sentence cuts, unmotivated dead air, generic appearance labels, and syllable budget overflows.
+- **Cut first, narrate second, with layered hard gates and pacing warnings** — Cut mode (`cut`) renders a constant-frame-rate shortened master aligned to sentence pauses and hard shot cuts first, then scripts against the real output timeline: hard-blocking `<= 0.20s` flash slivers, mid-sentence cuts or releases, incomplete sentences, and tempo-budget overflows while surfacing long dead air, cold-open silence, and generic appearance labels as non-blocking warnings.
 - **Declarative studio packaging and broadcast-grade audio mixing** — Built-in studio packaging (`packaging_plan.json`) renders `9:16` `4:3` portrait stage / cinema frames and `16:9` warm editorial caption bands, `@2x` supersampled headers, callouts, character name tags, data cards, heavy CJK typography, and automatic `cover.jpg` export; the audio chain applies vocal presence EQ & compression, a `2.2kHz` BGM vocal-pocket dip, transient-aligned SFX, and closed-loop `-1.0 dBTP` true-peak limiting.
 - **One-step JianYing draft export, five-domain asset library, and minimal review studio** — Multi-track `timeline.json` exports directly to a self-contained JianYing/CapCut draft bundle; the read-only local review studio (`审片台`) provides finished-film playback alongside a five-domain library (**Source Series / BGM / SFX / Voices / Styles & Samples**).
 
@@ -295,7 +295,7 @@ No. VLM scene analysis checkpoints completed scenes to disk and automatically re
 
 ### Why does the VLM refer to characters as "a man in black" instead of their names?
 
-Whenever the drama or film title is known, have the agent follow the [Research Guide](skills/video-recap/references/research-guide.md) to write main character names and relationships into `work_dir/background_research.json` before understanding. Both VLM prompts and scripting briefs incorporate those names directly, and the `generic_character_label` floor check rejects drafts that fall back to generic appearance labels.
+Whenever the drama or film title is known, have the agent follow the [Research Guide](skills/video-recap/references/research-guide.md) to write main character names and relationships into `work_dir/background_research.json` before understanding. Both VLM prompts and scripting briefs incorporate those names directly, and `generic_character_label` flags drafts that fall back to generic appearance labels as warnings.
 
 ## Documentation
 
