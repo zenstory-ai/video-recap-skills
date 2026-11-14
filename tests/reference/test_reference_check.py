@@ -404,7 +404,7 @@ def test_export_succeeds_with_partial_dimensions_and_source_fact_overlap_and_pas
     ).write_text(out.read_text(encoding="utf-8"), encoding="utf-8")
     library_py = repo_root / "skills" / "video-recap" / "scripts" / "library.py"
     res = subprocess.run(
-        [sys.executable, str(library_py), "--library-dir", str(lib_root), "check"],
+        [sys.executable, "-X", "utf8", str(library_py), "--library-dir", str(lib_root), "check"],
         capture_output=True,
         text=True,
         encoding="utf-8",

@@ -322,7 +322,7 @@ def test_validate_cli_exits_zero_on_advisory_craft_warnings_and_blocks_stage_onl
     )
     validate_py = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts" / "validate.py"
     res = subprocess.run(
-        [sys.executable, str(validate_py), "--work-dir", str(tmp_path), "--mode", "full"],
+        [sys.executable, "-X", "utf8", str(validate_py), "--work-dir", str(tmp_path), "--mode", "full"],
         capture_output=True,
         text=True,
         encoding="utf-8",
