@@ -82,7 +82,7 @@ def parse_args(argv=None):
     voice.add_argument("--audio-mode", choices=AUDIO_MODES, default="narration")
     voice.add_argument(
         "--tts-provider",
-        default=os.environ.get("TTS_PROVIDER", "auto"),
+        default=(os.environ.get("TTS_PROVIDER") or "auto").strip().lower() or "auto",
         choices=TTS_PROVIDERS,
         help="voiceover provider; auto prefers configured MiMo, then Fish Audio; Index is explicit",
     )

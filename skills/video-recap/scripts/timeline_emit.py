@@ -61,12 +61,15 @@ def _emit_timeline(input_video, tts_segments, work_dir, duration_s, canvas, has_
         }]
     narration_segments = []
     for seg in tts_segments:
+        placed = seg.get("placed_audio_path")
+        if not placed:
+            continue
         s, e = _seg_place_window(seg)
         narration_item = {
             # JianYing must consume the exact WAV written into narration.wav. In
             # particular, a tempo-adjusted beat cannot reference its longer pre-fit
             # source or the editor will trim its final words at timeline_end.
-            "source_path": seg["placed_audio_path"],
+            "source_path": str(Path(placed)),
             "timeline_start": s, "timeline_end": e,
             "text": seg["narration"],
             "overlaps_speech": seg["overlaps_speech"],

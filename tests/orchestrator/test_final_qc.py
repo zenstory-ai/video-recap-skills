@@ -392,3 +392,37 @@ def test_recap_cli_defaults_require_final_qc_true_with_opt_out():
     _, opt_out_args = recap_cli.parse_args(["in.mp4", "--no-require-final-qc"])
     assert opt_out_args.require_final_qc is False
 
+
+def test_final_qc_accepts_shot_review_of_final_output_and_ignores_unmatched_media_identity(tmp_path):
+    from lib import file_identity
+
+    edited = tmp_path / "edited_source.mp4"
+    edited.write_bytes(b"edited source bytes")
+    output = tmp_path / "recap_final.mp4"
+    output.write_bytes(b"rendered final output bytes")
+    _write_json(
+        tmp_path / "assembly_manifest.json",
+        {"final_output": str(output), "input_video": str(edited)},
+    )
+    _write_json(
+        tmp_path / "shot_review.json",
+        {
+            "status": "NEEDS_REVIEW",
+            "media": {"path": str(output), "identity": file_identity(output)},
+            "flash_slivers": [{"start_frame": 10, "end_frame": 12, "duration_seconds": 0.08}],
+        },
+    )
+    report = final_qc.build_final_qc(tmp_path, final_output=output, probe_fixture=_probe())
+    assert "flash_frame_sliver" in [f["code"] for f in report["findings"]]
+
+    _write_json(
+        tmp_path / "shot_review.json",
+        {
+            "status": "NEEDS_REVIEW",
+            "media": {"path": str(tmp_path / "old.mp4"), "identity": {"size": 1, "mtime_ns": 1}},
+            "flash_slivers": [{"start_frame": 10, "end_frame": 12, "duration_seconds": 0.08}],
+        },
+    )
+    stale_report = final_qc.build_final_qc(tmp_path, final_output=output, probe_fixture=_probe())
+    assert "flash_frame_sliver" not in [f["code"] for f in stale_report["findings"]]
+

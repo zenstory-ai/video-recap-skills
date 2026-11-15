@@ -72,7 +72,7 @@ def _settings_and_audio_mismatches(actual, expected):
             "仍需这条路径请使用 v0.6.2"
         )
     elif _settings_for_compare(actual["settings"]) != _settings_for_compare(expected["settings"]):
-        mismatches.append("settings: 当前 CLI 参数与 Phase A manifest 不匹配")
+        mismatches.append("settings: 当前 CLI 参数与运行清单 recap_run_manifest.json 不匹配")
     if actual.get("audio") != expected["audio"]:
         mismatches.append(f"audio: expected {expected['audio']!r}, got {actual.get('audio')!r}")
     return mismatches
@@ -104,7 +104,7 @@ def _multi_manifest_mismatches(work_dir, args, source_records):
         {k: s[k] for k in identity} for s in expected["sources"]
     ]:
         mismatches.append(
-            "sources: 当前输入视频列表/顺序/source_id/identity 与 Phase A manifest 不匹配"
+            "sources: 当前输入视频列表/顺序/source_id/identity 与运行清单 recap_run_manifest.json 不匹配"
         )
     return mismatches + _settings_and_audio_mismatches(actual, expected)
 
@@ -160,6 +160,11 @@ def _understand_args_for_source(source_record, source_work_dir, args):
         uargs += ["--scene-threshold", str(args.scene_threshold)]
     if args.target_duration:
         uargs += ["--target-duration", args.target_duration]
+    if (
+        getattr(args, "audio_mode", "narration") == "narration"
+        and getattr(args, "tts_provider", "auto") != "auto"
+    ):
+        uargs += ["--tts-provider", args.tts_provider]
     if args.skip_asr:
         uargs.append("--skip-asr")
     return uargs

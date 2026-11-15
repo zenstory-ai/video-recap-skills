@@ -434,7 +434,7 @@ def test_brief_header_branches_on_labels_burned(tmp_path):
     text = brief.read_text(encoding="utf-8")
     assert "Storyboard" in text
     assert "先看 storyboard 再写" in text
-    assert "inspect clip-map" in text  # labels not burned → point to clip-map
+    assert "recap_inspect.py --work-dir <work_dir> clip-map" in text  # labels not burned → point to clip-map
     assert text.rstrip().endswith("# body")  # original body preserved at the end
 
 
@@ -452,7 +452,7 @@ def test_brief_header_cut_mode_lists_both_timelines(tmp_path):
     understanding_storyboard._prepend_storyboard_brief_header(brief, source, edited, cut_mode=True)
     text = brief.read_text(encoding="utf-8")
     assert "源时间线" in text and "output" in text
-    assert "inspect clip-map" not in text  # labels burned → no fallback note
+    assert "clip-map" not in text  # labels burned → no fallback note
 
 
 # ── optional real-ffmpeg tile smoke test (skipped when ffmpeg absent) ─────────

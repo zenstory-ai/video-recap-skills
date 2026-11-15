@@ -29,7 +29,9 @@ def test_audio_mix_tail_fade_applies_ending_afade_to_orig_and_bgm(monkeypatch):
     assert "afade=t=out" not in no_fade
 
 
-def test_unsafe_mid_sentence_release_propagates_to_blocking_assembly_qc(monkeypatch, tmp_path):
+def test_bounded_release_does_not_block_while_unsafe_entry_propagates_to_assembly_qc(
+    monkeypatch, tmp_path
+):
     (tmp_path / "speech_boundary_anchors.json").write_text(
         json.dumps(
             {
@@ -41,10 +43,14 @@ def test_unsafe_mid_sentence_release_propagates_to_blocking_assembly_qc(monkeypa
         ),
         encoding="utf-8",
     )
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([{"start": 1.0, "end": 12.0, "text": "你以为把证据烧了就能全身而退吗"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
     monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
 
-    # Without active dialogue at 4.0s, release is safe (bounded_release)
-    quiet_seg = tts_segment(
+    # Releasing at 4.0s (> 3.0s before 12.0s anchor) uses smooth bounded_release without blocking
+    release_seg = tts_segment(
         index=0,
         start=1.0,
         end=4.0,
@@ -53,26 +59,22 @@ def test_unsafe_mid_sentence_release_propagates_to_blocking_assembly_qc(monkeypa
         placed_audio_duration=3.0,
         overlaps_speech=True,
     )
-    safe_handoffs = audio_mix._apply_source_sentence_handoffs([quiet_seg], tmp_path, 15.0)
+    safe_handoffs = audio_mix._apply_source_sentence_handoffs([release_seg], tmp_path, 15.0)
     assert safe_handoffs[0]["status"] == "bounded_release"
-    assert quiet_seg.get("source_handoff_blocking") is not True
+    assert release_seg.get("source_handoff_blocking") is not True
 
-    # With active source dialogue spanning [1.0, 12.0], releasing at 4.0s cuts into mid-sentence!
-    (tmp_path / "asr_result.json").write_text(
-        json.dumps([{"start": 1.0, "end": 12.0, "text": "你以为把证据烧了就能全身而退吗"}], ensure_ascii=False),
-        encoding="utf-8",
-    )
+    # Entering mid-sentence at 4.0s (away from 1.0s and 12.0s anchors) blocks assembly QC!
     seg = tts_segment(
         index=0,
-        start=1.0,
-        end=4.0,
-        actual_place_start=1.0,
-        actual_place_end=4.0,
+        start=4.0,
+        end=7.0,
+        actual_place_start=4.0,
+        actual_place_end=7.0,
         placed_audio_duration=0.0,
         overlaps_speech=True,
     )
     handoffs = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 15.0)
-    assert handoffs[0]["status"] == "unsafe_mid_sentence_release"
+    assert seg["source_entry_status"] == "unsafe_entry"
     assert seg["source_handoff_blocking"] is True
 
     qc = assembly_contract._build_assembly_qc(
@@ -88,3 +90,55 @@ def test_unsafe_mid_sentence_release_propagates_to_blocking_assembly_qc(monkeypa
     )
     assert qc["blocking"] is True
     assert "unsafe_source_handoff" in qc["blocking_codes"]
+
+
+def test_source_handoff_does_not_swallow_fresh_short_line_after_measured_pause(
+    monkeypatch, tmp_path
+):
+    # Narration ends at 93.29s inside an acoustic pause [90.73, 93.69], right before a short
+    # line ("救我！", 93.69–94.76s) whose anchor is at 95.06s (<= 3.0s away).
+    (tmp_path / "speech_boundary_anchors.json").write_text(
+        json.dumps(
+            {
+                "sentence_anchors": [
+                    {
+                        "time": 90.86,
+                        "pause_start": 90.73,
+                        "confidence": "low",
+                        "boundary_use": "unverified",
+                    },
+                    {
+                        "time": 95.06,
+                        "pause_start": 94.76,
+                        "confidence": "low",
+                        "boundary_use": "unverified",
+                    },
+                ],
+                "acoustic_pauses": [
+                    {"start": 90.73, "end": 93.69},
+                    {"start": 94.76, "end": 95.06},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "asr_result.json").write_text(
+        json.dumps([{"start": 85.0, "end": 100.0, "text": "唤醒了魔导士。救我！"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setitem(CONFIG, "duck_fade_seconds", 0.3)
+
+    seg = tts_segment(
+        index=0,
+        start=87.55,
+        end=93.29,
+        actual_place_start=87.55,
+        actual_place_end=93.29,
+        placed_audio_duration=0.0,
+        overlaps_speech=True,
+    )
+    handoffs = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 110.0)
+    assert handoffs[0]["status"] == "bounded_release"
+    assert seg["source_duck_end"] == 93.29
+    assert seg["source_restore_at"] == 93.59
+

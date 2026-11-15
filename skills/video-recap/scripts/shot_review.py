@@ -220,7 +220,29 @@ def _associate_plan(report, plan, pts, end):
     tolerance = max(b - a for a, b in zip(pts, [*pts[1:], end]))
     if not spans or abs(previous - end) > tolerance:
         raise ValueError("bound plan duration disagrees with actual frame clock")
-    joins = [bisect_left(pts, s[0]) for s in spans[1:]]
+    clips = plan["clips"]
+    if (
+        all(type(c.get("frame_count")) is int and c["frame_count"] > 0 for c in clips)
+        and sum(c["frame_count"] for c in clips) == len(pts)
+    ):
+        joins = []
+        acc = 0
+        for c in clips[:-1]:
+            acc += c["frame_count"]
+            joins.append(acc)
+    else:
+        clock = [*pts, end]
+        joins = []
+        for s in spans[1:]:
+            idx = bisect_left(clock, s[0])
+            if idx <= 0:
+                joins.append(0)
+            elif idx >= len(pts):
+                joins.append(len(pts))
+            else:
+                if s[0] - clock[idx - 1] <= clock[idx] - s[0]:
+                    idx -= 1
+                joins.append(idx)
     for candidate in report["candidates"]:
         f, t = candidate["frame"], pts[candidate["frame"]]
         if any(abs(f - join) <= 1 for join in joins):
@@ -236,6 +258,22 @@ def _associate_plan(report, plan, pts, end):
                     break
     report["plan_joins"] = joins
 
+    def _near_clip_edge(frame):
+        return frame == 0 or frame == len(pts) or any(abs(frame - join) <= 1 for join in joins)
+
+    kept_slivers = []
+    internal_sliver_ranges = set()
+    for sliver in report.get("flash_slivers", []):
+        if _near_clip_edge(sliver["start_frame"]) or _near_clip_edge(sliver["end_frame"]):
+            kept_slivers.append(sliver)
+        else:
+            internal_sliver_ranges.add((sliver["start_frame"], sliver["end_frame"]))
+    if internal_sliver_ranges:
+        for span in report.get("short_spans", []):
+            if (span["start_frame"], span["end_frame"]) in internal_sliver_ranges:
+                span["review_status"] = "SOURCE_INTERNAL_FLASH_ADVISORY"
+    report["flash_slivers"] = kept_slivers
+
 
 def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
     video = Path(video).resolve()
@@ -250,7 +288,7 @@ def scan_video(video, *, threshold=0.35, plan_path=None, roi=None, **policy):
         _associate_plan(report, plan, pts, end)
     report.update({
         "schema_version": 1, "artifact": "shot_review", "algorithm": "scene-frame-recall-v1", "scan_complete": True,
-        "media": {"path": str(video), "frame_count": len(pts),
+        "media": {"path": str(video), "identity": file_identity(video), "frame_count": len(pts),
                   "origin_pts_exact": str(origin), "duration_exact": str(end)},
         "plan_binding": {"path": str(Path(plan_path).resolve())} if plan is not None else None,
         "scene_threshold": threshold,

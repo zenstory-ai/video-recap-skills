@@ -28,12 +28,15 @@ __all__ = [
     "has_packaging_plan",
     "load_packaging_layers",
     "packaging_settings",
+    "prepare_packaging_overlay",
     "prepare_studio_packaging",
     "resolve_output_canvas",
     "studio_packaging_settings",
     "studio_timeline_segments",
     "timeline_image_segments",
 ]
+
+prepare_packaging_overlay = prepare_studio_packaging
 
 PACKAGING_LAYERS = "packaging_layers.json"
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp"}

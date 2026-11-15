@@ -8,7 +8,7 @@ import os
 
 from pathlib import Path
 
-from lib import CONFIG, log, get_video_duration, api_call, offline_ignored_settings
+from lib import CONFIG, TTS_PROVIDERS, log, get_video_duration, api_call, offline_ignored_settings
 
 from extract import extract_frames
 
@@ -84,6 +84,12 @@ def main():
         default=None,
         help="cut-mode target duration to document in the writing brief",
     )
+    ap.add_argument(
+        "--tts-provider",
+        default=None,
+        choices=TTS_PROVIDERS,
+        help="TTS provider hint for narration brief emotion field formatting",
+    )
     ap.add_argument("--skip-asr", action="store_true")
     ap.add_argument(
         "--force", action="store_true", help="ignore cached artifacts and recompute"
@@ -107,7 +113,7 @@ def main():
         if os.environ.get(name):
             ap.error(f"环境变量 {name} 已移除：请从环境里删掉它，改传 {flag}")
     if args.brief_only and args.edited_storyboard_only:
-        ap.error("--brief-only and --edited-storyboard-only are mutually exclusive")
+        ap.error("--brief-only 与 --edited-storyboard-only 互斥，不能同时指定")
 
     video = args.video
     work_dir = Path(args.work_dir)
@@ -126,6 +132,9 @@ def main():
         CONFIG["edit_mode"] = args.edit_mode
     if args.target_duration is not None:
         CONFIG["target_duration"] = args.target_duration
+    if args.tts_provider is not None:
+        CONFIG["tts_provider"] = args.tts_provider
+        CONFIG["_explicit_tts_provider"] = args.tts_provider
 
     video_duration = get_video_duration(video)
     if CONFIG["fps"] <= 0:

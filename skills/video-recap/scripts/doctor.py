@@ -14,7 +14,14 @@ import sys
 import urllib.parse
 from pathlib import Path
 
-from lib import CONFIG, TTS_PROVIDERS, env_bool, ffmpeg_filters
+from lib import (
+    CONFIG,
+    TTS_PROVIDERS,
+    broken_homebrew_ffmpeg_full_path,
+    env_bool,
+    ffmpeg_filters,
+    prefer_homebrew_ffmpeg_full,
+)
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -83,7 +90,13 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
     mimo_tts_configured = bool(CONFIG["mimo_tts_api_key"])
     fish_tts_configured = bool(CONFIG["fish_api_key"])
     index_tts = _index_tts_status()
-    requested_tts_provider = tts_provider or CONFIG["tts_provider"]
+    if tts_provider is not None and str(tts_provider).strip():
+        raw_provider = str(tts_provider)
+    elif "TTS_PROVIDER" in os.environ:
+        raw_provider = os.environ.get("TTS_PROVIDER") or "auto"
+    else:
+        raw_provider = str(CONFIG.get("tts_provider") or "auto")
+    requested_tts_provider = (raw_provider.strip() or "auto").lower()
     effective_tts_provider = requested_tts_provider
     if requested_tts_provider == "auto":
         effective_tts_provider = (
@@ -173,17 +186,27 @@ def build_report(*, tts_provider: str | None = None) -> dict[str, object]:
             )
         if not index_tts["index_tts_voice_set"]:
             failures.append("INDEX_TTS_VOICE is not set")
+    broken_full = (
+        broken_homebrew_ffmpeg_full_path(ffmpeg_path)
+        if subtitle_delivery in {"sidecar_srt", "fails_explicit_burn"}
+        else None
+    )
+    full_hint = (
+        f" (detected broken ffmpeg-full at {broken_full}; run `brew reinstall ffmpeg-full`)"
+        if broken_full
+        else ""
+    )
     if subtitle_delivery == "sidecar_srt":
         warnings.append(
             "ffmpeg lacks subtitles/libass filter; the default run will not burn subtitles and "
             "delivers a .srt sidecar instead (explicit --burn-subtitles fails): "
-            "install an ffmpeg build with libass to burn them"
+            f"install an ffmpeg build with libass to burn them{full_hint}"
         )
     elif subtitle_delivery == "fails_explicit_burn":
         warnings.append(
             "ffmpeg lacks subtitles/libass filter and BURN_SUBTITLES asks for burn-in, so runs "
             "will stop at preflight: unset BURN_SUBTITLES to get a .srt sidecar, pass "
-            "--no-burn-subtitles, or install an ffmpeg build with libass"
+            f"--no-burn-subtitles, or install an ffmpeg build with libass{full_hint}"
         )
     if not checks["api_config"]["api_key_set"]:
         failures.append("MIMO_API_KEY is not set; the default ASR / VLM path requires MiMo")
@@ -300,6 +323,7 @@ def main() -> int:
         help="override the TTS provider for this preflight report",
     )
     args = parser.parse_args()
+    prefer_homebrew_ffmpeg_full()
 
     report = build_report(tts_provider=args.tts_provider)
     if args.json:

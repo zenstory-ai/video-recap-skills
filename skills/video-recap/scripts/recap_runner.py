@@ -8,7 +8,7 @@ import materials as material_lib
 import resources.project_binding as project_binding
 import resources.lock as resource_lock
 
-from lib import TTS_PROVIDERS, file_identity, read_json_object
+from lib import TTS_PROVIDERS, file_identity, prefer_homebrew_ffmpeg_full, read_json_object
 from recap_cli import parse_args
 from recap_runtime import (
     RUN_MANIFEST,
@@ -145,7 +145,9 @@ def _run_or_restore_understanding(source_record, source_work_dir, args, project_
             "understand.py",
             *_understand_args_for_source(source_record, source_work_dir, args),
         )
-    elif kept_local_research:
+    elif kept_local_research or (
+        uses_narration(args) and args.tts_provider not in {"auto", "mimo-tts"}
+    ):
         _run(
             "understanding",
             "understand.py",
@@ -165,7 +167,7 @@ def _run_or_restore_understanding(source_record, source_work_dir, args, project_
         )
         source_record["material_id"] = meta["material_id"]
         print(
-            f"[video-recap] 💾 已沉淀素材: {meta['material_id']} → {lib_dir}",
+            f"[video-recap] 💾 已保存理解缓存: {meta['material_id']} → {lib_dir}",
             flush=True,
         )
     return restored
@@ -190,7 +192,7 @@ def _reject_stale(mismatches, label):
         details = "\n  - ".join(mismatches)
         raise SystemExit(
             f"work_dir 与当前{label}recap 输入不匹配，拒绝复用既有 narration/clip_plan；"
-            "请使用新的 --work-dir，或删除旧产物后重新运行 Phase A。\n"
+            "请使用新的 --work-dir，或删除旧产物后重新运行理解阶段。\n"
             f"  - {details}"
         )
 
@@ -219,8 +221,14 @@ def _reject_stale_cut_narration(work_dir, clip_plan_identity):
 def _refresh_stale_output_anchors(work_dir, source_records=None):
     """Refresh Pass-2 output speech anchors in-place when cut.py re-snapped clip_plan_validated.json."""
     validated = work_dir / "clip_plan_validated.json"
+    if not validated.exists():
+        return
     anchors = read_json_object(work_dir / "speech_boundary_anchors_output.json")
-    if not (validated.exists() and anchors and anchors.get("clip_plan_identity") != file_identity(validated)):
+    if anchors is not None and anchors.get("clip_plan_identity") == file_identity(validated):
+        return
+    plan = read_json_object(validated)
+    clips = plan.get("clips") if isinstance(plan, dict) else None
+    if not isinstance(clips, list) or not clips:
         return
     from briefing.timeline import (
         _sentence_entry_anchors_for_brief,
@@ -228,9 +236,7 @@ def _refresh_stale_output_anchors(work_dir, source_records=None):
     )
 
     if source_records is not None:
-        plan = read_json_object(validated)
-        if plan and isinstance(plan.get("clips"), list):
-            write_multi_source_output_speech_evidence(work_dir, source_records, plan)
+        write_multi_source_output_speech_evidence(work_dir, source_records, plan)
     elif (work_dir / "edited_source.mp4").exists():
         _sentence_entry_anchors_for_brief(work_dir, "cut")
 
@@ -295,7 +301,7 @@ def _deliver(work_dir, args, assemble_video, recap_stem, extra_assemble_args=())
 
 
 def _run_multi_cut(videos, work_dir, args):
-    """Multi-video MVP: cut-first/narrate-second over a project work_dir."""
+    """Multi-video cut: cut-first/narrate-second over a project work_dir."""
     project_binding.sync_production_reference(work_dir, getattr(args, "resolved_project", None))
     source_records = _build_multi_source_records(videos, args)
     narration_json = work_dir / "narration.json"
@@ -330,8 +336,13 @@ def _run_multi_cut(videos, work_dir, args):
     _render_cut(videos[0], work_dir, args, "--sources-manifest", str(manifest_path))
     if uses_narration(args):
         if not narration_json.exists():
+            if args.tts_provider != "auto":
+                _write_project_run_manifest(work_dir, args, source_records)
             _write_multi_source_output_brief(
-                work_dir, source_records, work_dir / "clip_plan_validated.json"
+                work_dir,
+                source_records,
+                work_dir / "clip_plan_validated.json",
+                tts_provider=args.tts_provider,
             )
             _write_multi_source_edited_storyboard(work_dir, videos[0])
             _write_phase_ledger(work_dir, cp_identity)
@@ -354,11 +365,12 @@ def _run_multi_cut(videos, work_dir, args):
 
 def main():
     ap, args = parse_args()
+    prefer_homebrew_ffmpeg_full()
 
     # argparse `choices` does not cover the TTS_PROVIDER env default; source-owned audio
     # never synthesises, so an ambient provider is irrelevant there.
     if uses_narration(args) and args.tts_provider not in TTS_PROVIDERS:
-        ap.error("TTS_PROVIDER/--tts-provider must be one of: " + ", ".join(TTS_PROVIDERS))
+        ap.error("TTS_PROVIDER/--tts-provider 必须是以下值之一: " + ", ".join(TTS_PROVIDERS))
 
     validate_audio_routing(ap, args)
     args.resolved_project = None
@@ -378,7 +390,7 @@ def main():
             args.mimo_tts_voice or os.environ.get("MIMO_TTS_VOICE", "").strip()
         )
         if explicit_mimo_voice and args.voice_ref:
-            ap.error("--mimo-tts-voice and --voice-ref are mutually exclusive")
+            ap.error("--mimo-tts-voice 与 --voice-ref 互斥，不能同时指定")
         if args.tts_provider in {"fish-audio", "index-tts"} and (
             explicit_mimo_voice or args.voice_ref
         ):
@@ -386,15 +398,15 @@ def main():
                 "--mimo-tts-voice/--voice-ref are only supported by --tts-provider mimo-tts"
             )
     if (args.subtitle_y_top is None) != (args.subtitle_y_bot is None):
-        ap.error("--subtitle-y-top and --subtitle-y-bot must be provided together")
+        ap.error("--subtitle-y-top 与 --subtitle-y-bot 必须同时提供")
     if args.subtitle_y_top is not None:
         if args.subtitle_y_top < 0 or args.subtitle_y_bot <= args.subtitle_y_top:
-            ap.error("subtitle Y coordinates must satisfy 0 <= top < bot")
+            ap.error("字幕 Y 坐标必须满足 0 <= top < bot")
 
     videos = [Path(v).resolve() for v in args.video]
     if len(videos) > 1 and args.edit_mode != "cut":
         raise SystemExit(
-            "多视频输入当前 MVP 只支持 --edit-mode cut；full 请一次输入一个视频。"
+            "多视频输入只支持 --edit-mode cut；full 模式请一次输入一个视频。"
         )
     if len(videos) > 1 and args.subtitle_y_top is not None:
         ap.error("多视频 cut 暂不支持全局 subtitle Y 坐标；各源字幕带可能不同")
@@ -404,13 +416,13 @@ def main():
         )
         if args.subtitle_y_bot > canvas_height:
             ap.error(
-                f"subtitle Y coordinates exceed display canvas height {canvas_height}: "
+                f"字幕 Y 坐标超出显示画布高度 {canvas_height}: "
                 f"bot={args.subtitle_y_bot}"
             )
     if args.voice_ref:
         voice_ref = Path(args.voice_ref).expanduser().resolve()
         if not voice_ref.is_file():
-            ap.error(f"reference audio does not exist or is not a file: {voice_ref}")
+            ap.error(f"参考音频不存在或不是普通文件 (reference audio does not exist): {voice_ref}")
         args.voice_ref = str(voice_ref)
 
     _execute_pipeline(args, videos)
@@ -490,6 +502,8 @@ def _run_single(video, work_dir, args):
     _render_cut(video, work_dir, args)
     if uses_narration(args):
         if not narration_json.exists():
+            if args.tts_provider != "auto":
+                _write_run_manifest(work_dir, video, args)
             # PASS 2: rebuild the brief (now an OUTPUT-timeline variant) and pause for narration.
             # Rebuilt from cached/restored analysis only: a material restore may have supplied
             # pass-1 artifacts (even a source-time brief), but must not skip this rebuild.

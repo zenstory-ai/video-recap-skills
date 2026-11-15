@@ -1,4 +1,4 @@
-<!-- Last synced with README.md: 2026-11-11 -->
+<!-- Last synced with README.md: 2026-11-14 -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/zenstory-ai/zenstory/main/apps/web/public/brand/zenstory-ai-mark.svg" alt="ZenStory AI" width="76" height="76">
 </p>
@@ -45,8 +45,8 @@ The 59-second landscape recap above, *Guohuo (这一秒过火)*, was selected ac
 
 - **One API key remotely, zero third-party Python packages locally** — Speech recognition (ASR), visual understanding (VLM), and default voiceover (TTS) all run through [Xiaomi MiMo](https://platform.xiaomimimo.com). Locally you need only Python's standard library and `ffmpeg`—no GPU, no `pip install`, and no model weights. Voiceover can optionally switch to Fish Audio or self-hosted IndexTTS.
 - **Editorial POV and sound handoff before scripting** — Before writing narration, the agent locks the viewer promise, point of view, and beat-by-beat state turns in `recap_story_plan.json`, then assigns an audio owner per beat in `visual_audio_board.json`: peak acting stays at `1.0x` in original dialogue, physical conflict belongs to action sound, and narration steps in only for context and subtext.
-- **Cut first, narrate second, guarded by five deterministic floor gates** — Cut mode (`cut`) renders a constant-frame-rate shortened master aligned to sentence pauses and hard shot cuts first, then scripts against the real output timeline while blocking `<= 0.20s` flash slivers, mid-sentence cuts, unmotivated dead air, generic appearance labels, and syllable budget overflows.
-- **Declarative studio packaging and broadcast-grade audio mixing** — Built-in studio packaging (`packaging_plan.json`) renders `9:16` `4:3` portrait stage / cinema frames and `16:9` warm editorial caption bands, `@2x` supersampled headers, callouts, character name tags, data cards, heavy CJK typography, and automatic `cover.jpg` export; the audio chain applies vocal presence EQ & compression, a `2.2kHz` BGM vocal-pocket dip, transient-aligned SFX, and closed-loop `-1.0 dBTP` true-peak limiting.
+- **Cut first, narrate second, with layered hard gates and pacing warnings** — Cut mode (`cut`) renders a constant-frame-rate shortened master aligned to sentence pauses and hard shot cuts first, then scripts against the real output timeline: hard-blocking edit-join `<= 0.20s` flash slivers, mid-sentence cuts or releases, incomplete sentences, and tempo-budget overflows while surfacing long dead air, cold-open silence, and generic appearance labels as non-blocking warnings.
+- **Declarative canvas packaging and multi-track loudness-controlled audio mixing** — Built-in packaging (`packaging_plan.json`) renders `9:16` `4:3` portrait stage / cinema frames and `16:9` rounded light caption bands, `@2x` supersampled headers, callouts, character name tags, data cards, heavy CJK typography, and automatic `cover.jpg` export; the audio chain applies vocal presence EQ & compression, a `2.2kHz` BGM vocal-pocket dip, transient-aligned SFX, and `-1.0 dBTP` true-peak limiting.
 - **One-step JianYing draft export, five-domain asset library, and minimal review studio** — Multi-track `timeline.json` exports directly to a self-contained JianYing/CapCut draft bundle; the read-only local review studio (`审片台`) provides finished-film playback alongside a five-domain library (**Source Series / BGM / SFX / Voices / Styles & Samples**).
 
 ## Install
@@ -120,8 +120,9 @@ export TTS_PROVIDER=fish-audio
 export FISH_API_KEY=your-fish-key
 export FISH_TTS_REFERENCE_ID=5653cea4ac83480aaf2bf45406556185   # optional custom voice ID
 
-# Option B: Self-hosted IndexTTS (activated when --tts-provider index-tts is passed)
-export INDEX_TTS_ENDPOINT=http://127.0.0.1:8000
+# Option B: Self-hosted IndexTTS (activated via TTS_PROVIDER=index-tts or --tts-provider index-tts)
+export TTS_PROVIDER=index-tts
+export INDEX_TTS_ENDPOINT=http://127.0.0.1:8000/tts
 export INDEX_TTS_VOICE=narrator_default
 ```
 
@@ -148,8 +149,8 @@ Make a Chinese-narration recap of /path/to/video.mp4. It is episode 1 of 庆余�
 # 2. Condense multiple episodes into one unified story spine (cut first, narrate against the cut)
 Use /path/to/ep1.mp4 and /path/to/ep2.mp4 to make one ten-minute recap with a shared story spine, keeping key original dialogue and character reactions, not two separate summaries.
 
-# 3. 9:16 portrait 4:3 golden-stage studio packaging + JianYing draft export
-Cut /path/to/ep1.mp4 into a 90-second vertical short-drama recap using the 4:3 golden-stage packaging with a two-line highlighted header, character name tags, and transition SFX, and export an editable JianYing draft.
+# 3. 9:16 portrait 4:3 stage viewport packaging + JianYing draft export
+Cut /path/to/ep1.mp4 into a 90-second vertical short-drama recap using the 4:3 stage viewport packaging with a two-line highlighted header, character name tags, and transition SFX, and export an editable JianYing draft.
 
 # 4. Produce a series episode bound to a shared asset library and adopted templates
 Render episode 3 from /path/to/ep3.mp4 using the narrator voice, instrumental BGM, and portrait packaging template bound in /path/to/series/recap_project.json.
@@ -171,7 +172,7 @@ flowchart LR
     understand --> plan["② Direct & Script<br/>POV · sound handoff · floor lint"]
     understand -. "cut mode · cut first" .-> cut["Sentence-safe Cut<br/>edited_source.mp4"] -.-> plan
     plan --> voiceover["③ Voiceover<br/>MiMo / Fish / IndexTTS"]
-    voiceover --> assemble["④ Mix & Studio Package<br/>plates · captions · true-peak lock"]
+    voiceover --> assemble["④ Mix & Package<br/>plates · captions · true-peak limit"]
     assemble --> output(["recap_*.mp4 + JianYing Draft"])
     classDef io fill:#0f172a,stroke:#0f172a,color:#fff;
     classDef stage fill:#eff6ff,stroke:#3b82f6,color:#1e293b;
@@ -213,7 +214,7 @@ Before cutting, the agent writes [`recap_story_plan.json`](examples/guohuo-60s/r
 }
 ```
 
-Accordingly, [`narration.json`](examples/guohuo-60s/narration.json) exits cleanly at `10.2s`, leaves the 13-second confrontation entirely to the actor's voice and proofread `「」` captions in [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json), and re-enters at `23.047s` right on the emotional turn:
+Accordingly, [`narration.json`](examples/guohuo-60s/narration.json) exits cleanly at `10.2s`, leaves the 13-second confrontation entirely to the actor's original voice and the source footage's hardcoded dialogue captions (while [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json) records the verified transcript timing for full-mask or sidecar reproduction without double-stacking captions on the Remotion overlay), and re-enters at `23.047s` right on the emotional turn:
 
 ```json
 [
@@ -261,7 +262,7 @@ Viewing revisions separate `change_set` from `frozen_set` in [`revision-log.json
 
 ### 3. Keep editing in JianYing / CapCut
 
-Ask the agent to "export a JianYing draft" and `timeline.json` becomes a self-contained multi-track draft folder—source clips, per-segment narration, BGM, SFX, captions, and overlay plates on separate tracks, with media bundled into `Resources/local` so the project opens cleanly across machines:
+Ask the agent to "export a JianYing draft" and `timeline.json` becomes a self-contained multi-track draft folder—source clips, per-segment narration, BGM, captions, and overlay image plates on separate tracks, with media bundled into `Resources/local` so the project opens cleanly across machines:
 
 <img alt="Exported JianYing multi-track draft: source clips, narration, BGM, and captions on separate tracks" src="docs/jianying-export.jpg" width="100%">
 
@@ -295,7 +296,7 @@ No. VLM scene analysis checkpoints completed scenes to disk and automatically re
 
 ### Why does the VLM refer to characters as "a man in black" instead of their names?
 
-Whenever the drama or film title is known, have the agent follow the [Research Guide](skills/video-recap/references/research-guide.md) to write main character names and relationships into `work_dir/background_research.json` before understanding. Both VLM prompts and scripting briefs incorporate those names directly, and the `generic_character_label` floor check rejects drafts that fall back to generic appearance labels.
+Whenever the drama or film title is known, have the agent follow the [Research Guide](skills/video-recap/references/research-guide.md) to write main character names and relationships into `work_dir/background_research.json` before understanding. Both VLM prompts and scripting briefs incorporate those names directly, and `generic_character_label` flags drafts that fall back to generic appearance labels as warnings.
 
 ## Documentation
 

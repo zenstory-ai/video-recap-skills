@@ -342,6 +342,7 @@ def test_assemble_main_creates_missing_output_dir(monkeypatch, tmp_path):
         )
         return output_path
 
+    monkeypatch.setattr(render_preflight, "_preflight_burn_subtitles", lambda: None)
     monkeypatch.setattr("assemble.assemble_video", fake_assemble)
     monkeypatch.setattr(
         sys,
@@ -2034,7 +2035,7 @@ def test_source_handoff_holds_to_end_when_no_later_sentence_anchor(
     assert _eval_envelope(expr, 29.0) == pytest.approx(0.2)
 
 
-def test_source_handoff_blocks_mid_sentence_release_when_next_anchor_is_beyond_hold_bound(
+def test_source_handoff_releases_at_narration_end_when_next_anchor_is_beyond_hold_bound(
     monkeypatch, tmp_path
 ):
     _write_legacy_anchors(
@@ -2050,11 +2051,11 @@ def test_source_handoff_blocks_mid_sentence_release_when_next_anchor_is_beyond_h
 
     report = audio_mix._apply_source_sentence_handoffs([seg], tmp_path, 60.0)
 
-    assert report[0]["status"] == "unsafe_mid_sentence_release"
+    assert report[0]["status"] == "bounded_release"
     assert seg["source_duck_end"] == pytest.approx(12.0)
     assert seg["source_restore_at"] == pytest.approx(12.3)
     assert report[0]["hold_seconds"] == pytest.approx(0.3)
-    assert seg.get("source_handoff_blocking") is True
+    assert seg.get("source_handoff_blocking") is not True
     expr = audio_mix._duck_envelope([seg], 1.0, 0.2, 0.12, 0.3, bridge=1.5)
     assert _eval_envelope(expr, 13.0) == pytest.approx(1.0)
 

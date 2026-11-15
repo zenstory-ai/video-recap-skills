@@ -74,8 +74,8 @@ def _details(e):
         return f"入点 {_seconds(e.get('entry_time'))} 压在原声上，但没有已验证的句尾锚点"
     if code == "unsafe_source_release":
         return (
-            f"出点 {_seconds(e.get('exit_time'))} 落在原声句子中间，后续 "
-            f"{e.get('max_hold_seconds', 3):g}s 内无句尾锚点，恢复原声会露出半截台词"
+            f"出点 {_seconds(e.get('exit_time'))} 落在检出对白区间内，后续 "
+            f"{e.get('max_hold_seconds', 3):g}s 内无句尾锚点；请确认此处原声尚未开口或已自然收句"
         )
     if code == "time_overlap":
         return (

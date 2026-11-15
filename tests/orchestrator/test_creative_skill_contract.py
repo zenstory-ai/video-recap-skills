@@ -161,14 +161,11 @@ def test_skill_json_examples_are_parseable_and_cut_reason_keeps_editorial_fields
         _json_fences(_skill_path(skill_name))
 
     cut_example = _json_fences(_skill_path("video-recap"))[0]["clips"][0]
-    reason_parts = [part.strip() for part in cut_example["reason"].split("|")]
+    reason = cut_example["reason"].strip()
 
-    assert len(reason_parts) == 7
-    assert reason_parts[0].startswith("b")
-    assert "→" in reason_parts[2]
-    assert reason_parts[3].startswith("POV=")
-    assert reason_parts[-2].startswith("入点=")
-    assert reason_parts[-1].startswith("出点=")
+    assert isinstance(reason, str) and len(reason) >= 12
+    assert "|" not in reason
+    assert "入点" in reason and "出点" in reason
 
     def nested_items(value):
         if isinstance(value, dict):
@@ -194,11 +191,10 @@ def test_skill_json_examples_are_parseable_and_cut_reason_keeps_editorial_fields
         ]
         assert displayed_clips, schema_path
         for clip in displayed_clips:
-            parts = [part.strip() for part in clip["reason"].split("|")]
-            assert len(parts) == 7, (schema_path, clip)
-            assert parts[0].startswith("b") and "→" in parts[2]
-            assert parts[3].startswith("POV=")
-            assert parts[-2].startswith("入点=") and parts[-1].startswith("出点=")
+            clip_reason = clip["reason"].strip()
+            assert isinstance(clip_reason, str) and len(clip_reason) >= 12, (schema_path, clip)
+            assert "|" not in clip_reason, (schema_path, clip)
+            assert "入点" in clip_reason and "出点" in clip_reason, (schema_path, clip)
 
 
 def test_markdown_references_are_local_and_resolve_inside_each_skill():
@@ -346,9 +342,11 @@ print(json.dumps(names))
 """
 
     result = subprocess.run(
-        [sys.executable, "-I", "-c", code],
+        [sys.executable, "-I", "-X", "utf8", "-c", code],
         cwd=scripts_dir,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

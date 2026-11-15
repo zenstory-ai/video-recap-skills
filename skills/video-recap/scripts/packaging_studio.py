@@ -9,6 +9,7 @@ from pathlib import Path
 from artifacts import file_identity
 from audio_automation import coalesce_duck_windows
 from audio_mix import _seg_place_window
+from lib import escape_ffmpeg_filter_path as _escape_subtitle_filter_path, log
 from packaging_fonts import resolve_font_family
 from packaging_plates import (
     render_callout_plate,
@@ -26,18 +27,8 @@ PACKAGING_SCHEMA = "video-recap.packaging_plan.v1"
 PRESETS = ("portrait_cinema", "portrait_stage", "landscape_cinema")
 
 
-def _escape_subtitle_filter_path(path) -> str:
-    text = str(path).replace("\\", "/")
-    for raw, escaped in (
-        ("\\", "\\\\"),
-        (":", "\\:"),
-        ("'", "\\'"),
-        (",", "\\,"),
-        ("[", "\\["),
-        ("]", "\\]"),
-    ):
-        text = text.replace(raw, escaped)
-    return text
+def _callout_display_units(text: str) -> float:
+    return sum(0.58 if ord(ch) < 128 else 1.0 for ch in text)
 
 
 def _even(val: float | int) -> int:
@@ -68,12 +59,17 @@ def load_raw_packaging_plan(work_dir: str | Path | None) -> dict | None:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise RuntimeError(f"{PACKAGING_PLAN} 顶层必须是 JSON 对象")
+    _promo_hint = "若要保存平台标题与封面文案备忘，请写入 promo_copy.json"
     schema = data.get("schema", PACKAGING_SCHEMA)
     if schema != PACKAGING_SCHEMA:
-        raise RuntimeError(f"{PACKAGING_PLAN} schema 不受支持: {schema!r}")
+        raise RuntimeError(
+            f"{PACKAGING_PLAN} schema 不受支持: {schema!r}（画布包装须为 {PACKAGING_SCHEMA!r}）；{_promo_hint}"
+        )
     preset = str(data.get("preset") or "").strip()
     if preset not in PRESETS:
-        raise RuntimeError(f"{PACKAGING_PLAN} preset 必须是 {PRESETS} 之一，当前为 {preset!r}")
+        raise RuntimeError(
+            f"{PACKAGING_PLAN} 用于成片画布包装，preset 必须是 {PRESETS} 之一（当前为 {preset!r}）；{_promo_hint}"
+        )
     return data
 
 
@@ -264,7 +260,8 @@ def _place_timed_plate(
             x = max(sx, w - pw - sx) if slot != "upper_left" else sx
             y = round(48 * h / 1080)
 
-    x = max(0, min(w - pw, int(x)))
+    safe_pad = min(sx, max(0, (w - pw) // 2))
+    x = max(safe_pad, min(int(x), w - pw - safe_pad))
     y = max(0, min(h - ph, int(y)))
     return {"x": x, "y": y, "width": pw, "height": ph}
 
@@ -274,6 +271,8 @@ def prepare_studio_packaging(
     input_canvas: dict,
     video_duration: float,
     tts_segments: list[dict],
+    *,
+    subtitle_spans: list[tuple[float, float]] | None = None,
 ) -> dict | None:
     """Validate packaging_plan.json, render @2x PNG plates, and return compiled studio spec."""
     plan = load_raw_packaging_plan(work_dir)
@@ -293,26 +292,61 @@ def prepare_studio_packaging(
     timed_plates: list[dict] = []
     collision_items: list[dict] = []
     blocking_codes: list[str] = []
+    warnings: list[dict] = []
+    degraded_plates: list[str] = []
+
+    sub_margin_v = int(sub_overrides["margin_v"])
+    sub_font_sz = int(sub_overrides["font_size"])
+    sub_rect = {
+        "x": int(sub_overrides["margin_l"]),
+        "y": max(0, h - sub_margin_v - int(sub_font_sz * 2.4)),
+        "width": max(1, w - int(sub_overrides["margin_l"]) - int(sub_overrides["margin_r"])),
+        "height": int(sub_font_sz * 2.4),
+    }
+    if subtitle_spans is not None:
+        sub_spans: list[tuple[float, float]] = [
+            (float(s), float(e)) for s, e in subtitle_spans if float(e) > float(s)
+        ]
+    else:
+        sub_spans = [
+            (float(s), float(e)) for s, e in map(_seg_place_window, tts_segments) if e > s
+        ]
+        orig_sub_path = root / "original_subtitles.json"
+        if orig_sub_path.is_file():
+            try:
+                for row in json.loads(orig_sub_path.read_text(encoding="utf-8")) or ():
+                    if isinstance(row, dict) and float(row["end"]) > float(row["start"]):
+                        sub_spans.append((float(row["start"]), float(row["end"])))
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+
+    def _sub_overlaps(s: float, e: float) -> bool:
+        return any(_times_overlap(s, e, ss, se) for ss, se in sub_spans)
+
+    def _track_plate(name: str, pmeta: dict) -> dict:
+        if pmeta.get("text_rendered") is False:
+            degraded_plates.append(name)
+        return pmeta
 
     if preset == "portrait_cinema":
-        frame_meta = render_portrait_cinema_frame_plate(
+        frame_meta = _track_plate("portrait_cinema_frame", render_portrait_cinema_frame_plate(
             assets_dir / "frame_portrait_cinema.png",
             canvas,
             header_h=meta["header_h"],
             footer_h=meta["footer_h"],
             header=plan.get("header") or {},
             theme_color=str(plan.get("theme_color") or "#16110E"),
-        )
+        ))
         static_plates.append({"name": "portrait_cinema_frame", **frame_meta, "rect": {"x": 0, "y": 0, "width": w, "height": h}})
     elif preset == "portrait_stage":
         backdrop_mode = str(plan.get("backdrop_mode") or "blurred_frame")
-        stage_meta = render_portrait_stage_overlay_plate(
+        stage_meta = _track_plate("portrait_stage_overlay", render_portrait_stage_overlay_plate(
             assets_dir / "stage_portrait_overlay.png",
             canvas,
             viewport=viewport,
             header=plan.get("header") or {},
             backdrop_mode=backdrop_mode,
-        )
+        ))
         static_plates.append({"name": "portrait_stage_overlay", **stage_meta, "rect": {"x": 0, "y": 0, "width": w, "height": h}})
     else:
         card_mode = str(plan.get("subtitle_card_mode") or "cinema_glow")
@@ -352,7 +386,7 @@ def prepare_studio_packaging(
     # Optional calligraphic title_mark
     title_mark = plan.get("title_mark")
     if isinstance(title_mark, dict) and str(title_mark.get("title") or "").strip():
-        tm_meta = render_title_mark_plate(assets_dir / "title_mark.png", title_mark, scale=scale)
+        tm_meta = _track_plate("title_mark", render_title_mark_plate(assets_dir / "title_mark.png", title_mark, scale=scale))
         tm_x = int(title_mark.get("x", round(36 * scale)))
         tm_y = int(title_mark.get("y", viewport["y"] + round(24 * scale)))
         tm_rect = {
@@ -406,7 +440,7 @@ def prepare_studio_packaging(
         ce = min(float(video_duration), float(card.get("end", cs + 3.2)))
         if ce - cs < 0.5:
             continue
-        c_meta = render_card_plate(assets_dir / f"card_{idx:02d}.png", card, scale=scale)
+        c_meta = _track_plate(f"card_{idx:02d}", render_card_plate(assets_dir / f"card_{idx:02d}.png", card, scale=scale))
         side = str(card.get("side") or ("right" if card.get("kind") == "data_card" else "left"))
         rect = _place_timed_plate(
             preset, canvas, viewport, (c_meta["width"], c_meta["height"]), side, is_card=True
@@ -440,13 +474,22 @@ def prepare_studio_packaging(
         clean_txt = str(callout.get("text") or "").strip().rstrip("，。！？、；：,.!?;:")
         if not clean_txt:
             continue
-        if len(clean_txt) > 16:
+        clean_sub = str(callout.get("subtext") or "").strip().rstrip("，。！？、；：,.!?;:")
+        effective_units = max(
+            _callout_display_units(clean_txt),
+            _callout_display_units(clean_sub) * 0.75,
+        )
+        render_spec = callout
+        if effective_units > 26.0:
             blocking_codes.append("packaging_callout_too_long")
+        elif effective_units > 16.0:
+            render_spec = {**callout, "_font_scale": max(0.65, 16.0 / effective_units)}
+            warnings.append({"code": "packaging_callout_compact_scaled", "message": f"花字「{clean_txt}」略长，已自动缩字号排版"})
         cs = max(0.0, float(callout.get("start", 0.0)))
         ce = min(float(video_duration), float(callout.get("end", cs + 3.2)))
         if ce - cs < 0.5:
             continue
-        co_meta = render_callout_plate(assets_dir / f"callout_{idx:02d}.png", callout, scale=scale)
+        co_meta = _track_plate(f"callout_{idx:02d}", render_callout_plate(assets_dir / f"callout_{idx:02d}.png", render_spec, scale=scale))
         requested_slot = str(callout.get("slot") or "auto")
         candidates = (
             [auto_slots[(idx + shift) % len(auto_slots)] for shift in range(len(auto_slots))]
@@ -459,7 +502,8 @@ def prepare_studio_packaging(
             cand_rect = _place_timed_plate(
                 preset, canvas, viewport, (co_meta["width"], co_meta["height"]), cand_slot, is_card=False
             )
-            if not any(
+            sub_hit = _sub_overlaps(cs, ce) and _rects_intersect(cand_rect, sub_rect, pad=2)
+            if not sub_hit and not any(
                 _times_overlap(cs, ce, prev["start"], prev["end"]) and _rects_intersect(cand_rect, prev["rect"])
                 for prev in collision_items
             ):
@@ -487,25 +531,23 @@ def prepare_studio_packaging(
         timed_plates.append(entry)
         collision_items.append(entry)
 
-    # Subtitle band vs timed card/callout collision & mutual collision checks
-    sub_margin_v = int(sub_overrides["margin_v"])
-    sub_font_sz = int(sub_overrides["font_size"])
-    sub_rect = {
-        "x": int(sub_overrides["margin_l"]),
-        "y": max(0, h - sub_margin_v - int(sub_font_sz * 2.4)),
-        "width": max(1, w - int(sub_overrides["margin_l"]) - int(sub_overrides["margin_r"])),
-        "height": int(sub_font_sz * 2.4),
-    }
-    has_subs = bool(tts_segments) or (root / "original_subtitles.json").is_file()
+    # Subtitle band vs timed card/callout collision & mutual collision checks (time-aware)
     collisions = []
     for i, a in enumerate(collision_items):
-        if has_subs and _rects_intersect(a["rect"], sub_rect, pad=2):
+        if _sub_overlaps(a["start"], a["end"]) and _rects_intersect(a["rect"], sub_rect, pad=2):
             collisions.append({"a": a["name"], "b": "subtitle_safe_band"})
         for b in collision_items[i + 1:]:
             if _times_overlap(a["start"], a["end"], b["start"], b["end"]) and _rects_intersect(a["rect"], b["rect"]):
                 collisions.append({"a": a["name"], "b": b["name"]})
     if collisions:
         blocking_codes.append("packaging_overlay_collision")
+    if degraded_plates:
+        log("警告：当前 Python 环境未安装 Pillow，包装文字贴片已降级为无字底板")
+        warnings.append({
+            "code": "packaging_text_renderer_unavailable",
+            "plates": degraded_plates,
+            "message": "当前 Python 环境未安装 Pillow，包装贴片已降级为无字底板；安装 Pillow 后重跑可渲染完整文字图层",
+        })
 
     progress_plate = None
     if bool(plan.get("progress_bar", preset == "portrait_stage")):
@@ -538,6 +580,7 @@ def prepare_studio_packaging(
             "timed_plate_count": len(timed_plates),
             "collisions": collisions,
             "blocking_codes": sorted(set(blocking_codes)),
+            "warnings": warnings,
         },
     }
 

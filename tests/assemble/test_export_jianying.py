@@ -443,7 +443,10 @@ def test_core_assemble_does_not_import_exporter():
         "assert not any(name.startswith('jianying') for name in sys.modules), "
         "'core imported JianYing helper modules'"
     )
-    r = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    r = subprocess.run(
+        [sys.executable, "-X", "utf8", "-c", code],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
     assert r.returncode == 0, r.stderr
 
 

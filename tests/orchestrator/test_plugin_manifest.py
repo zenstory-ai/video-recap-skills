@@ -16,6 +16,8 @@ def test_plugin_manifest_has_exactly_four_keys():
     assert set(manifest.keys()) == {"name", "version", "description", "author"}
     assert manifest["name"] == "video-recap-skills"
     assert re.fullmatch(r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)", manifest["version"])
+    version_text = (ROOT / "VERSION").read_text(encoding="utf-8").strip()
+    assert version_text == manifest["version"]
     changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     assert f"## [{manifest['version']}]" in changelog
 

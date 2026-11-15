@@ -1,7 +1,7 @@
 ---
 name: video-reference
 user-invocable: true
-description: 按需把一部成片拆成可复用的制作参考：测镜头节奏与响度，标注段落与音轨分工，把原片事实与可迁移方法分开， 导出不含原片人名台词的 production_reference.json 供下次制作参考。不在默认生产路径上。 触发词：拆片、拆解成片、制作参考、参考模板、production reference。
+description: 按需把一部成片拆成可复用的制作参考：测镜头节奏与响度，标注段落与音轨分工，把原片事实与可迁移方法分开，导出不含原片人名台词的 production_reference.json 供下次制作参考。不在默认生产路径上。触发词：拆片、拆解成片、制作参考、参考模板、production reference。
 ---
 
 ## 1. 定位
@@ -33,9 +33,9 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
    - **切点初筛逻辑**：`scdet` 场景切换得分 `≥10` 的帧直接判为切点；得分在 `4` 到 `10` 之间时，只有当该帧得分达到前后 `0.3` 秒窗口内其余非相邻帧最高分的两倍以上（即鹤立鸡群的局部峰值），才判为切点。这样能过滤掉大部分跟拍晃动、急推拉和闪光灯，把这些拿不准的帧归入待复核窗口 `shots.review_windows`。此外，由于 `scdet` 得分会扣减上一帧的画面变化量，从剧烈运动镜头突然硬切到静止画面时，`scdet` 得分可能被压到只有 1 分左右；因此工具会把帧间画面差（`mafd`）自身突起的峰值也一并收进 `shots.review_windows` 供人工看图确认，但不会直接算作自动切点。
 2. **看图复核切点（`frames`）**：任何固定阈值在真实成片面前都会顾此失彼（昏暗夜戏的硬切可能只有 5–7 分，而激烈打斗的一个长镜头里每隔 0.2 秒就能蹦出 7–8 分的峰值），因此必须看图复核。运行 `frames --review` 会把每个待复核窗口逐帧拼成图片，运行 `frames --longest 5` 会在全片最长的 5 个镜头里各均匀抽取 12 帧拼图；图片输出在 `U/reference_frames/` 下，终端会打印每一格对应的时间秒数。看完图后在 `labels.cut_fixes` 中登记修正：`add` 填入算法漏掉的真切点秒数，`remove` 填入算法误报的假切点秒数（与测得切点误差在 `±0.1` 秒内即可匹配）；若确认全部准确、无需增删，显式写 `"cut_fixes": {}` 表示已复核。注意：一旦重跑 `measure` 导致待复核窗口发生变化，旧的 `cut_fixes` 不再算数，Agent 必须对照新窗口重新核对更新。复核完成后，后续所有镜头统计指标、段落切点密度和最终导出物都会按修正后的切点重新计算。
 3. **标注音轨与段落（`labels`）**：由 Agent 在 `U/reference_breakdown.json` 中填写 `labels`——包括音轨归属 `audio_spans`、叙事功能段落 `sections`、字幕版式 `subtitles` 与标注依据 `basis`。
-   - **音轨边界必须卡在真实声音起止点**：`audio_spans` 的切换点要落在**耳朵真正听见人声开口或收声的时刻**，不要照抄字幕条出现或消失的时刻（按字幕切入帧标注的旁白收尾点，实测往往比真实现场收声晚 `0.24–0.42` 秒）。若目录内已有 `U/speech_boundary_anchors.json`，直接对照其中的 `acoustic_pauses`（`start` 即上一句收声点，`end` 即下一句开口点）对齐边界；因为声画同步换手率 `switch_on_cut_share` 只认切点前后 `±0.25` 秒的误差，边界一旦标偏，算出来的换手率就会严重失真。原片人物自带的画外音或内心独白仍属于原片音轨，统一标为 `original_dialogue`，如需在打法上区分，写进后面的 `source_facts` 与 `methods` 即可。
+   - **音轨边界必须卡在真实声音起止点**：`audio_spans` 的切换点要落在**耳朵真正听见人声开口或收声的时刻**，不要照抄字幕条出现或消失的时刻（按字幕切入帧标注的旁白收尾点，实测往往比真实现场收声晚 `0.24–0.42` 秒）。若目录内已有 `U/speech_boundary_anchors.json`，直接对照其中的 `acoustic_pauses`（`start` 即上一句收声点，`end` 即下一句开口点）对齐边界；因为声画同步换手率 `switch_on_cut_share` 只认切点前后 `±0.25` 秒的误差，边界一旦标偏，算出来的换手率就会严重失真。原片人物自带的画外音或内心独白仍属于原片音轨，统一标为 `original_dialogue`，如需在做法上区分，写进后面的 `source_facts` 与 `methods` 即可。
    - 填完 `labels` 后即可先跑一次 `check`，查看终端打印出的派生统计值 `derived`（各音轨时长占比、各段落切点密度、旁白字速、声音换手落在画面硬切上的比例、全片各叙事功能段落在时间轴上的起止占比 `structure`，以及第一次原声亮相的相对位置 `first_original_at`）。
-4. **提炼事实与可迁移方法（`source_facts` 与 `methods`）**：对照刚刚算出的客观派生数据，在同一份 `reference_breakdown.json` 中继续填写原片事实 `source_facts`（必须锚定具体时间区间或测量路径，并显式列出涉及的专有名称 `entities`）与可迁移方法 `methods`（包含做法规则 `rule`、适用场景 `applies_when`、避坑条件 `avoid_when`、作用的下游文件 `applies_to`、支撑证据 `evidence` 与量化参考指标 `targets`）。注意：`targets` 里只允许写引用路径 `{"from": "<测量路径>"}`，严禁在规则正文里手写具体数字；导出时脚本会自动把实测数值填进去。
+4. **提炼事实与可迁移方法（`source_facts` 与 `methods`）**：对照刚刚算出的客观派生数据，在同一份 `reference_breakdown.json` 中继续填写原片事实 `source_facts`（必须锚定具体时间区间或测量路径，并显式列出涉及的专有名称 `entities`）与可迁移方法 `methods`（包含做法规则 `rule`、适用场景 `applies_when`、避坑条件 `avoid_when`、作用的下游文件 `applies_to`、支撑证据 `evidence` 与量化参考指标 `targets`）。注意：`targets` 里只写引用路径 `{"from": "<测量路径>"}`（数值叶子或白名单派生对象），建议不要在 `rule` 正文里直接手写阿拉伯数字（手写数字会触发非阻断 warning 提醒核查）；导出时脚本会自动把实测数值填进去。
 5. **校验并导出（`check` → `export`）**：运行 `check` 确认零 error 后，执行 `export` 导出 `production_reference.json`；导出器在写盘前会对产物再做一遍全字段防剧透泄漏扫描。
 
 完整字段定义、枚举词表以及好/坏方法写法对比见 `references/reference-schema.md`。
@@ -51,13 +51,13 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 | R3 | 每条 `fact` 必须在时间锚点 `t: [a, b]`（落在成片时长内）与测量锚点 `measure: [路径]`（解析到 `shots` / `loudness` / `derived` 下的非字符串数值）之间二选一，且必须显式填写 `entities` 数组 |
 | R4 | 每条 `method` 至少绑定一条支撑证据：引用已定义的 `fact` ID，或引用 `measure:<路径>`（同样仅限上述三个根路径） |
 | R5 | `target` 只允许写 `from` 键，指向 `shots`、`loudness` 或 `derived` 下的数值叶子节点或白名单派生对象（见 schema），严禁使用列表下标 |
-| R6 | `rule`、`applies_when`、`avoid_when` 以及 `skipped_dimensions` 的原因说明中，严禁出现：原片专有名称（忽略空格比对）、与 ASR 台词/背景资料/`source_facts` 完全重合的连续 8 个汉字（跨标点、跨相邻 ASR 窗口同样拦截）或连续 5 个英文单词、绝对时间码、“第 N 秒”或“N 分 M 秒”（含汉字数字）、本地绝对路径 |
-| R7 | 五大制作维度（`narrative_structure`、`pacing`、`shots_editing`、`narration_subtitles`、`audio_visual`）每个维度至少提炼一条 `method`，若某维度确实无法提炼则必须在 `skipped_dimensions` 中写明原因 |
+| R6 | `rule`、`applies_when`、`avoid_when` 以及 `skipped_dimensions` 的原因说明中，严禁出现：原片专有名称（忽略空格比对）、与 ASR 台词或背景资料完全重合的连续 8 个汉字（跨标点、跨相邻 ASR 窗口同样拦截）或连续 5 个英文单词、绝对时间码、“第 N 秒”或“N 分 M 秒”（含汉字数字）、本地绝对路径 |
+| R7 | `methods` 至少提炼一条可迁移方法；五个制作维度（`narrative_structure`、`pacing`、`shots_editing`、`narration_subtitles`、`audio_visual`）按成片实际亮点提炼，未覆盖且未在 `skipped_dimensions` 写明原因的维度仅报 warning 提示 |
 | R8 | 导出 `production_reference.json` 时，对所有键名和字符串值再跑一遍 R6 防泄漏扫描，且导出物任意层级严禁出现 `source_facts`、`labels`、`entities`、`evidence`、`statement`、`from`、`path` 键 |
 
-防泄漏词表会自动汇总 `source_facts[].entities`、`background_research.json` 中的角色与 `character_details` 别名、不超过 5 个字的 `cultural_notes` 词条，以及资料中带《》「」引号的短词。若报出与 `source_facts` 连续 8 字重合，只需把其中一侧的通用剪辑表述换个说法即可。
+防泄漏词表会自动汇总 `source_facts[].entities`、`background_research.json` 中的角色与 `character_details` 别名、不超过 5 个字的 `cultural_notes` 词条，以及资料中带《》「」引号的短词。
 
-以下情况仅报警告（warning），不阻断导出：`method` 未填 `applies_when`、`rule` 正文里直接写了阿拉伯数字、ASR 精度不是 `AVAILABLE_COARSE`、成片含中文对白但理解产物与资料库均未提供人名（此时仅靠手写的 `entities` 把关）、`basis` 为空、理解产物记录的视频文件身份与当前测量的成片不一致、存在待复核切点窗口但未填写 `cut_fixes`。
+以下情况仅报警告（warning），不阻断导出：`method` 与 `source_facts` 的描述共有连续 8 字或 5 词（提醒核查是否带入原片情节；通用剪辑表述无需硬换近义词）、五个维度中存在未覆盖也未登记 `skipped_dimensions` 的维度、`method` 未填 `applies_when`、`rule` 正文里直接写了阿拉伯数字、ASR 精度不是 `AVAILABLE_COARSE`、成片含中文对白但理解产物与资料库均未提供人名（此时仅靠手写的 `entities` 把关）、`basis` 为空、理解产物记录的视频文件身份与当前测量的成片不一致、存在待复核切点窗口但未填写 `cut_fixes`。
 
 注意：R6 只能拦住字面重合，拦不住换了词却仍在复述原片剧情的写法；编写 `method` 时必须总结“遇到什么素材特征时怎么处理”，绝不能写成“主角进门后怎么剪”。此外，校验器不检查自然语言语义是否与数据吻合——动笔写“哪类段落切镜更密”前，必须先核对 `check` 打印出的 `cuts_per_min` 实测值，切忌凭印象写出与实测数据相反的结论。
 
@@ -72,6 +72,6 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 ## 6. 能力边界
 
 - 全程纯本地计算，不调用 MiMo 或任何大模型，不修改上游视频理解产物，也不给成片好坏打分或计算“新片与参考片的差距”。
-- 镜头切点基于 ffmpeg `scdet` 分数加人工看图复核：慢速叠化转场无法被算法自动检出；间隔不足 `0.3` 秒的连续两个快切、恰好卡在 `soft_score` 临界线上的切点（不同 ffmpeg 版本可能算出 `4.00` 与 `3.989` 的微小差异）、以及剧烈运动后突入暗场的硬切（得分可能低至 `0.9`）都不会被直接算作自动切点，而是统一收进待复核窗口靠人工看图兜底。在一部 5 分钟的剧集解说实测中，算法初筛抓出 82 个切点，并在 11 个待复核窗口中框住了全部 5 个漏检真切点（其余 7 个窗口为急推拉、翻页与运动镜头）；人工看图补齐这 5 个切点后，与片头、暗场、中段三处逐帧人工真值（共 27 个切点）100% 吻合、零误报。
+- 镜头切点基于 ffmpeg `scdet` 分数加人工看图复核：慢速叠化转场无法被算法自动检出；间隔不足 `0.3` 秒的连续快切、恰好卡在 `soft_score` 临界线上的切点（不同 ffmpeg 版本可能存在微小浮点差异）、以及剧烈运动后突入暗场的硬切（得分可能低于 1.0）都不会直接算作自动切点，而是收进 `shots.review_windows` 交由 `frames --review` 人工看图确认。
 - 旁白占比与语速属于 `labeled` 级别精度：由人工标注的音轨区间结合粗粒度 ASR 分窗估算得出，而非逐字时间戳对齐。
 - 防剧透泄漏扫描基于字面字符串比对，Agent 落笔时仍需主动自查，确保 `methods` 写的是通用创作手法而非原片故事梗概。

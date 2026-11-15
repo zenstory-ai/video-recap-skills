@@ -50,7 +50,7 @@ def validate_audio_routing(parser, args):
     conflicts = sorted(set(args._explicit_options).intersection(_TTS_OPTIONS))
     if conflicts:
         detail = ", ".join(conflicts)
-        parser.error(f"--audio-mode {mode} cannot use TTS/narration options: {detail}")
+        parser.error(f"--audio-mode {mode} 不能使用配音/解说参数 (cannot use TTS): {detail}")
     # Environment defaults are irrelevant once source audio owns the run. Normalizing
     # prevents an invalid ambient provider from leaking into later state or continuation.
     args.tts_provider = "auto"

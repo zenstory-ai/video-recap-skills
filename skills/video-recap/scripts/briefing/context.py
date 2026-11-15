@@ -5,9 +5,9 @@ import re
 
 def _scene_number(scene_id):
     """1-based scene number for every human-facing label in the brief (JSON keeps the
-    0-based `scene_id`); a scene split across kept clips ("3.1") reads "4 part 2"."""
+    0-based `scene_id`); a scene split across kept clips ("3.1") reads "4 第2段"."""
     base, _, part = str(scene_id).partition(".")
-    return f"{int(base) + 1} part {int(part) + 1}" if part else str(int(base) + 1)
+    return f"{int(base) + 1} 第{int(part) + 1}段" if part else str(int(base) + 1)
 
 
 def _clip_text(text, limit):
@@ -55,20 +55,20 @@ def normalize_background_research(research):
 
 
 def _format_background_research(research, limit=1800):
-    """Render background_research.json into a bounded Story-context brief section."""
+    """Render background_research.json into a bounded Chinese story-context brief section."""
     if not research:
         return []
     research = normalize_background_research(research)
     lines = [
-        "## Story context (from background_research.json)",
+        "## 故事背景资料（来自 background_research.json）",
         "",
-        "Research is context_only: use it for aliases/names/world terms and weak background only; do NOT reveal future plot or upgrade research-only relationships/causes into current on-screen facts without visual/ASR support.",
+        "背景调研仅供对照（`context-only`）：只用于核对人名、别名、阵营设定与前情背景；未经本片画面或 ASR 证实的关系与后续剧情，不要直接写成当前画面的既成事实，也不要提前剧透。",
         "",
     ]
     for key, label in (
-        ("synopsis", "Synopsis"),
-        ("worldbuilding", "Worldbuilding"),
-        ("episode_context", "Episode context"),
+        ("synopsis", "剧情梗概"),
+        ("worldbuilding", "世界观设定"),
+        ("episode_context", "本集前情"),
     ):
         value = _clip_text(research[key], 500)
         if value:
@@ -76,13 +76,13 @@ def _format_background_research(research, limit=1800):
 
     characters = research["characters"]
     if characters:
-        lines.append("- Characters:")
+        lines.append("- 主要角色:")
         for name, desc in list(characters.items())[:12]:
             lines.append(f"    - {_clip_text(name, 60)}: {_clip_text(desc, 160)}")
 
     details = research["character_details"]
     if details:
-        lines.append("- Character details:")
+        lines.append("- 角色详情:")
         for name, info in list(details.items())[:8]:
             bits = []
             aliases = [_clip_text(alias, 40) for alias in info["aliases"][:4]]
@@ -99,7 +99,7 @@ def _format_background_research(research, limit=1800):
 
     arcs = research["plot_arcs"]
     if arcs:
-        lines.append("- Plot arcs:")
+        lines.append("- 故事线索:")
         for arc in arcs[:8]:
             name = _clip_text(arc.get("name"), 80)
             desc = _clip_text(arc.get("description"), 180)
@@ -111,7 +111,7 @@ def _format_background_research(research, limit=1800):
 
     notes = research["cultural_notes"]
     if notes:
-        lines.append("- Cultural notes:")
+        lines.append("- 专有设定:")
         for note in notes[:6]:
             item = _clip_text(note.get("item"), 80)
             expl = _clip_text(note.get("explanation"), 160)
@@ -123,7 +123,7 @@ def _format_background_research(research, limit=1800):
     lines.extend(
         [
             "",
-            'Use these names, relationships, and stakes in the narration instead of generic labels like "男子"/"白发女子".',
+            "写解说时优先使用角色真名或具体身份关系，避免对主要人物使用「黑衣男子」「白发女子」等泛称。",
             "",
         ]
     )
@@ -134,7 +134,7 @@ def _format_background_research(research, limit=1800):
     return [
         *clipped.splitlines(),
         "",
-        "[Story context clipped to keep ASR/visual evidence in context]",
+        "[背景资料较长，已截断以保留画面与 ASR 证据空间]",
         "",
     ]
 
@@ -151,10 +151,7 @@ def _format_moderation_refusals(scenes_analysis):
     labels = ", ".join(_scene_number(scene["scene_id"]) for scene in refused[:12])
     more = f" …(+{len(refused) - 12})" if len(refused) > 12 else ""
     return [
-        f"- Moderation-refused scenes: {len(refused)}/{len(scenes_analysis)} "
-        f"(Scene {labels}{more}) — MiMo refused the frame VLM request, so their frame "
-        f"description is blank and they carry no frame_facts. This is a "
-        "content-moderation refusal, not empty footage: ground them in ASR, burned-in "
-        "subtitles, or background research, or skip them in cut mode.",
+        f"- 画面审核拒答场景: {len(refused)}/{len(scenes_analysis)}（场景 {labels}{more}）— "
+        "VLM 请求触发内容审核而未返回描述与帧动作，并非空镜头；请结合 ASR 对白、原片硬字幕或背景调研核实，cut 模式下如无把握可跳过。",
         "",
     ]

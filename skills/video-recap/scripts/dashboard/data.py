@@ -402,6 +402,27 @@ def overview(root: Path) -> dict:
 
 
 # --- search ------------------------------------------------------------------------------
+def _casefold_span(text: str, needle: str) -> tuple[int, int] | None:
+    """Map a match in ``text.casefold()`` back to exact code-point ``(start, end)`` in ``text``."""
+    folded_parts = [ch.casefold() for ch in text]
+    folded = "".join(folded_parts)
+    fpos = folded.find(needle)
+    if fpos < 0:
+        return None
+    fend = fpos + len(needle)
+    cursor = 0
+    start_cp = end_cp = None
+    for idx, part in enumerate(folded_parts):
+        next_cursor = cursor + len(part)
+        if start_cp is None and next_cursor > fpos:
+            start_cp = idx
+        if start_cp is not None and next_cursor >= fend:
+            end_cp = idx + 1
+            break
+        cursor = next_cursor
+    return (start_cp, end_cp) if start_cp is not None and end_cp is not None else None
+
+
 def search(root: Path, q) -> dict:
     """Case-insensitive substring search over narration, clip reasons and library entries."""
     query = (q or "").strip()
@@ -411,14 +432,24 @@ def search(root: Path, q) -> dict:
     needle = query.casefold()
 
     def add(group, title, text, href):
-        pos = text.casefold().find(needle)
-        if pos < 0 or len(hits) >= MAX_HITS:
+        if len(hits) >= MAX_HITS or not text:
             return
+        folded = text.casefold()
+        fpos = folded.find(needle)
+        if fpos < 0:
+            return
+        if len(folded) == len(text):
+            pos, end_pos = fpos, fpos + len(needle)
+        else:
+            span = _casefold_span(text, needle)
+            if span is None:
+                return
+            pos, end_pos = span
         start = max(0, pos - 24)
         prefix = "…" if start else ""
         hits.append({"group": group, "title": title, "href": href,
-                     "snippet": prefix + text[start:pos + len(query) + 60],
-                     "at": len(prefix) + pos - start, "len": len(query)})
+                     "snippet": prefix + text[start:end_pos + 60],
+                     "at": len(prefix) + pos - start, "len": end_pos - pos})
 
     found = discover(root)
     runs = set(found["runs"])

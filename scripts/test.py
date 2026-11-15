@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Cross-platform test runner: one isolated pytest process per skill group.
+"""Cross-platform test runner: one isolated pytest process per test group.
 
-Each skill ships its OWN lib.py (the bundle has no shared code), so a single
-`pytest tests/` would import several skills' modules into one process and collide
-on the `lib` module name. Run one group per subprocess instead.
+`video-recap` and `video-reference` each ship their own `lib.py` (with no shared
+package), so a single `pytest tests/` run would import both skills into one
+process and collide on `lib`. Run one group per subprocess instead.
 
 Works on macOS, Linux, and Windows (the bash equivalent is scripts/test.sh).
 

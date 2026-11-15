@@ -28,14 +28,15 @@ SUBTITLE_ROWS = (
     ("band", "字幕带", "px"),
 )
 ASS_COLOR_RE = re.compile(r"^&H([0-9A-Fa-f]{2})?([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})([0-9A-Fa-f]{2})&?$")
-HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
+HEX_COLOR_RE = re.compile(r"^#([0-9A-Fa-f]{6})(?:[0-9A-Fa-f]{2})?$")
 
 
 def ass_to_hex(value) -> str | None:
-    """``#RRGGBB`` for an ASS ``&HAABBGGRR`` / ``&HBBGGRR`` or ``#RRGGBB`` colour, else None."""
+    """``#RRGGBB`` for an ASS ``&HAABBGGRR`` / ``&HBBGGRR`` or ``#RRGGBB[AA]`` colour, else None."""
     raw = str(value or "").strip()
-    if HEX_COLOR_RE.match(raw):
-        return raw.upper()
+    hex_match = HEX_COLOR_RE.match(raw)
+    if hex_match:
+        return f"#{hex_match.group(1).upper()}"
     match = ASS_COLOR_RE.match(raw)
     if not match:
         return None
@@ -170,12 +171,14 @@ def _packaging_preview(root: Path, canvas: dict, params: dict, resources: dict) 
         preset = str(studio.get("preset") or "")
         vp = studio.get("viewport")
         if not isinstance(vp, dict):
+            cw, ch = canvas["width"], canvas["height"]
             if preset == "portrait_stage":
-                vp = {"x": 0, "y": 520, "width": canvas["width"], "height": 810}
+                vp = {"x": 0, "y": round(436 * ch / 1920), "width": cw, "height": round(cw * 3 / 4)}
             elif preset == "portrait_cinema":
-                vp = {"x": 0, "y": 0, "width": canvas["width"], "height": 1440}
+                hh, fh = round(184 * ch / 1920), round(188 * ch / 1920)
+                vp = {"x": 0, "y": hh, "width": cw, "height": max(2, ch - hh - fh)}
             else:
-                vp = {"x": 0, "y": 0, "width": canvas["width"], "height": canvas["height"]}
+                vp = {"x": 0, "y": 0, "width": cw, "height": ch}
         studio_preview = {
             "preset": preset,
             "backdrop": str(studio.get("backdrop") or ""),

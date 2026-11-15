@@ -171,7 +171,7 @@ def test_cli_check_exit_code_and_json_report(tmp_path):
     def run(root):
         return subprocess.run(
             [sys.executable, "-X", "utf8", str(SCRIPT), "--library-dir", str(root), "check", "--json"],
-            capture_output=True, text=True, encoding="utf-8",
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
         )
 
     ok = run(EXAMPLE)

@@ -201,7 +201,7 @@ def resolve_font_family(role: str = "sans_heavy", explicit_path: str = "") -> tu
 def load_font(role: str, size_px: int, explicit_path: str = ""):
     """Load a Pillow font at exact pixel height."""
     if ImageFont is None:
-        raise RuntimeError("生成精装包装图层需要安装 Pillow (pip install Pillow)")
+        raise RuntimeError("生成文字贴片需要安装 Pillow (pip install Pillow)")
     size_px = max(8, int(round(size_px)))
     path, index = resolve_font_spec(role, explicit_path)
     if path:

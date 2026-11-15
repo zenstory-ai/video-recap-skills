@@ -53,7 +53,7 @@
 
 - `cut_fixes`（可选）：只允许包含 `add` 与 `remove` 两个秒数数组。`remove` 中的每个时间点必须落在某个已测得切点的 `±0.1` 秒范围内；`add` 中的时间点则不得落在任何已测得切点的 `±0.1` 秒内。只要显式填写了 `cut_fixes`（哪怕写 `{}`），即代表已完成人工看图复核；有增删时，所有 `shots.*` 及与切点关联的 `derived.*` 指标都会按修正后的切点列表重新计算。
 - `subtitles`（可选）：`burned`（布尔值）与 `max_lines`（`≥1` 的整数）必填，`marks_original`（标识原声字幕的引号样式）与 `evidence_t`（抽样取证秒数数组）可选。
-- `skipped_dimensions`：键为跳过的维度名，值为一句非空的原因说明；该说明会原样写入导出物，因此同样受 R8 防剧透泄漏扫描约束。
+- `skipped_dimensions`（可选）：键为跳过的维度名，值为一句非空的原因说明（未覆盖且未在此说明的维度会报 R7 warning，不阻断导出）；该说明会原样写入导出物，因此同样受 R6/R8 防剧透泄漏扫描约束。
 - `source_facts` 条目：`id`、`dimension`、`statement`、`entities` 必填，时间锚点 `t` 与测量锚点 `measure` 二选一。`entities` 需列出该条事实涉及的所有人名、地名、机构名（无专名时写 `[]`），它们会自动加入导出时的防泄漏拦截词表。
 - `methods` 条目：`id`、`dimension`、`rule`、`applies_to`、`evidence` 必填；`applies_when`、`avoid_when`、`targets` 可选。
 - `targets` 条目：每个指标只写 `{"from": "<测量路径>"}`，路径根只能是 `shots`、`loudness` 或 `derived`，且不得带列表下标；路径解析结果必须是单个数值叶子节点，或以下白名单派生对象之一：`derived.structure`、`derived.first_original_at`（导出时仅保留相对位置占比 `{fraction}`，去掉绝对秒数）、`derived.narration_jobs`、`derived.by_owner.<owner>`、`derived.by_section.<function>`。像 `shots.cuts`、`shots.curve`、`loudness.short_term_1s` 这类逐时刻时间序列不能作为 `target` 导出。
@@ -75,7 +75,7 @@
 | 派生路径 | 指标含义 |
 |---|---|
 | `derived.by_owner.<owner>` | 该音源主导的总秒数 `seconds`、全片时长占比 `share`、连续段落数 `blocks`、段落中位时长 `block_median_s`、每分钟切点数 `cuts_per_min`、平均短期响度 `mean_short_term_lufs` |
-| `derived.narration_chars_per_s` | 旁白每秒字数（仅统计被旁白覆盖 `≥80%` 的 ASR 分窗；未跑 ASR 时 `value` 为 `null`） |
+| `derived.narration_chars_per_s.value` | 旁白每秒字数数值叶子（仅统计被旁白覆盖 `≥80%` 的 ASR 分窗；未跑 ASR 时为 `null`，引用时须带 `.value`） |
 | `derived.switch_on_cut_share` | 声音主导权切换点恰好落在画面硬切点 `±0.25` 秒内的比例（衡量声画同步换手率） |
 | `derived.by_section.<function>` | 该叙事功能段落的总秒数 `seconds`、每分钟切点数 `cuts_per_min`、旁白时长占比 `narration_share` |
 | `derived.structure` | 全片叙事段落排布结构：`[{function, at: [起点全片占比, 终点全片占比], lead_owner}]` |
@@ -122,7 +122,7 @@
 
 **正例（可迁移、有条件、有数据支撑）**：
 
-1. `"rule": "当面质问或争执时顺着对话保留快频反打，转入解说交代前因时换成稳定画面托底，避免频繁跳切分散听众对信息的注意力"`，搭配 `"applies_when": "人物当面交锋激烈、又需要旁白穿插交代前因后果的剧情解说"`。注意：规则描述的方向必须与 `check` 算出的 `derived.by_owner.*.cuts_per_min` 实测值一致，不要闭眼瞎写。
+1. `"rule": "当面质问或争执时顺着对话保留快频反打，转入解说交代前因时换成稳定画面托底，避免频繁跳切分散听众对信息的注意力"`，搭配 `"applies_when": "人物当面交锋激烈、又需要旁白穿插交代前因后果的剧情解说"`。注意：规则描述的方向必须与 `check` 算出的 `derived.by_owner.*.cuts_per_min` 实测值一致，不要凭主观印象下结论。
 2. `"rule": "开场先用一句旁白点破人物处境与身份落差，紧接着尽早放出第一句原声冲突把观众拽进现场"`，搭配 `"targets": {"first_original": {"from": "derived.first_original_at"}}`。
 3. `"rule": "旁白与原声的交接点尽量卡在画面硬切点上，借镜头切换掩护声音换手"`，搭配 `"evidence": ["measure:derived.switch_on_cut_share"]`。
 

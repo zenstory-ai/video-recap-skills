@@ -62,7 +62,7 @@ def test_vlm_labels_frames_with_corrected_source_time(monkeypatch, tmp_path):
         f.write_bytes(b"\xff\xd8\xff\xd9")
         frames.append(f)
     monkeypatch.setitem(CONFIG, "fps", 1.0)
-    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.5")
+    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.6-flash")
     monkeypatch.setitem(CONFIG, "vlm_workers", 1)
     monkeypatch.setitem(CONFIG, "context_info", "")
     seen = []
@@ -100,7 +100,7 @@ def test_vlm_frame_base64_cache_is_bounded(monkeypatch, tmp_path):
         f.write_bytes(b"\xff\xd8" + bytes([n]) * 2048 + b"\xff\xd9")
         frames.append(f)
     monkeypatch.setitem(CONFIG, "fps", 1.0)
-    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.5")
+    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.6-flash")
     monkeypatch.setitem(CONFIG, "vlm_workers", 1)
     monkeypatch.setitem(CONFIG, "vlm_max_frames", 3)
     monkeypatch.setitem(CONFIG, "context_info", "")

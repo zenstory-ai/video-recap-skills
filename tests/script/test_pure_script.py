@@ -774,3 +774,18 @@ def test_validate_ignores_unreadable_vlm_analysis_json(monkeypatch, tmp_path):
 
     report = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
+
+
+def test_inline_voice_cues_stripped_while_ascii_parentheticals_count_toward_budget(tmp_path):
+    from agent_text import _spoken_unit_count, _text_char_count
+
+    assert _text_char_count("(whispering) [压低] 别出声！") == 3
+    assert _spoken_unit_count("(whispering) [压低] 别出声！") == 3
+    assert _spoken_unit_count("联邦调查局(FBI)连夜突袭。") > _spoken_unit_count("联邦调查局连夜突袭。")
+
+    report = lint_narration(
+        [{"start": 0.0, "end": 2.0, "narration": "(sigh)。"}],
+        mode="full",
+        work_dir=tmp_path,
+    )
+    assert any(err["code"] == "empty_narration" for err in report["errors"])

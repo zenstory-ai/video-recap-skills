@@ -1,7 +1,9 @@
 """Canonical CLI and programmatic render entry for the assemble stage."""
 
 import argparse
+import inspect
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -79,12 +81,24 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
         _block_before_render(tts_segments, video_duration, work_dir, output_path, audio_mode)
 
     # 始终生成 SRT 字幕文件（原声留白处补烧原声字幕，传入成片时长以计算留白区间）
-    srt_path = subtitle_render._generate_srt(tts_segments, work_dir, video_duration)
+    srt_params = inspect.signature(subtitle_render._generate_srt).parameters
+    if "canvas" in srt_params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in srt_params.values()
+    ):
+        srt_path = subtitle_render._generate_srt(
+            tts_segments, work_dir, video_duration, canvas=canvas
+        )
+    else:
+        srt_path = subtitle_render._generate_srt(tts_segments, work_dir, video_duration)
     lib.log(f"字幕文件: {srt_path}")
     ass_path = None
+    subtitle_spans = []
     if burn_subtitles:
         ass_path = subtitle_render._generate_ass(tts_segments, work_dir, video_duration, canvas)
         lib.log(f"压制字幕文件: {ass_path}")
+        subtitle_spans = subtitle_render.burned_subtitle_spans(
+            tts_segments, work_dir, video_duration, canvas=canvas
+        )
 
     # 可选 BGM：作为一条独立音轨（input [2:a]）混入，旁白处自动压低
     if bgm_path and not has_bgm:
@@ -92,9 +106,17 @@ def assemble_video(input_video, tts_segments, work_dir, output_path, *,
     elif has_bgm:
         lib.log(f"BGM 铺底: {bgm_path} (音量 {lib.CONFIG['bgm_volume']}，旁白时 {lib.CONFIG['bgm_ducking_volume']})")
 
-    studio_plan = packaging.prepare_studio_packaging(
-        work_dir, input_canvas, video_duration, tts_segments
-    )
+    pkg_params = inspect.signature(packaging.prepare_studio_packaging).parameters
+    if "subtitle_spans" in pkg_params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in pkg_params.values()
+    ):
+        studio_plan = packaging.prepare_studio_packaging(
+            work_dir, input_canvas, video_duration, tts_segments, subtitle_spans=subtitle_spans
+        )
+    else:
+        studio_plan = packaging.prepare_studio_packaging(
+            work_dir, input_canvas, video_duration, tts_segments
+        )
     # 多轨时间线模型（timeline.json）：canonical 渲染仍是 ffmpeg，此模型供检视/可选导出
     timeline_emit._emit_timeline(
         input_video, tts_segments, work_dir, video_duration, canvas, has_bgm,
@@ -512,8 +534,9 @@ def main():
         lib.CONFIG["export_jianying"] = True
     if args.jianying_bundle_media is not None:
         lib.CONFIG["jianying_bundle_media"] = args.jianying_bundle_media
-    # Before the render: an explicit burn without libass fails, the default degrades to the
-    # .srt sidecar.
+    # Before the render: auto-prefer healthy Homebrew ffmpeg-full on macOS, then fail explicit
+    # burn without libass or degrade the default to the .srt sidecar.
+    lib.prefer_homebrew_ffmpeg_full()
     render_preflight._preflight_burn_subtitles()
     # Argument combinations are validated once, by assemble_video.
     tts_meta = Path(args.tts_meta) if args.tts_meta else None
@@ -569,28 +592,41 @@ def main():
         from jianying.optional import maybe_export_jianying
         maybe_export_jianying(work_dir, args.jianying_out, stem)
 
+    sidecar_note = f"（外挂字幕: {sidecar}）" if sidecar else ""
     for warning in warnings:
-        lib.log(f"⚠️ {warning['code']}: {warning['message']}（外挂字幕: {sidecar}）")
+        lib.log(f"⚠️ {warning['code']}: {warning['message']}{sidecar_note}")
     print(json.dumps({"status": "assembled", "output": str(final_output), "work_dir": str(work_dir),
                       "subtitle_sidecar": str(sidecar) if sidecar else None,
                       "warnings": [warning["code"] for warning in warnings]},
                      ensure_ascii=False))
 
 
-def _export_cover_image(final_output: Path, work_dir: Path) -> Path | None:
+def _export_cover_image(final_output: Path, work_dir: Path | None = None) -> Path | None:
     """Extract a crisp cover frame (work_dir/cover.jpg) capturing the opening hook header & card."""
-    if not final_output.is_file() or not shutil.which("ffmpeg"):
+    if work_dir is None or not final_output.is_file() or not shutil.which("ffmpeg"):
         return None
     try:
         dur = lib.get_video_duration(final_output)
     except Exception:
         dur = 3.0
-    seek_t = min(max(0.9, dur * 0.06), max(0.0, dur - 0.15))
+    seek_s = min(max(0.0, dur * 0.06), max(0.0, dur - 0.1))
+    promo_path = Path(work_dir) / "promo_copy.json"
+    if promo_path.is_file():
+        promo = lib.read_json_object(promo_path) or {}
+        cover = promo.get("cover")
+        if isinstance(cover, dict):
+            for key in ("frame_s", "timestamp"):
+                raw_t = cover.get(key)
+                if isinstance(raw_t, (int, float)) and not isinstance(raw_t, bool):
+                    t = float(raw_t)
+                    if math.isfinite(t) and 0.0 <= t < dur:
+                        seek_s = round(t, 3)
+                        break
     cover_path = Path(work_dir) / "cover.jpg"
     try:
         res = subprocess.run(
             [
-                "ffmpeg", "-y", "-ss", f"{seek_t:.3f}", "-i", str(final_output),
+                "ffmpeg", "-y", "-ss", f"{seek_s:.3f}", "-i", str(final_output),
                 "-frames:v", "1", "-q:v", "2", str(cover_path),
             ],
             capture_output=True,

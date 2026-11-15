@@ -46,11 +46,14 @@ _SCRIPT_ARTIFACTS = [
     "original_subtitles.json",
 ]
 _RENDER_ARTIFACTS = [
+    "packaging_plan.json",
+    "promo_copy.json",
     "tts_meta.json",
     "timeline.json",
     "subtitles.srt",
     "subtitles.ass",
     "assembly_manifest.json",
+    "cover.jpg",
 ]
 _STORYBOARD_ARTIFACTS = [
     "storyboard/source_storyboard.json",
@@ -111,9 +114,9 @@ def _discover_source(work_dir):
 
 def _discover_multi_source(work_dir):
     data = _load_optional(Path(work_dir) / "multi_source_manifest.json")
-    if data is None:
+    if not isinstance(data, dict) or not isinstance(data.get("sources"), list):
         return None
-    return {"schema_version": data["schema_version"], "sources": data["sources"]}
+    return {"schema_version": data.get("schema_version"), "sources": data["sources"]}
 
 
 # --- affine map -----------------------------------------------------------
@@ -284,10 +287,16 @@ def cmd_clip_map(work_dir, output_start, output_end, compact):
     if output_start is None and output_end is None:
         return {"error": "请用 --output-start/--output-end 指定要查询的窗口。"}
 
+    source_keys = {(c.get("source_id"), c.get("source_path")) for c in clips}
+    source_span = (
+        [min(c["source_start"] for c in clips), max(c["source_end"] for c in clips)]
+        if len(source_keys) == 1
+        else None
+    )
     return {
         "work_dir": str(work_dir),
         "clip_count": len(clips),
-        "source_span": [clips[0]["source_start"], clips[-1]["source_end"]],
+        "source_span": source_span,
         "output_span": [clips[0]["output_start"], clips[-1]["output_end"]],
         "queries": [_map_output_window(output_start, output_end, clips, compact)],
     }
@@ -335,9 +344,13 @@ def _render_clip_map_md(result, compact):
     if "error" in result:
         return result["error"]
     lines = [f"# clip-map: {result['work_dir']}", ""]
+    src_label = (
+        f"源 {_fmt_seconds(result['source_span'][0])}–{_fmt_seconds(result['source_span'][1])}"
+        if result["source_span"] is not None
+        else "多源输入"
+    )
     lines.append(
-        f"{result['clip_count']} clips · "
-        f"源 {_fmt_seconds(result['source_span'][0])}–{_fmt_seconds(result['source_span'][1])} · "
+        f"{result['clip_count']} clips · {src_label} · "
         f"输出 {_fmt_seconds(result['output_span'][0])}–{_fmt_seconds(result['output_span'][1])}")
     for q in result["queries"]:
         lines.append("")

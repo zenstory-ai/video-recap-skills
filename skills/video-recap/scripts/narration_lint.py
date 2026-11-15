@@ -13,6 +13,7 @@ from agent_text import (
     TTS_UTTERANCE_OVERHEAD_SECONDS,
     _lint_char_budget,
     _scene_available_seconds,
+    _spoken_unit_count,
     _text_char_count,
 )
 from entry_suggestion import (
@@ -36,7 +37,7 @@ GENERIC_CHARACTER_RE = re.compile(
     r"|白发女子|黑发男子"
 )
 COMMENTARY_CLICHE_RE = re.compile(
-    r"这说明|这意味着|这证明了|这是一场关于|命运的齿轮|好戏才刚刚开始|故事才刚刚开始"
+    r"这是一场关于|命运的齿轮|好戏才刚刚开始|故事才刚刚开始"
     r"|传奇仍在继续|未来可期|拭目以待|让我们一起"
 )
 META_OPENER_RE = re.compile(r"^(?:大家好|今天我们来|今天聊聊|本期视频|接下来我们)")
@@ -51,8 +52,12 @@ def _lint_issue(level, index, code, message, **extra):
     return issue
 
 
+def _strip_stage_brackets(text):
+    return re.sub(r"\[[^\]]*\]", "", text).strip()
+
+
 def _has_terminal_punctuation(text):
-    stripped = text.rstrip(_TRAILING_QUOTES)
+    stripped = _strip_stage_brackets(text).rstrip(_TRAILING_QUOTES)
     return bool(stripped) and stripped[-1] in _SENTENCE_END_PUNCT
 
 
@@ -83,8 +88,8 @@ def _source_sentence_entry_issue(
             "error",
             index,
             "source_sentence_anchors_unavailable",
-            "Source speech owns this entry but no verified sentence-end anchor is available. "
-            "Move/remove the narration or regenerate output speech evidence before TTS.",
+            "此处与原声对白重叠，但没有已验证的句尾停顿锚点；"
+            "请在 TTS 前移动或删除该段旁白，或重新生成语音边界证据。",
             entry_time=round(start, 3),
             suggested_start=None,
         )
@@ -99,12 +104,9 @@ def _source_sentence_entry_issue(
         "error",
         index,
         "interrupts_source_sentence",
-        "Narration enters before the source sentence finishes. Move the whole block (same "
-        "duration) to the suggested sentence-end anchor, or shorten/move/remove it when no "
-        f"anchor within {SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS:g}s keeps it between its neighbours "
-        "and clear of the other blocks, then rerun lint before TTS. The window stays inside the "
-        "output duration (cut_output); full mode does not know the video's end, so keep it "
-        "inside the video. Source sentence interruption has no override.",
+        "旁白在原声句子说完前切入。请将整段旁白平移到建议的句尾锚点；"
+        f"若前后 {SUGGESTED_ANCHOR_MAX_SHIFT_SECONDS:g}s 内没有不与相邻块冲突的锚点，"
+        "请缩短、移动或删除该段后再重跑 validate。",
         entry_time=round(start, 3),
         suggested_start=round(suggested["time"], 3) if suggested else None,
         suggested_end=round(suggested["time"] + end - start, 3) if suggested else None,
@@ -116,7 +118,7 @@ def _source_sentence_entry_issue(
 
 
 def _source_sentence_exit_issue(index, end, source_evidence, timeline_duration=None):
-    """Block when a narration run releases original audio mid-sentence with no nearby pause anchor."""
+    """Warn when a narration run releases original audio inside detected speech with no nearby pause anchor."""
     anchors = source_evidence["anchors"]
     if not anchors:
         return None
@@ -139,11 +141,11 @@ def _source_sentence_exit_issue(index, end, source_evidence, timeline_duration=N
     ):
         return None
     return _lint_issue(
-        "error",
+        "warning",
         index,
         "unsafe_source_release",
-        f"旁白结束于 {end:.2f}s，但此处原声仍在句子中途且后续 {SOURCE_HANDOFF_MAX_HOLD_SECONDS:g}s "
-        "内无句末停顿锚点，恢复原声会放出半截残句；请延长/调整旁白覆盖完整原句，或桥接到下一段旁白。",
+        f"旁白结束于 {end:.2f}s，处于检出对白区间内且后续 {SOURCE_HANDOFF_MAX_HOLD_SECONDS:g}s "
+        "内无句末停顿锚点；请确认此处原声尚未开口或已自然收句，避免半句放出。",
         exit_time=round(end, 3),
         max_hold_seconds=SOURCE_HANDOFF_MAX_HOLD_SECONDS,
     )
@@ -164,10 +166,8 @@ def _over_budget_error(index, start, end, char_count, budget):
         "error",
         index,
         "over_budget",
-        f"段 {index + 1} [{start:.2f}-{end:.2f}s] has {char_count} chars; the window holds "
-        f"about {budget} (hard limit {limit}), {char_count - limit} over the limit. "
-        "Shorten the text or widen/move the window, then rerun validate; "
-        "validation never shortens approved text.",
+        f"段 {index + 1} [{start:.2f}-{end:.2f}s] 写了 {char_count} 字，窗口建议约 {budget} 字"
+        f"（硬上限 {limit} 字，超出 {char_count - limit} 字）；请精简文本或拉宽/平移窗口后重跑 validate。",
         start=start,
         end=end,
         budget_chars=budget,
@@ -211,7 +211,7 @@ def _placeholder_leakage_issues(narration, work_dir):
 
 
 def _generic_character_label_issues(narration, work_dir):
-    """When background_research.json supplies named characters, reject VLM appearance labels."""
+    """When background_research.json supplies named characters, warn on VLM appearance labels."""
     if work_dir is None or not isinstance(narration, list):
         return []
     research = load_background_research(work_dir)
@@ -229,11 +229,11 @@ def _generic_character_label_issues(narration, work_dir):
         if matches:
             issues.append(
                 _lint_issue(
-                    "error",
+                    "warning",
                     idx,
                     "generic_character_label",
                     f"background_research.json 已提供角色名（{', '.join(known)}），"
-                    f"禁止在解说中使用笼统外貌代称「{matches[0]}」",
+                    f"建议将外貌泛称「{matches[0]}」改为角色名或身份关系（若确指路人可忽略）",
                     matches=matches,
                     known_characters=known,
                 )
@@ -304,11 +304,11 @@ def _timeline_pacing_issues(sorted_segments, source_evidence, timeline_duration)
         if first_onset > max_cold + 1e-6:
             issues.append(
                 _lint_issue(
-                    "error",
+                    "warning",
                     0,
                     "weak_cold_open_silence",
-                    f"开场前 {first_onset:.2f}s 既无旁白也无原声对白（上限 {max_cold:.1f}s）；"
-                    "前 3 秒必须用旁白钩子或高张力原声台词抓住观众",
+                    f"开场前 {first_onset:.2f}s 无旁白也无原声对白（常规参考 ≤ {max_cold:.1f}s）；"
+                    "若非刻意的动作/悬念冷开场留白，建议尽早切入钩子或原声台词",
                     first_audio_onset=round(first_onset, 3),
                     max_cold_open_silence_seconds=max_cold,
                 )
@@ -321,11 +321,11 @@ def _timeline_pacing_issues(sorted_segments, source_evidence, timeline_duration)
             if left - cursor > max_dead + 1e-6:
                 issues.append(
                     _lint_issue(
-                        "error",
+                        "warning",
                         None,
                         "excessive_dead_air",
                         f"成片 [{cursor:.2f}-{left:.2f}s] 连续 {left - cursor:.2f}s "
-                        f"既无旁白也无原声对白（上限 {max_dead:.1f}s）；请补解说或收紧留白",
+                        f"无旁白也无原声对白（常规参考 ≤ {max_dead:.1f}s）；请确认是否为有意留给动作/音乐的呼吸段",
                         start=round(cursor, 3),
                         end=round(left, 3),
                         duration=round(left - cursor, 3),
@@ -336,12 +336,12 @@ def _timeline_pacing_issues(sorted_segments, source_evidence, timeline_duration)
         if timeline_duration - cursor > max_dead + 1e-6:
             issues.append(
                 _lint_issue(
-                    "error",
+                    "warning",
                     None,
                     "excessive_dead_air",
                     f"成片尾部 [{cursor:.2f}-{timeline_duration:.2f}s] 连续 "
-                    f"{timeline_duration - cursor:.2f}s 既无旁白也无原声对白（上限 {max_dead:.1f}s）；"
-                    "请补收束旁白、保留原声落点或裁剪拖尾",
+                    f"{timeline_duration - cursor:.2f}s 无旁白也无原声对白（常规参考 ≤ {max_dead:.1f}s）；"
+                    "若画面与余韵已自然收尾可保留，否则可裁剪多余拖尾",
                     start=round(cursor, 3),
                     end=round(timeline_duration, 3),
                     duration=round(timeline_duration - cursor, 3),
@@ -372,7 +372,7 @@ def lint_narration(
                 "error",
                 None,
                 "invalid_json_shape",
-                "narration.json must be a JSON array",
+                "narration.json 顶层必须是 JSON 数组",
             )
         )
     else:
@@ -385,7 +385,7 @@ def lint_narration(
                         "error",
                         idx,
                         "invalid_segment",
-                        "Narration segment must be an object",
+                        "旁白条目必须是 JSON 对象",
                     )
                 )
                 continue
@@ -393,7 +393,7 @@ def lint_narration(
             if not _is_number(start) or not _is_number(end):
                 errors.append(
                     _lint_issue(
-                        "error", idx, "invalid_time", "start/end must be finite numbers"
+                        "error", idx, "invalid_time", "start 与 end 必须是有限数值"
                     )
                 )
                 continue
@@ -403,7 +403,7 @@ def lint_narration(
                         "error",
                         idx,
                         "out_of_order",
-                        "Segments must be listed in chronological order",
+                        "旁白条目必须按时间先后排序",
                         start=start,
                         previous_start=previous_start,
                     )
@@ -416,7 +416,7 @@ def lint_narration(
                         "error",
                         idx,
                         "invalid_narration",
-                        "narration must be a string",
+                        "narration 字段必须是字符串",
                         start=start,
                         end=end,
                     )
@@ -430,7 +430,7 @@ def lint_narration(
                         "error",
                         idx,
                         "invalid_pause",
-                        "pause_after_ms must be a non-negative integer number of milliseconds",
+                        "pause_after_ms 必须是非负整数（毫秒）",
                     )
                 )
                 continue
@@ -440,26 +440,26 @@ def lint_narration(
                         "error",
                         idx,
                         "invalid_time_range",
-                        "end must be greater than start",
+                        "end 必须大于 start",
                         start=start,
                         end=end,
                     )
                 )
                 continue
-            if not text:
+            raw_char_count = _text_char_count(text)
+            if not text or raw_char_count == 0:
                 errors.append(
                     _lint_issue(
                         "error",
                         idx,
                         "empty_narration",
-                        "narration text must not be empty",
+                        "narration 文本不能为空（去除方括号提示与标点后须有可朗读文字）",
                         start=start,
                         end=end,
                     )
                 )
                 continue
-
-            char_count = _text_char_count(text)
+            char_count = _spoken_unit_count(text) or 1
             budget = _lint_char_budget(start, end)
             play_rate = CONFIG["speech_rate"] * CONFIG["narration_speed"]
             estimated_tts_seconds = char_count / play_rate + TTS_UTTERANCE_OVERHEAD_SECONDS
@@ -475,7 +475,7 @@ def lint_narration(
                         "warning",
                         idx,
                         "slot_too_short",
-                        "Narration slot is very short; TTS may be clipped",
+                        "旁白时间窗很短，TTS 可能放不下",
                         start=start,
                         end=end,
                         budget_chars=budget,
@@ -487,7 +487,7 @@ def lint_narration(
                         "warning",
                         idx,
                         "over_budget",
-                        "Text may exceed the available TTS slot",
+                        "字数预计朗读时长可能超出当前时间窗",
                         start=start,
                         end=end,
                         budget_chars=budget,
@@ -502,7 +502,7 @@ def lint_narration(
                         "error",
                         idx,
                         "incomplete_sentence",
-                        "Narration must end with complete sentence punctuation",
+                        "旁白末尾必须有完整的句末标点",
                         text_tail=text[-8:],
                     )
                 )
@@ -549,7 +549,7 @@ def lint_narration(
                     idx, end, source_evidence, timeline_duration=timeline_duration
                 )
                 if exit_issue:
-                    errors.append(exit_issue)
+                    warnings.append(exit_issue)
 
             normalized.append(
                 {"index": idx, "start": start, "end": end, "char_count": char_count}
@@ -562,7 +562,7 @@ def lint_narration(
                 "error",
                 None,
                 "empty_narration_file",
-                "narration.json must contain at least one valid narration segment",
+                "narration.json 至少需要包含一条有效旁白",
             )
         )
     for prev, curr in zip(sorted_segments, sorted_segments[1:]):
@@ -572,7 +572,7 @@ def lint_narration(
                     "error",
                     curr["index"],
                     "time_overlap",
-                    "Segment overlaps the previous narration segment",
+                    "当前旁白段与上一段在时间轴上重叠",
                     previous_index=prev["index"],
                     previous_end=prev["end"],
                     start=curr["start"],
@@ -581,11 +581,11 @@ def lint_narration(
             )
 
     if _has_local_timing_evidence(work_dir, mode):
-        errors.extend(
+        warnings.extend(
             _timeline_pacing_issues(sorted_segments, source_evidence, timeline_duration)
         )
     errors.extend(_placeholder_leakage_issues(narration, work_dir))
-    errors.extend(_generic_character_label_issues(narration, work_dir))
+    warnings.extend(_generic_character_label_issues(narration, work_dir))
 
     report = {
         "ok": not errors,

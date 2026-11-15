@@ -17,7 +17,7 @@ Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级 conform 里
 生成的 source_id 与公开 example 不同时，根据 assets.json 的 episode 映射重写工作副本中的 source_id，
 不要改原片时间码。三段原声窗口保持 1.0x，旁白先写连续思路，字幕再按实际 placed audio 拆 cue。
 
-音画锁定后，再按“字幕与可选包装”流程使用 examples/guohuo-60s/remotion 做项目级透明包装；
+音画锁定后，再参照画布包装规范（references/packaging.md）使用 examples/guohuo-60s/remotion 做项目级透明包装；
 字体不可用时选同类 fallback 并抽检，不把特定字体写成核心依赖。
 
 最后进入 REVISION：读取 revision-log.json、edit-map.json 和 picture-conform.json。
@@ -59,7 +59,7 @@ Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级 conform 里
 - 配音阶段保留完整音频并记日志；若合成阶段在安全倍率内温和提速后仍装不下，会在视频编码前以 `no_safe_fit` 阻断，并在报错中写明超窗段号与所需的 `needed_tempo_factor`，此时只需改短该段词句或微调时间窗后重跑即可；
 - 严禁靠硬切语音尾音或继续提速把长音频硬塞进窄窗口。
 
-若复现时使用了不同音色或语速，请按新跑出的真实落盘音频重新生成字幕条，切勿直接拿公开的 [`captions.json`](captions.json) 硬套在新音频上冒充同步。此外，公开历史产物中记录的 `ducking_narr_weight` 为 `2.4`，而当前版本 `assemble.py` 已将该权重固定为 `1.5`；如需完全复刻当时的压音深度，可在项目级后期混音中微调并重新听审。
+若复现时使用了不同音色或语速，请按新跑出的真实落盘音频重新生成字幕条，切勿直接拿公开的 [`captions.json`](captions.json) 硬套在新音频上冒充同步。此外，公开历史产物中记录的 `ducking_narr_weight` 为 `2.4`，而当前版本 `assemble.py` 已将该权重固定为 `1.6`；如需完全复刻当时的压音深度，可在项目级后期混音中微调并重新听审。
 
 ### 5. 叠加项目级 Remotion 透明包装
 

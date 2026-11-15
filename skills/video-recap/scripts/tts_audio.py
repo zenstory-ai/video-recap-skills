@@ -8,6 +8,7 @@ import array
 import math
 import os
 import re
+import struct
 import sys
 import wave
 from pathlib import Path
@@ -15,35 +16,107 @@ from pathlib import Path
 from lib import CONFIG
 
 
+def _parse_riff_wav_chunks(raw_bytes, input_wav):
+    """Parse RIFF/WAVE fmt + data chunks for PCM (tag 1) or IEEE float (tag 3)."""
+    if len(raw_bytes) < 44 or raw_bytes[:4] != b"RIFF" or raw_bytes[8:12] != b"WAVE":
+        raise ValueError(f"无效 WAV 文件: {input_wav}")
+    offset = 12
+    fmt = None
+    data = None
+    while offset + 8 <= len(raw_bytes):
+        chunk_id = raw_bytes[offset:offset + 4]
+        chunk_size = struct.unpack_from("<I", raw_bytes, offset + 4)[0]
+        body_start = offset + 8
+        body_end = min(len(raw_bytes), body_start + chunk_size)
+        if chunk_id == b"fmt " and body_end - body_start >= 16:
+            fmt_tag, channels, framerate, _, block_align, bits = struct.unpack_from(
+                "<HHIIHH", raw_bytes, body_start
+            )
+            if fmt_tag == 0xFFFE and body_end - body_start >= 26:
+                fmt_tag = struct.unpack_from("<H", raw_bytes, body_start + 24)[0]
+            fmt = (fmt_tag, channels, framerate, block_align, bits)
+        elif chunk_id == b"data":
+            data = raw_bytes[body_start:body_end]
+            break
+        offset = body_start + chunk_size + (chunk_size & 1)
+    if fmt is None or data is None:
+        raise ValueError(f"WAV 缺少 fmt 或 data 块: {input_wav}")
+    if fmt[1] < 1 or fmt[2] < 1:
+        raise ValueError(f"无效 WAV 声道数或采样率 (channels={fmt[1]}, rate={fmt[2]}): {input_wav}")
+    return fmt, data
+
+
+def _decode_wav_samples_16bit_scale(input_wav):
+    """Return (channels, framerate, is_pcm16, samples_in_int16_scale)."""
+    raw_bytes = input_wav.read_bytes()
+    (fmt_tag, channels, framerate, _block_align, bits), data = _parse_riff_wav_chunks(
+        raw_bytes, input_wav
+    )
+    is_pcm16 = False
+    if fmt_tag == 1 and bits == 16:
+        samples = array.array("h")
+        usable = len(data) - (len(data) % 2)
+        samples.frombytes(data[:usable])
+        if sys.byteorder != "little":
+            samples.byteswap()
+        is_pcm16 = True
+    elif fmt_tag == 1 and bits == 8:
+        samples = [(b - 128) * 256.0 for b in data]
+    elif fmt_tag == 1 and bits == 24:
+        usable = len(data) - (len(data) % 3)
+        samples = [
+            int.from_bytes(data[i:i + 3], "little", signed=True) / 256.0
+            for i in range(0, usable, 3)
+        ]
+    elif fmt_tag == 1 and bits == 32:
+        usable = len(data) - (len(data) % 4)
+        ints = array.array("i")
+        ints.frombytes(data[:usable])
+        if sys.byteorder != "little":
+            ints.byteswap()
+        samples = [v / 65536.0 for v in ints]
+    elif fmt_tag == 3 and bits in (32, 64):
+        step = bits // 8
+        fmt_code = "<f" if bits == 32 else "<d"
+        usable = len(data) - (len(data) % step)
+        samples = []
+        for (s,) in struct.iter_unpack(fmt_code, data[:usable]):
+            if not math.isfinite(s):
+                s = 0.0
+            samples.append(int(round(max(-1.0, min(1.0, s)) * 32767.0)))
+    else:
+        raise ValueError(f"不支持的 WAV 编码 (format={fmt_tag}, bits={bits}): {input_wav}")
+
+    aligned = (len(samples) // channels) * channels
+    if aligned < len(samples):
+        samples = samples[:aligned]
+        is_pcm16 = False
+    return channels, framerate, is_pcm16, samples
+
+
+_decode_wav_samples_to_i16 = _decode_wav_samples_16bit_scale
+
+
 def _normalize_tts_wav_rms(input_wav, output_wav, *, target_rms_dbfs=-20.0, peak_limit=0.98):
-    """Normalize a mono/stereo 16-bit WAV to a target RMS with peak guard.
+    """Normalize a PCM (8/16/24/32-bit) or IEEE-float WAV to 16-bit PCM at target RMS.
 
     This helper is intentionally dependency-free so QC/assembly can reuse the
     returned metadata even when normalization is applied in a later lane.
     """
     input_wav = Path(input_wav)
     output_wav = Path(output_wav)
-    with wave.open(str(input_wav), "rb") as wf:
-        channels = wf.getnchannels()
-        sampwidth = wf.getsampwidth()
-        framerate = wf.getframerate()
-        frames = wf.getnframes()
-        data = wf.readframes(frames)
-    if sampwidth != 2:
-        raise ValueError(f"仅支持 16-bit PCM WAV: {input_wav}")
-
-    # array('h') decodes the whole block in C. The previous per-sample int.from_bytes
-    # comprehension ran three times over the audio (decode, normalize, re-decode the
-    # OUTPUT just to measure it) — about 420ms for a 12s block, times every narration
-    # segment. Same arithmetic, same rounding, one decode.
-    samples = array.array("h")
-    samples.frombytes(data)
-    if sys.byteorder != "little":  # wave data is little-endian regardless of host
-        samples.byteswap()
+    channels, framerate, is_pcm16, samples = _decode_wav_samples_16bit_scale(input_wav)
     if not samples:
-        # A silent block has no RMS to normalize toward; copy it through with neutral
-        # metadata rather than dividing by a zero sample count.
-        output_wav.write_bytes(input_wav.read_bytes())
+        # A silent block has no RMS to normalize toward; copy 16-bit WAV through verbatim
+        # (or write an empty 16-bit PCM WAV) rather than dividing by a zero sample count.
+        if is_pcm16:
+            output_wav.write_bytes(input_wav.read_bytes())
+        else:
+            with wave.open(str(output_wav), "wb") as wf:
+                wf.setnchannels(channels)
+                wf.setsampwidth(2)
+                wf.setframerate(framerate)
+                wf.writeframes(b"")
         return {
             "rms_dbfs_before": None,
             "rms_dbfs_after": None,
@@ -74,7 +147,7 @@ def _normalize_tts_wav_rms(input_wav, output_wav, *, target_rms_dbfs=-20.0, peak
         out_bytes.byteswap()
     with wave.open(str(output_wav), "wb") as wf:
         wf.setnchannels(channels)
-        wf.setsampwidth(sampwidth)
+        wf.setsampwidth(2)
         wf.setframerate(framerate)
         wf.writeframes(out_bytes.tobytes())
 

@@ -4,7 +4,7 @@
 
 把一段或几段视频做成中文解说成片的 skill 包。`skills/` 下两个自包含技能（1 个生产技能 + 1 个按需拆片参考技能）：
 
-- `video-recap`：统一生产技能，一气呵成完成视频理解（`understand.py`）→ Agent 制定故事/声画方案与写稿 → 视频剪辑（`cut.py`）→ 底线门禁校验（`validate.py`）→ TTS 配音（`voiceover.py`）→ 音画混音与字幕渲染（`assemble.py`），由总入口 `recap.py` 编排串联。
+- `video-recap`：统一生产技能，串联完成视频理解（`understand.py`）→ Agent 制定故事/声画方案与写稿 → 视频剪辑（`cut.py`）→ 底线门禁校验（`validate.py`）→ TTS 配音（`voiceover.py`）→ 音画混音与字幕渲染（`assemble.py`），由总入口 `recap.py` 编排串联。
 - `video-reference`：不在默认生产流水线上，按需把现有优秀成片拆成 `production_reference.json`。
 - 各阶段拥有什么、入口脚本和功能子包见 `docs/architecture.md`；能力边界与验收原则见 `docs/production-boundaries.md`。
 - 分发渠道：Claude 插件（`.claude-plugin/`，OpenClaw 的 `plugins install` 也读它）、源码 Release（`.release/policy.json`）和 ClawHub（`.clawhub/`）。

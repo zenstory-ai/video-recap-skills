@@ -2,7 +2,7 @@
 
 from artifacts import _load_work_json
 from audio_mix import _seg_place_window
-from lib import CONFIG
+from lib import CONFIG, log
 from assemble_constants import (
     _MIN_GAP_TO_SUBTITLE,
     _MIN_READABLE_SECONDS,
@@ -121,10 +121,11 @@ def _original_gap_subtitle_entries(tts_segments, work_dir, video_duration, *, ma
     delivering = CONFIG["burn_subtitles"] or bool(CONFIG["burn_subtitles_degraded"])
     if not (delivering and CONFIG["subtitle_original_in_gaps"]):
         return []
-    if _source_subtitles_already_visible_in_gaps():
-        return []
     agent = _load_agent_original_subtitles(work_dir)
     if not agent:
+        return []
+    if _source_subtitles_already_visible_in_gaps():
+        log("跳过 original_subtitles.json：当前遮罩未全片不透明覆盖留白段，保留原片可见硬字幕避免叠字")
         return []
     gaps = _narration_gap_windows(tts_segments, video_duration)
     if not gaps:

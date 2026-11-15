@@ -90,8 +90,12 @@ _PROSE_TIME_RE = re.compile(
     r"(?<![\d.:])(?:(?:(\d+):)?(\d{1,2}):(\d{2}(?:\.\d+)?)(?![\d:])"
     r"|(\d+(?:\.\d+)?)\s*(?:s|秒)(?![A-Za-z]))"
 )
+_DURATION_PREFIX_RE = re.compile(
+    r"(?:停顿|持续|停留|沉默|定格|僵持|等待|相视|愣|怔|等|过|隔|差)(?:了)?\s*$"
+    r"|(?:长达|历时|短短|整整|足足|约|大约|将近)\s*$"
+)
 _PROSE_TIME_SLACK = 0.25
-_CUT_AWAY_TIME = "[cut-away moment]"
+_CUT_AWAY_TIME = "[已剪除时刻]"
 
 
 def _remap_prose_times_for_brief(text, scene, overlap):
@@ -104,6 +108,8 @@ def _remap_prose_times_for_brief(text, scene, overlap):
     def replace(match):
         hours, minutes, secs, bare = match.groups()
         if bare is not None:
+            if match.group(0).endswith("秒") and _DURATION_PREFIX_RE.search(text[:match.start()]):
+                return match.group(0)
             when = float(bare)
         else:
             when = int(hours or 0) * 3600 + int(minutes) * 60 + float(secs)
@@ -144,7 +150,23 @@ def _remap_scenes_to_output_for_brief(scenes, spans):
 
 _COVERAGE_SLACK = 0.05
 # No "." inside: the ASR chunker splits sentences on it.
-_PARTIAL_WINDOW_TEXT = "[partial ASR window: only part of it is in the cut, text withheld]"
+_PARTIAL_WINDOW_TEXT = "[ASR 粗窗口仅部分保留，原词隐去]"
+
+
+def _merged_span_length(intervals):
+    """Total length of the union of (start, end) intervals."""
+    valid = sorted((s, e) for s, e in intervals if e > s)
+    if not valid:
+        return 0.0
+    total = 0.0
+    cur_s, cur_e = valid[0]
+    for s, e in valid[1:]:
+        if s <= cur_e:
+            cur_e = max(cur_e, e)
+        else:
+            total += cur_e - cur_s
+            cur_s, cur_e = s, e
+    return total + (cur_e - cur_s)
 
 
 def _remap_segments_to_output_for_brief(segments, spans, withhold_partial=False):
@@ -158,7 +180,7 @@ def _remap_segments_to_output_for_brief(segments, spans, withhold_partial=False)
     out = []
     for seg in segments:
         overlaps = _source_output_overlaps_for_brief(seg["start"], seg["end"], spans)
-        kept = sum(o["source_end"] - o["source_start"] for o in overlaps)
+        kept = _merged_span_length((o["source_start"], o["source_end"]) for o in overlaps)
         window = seg["end"] - seg["start"]
         partial = (
             withhold_partial
@@ -194,14 +216,65 @@ def _read_json(path, default):
     return json.loads(path.read_text(encoding="utf-8")) if path.exists() else default
 
 
+def _asr_evidence_matches_result(source_dir, evidence):
+    if "asr_result" not in evidence:
+        return True
+    expected = evidence.get("asr_result")
+    result_path = Path(source_dir) / "asr_result.json"
+    if not isinstance(expected, dict) or not result_path.is_file():
+        return False
+    return dict(expected) == file_identity(result_path)
+
+
+def _source_asr_measured(source_dir):
+    """True when ASR ran cleanly or proved video-only, so zero speech_spans means speech-free."""
+    source_dir = Path(source_dir)
+    evidence_path = source_dir / "asr_timing_evidence.json"
+    if evidence_path.exists():
+        evidence = _read_json(evidence_path, {})
+        return (
+            isinstance(evidence, dict)
+            and _asr_evidence_matches_result(source_dir, evidence)
+            and evidence.get("status") in {"AVAILABLE_COARSE", "NO_AUDIO_STREAM"}
+        )
+    asr_path = source_dir / "asr_result.json"
+    if asr_path.is_file():
+        try:
+            rows = _read_json(asr_path, None)
+        except ValueError:
+            rows = None
+        if isinstance(rows, list) and any(
+            isinstance(r, dict) and str(r.get("text") or "").strip() for r in rows
+        ):
+            return True
+    anchors_path = source_dir / "speech_boundary_anchors.json"
+    if anchors_path.is_file():
+        try:
+            anchors_doc = _read_json(anchors_path, {})
+        except ValueError:
+            anchors_doc = {}
+        if isinstance(anchors_doc, dict) and anchors_doc.get("status") in (
+            "completed",
+            "no_asr_segments",
+            "no_audio",
+        ):
+            return True
+    return False
+
+
 def _quiet_rows_for_source(source_dir):
     """Non-speech intervals for one source; a video-only source has no speech anywhere."""
-    evidence = _read_json(Path(source_dir) / "asr_timing_evidence.json", {})
-    if isinstance(evidence, dict) and evidence.get("status") == "NO_AUDIO_STREAM":
+    source_dir = Path(source_dir)
+    evidence = _read_json(source_dir / "asr_timing_evidence.json", {})
+    if (
+        isinstance(evidence, dict)
+        and _asr_evidence_matches_result(source_dir, evidence)
+        and evidence.get("status") == "NO_AUDIO_STREAM"
+    ):
         return [{"start": 0.0, "end": 1e9, "has_speech": False}]
     return [
         row
-        for row in _read_json(Path(source_dir) / "silence_periods.json", [])
+        for row in _read_json(source_dir / "silence_periods.json", [])
         if not row["has_speech"]
     ]
 
@@ -216,16 +289,28 @@ def _source_to_span_output(source_time, span):
 def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
     """Load sentence anchors and remap them to cut OUTPUT time when needed."""
     work_dir = Path(work_dir)
-    anchors = [
-        dict(item)
-        for item in _read_json(
-            work_dir / "speech_boundary_anchors.json", {"sentence_anchors": []}
-        )["sentence_anchors"]
-    ]
-    if edit_mode != "cut" or not (work_dir / "edited_source.mp4").exists():
+    if edit_mode == "cut" and (work_dir / "edited_source.mp4").exists():
+        spans = _load_cut_output_spans_for_brief(work_dir)
+        manifest = _read_json(work_dir / "multi_source_manifest.json", {})
+        if (
+            isinstance(manifest, dict)
+            and isinstance(manifest.get("sources"), list)
+            and manifest["sources"]
+        ):
+            plan = _read_json(work_dir / "clip_plan_validated.json", {})
+            return write_multi_source_output_speech_evidence(
+                work_dir, manifest["sources"], plan
+            )["sentence_anchors"]
+    else:
+        spans = None
+
+    anchors_doc = _read_json(
+        work_dir / "speech_boundary_anchors.json", {"sentence_anchors": []}
+    )
+    anchors = [dict(item) for item in anchors_doc.get("sentence_anchors", [])]
+    if spans is None:
         return anchors
 
-    spans = _load_cut_output_spans_for_brief(work_dir)
     output_duration = max(span["output_end"] for span in spans)
     remapped = []
     for anchor in anchors:
@@ -263,9 +348,15 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
             remapped.append(item)
 
     speech_rows = [
-        row for row in _read_json(work_dir / "asr_result.json", []) if row["text"]
+        row
+        for row in _read_json(work_dir / "asr_result.json", [])
+        if str(row.get("text") or "").strip()
     ]
     quiet_rows = _quiet_rows_for_source(work_dir)
+    pause_rows = [
+        row for row in anchors_doc.get("acoustic_pauses", []) if isinstance(row, dict)
+    ]
+    mapped_speech = _remap_segments_to_output_for_brief(speech_rows, spans)
     out_payload = {
         "schema_version": 2,
         "artifact": "speech_boundary_anchors_output.json",
@@ -273,9 +364,12 @@ def _sentence_entry_anchors_for_brief(work_dir, edit_mode):
         "source_artifact": "speech_boundary_anchors.json",
         "clip_plan_identity": file_identity(work_dir / "clip_plan_validated.json"),
         "sentence_anchors": sorted(remapped, key=lambda item: item["time"]),
-        "speech_spans": _remap_segments_to_output_for_brief(speech_rows, spans),
+        "speech_spans": mapped_speech,
         "quiet_windows": _remap_segments_to_output_for_brief(quiet_rows, spans),
+        "acoustic_pauses": _remap_segments_to_output_for_brief(pause_rows, spans),
     }
+    if not mapped_speech and _source_asr_measured(work_dir):
+        out_payload["speech_absent"] = True
     (work_dir / "speech_boundary_anchors_output.json").write_text(
         json.dumps(out_payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )
@@ -301,14 +395,12 @@ def _format_sentence_entry_anchors_for_brief(work_dir, edit_mode):
     lines = [
         "## 原声句末安全切入点",
         "",
-        "这些时间是 ASR 句末标点与短声学停顿对齐后的旁白入口。旁白在原声已开始后切入时，"
-        "必须从其中一个点开始；否则会在 TTS 前被 `interrupts_source_sentence` 硬阻断。",
-        "- 标 `unverified` 的点是由粗粒度 ASR 窗口里的标点位置估计、再吸附到短停顿得到的："
-        "落在停顿里，不会切断单词，但不保证原声句子已经说完（误差上限见 `±`）。请自己听一下再定；"
-        "门禁本身照常生效。",
-        "- 调整方式：优先把 `start` 移到建议锚点；放不下时缩短文本、移动整块或删除该旁白，不能让脚本静默挪音频。",
-        '- 原声句子完整性是硬约束：切入块写 `"source_entry_policy": "sentence_boundary"`；'
-        "不存在 `intentional_interrupt` 绕过方式。没有后续可靠句末锚点时，移动、缩短或删除旁白块。",
+        "以下时间点将 ASR 句末标点与短声学停顿对齐，作为原声开始后的安全旁白切入锚点；"
+        "若旁白落在原声句子中途，会在 TTS 前被 `interrupts_source_sentence` 拦截。",
+        "- 标 `unverified` 的点由粗粒度 ASR 窗口估算并吸附到短停顿：落在停顿里不会切断字词，"
+        "但未必是整句结束（误差上限见 `±`），切入前请试听确认。",
+        "- 调整方式：优先把 `start` 移到建议锚点（切入块保持 `\"source_entry_policy\": \"sentence_boundary\"`）；"
+        "附近没有合适句末锚点时，请缩短、平移或删除该段旁白。",
     ]
     for anchor in anchors:
         source_suffix = (
@@ -335,7 +427,7 @@ def _format_output_clip_list(work_dir):
     """List the kept clips on the OUTPUT timeline (cut-first/narrate-second pass 2), so the
     agent narrates against the real rendered cut instead of the source timeline."""
     plan = json.loads((Path(work_dir) / "clip_plan_validated.json").read_text(encoding="utf-8"))
-    out = ["## Kept clips on the OUTPUT timeline", ""]
+    out = ["## 成片保留片段映射（OUTPUT 时间轴）", ""]
     for c in plan["clips"]:
         reason = c.get("reason", "")
         out.append(
@@ -362,10 +454,12 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         if source_id not in cache:
             source_dir = work_dir / source_by_id[source_id]["source_work_dir"]
             anchors_path = source_dir / "speech_boundary_anchors.json"
+            anchors_doc = _read_json(anchors_path, {"sentence_anchors": []})
             cache[source_id] = (
-                _read_json(anchors_path, {"sentence_anchors": []})["sentence_anchors"],
+                anchors_doc.get("sentence_anchors", []),
                 source_speech_rows(source_dir),
                 _quiet_rows_for_source(source_dir),
+                [row for row in anchors_doc.get("acoustic_pauses", []) if isinstance(row, dict)],
             )
         return cache[source_id]
 
@@ -375,7 +469,7 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             (float(clip["source_start"]), float(clip["source_end"]))
         )
 
-    mapped_anchors, mapped_speech, mapped_quiet = [], [], []
+    mapped_anchors, mapped_speech, mapped_quiet, mapped_pauses = [], [], [], []
     output_duration = max(float(clip["output_end"]) for clip in plan["clips"])
     for clip in plan["clips"]:
         source_id = clip["source_id"]
@@ -390,7 +484,7 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
             "output_end": output_end,
         }
 
-        anchors, speech_rows, quiet_rows = load_source(source_id)
+        anchors, speech_rows, quiet_rows, pause_rows = load_source(source_id)
         for anchor in anchors:
             when = float(anchor["time"])
             if not (source_start - 0.05 <= when <= source_end + 0.05):
@@ -420,11 +514,12 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         for rows, destination, require_text in (
             (speech_rows, mapped_speech, True),
             (quiet_rows, mapped_quiet, False),
+            (pause_rows, mapped_pauses, False),
         ):
             for row in rows:
-                if require_text and not row["text"].strip():
+                if require_text and not str(row.get("text") or "").strip():
                     continue
-                if not require_text and row["has_speech"]:
+                if not require_text and row.get("has_speech"):
                     continue
                 start = max(source_start, float(row["start"]))
                 end = min(source_end, float(row["end"]))
@@ -440,6 +535,7 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
                 )
                 destination.append(item)
 
+    sorted_speech = sorted(mapped_speech, key=lambda row: (row["start"], row["end"]))
     payload = {
         "schema_version": 2,
         "artifact": "speech_boundary_anchors_output.json",
@@ -447,9 +543,15 @@ def write_multi_source_output_speech_evidence(work_dir, source_records, plan):
         "source_artifact": "multi_source_manifest.json",
         "clip_plan_identity": file_identity(work_dir / "clip_plan_validated.json"),
         "sentence_anchors": sorted(mapped_anchors, key=lambda row: row["time"]),
-        "speech_spans": sorted(mapped_speech, key=lambda row: (row["start"], row["end"])),
+        "speech_spans": sorted_speech,
         "quiet_windows": sorted(mapped_quiet, key=lambda row: (row["start"], row["end"])),
+        "acoustic_pauses": sorted(mapped_pauses, key=lambda row: (row["start"], row["end"])),
     }
+    if not sorted_speech and spans_by_source and all(
+        _source_asr_measured(work_dir / source_by_id[sid]["source_work_dir"])
+        for sid in spans_by_source
+    ):
+        payload["speech_absent"] = True
     (work_dir / "speech_boundary_anchors_output.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
     )

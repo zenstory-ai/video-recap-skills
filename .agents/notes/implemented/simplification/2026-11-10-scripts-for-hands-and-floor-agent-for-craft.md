@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续补充见 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]（将 `narration_lint.py` 残余的开场/留白时长与外貌泛称阻断降级为警告，拆分 `promo_copy.json` 并统一中文化动态简报与参考文档）。
+
 ## Problem
 
 仓库技能脚本曾累积约 3.2 万行代码与 3.3 万行测试。随着基础模型能力增强，视频剪辑与解说中“怎么把视频做好看”无法靠工程规则穷举；而代码里大量替模型做预消化/归纳/出建议（P）、用词表与阈值写死品味规则（T）、校验自家中间产物契约与保留旧版 schema 兼容层（C），不仅越来越尴尬，甚至在源头抹掉或改写客观证据（如 `detect._merge_short_scenes` 合并掉 4 秒以内的碎镜、`asr._correct_text_with_glossary` 静默改写 ASR 原始转写），或把风格偏好做成硬阻断（如 `deslop_qc` 的破折号阻断、`cut_qc` 的时长比例阻断）。

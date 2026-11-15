@@ -1,58 +1,51 @@
-# Config playbook (override-only)
+# 配置参数速查表（按需覆盖）
 
-Use the defaults after configuring the required credentials and local tools. The environment
-variables and CLI flags below override those defaults. An optional `recap_project.json` passed
-with `--project` binds resources and templates to the same settings (see `resource-library.md`).
-A conflict between a project binding and an explicit setting stops the run.
-Defaults below are bundle-level defaults unless a note scopes them to a specific stage.
+配好必需密钥与本机 `ffmpeg` 后，默认参数即可跑通全流程。以下环境变量与 CLI 参数用于按需覆盖默认值；也可通过 `--project recap_project.json` 绑定资源库与模板（见 `./resource-library.md`，显式参数与项目绑定冲突时会报错停机）。
 
-| Concern | Env var / flag | Default | Notes |
+## 1. 模型、理解与 TTS 配音
+
+| 配置项 | 环境变量 / CLI 参数 | 默认值 | 说明 |
 |---|---|---|---|
-| MiMo API key | `MIMO_API_KEY` | — | **required for the default pipeline**; one key drives ASR + VLM + default MiMo TTS. `tp-*` Token-Plan keys auto-route to the cluster base URL; `sk-*` keys support pay-as-you-go without a subscription |
-| Token-Plan cluster | `MIMO_TOKEN_PLAN_CLUSTER` | `cn` | `cn` / `sgp` / `ams` (only for `tp-*` keys) |
-| VLM / chat model | `MIMO_MODEL` | `mimo-v2.5` | scene frame VLM |
-| ASR model | `MIMO_ASR_MODEL` | `mimo-v2.5-asr` | speech-to-text |
-| ASR language | `MIMO_ASR_LANGUAGE` | `auto` | `auto` / `zh` / `en` |
-| ASR window | `ASR_SEGMENT_SECONDS` | `15` | smaller → finer dialogue timestamps (stays under MiMo's 10MB base64 cap) |
-| TTS provider | `TTS_PROVIDER` / `--tts-provider {auto,mimo-tts,fish-audio,index-tts}` | `auto` | `auto` prefers configured MiMo, then Fish Audio, and never picks index-tts; explicit selection is recommended for repeatable runs |
-| MiMo TTS model | `MIMO_TTS_MODEL` | `mimo-v2.5-tts` | MiMo provider only |
-| MiMo voice | `MIMO_TTS_VOICE` / `--mimo-tts-voice` | `冰糖` | |
-| Cloned narration voice | `VOICE_REF` / `--voice-ref` | off | MiMo full/cut only; lazily normalize once, then use `mimo-v2.5-tts-voiceclone`; mutually exclusive with `--mimo-tts-voice`; requires authorization and sends the reference to MiMo |
-| Fish Audio key | `FISH_API_KEY` | — | required when Fish Audio is selected; never written to artifacts or cache metadata |
-| Fish Audio model | `FISH_TTS_MODEL` | `s2.1-pro-free` | free model under Fair Use, no SLA; check Fish Audio's current policy |
-| Fish Audio voice | `FISH_TTS_REFERENCE_ID` | `5653cea4ac83480aaf2bf45406556185`（娱乐扒妹） | optional override for the built-in narration voice; part of the per-segment cache settings |
-| Fish Audio endpoint | `FISH_TTS_API_URL` | `https://api.fish.audio/v1/tts` | returns WAV directly to the existing voiceover pipeline |
-| Self-hosted TTS | `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` | — | explicit `--tts-provider index-tts` only; the endpoint is never written to disk, and segment `emotion`/style is rejected |
-| TTS transport | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | request timeout, parallel segments, and per-segment retries for all providers |
-| TTS hallucination bound | `TTS_MIN_SPEECH_RATE` | `2.5` | chars/s (each digit counts 1, `%` counts 3, a Latin word 1.5); a narration segment longer than reading its text at this rate plus pause and edge allowances is treated as invented speech: retried, never cached, failed after `TTS_RETRIES` with the last take kept as `*.rejected.wav`; `0` disables |
-| Narration speed | `NARRATION_SPEED` | `1.15` | gentle global atempo on the voiceover (combined into a single `atempo` pass when segment micro-fitting is needed); set `1.0` for unhurried long-form/documentary |
-| Source sentence boundary detector | `SOURCE_BOUNDARY_NOISE_THRESHOLD` / `SOURCE_BOUNDARY_MIN_PAUSE` / `SOURCE_BOUNDARY_MAX_ALIGNMENT_ERROR` | `-18dB` / `0.12` / `2.1` | aligns ASR terminal punctuation to short acoustic pauses and writes `speech_boundary_anchors.json`; unsafe narration entries and cut in/out points are blocked. There is no intentional-interrupt override |
-| Cut sentence snapping | `SNAP_CLIP_LINE_END` / `CLIP_START_SNAP_MAX_PREPEND` / `CLIP_START_SNAP_MAX_TRIM` / `CLIP_SNAP_MAX_EXTEND` / `CLIP_END_PAUSE_PAD` / `MIN_CLIP_DURATION` | on / `1.8` / `0.35` / `2.0` / `0.30` / `0.8` | scene-cut cleanup runs first, then reliable sentence/quiet snapping (extending clip ends by up to `CLIP_END_PAUSE_PAD` inside the quiet pause without crossing a hard cut so lines land with natural reaction room), then sub-frame frame-grid alignment. Clips shorter than `MIN_CLIP_DURATION` are rejected; reverting a shot snap onto speech when that would re-expose a `<= FLASH_SLIVER_MAX_SECONDS` flash frame blocks with `shot_speech_conflict`; an ASR-owned edge still inside speech blocks with `unsafe_clip_sentence_boundary` and `nearest_safe` times |
-| Cut flash-sliver gate | `CUT_SHOT_REVIEW` / `SHOT_REVIEW_THRESHOLD` / `FLASH_SLIVER_MAX_SECONDS` | `true` / `0.35` / `0.20` | `cut.py` automatically scans rendered `edited_source.mp4` into `work_dir/shot_review.json` and blocks on `flash_slivers` (`<= 0.20s` / 1–5 frame residual camera slivers) while keeping longer short shots (`<= 1.0s`) for dynamic review |
-| Narration pacing & continuity gates | `MAX_COLD_OPEN_SILENCE_SECONDS` / `MAX_DEAD_AIR_SECONDS` | `2.5` / `5.0` | `validate.py` blocks cold opens silent of both narration and dialogue past `2.5s` (`weak_cold_open_silence`, when timeline `>= 8s`), continuous stretches with neither narration nor dialogue past `5.0s` (`excessive_dead_air`), incomplete sentences (`incomplete_sentence`), mid-sentence source unmute (`unsafe_source_release`), and generic appearance labels when `background_research.json` names characters (`generic_character_label`) |
-| Mask source subs | `MASK_SOURCE_SUBTITLES` / `SOURCE_SUBTITLE_MASK_RATIO` | off / `0.14` | masking needs `MASK_SOURCE_SUBTITLES=1` and burned recap subtitles. Passing measured `--subtitle-y-top/--subtitle-y-bot` turns it on too. With `--no-burn-subtitles`, or when a default burn degrades because ffmpeg lacks libass, the MP4 stays unmasked |
-| Measured subtitle band | `--subtitle-y-top/--subtitle-y-bot` | off | half-open `[top, bot)` rows of the auto-rotated display canvas (the stored width is scaled by the SAR; a rotated non-square stream's rows are scaled by it too, and the mask converts them back to decoded-frame rows); square or near-square pixels (SAR within 2% of 1:1; unspecified `0:1` counts as square) and bottom ASS alignment (1/2/3) only; a full source checkout includes `tools/measure_subtitle.py` for source-identified previews and suggestions |
-| Subtitle mask look | `SUBTITLE_MASK_OPACITY` / `SOURCE_SUBTITLE_MASK_TIMING` / `SUBTITLE_MASK_PADDING` | `0.6` / `narration` / `4` | generic ratio masks stay translucent by default; an explicitly measured `--subtitle-y-top/--subtitle-y-bot` band defaults to opaque so source glyphs cannot show through. Set `SUBTITLE_MASK_OPACITY` to override; timing `all` restores full-time masking |
-| Original ducking | `IDLE_ORIG_VOLUME` / `SPEECH_DUCKING_VOLUME` | `1.0` / `0.12` | the original returns to full-volume `IDLE` in deliberate gaps/original blocks, and ducks to `SPEECH` under narration. Inter-beat gaps shorter than `DUCK_BRIDGE_SECONDS` stay ducked so a single narration block does not swell between sentences. Releasing ducked source audio mid-sentence inside active dialogue (>0.35s remaining) blocks with `unsafe_source_handoff` |
-| Foreign source audio | `FOREIGN_SOURCE_AUDIO` | off | set when the original audio is in a language the narration is **not** (e.g. a Japanese drama recapped in Chinese). The under-narration original (`SPEECH_DUCKING_VOLUME` / `ZONE_DUCKING_VOLUME`) drops from `0.12` to `0.05` so the foreign speech doesn't bleed under the narration as 怪音; original-audio gap blocks still play full-volume (`IDLE_ORIG_VOLUME`). Explicit `SPEECH_DUCKING_VOLUME`/`ZONE_DUCKING_VOLUME` still override. Pairs with `original_subtitles.json` for verified or translated gap dialogue |
-| Duck fade | `DUCK_FADE_SECONDS` | `0.3` | attack ramp target. Sentence-safe source restore is shortened to fit wholly inside the measured acoustic pause (`pause_start`→anchor), so it never reveals the previous source sentence tail |
-| Duck bridge | `DUCK_BRIDGE_SECONDS` | `1.5` | inter-beat gaps shorter than this stay ducked inside one narration block; gaps >= this are treated as intentional original-audio blocks and return to `IDLE_ORIG_VOLUME` |
-| Ending audio fade | `ENDING_AUDIO_FADE_MS` | `350` | smooth `afade=t=out` applied to original audio and BGM at the end of the delivered timeline (`0` disables) so endings land cleanly without abrupt audio cutoffs |
-| Background music | `BGM_PATH` / `BGM_VOLUME` / `BGM_DUCKING_VOLUME` | off / `0.18` / `0.10` | optional looped music bed mixed as its own track; point `BGM_PATH` at any audio file. It ducks to `BGM_DUCKING_VOLUME` under narration |
-| Final loudness | `FINAL_LOUDNORM` / `TARGET_LUFS` / `LOUDNESS_LIMITER_MAX_DB` | `true` / `-14` / `6` | end-of-pipeline two-pass normalize with one constant gain, never dynamically compressed; when the mix's true peak has no room for that gain an oversampled true-peak limiter takes up to `LOUDNESS_LIMITER_MAX_DB` of peak first, and only the gain beyond that lowers the target (`0` disables the limiter). The -1 dBTP ceiling holds for the delivered AAC file: the first render aims 0.5 dB under it, the encoded file is decoded and measured, and an overshoot re-encodes only the audio lower (at most twice; still over blocks with `delivered_true_peak_over_target`). `assembly_qc.json` records the mode ffmpeg actually ran (`loudness_mode`, `loudnorm_final_pass` incl. `peak_limiter` and the measured `delivered` file) |
-| Output compression | `OUTPUT_CRF` / `OUTPUT_PRESET` / `OUTPUT_MAX_HEIGHT` | `18` / `veryfast` / `0` | x264 re-encode controls, applied whenever the final mux re-encodes (burning subtitles / masking / scaling / `FORCE_VIDEO_REENCODE`, or a source picture that is not H.264 8-bit 4:2:0 with even dimensions; the delivery is always H.264 8-bit 4:2:0 with `+faststart`: `yuv420p`, or a full-range `yuvj420p` H.264 source copied unchanged; tagged BT.709 when the source is untagged or BT.709, keeping any other declared colour tags, and an RGB source (colour space `gbr` or an RGB/paletted pixel format) is converted to BT.709 limited range; multi-source cuts whose sources disagree convert every clip's matrix and range to BT.709 limited). Higher `OUTPUT_CRF` = smaller file/lower quality (18≈visually lossless, 23–26 much smaller); `slow`/`slower` preset shrinks more at the same CRF; `OUTPUT_MAX_HEIGHT>0` downscales the final height (keeps aspect, even width), e.g. `720` to halve 1080p pixels. Subtitles/mask render at native res then downscale, so they stay crisp |
-| Scene threshold | `--scene-threshold` | `0.1` | scene-cut sensitivity |
-| Shot-change-aware cut | `SCENE_CUT_SNAP` / `SCENE_CUT_SNAP_MARGIN` / `SCENE_CUT_DETECT_THRESHOLD` | on / `0.5` / `0.32` | cut mode: nudge each clip boundary off the original footage's hard cuts so the edit point doesn't flash a sliver of the adjacent shot (闪烁). source_start moves forward onto / source_end back onto any shot-change within the margin; boundaries already on a cut, or that would shrink a clip below `MIN_CLIP_DURATION` (`0.8s`), are left as-is. Set `SCENE_CUT_SNAP=0` to disable |
-| VLM workers | `VLM_WORKERS` | `8` | lower to 1 if a proxy/WAF rate-limits |
-| Subtitle size & wrap | `SUBTITLE_FONT_SIZE` / `SUBTITLE_MARGIN_V` / `SUBTITLE_MAX_CHARS` / `SUBTITLE_OUTLINE` | `42` / `48` / `18` / `2.5` | bold single-line readability; narrator lines default to soft warm gold (`&H008AE0FF` / `#FFE08A`) while `「原声台词」` gap cues render in crisp white (`#FFFFFF`) |
-| Subtitle font | `SUBTITLE_FONT_NAME` / `SUBTITLE_FONT_FILE` | platform CJK sans (`PingFang SC` / `Microsoft YaHei` / `Noto Sans CJK SC`) / — | with a font file, burned ASS subtitles load fonts from its directory (`fontsdir`); `SUBTITLE_FONT_NAME` must be that file's family name. A bound `subtitle_style` template sets both |
-| 剪映 export (optional) | `--export-jianying` | off | after rendering, also write a 剪映/JianYing draft from `timeline.json`. Decoupled — the core render never needs it |
-| 剪映 draft dir | `JIANYING_DRAFT_DIR` | work_dir | parent folder for the exported draft (point it at 剪映's drafts root to open in-app) |
-| 剪映 bundle media | `JIANYING_BUNDLE_MEDIA` / `--jianying-no-bundle-media` | **on** | copies video/audio/photo into `Resources/local/*`, uses draft-placeholder paths, and writes the type-0 material index in `draft_meta_info.json`. This makes a cloned/moved draft self-contained and is required on sandboxed macOS. Use `--jianying-no-bundle-media` only if 剪映 can reach the original paths |
-| Source video | `--source-video` | — | original video (cut mode, `assemble.py`) so `timeline.json` / 剪映 export reference the real source clips instead of the concatenated `edited_source.mp4` |
+| MiMo 密钥 | `MIMO_API_KEY` | — | 默认全链路必需，驱动 ASR、VLM 与默认 MiMo TTS。`tp-*` 自动走 Token Plan 集群地址，`sk-*` 走按量计费地址 |
+| Token Plan 集群 | `MIMO_TOKEN_PLAN_CLUSTER` | `cn` | 可选 `cn` / `sgp` / `ams`（仅对 `tp-*` 密钥生效） |
+| 画面理解模型 | `MIMO_MODEL` | `mimo-v2.6-flash` | 场景抽帧 VLM 模型（可选 `mimo-v2.6-pro` 等）；并发数由 `VLM_WORKERS`（默认 `8`）控制，遇限流可调小 |
+| 语音转写模型 | `MIMO_ASR_MODEL` / `MIMO_ASR_LANGUAGE` | `mimo-v2.5-asr` / `auto` | 语言可选 `auto` / `zh` / `en` |
+| ASR 切片时长 | `ASR_SEGMENT_SECONDS` | `15` | 秒；调小（如 `5`）可获得更细粒度对白时间窗 |
+| 场景切分阈值 | `--scene-threshold` | `0.1` | 理解阶段初始镜头切分灵敏度 |
+| TTS 供应商 | `TTS_PROVIDER` / `--tts-provider` | `auto` | 可选 `auto`、`mimo-tts`、`fish-audio`、`index-tts`。`auto` 优先选已配置的 MiMo，其次 Fish Audio，不自动选 `index-tts` |
+| MiMo 配音音色 | `MIMO_TTS_MODEL` / `MIMO_TTS_VOICE` / `--mimo-tts-voice` | `mimo-v2.5-tts` / `冰糖` | 仅 `mimo-tts` 生效 |
+| 解说音色克隆 | `VOICE_REF` / `--voice-ref` | 关闭 | 仅 `mimo-tts` 支持，与 `--mimo-tts-voice` 互斥；将参考音频切片发往 `mimo-v2.5-tts-voiceclone`，使用前须获声音授权 |
+| Fish Audio | `FISH_API_KEY` / `FISH_TTS_MODEL` / `FISH_TTS_REFERENCE_ID` / `FISH_TTS_API_URL` | — / `s2.1-pro-free` / `5653cea4ac83480aaf2bf45406556185` / `https://api.fish.audio/v1/tts` | 选 `fish-audio` 时需配置 `FISH_API_KEY`（默认音色“娱乐扒妹”）；密钥不落盘 |
+| 自建 IndexTTS | `INDEX_TTS_ENDPOINT` / `INDEX_TTS_VOICE` | — | 显式设 `TTS_PROVIDER=index-tts` 或传 `--tts-provider index-tts` 时启用；兼容 8/16/24/32-bit PCM 与 32/64-bit float WAV，固定请求体拒绝段级 `emotion`（详见 `./index-tts.md`） |
+| TTS 并发与超时 | `TTS_TIMEOUT` / `TTS_WORKERS` / `TTS_RETRIES` | `300` / `4` / `3` | 单请求超时秒数、并发段数与重试次数 |
+| 异常慢读检测 | `TTS_MIN_SPEECH_RATE` | `2.5` | 字/秒下限；合成音频明显超出正常朗读时长时判定为异常合成并重试，失败后留存 `*.rejected.wav`（`0` 关闭） |
+| 全局旁白语速 | `NARRATION_SPEED` | `1.15` | 旁白整体轻度提速倍率；长片深度解说可设为 `1.0` |
 
-`assemble.py` always writes `timeline.json` — a backend-neutral multi-track model
-(video / original-audio / narration / BGM / subtitle, with ducking automation). The
-canonical renderer is ffmpeg; the 剪映 exporter is an optional consumer of the same file. Subtitle text in `timeline.json` is display-ready and follows the same terminal-punctuation policy as SRT/ASS.
+## 2. 剪辑切点与解说校验
 
-See `SKILL.md` and `python3 scripts/<stage>.py --help` for the full per-stage option list.
+| 配置项 | 环境变量 / CLI 参数 | 默认值 | 说明 |
+|---|---|---|---|
+| 原声句界检测 | `SOURCE_BOUNDARY_NOISE_THRESHOLD` / `SOURCE_BOUNDARY_MIN_PAUSE` / `SOURCE_BOUNDARY_MAX_ALIGNMENT_ERROR` | `-18dB` / `0.12` / `2.1` | 将 ASR 句末标点对齐短声学停顿并写出 `speech_boundary_anchors.json`，用于拦截切词与抢话 |
+| 硬切边缘吸附 | `SCENE_CUT_SNAP` / `SCENE_CUT_SNAP_MARGIN` / `SCENE_CUT_DETECT_THRESHOLD` | 开启 / `0.5` / `0.32` | `cut` 模式下将片段首尾吸附到 `0.5s` 内的原片硬切点，避免切出邻镜残帧（`SCENE_CUT_SNAP=0` 关闭） |
+| 句末吸附与尾垫 | `SNAP_CLIP_LINE_END` / `CLIP_START_SNAP_MAX_PREPEND` / `CLIP_START_SNAP_MAX_TRIM` / `CLIP_SNAP_MAX_EXTEND` / `CLIP_END_PAUSE_PAD` / `MIN_CLIP_DURATION` | 开启 / `1.8` / `0.35` / `2.0` / `0.30` / `0.8` | 硬切吸附后将出点向停顿窗延伸最多 `0.30s` 留出反应气口；单段短于 `0.8s` 报错，踩中对白中途报 `unsafe_clip_sentence_boundary`，硬切与台词无法兼顾时报 `shot_speech_conflict` |
+| 成片残帧门禁 | `CUT_SHOT_REVIEW` / `SHOT_REVIEW_THRESHOLD` / `FLASH_SLIVER_MAX_SECONDS` | `true` / `0.35` / `0.20` | `cut.py` 自动扫描 `edited_source.mp4` 写出 `shot_review.json`：对剪辑切点附近的 `<= 0.20s` 残帧（`flash_slivers`）做硬阻断，原片单镜头内部自带的闪白/雷电记为 `SOURCE_INTERNAL_FLASH_ADVISORY` |
+| 留白节奏提示阈值 | `MAX_COLD_OPEN_SILENCE_SECONDS` / `MAX_DEAD_AIR_SECONDS` | `2.5` / `5.0` | `validate.py` 对开场静默超过 `2.5s`（`weak_cold_open_silence`）或连续无旁白无对白超过 `5.0s`（`excessive_dead_air`）输出非阻断提示（`warning`） |
+
+## 3. 混音、响度、字幕与导出
+
+| 配置项 | 环境变量 / CLI 参数 | 默认值 | 说明 |
+|---|---|---|---|
+| 原声闪避音量 | `IDLE_ORIG_VOLUME` / `SPEECH_DUCKING_VOLUME` / `ZONE_DUCKING_VOLUME` | `1.0` / `0.12` / `0.12` | 原声留白段恢复 `1.0`，旁白覆盖段压低至 `0.12`；半句中途抢断切入原声会触发 `unsafe_source_handoff` 阻断 |
+| 外语源片闪避 | `FOREIGN_SOURCE_AUDIO` | 关闭 | 外语原片配中文解说时开启，旁白下原声自动压低至 `0.05` 避免双语互扰，留白段仍恢复 `1.0` |
+| 闪避过渡与桥接 | `DUCK_FADE_SECONDS` / `DUCK_BRIDGE_SECONDS` | `0.3` / `1.5` | 音量渐变时长与句间桥接阈值：相邻旁白间隔短于 `1.5s` 时保持压低，避免句间原声忽大忽小 |
+| 片尾音频淡出 | `ENDING_AUDIO_FADE_MS` | `350` | 毫秒；片尾原声与 BGM 平滑淡出时长（`0` 关闭） |
+| 背景配乐 | `BGM_PATH` / `BGM_VOLUME` / `BGM_DUCKING_VOLUME` | 关闭 / `0.18` / `0.10` | 循环铺底配乐路径及常规/旁白压低音量 |
+| 终混响度控制 | `FINAL_LOUDNORM` / `TARGET_LUFS` / `LOUDNESS_LIMITER_MAX_DB` | `true` / `-14` / `6` | 两遍线性等增益响度归一（不改变动态比例），配合超采样真峰值限制器守住 `-1.0 dBTP` 上限，结果记入 `assembly_qc.json` |
+| 字幕烧录与样式 | `BURN_SUBTITLES` / `--burn-subtitles` / `--no-burn-subtitles` / `SUBTITLE_ORIGINAL_IN_GAPS` / `SUBTITLE_FONT_SIZE` / `SUBTITLE_MARGIN_V` / `SUBTITLE_MAX_CHARS` / `SUBTITLE_OUTLINE` / `SUBTITLE_FONT_NAME` / `SUBTITLE_FONT_FILE` | `true` / `true` / `42` / `48` / `18` / `2.5` / 系统默认黑体 / — | 旁白默认暖金（`#FFE08A`），`「原声台词」` 为纯白（`#FFFFFF`）；指定字体文件时 `SUBTITLE_FONT_NAME` 需与字体族名一致 |
+| 原片字幕遮罩 | `MASK_SOURCE_SUBTITLES` / `SOURCE_SUBTITLE_MASK_RATIO` / `SOURCE_SUBTITLE_MASK_TIMING` / `SUBTITLE_MASK_OPACITY` / `SUBTITLE_MASK_PADDING` / `--subtitle-y-top` + `--subtitle-y-bot` | 关闭 / `0.14` / `narration` / `0.6` / `4` / 关闭 | 开启遮罩且烧录字幕时生效；默认仅旁白区间半透明遮罩（`narration`，不透明度 `0.6`），设 `SOURCE_SUBTITLE_MASK_TIMING=all` 可全片遮罩；成对传入实测 `[top, bot)` 像素行会自动开启 `opacity=1.0` 的不透明像素带遮罩（默认仍仅在旁白区间生效，若需全片遮盖硬字幕并启用 `original_subtitles.json` 再加设 `SOURCE_SUBTITLE_MASK_TIMING=all`；要求近方形像素 SAR 偏差 `<= 2%` 且底部对齐 `SUBTITLE_ALIGNMENT` 为 `1/2/3`） |
+| 视频编码参数 | `OUTPUT_CRF` / `OUTPUT_PRESET` / `OUTPUT_MAX_HEIGHT` / `FORCE_VIDEO_REENCODE` | `18` / `veryfast` / `0` / `false` | H.264 `yuv420p` 重编码质量、速度预设、最大输出高度（`0` 保持原分辨率）与无滤镜时是否强制重编码 |
+| 素材库目录 | `VIDEO_RECAP_MATERIAL_LIBRARY_DIR` / `--material-library-dir` | — | 跨集理解缓存与五维资源库根目录（配合 `--save-materials` / `--use-materials` 或 `library.py` 使用） |
+| 剪映草稿导出 | `--export-jianying` / `JIANYING_DRAFT_DIR` / `JIANYING_BUNDLE_MEDIA` / `--jianying-no-bundle-media` | 关闭 / `work_dir` / 开启 | 从后端无关的 `timeline.json` 导出剪映草稿，默认打包媒体到 `Resources/local/*` 保证草稿可迁移 |
+| 源视频引用 | `--source-video` | — | 仅 `assemble.py` 单阶段入口参数（`recap.py` 自动传递），让 `cut` 模式的 `timeline.json` 与剪映草稿直接指向源片区间 |
+
+各阶段完整命令行选项可通过 `python3 scripts/<stage>.py --help` 查看。

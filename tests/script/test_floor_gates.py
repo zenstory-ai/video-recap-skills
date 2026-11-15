@@ -47,7 +47,7 @@ def test_incomplete_sentence_is_blocking_error_while_quoted_endings_pass(tmp_pat
     assert good["ok"] is True
 
 
-def test_unsafe_source_release_blocks_mid_sentence_unmute_and_passes_near_anchor(tmp_path):
+def test_unsafe_source_release_warns_mid_sentence_unmute_and_clears_near_anchor(tmp_path):
     _seed_timing_evidence(
         tmp_path,
         anchors=[
@@ -57,13 +57,15 @@ def test_unsafe_source_release_blocks_mid_sentence_unmute_and_passes_near_anchor
         asr=[{"start": 2.5, "end": 9.2, "text": "你以为把证据烧了就能全身而退吗"}],
         silences=[{"start": 0.0, "end": 2.5, "has_speech": False}],
     )
-    # Block ends at 4.0s while dialogue continues until 9.2s (5.2s > 3.0s hold bound)
-    blocked = lint_narration(
+    # Block ends at 4.0s while coarse/detected dialogue continues until 9.2s (5.2s > 3.0s hold bound):
+    # emits non-blocking warning so pre-line setup ("垫半句、让半句") inside 15s ASR windows is not deadlocked
+    warned = lint_narration(
         [{"start": 0.2, "end": 4.0, "narration": "林砚当场亮出底牌。"}],
         [{"start": 0.0, "end": 10.0}],
         work_dir=tmp_path,
     )
-    assert "unsafe_source_release" in [e["code"] for e in blocked["errors"]]
+    assert warned["ok"] is True
+    assert "unsafe_source_release" in [w["code"] for w in warned["warnings"]]
 
     # Ending at 6.8s leaves 2.4s (<= 3.0s hold bound) to the 9.2s sentence anchor -> clean handoff
     clean = lint_narration(
@@ -71,10 +73,11 @@ def test_unsafe_source_release_blocks_mid_sentence_unmute_and_passes_near_anchor
         [{"start": 0.0, "end": 10.0}],
         work_dir=tmp_path,
     )
-    assert "unsafe_source_release" not in [e["code"] for e in clean["errors"]]
+    assert clean["ok"] is True
+    assert "unsafe_source_release" not in [w["code"] for w in clean["warnings"]]
 
 
-def test_weak_cold_open_silence_blocks_late_hook_unless_dialogue_opens(tmp_path):
+def test_weak_cold_open_silence_warns_late_hook_unless_dialogue_opens(tmp_path):
     _seed_timing_evidence(
         tmp_path,
         silences=[{"start": 0.0, "end": 10.0, "has_speech": False}],
@@ -84,9 +87,10 @@ def test_weak_cold_open_silence_blocks_late_hook_unless_dialogue_opens(tmp_path)
         [{"start": 0.0, "end": 10.0}],
         work_dir=tmp_path,
     )
-    assert "weak_cold_open_silence" in [e["code"] for e in late["errors"]]
+    assert late["ok"] is True
+    assert "weak_cold_open_silence" in [w["code"] for w in late["warnings"]]
 
-    # When high-tension original dialogue opens at 0.3s, narration entering at 3.2s is valid!
+    # When high-tension original dialogue opens at 0.3s, narration entering at 3.1s emits no cold-open warning
     _seed_timing_evidence(
         tmp_path,
         anchors=[{"time": 3.0, "pause_start": 2.8, "confidence": "high"}],
@@ -99,26 +103,28 @@ def test_weak_cold_open_silence_blocks_late_hook_unless_dialogue_opens(tmp_path)
         work_dir=tmp_path,
     )
     assert cold_open_with_dialogue["ok"] is True
+    assert "weak_cold_open_silence" not in [w["code"] for w in cold_open_with_dialogue["warnings"]]
 
 
-def test_excessive_dead_air_blocks_long_unnarrated_non_dialogue_gaps(tmp_path):
+def test_excessive_dead_air_warns_on_long_unnarrated_non_dialogue_gaps(tmp_path):
     _seed_timing_evidence(
         tmp_path,
         silences=[{"start": 0.0, "end": 16.0, "has_speech": False}],
     )
-    # 7.5s gap between [0.2, 3.0] and [10.5, 14.0] with no dialogue -> excessive_dead_air
+    # 6.8s gap between [0.2, 4.2] and [11.0, 15.5] with no dialogue -> advisory excessive_dead_air warning
     report = lint_narration(
         [
-            {"start": 0.2, "end": 3.0, "narration": "林砚在深夜悄悄潜入档案室。"},
-            {"start": 10.5, "end": 14.0, "narration": "抽屉最底层藏着真正的密信。"},
+            {"start": 0.2, "end": 4.2, "narration": "林砚深夜潜入档案室。"},
+            {"start": 11.0, "end": 15.5, "narration": "抽屉底下藏着密信。"},
         ],
         [{"start": 0.0, "end": 16.0}],
         work_dir=tmp_path,
     )
-    assert "excessive_dead_air" in [e["code"] for e in report["errors"]]
+    assert report["ok"] is True
+    assert "excessive_dead_air" in [w["code"] for w in report["warnings"]]
 
 
-def test_generic_character_label_blocks_vlm_appearance_terms_when_research_exists(tmp_path):
+def test_generic_character_label_warns_vlm_appearance_terms_when_research_exists(tmp_path):
     (tmp_path / "background_research.json").write_text(
         json.dumps(
             {
@@ -129,12 +135,13 @@ def test_generic_character_label_blocks_vlm_appearance_terms_when_research_exist
         ),
         encoding="utf-8",
     )
-    bad = lint_narration(
+    flagged = lint_narration(
         [{"start": 0.2, "end": 6.5, "narration": "黑衣男子突然转身，把密信塞进年轻女子手里。"}],
         [{"start": 0.0, "end": 7.0}],
         work_dir=tmp_path,
     )
-    assert [e["code"] for e in bad["errors"]] == ["generic_character_label"]
+    assert flagged["ok"] is True
+    assert [w["code"] for w in flagged["warnings"]] == ["generic_character_label"]
 
     good = lint_narration(
         [{"start": 0.2, "end": 6.5, "narration": "周牧突然转身，把染血的密信塞进林砚手里。"}],
@@ -142,6 +149,7 @@ def test_generic_character_label_blocks_vlm_appearance_terms_when_research_exist
         work_dir=tmp_path,
     )
     assert good["ok"] is True
+    assert good["warnings"] == []
 
 
 def test_depth_first_brief_orders_depth_and_asr_before_visual_ref_and_warns_missing_research(
@@ -161,12 +169,12 @@ def test_depth_first_brief_orders_depth_and_asr_before_visual_ref_and_warns_miss
     brief_path = build_agent_brief(scenes, asr, [], 6.0, tmp_path)
     text = brief_path.read_text(encoding="utf-8")
 
-    assert "⚠️ Missing Background Research" in text
+    assert "⚠️ 缺少背景资料" in text
     assert "max budget if fully narrated" not in text
     assert '"start": 0.2' in text
-    depth_idx = text.index("- Deeper analysis:")
-    asr_idx = text.index("- ASR overlap:")
-    vis_idx = text.index("- Visual ref (cut-point check only):")
+    depth_idx = text.index("- 深层分析:")
+    asr_idx = text.index("- ASR 对白重叠:")
+    vis_idx = text.index("- 画面参考（仅供核对切点）:")
     assert depth_idx < asr_idx < vis_idx
 
     # Multi-source clip & output briefs share the unified depth-first guidance
@@ -186,8 +194,8 @@ def test_depth_first_brief_orders_depth_and_asr_before_visual_ref_and_warns_miss
     clip_brief = write_multi_source_clip_brief(
         tmp_path, records, Namespace(context="", target_duration="30s")
     ).read_text(encoding="utf-8")
-    assert "⚠️ Missing Background Research" in clip_brief
-    assert "底线质量与审美硬门禁" not in clip_brief or "0.20s" in clip_brief
+    assert "⚠️ 缺少背景资料" in clip_brief
+    assert "0.20s" in clip_brief
 
     plan_path = tmp_path / "clip_plan_validated.json"
     plan = {
@@ -199,7 +207,7 @@ def test_depth_first_brief_orders_depth_and_asr_before_visual_ref_and_warns_miss
                 "output_start": 0.0,
                 "output_end": 6.0,
                 "duration": 6.0,
-                "reason": "b01 | hook",
+                "reason": "b01 (hook)：亮出伪造签名",
             }
         ]
     }
@@ -207,12 +215,12 @@ def test_depth_first_brief_orders_depth_and_asr_before_visual_ref_and_warns_miss
     out_brief = write_multi_source_output_brief(tmp_path, records, plan_path).read_text(
         encoding="utf-8"
     )
-    assert "⚠️ Missing Background Research" in out_brief
-    assert "底线质量与审美硬门禁" in out_brief
+    assert "⚠️ 缺少背景资料" in out_brief
+    assert "底线校验与质量提示" in out_brief
     assert "max budget if fully narrated" not in out_brief
 
 
-def test_no_audio_stream_video_allows_narration_while_enforcing_dead_air_and_cold_open(tmp_path):
+def test_no_audio_stream_video_allows_narration_and_surfaces_advisory_pacing_warnings(tmp_path):
     from speech_ownership import measure_narration_speech_ownership
 
     (tmp_path / "asr_timing_evidence.json").write_text(
@@ -239,37 +247,40 @@ def test_no_audio_stream_video_allows_narration_while_enforcing_dead_air_and_col
         mode="full",
     )
     late_open = lint_narration(late_items, scenes, work_dir=tmp_path)
-    assert "weak_cold_open_silence" in [e["code"] for e in late_open["errors"]]
+    assert late_open["ok"] is True
+    assert "weak_cold_open_silence" in [w["code"] for w in late_open["warnings"]]
 
     gap_items = measure_narration_speech_ownership(
         [
-            {"start": 0.2, "end": 2.2, "narration": "密使深夜叩门。", "overlaps_speech": False},
-            {"start": 8.5, "end": 11.4, "narration": "东宫急函逼众决断。", "overlaps_speech": False},
+            {"start": 0.2, "end": 2.6, "narration": "密使叩门。", "overlaps_speech": False},
+            {"start": 8.5, "end": 11.4, "narration": "急函呈上。", "overlaps_speech": False},
         ],
         tmp_path,
         mode="full",
     )
     dead_air = lint_narration(gap_items, scenes, work_dir=tmp_path)
-    assert "excessive_dead_air" in [e["code"] for e in dead_air["errors"]]
+    assert dead_air["ok"] is True
+    assert "excessive_dead_air" in [w["code"] for w in dead_air["warnings"]]
 
 
 def test_editorial_commentary_tone_emits_advisory_warning_without_blocking(tmp_path):
     _seed_timing_evidence(
         tmp_path,
-        silences=[{"start": 0.0, "end": 12.0, "has_speech": False}],
+        silences=[{"start": 0.0, "end": 16.0, "has_speech": False}],
     )
-    scenes = [{"start": 0.0, "end": 12.0}]
+    scenes = [{"start": 0.0, "end": 16.0}]
     report = lint_narration(
         [
             {"start": 0.2, "end": 5.5, "narration": "大家好，今天我们来聊聊林砚追查旧案的真相。"},
-            {"start": 6.0, "end": 11.4, "narration": "这说明权力博弈面前，好戏才刚刚开始。"},
+            {"start": 6.0, "end": 11.0, "narration": "权力博弈面前，好戏才刚刚开始。"},
+            {"start": 11.5, "end": 15.8, "narration": "这说明那枚印章昨天已经被调包了。"},
         ],
         scenes,
         work_dir=tmp_path,
     )
     assert report["ok"] is True
-    codes = [w["code"] for w in report["warnings"]]
-    assert codes.count("editorial_commentary_tone") == 2
+    flagged_indices = [w["index"] for w in report["warnings"] if w["code"] == "editorial_commentary_tone"]
+    assert flagged_indices == [0, 1]
 
 
 def test_all_skill_scripts_avoid_unguarded_python310_typing_imports():
@@ -285,3 +296,56 @@ def test_all_skill_scripts_avoid_unguarded_python310_typing_imports():
                 assert "TypeGuard" not in names, (
                     f"{py_file} imports Python 3.10+ typing.TypeGuard at module top level"
                 )
+
+
+def test_validate_cli_exits_zero_on_advisory_craft_warnings_and_blocks_stage_only_brackets(tmp_path):
+    import subprocess
+
+    _seed_timing_evidence(
+        tmp_path,
+        silences=[{"start": 0.0, "end": 24.0, "has_speech": False}],
+    )
+    (tmp_path / "scenes.json").write_text(
+        json.dumps([{"scene_id": 0, "start": 0.0, "end": 24.0, "description": "走廊"}], ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "background_research.json").write_text(
+        json.dumps({"characters": {"林砚": "刑侦队长"}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (tmp_path / "narration.json").write_text(
+        json.dumps(
+            [
+                {"start": 3.2, "end": 8.0, "narration": "黑衣男子推门而入。", "overlaps_speech": False},
+                {"start": 14.0, "end": 18.5, "narration": "旧档当场露馅。", "overlaps_speech": False},
+            ],
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    validate_py = Path(__file__).resolve().parents[2] / "skills" / "video-recap" / "scripts" / "validate.py"
+    res = subprocess.run(
+        [sys.executable, "-X", "utf8", str(validate_py), "--work-dir", str(tmp_path), "--mode", "full"],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+    )
+    assert res.returncode == 0, res.stderr
+    payload = json.loads(res.stdout.strip().splitlines()[-1])
+    assert payload["status"] == "validated"
+    lint = json.loads((tmp_path / "narration_lint.json").read_text(encoding="utf-8"))
+    assert lint["ok"] is True
+    assert lint["errors"] == []
+    warning_codes = {w["code"] for w in lint["warnings"]}
+    assert {"weak_cold_open_silence", "excessive_dead_air", "generic_character_label"} <= warning_codes
+
+    stage_only = lint_narration(
+        [{"start": 0.2, "end": 3.0, "narration": "[压低声音。]"}],
+        [{"start": 0.0, "end": 4.0}],
+    )
+    assert stage_only["ok"] is False
+    assert [e["code"] for e in stage_only["errors"]] == [
+        "empty_narration",
+        "empty_narration_file",
+    ]

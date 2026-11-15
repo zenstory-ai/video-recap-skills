@@ -273,7 +273,7 @@ def _prepend_storyboard_brief_header(
                 )
         if any_labels_missing:
             lines.append(
-                "- 时间戳未烧入 → 用 `inspect clip-map` 查时间（JSON sidecar 仍为权威时间源）"
+                "- 时间戳未烧入 → 用 `scripts/recap_inspect.py --work-dir <work_dir> clip-map --output-start <s> --output-end <e>` 查时间（JSON sidecar 仍为权威时间源）"
             )
         lines.append("")
         header = "\n".join(lines) + "\n"

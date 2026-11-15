@@ -21,7 +21,7 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from lib import load_json, material_id_for, read_json_object, source_id_for
+from lib import file_identity, load_json, material_id_for, read_json_object, source_id_for
 
 # asr_timing_evidence.json stays out on purpose: it binds asr_result.json and audio.wav by
 # {size, mtime_ns}, and a restore rewrites the former (redacted copy) and never copies the
@@ -227,6 +227,21 @@ def save_material(
         dict(previous["series"]) if previous and isinstance(previous.get("series"), dict) else None
     )
     source_path = Path(source_path).resolve()
+    work = Path(work_dir)
+    asr_evidence = read_json_object(work / "asr_timing_evidence.json")
+    asr_status = None
+    if isinstance(asr_evidence, dict) and asr_evidence.get("status") in {
+        "AVAILABLE_COARSE",
+        "NO_AUDIO_STREAM",
+    }:
+        asr_res_id = asr_evidence.get("asr_result")
+        asr_res_path = work / "asr_result.json"
+        if "asr_result" not in asr_evidence or (
+            isinstance(asr_res_id, dict)
+            and asr_res_path.is_file()
+            and dict(asr_res_id) == file_identity(asr_res_path)
+        ):
+            asr_status = asr_evidence["status"]
     summary_info = summarize_work_dir(work_dir, source_name=source_path.name)
     metadata = {
         "schema_version": 1,
@@ -240,6 +255,8 @@ def save_material(
         "created_at": created_at,
         "updated_at": now,
     }
+    if asr_status:
+        metadata["asr_status"] = asr_status
     if effective_series:
         metadata["series"] = effective_series
     meta_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -312,6 +329,9 @@ def restore_material(
         for name in staged:
             copy_artifact_redacted(src_dir / name, tmp / name)
 
+        stale_evidence = dest / "asr_timing_evidence.json"
+        if stale_evidence.exists() or stale_evidence.is_symlink():
+            stale_evidence.unlink()
         pruned = []
         for name in sorted(ALLOWED_ARTIFACTS - set(staged) - {_RESEARCH}):
             out = dest / name

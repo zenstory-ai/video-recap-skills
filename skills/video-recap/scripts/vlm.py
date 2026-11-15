@@ -167,8 +167,7 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
                 b64_cache.popitem(last=False)
         return encoded
 
-    def _analyze_single_scene(i, scene):
-        """分析单个场景，返回 (scene_id, result_dict)"""
+    def _select_scene_frames(scene):
         scene_frames = [f for f, t in frame_times.items()
                         if scene["start"] <= t <= scene["end"]]
         if not scene_frames:
@@ -183,6 +182,12 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
             scene_frames = [scene_frames[int(j * step)] for j in range(max_frames)]
         else:
             scene_frames = scene_frames[:max_frames]
+        return tuple(scene_frames)
+
+    def _analyze_single_scene(i, scene, scene_frames=None):
+        """分析单个场景，返回 (scene_id, result_dict)"""
+        if scene_frames is None:
+            scene_frames = _select_scene_frames(scene)
 
         content_parts = []
         for f in scene_frames:
@@ -287,35 +292,59 @@ def analyze_scenes(scenes, frames, work_dir, *, resume=True):
     if todo and len(todo) < len(scenes):
         log(f"VLM 复用 {len(scenes) - len(todo)} 个已缓存场景，待分析 {len(todo)} 个")
 
+    def _clone_scene_result(template, idx):
+        cloned = dict(template)
+        cloned["scene_id"] = idx
+        cloned["start"] = scenes[idx]["start"]
+        cloned["end"] = scenes[idx]["end"]
+        return cloned
+
+    scene_frame_sigs = {i: _select_scene_frames(s) for i, s in enumerate(scenes)}
+
     def _run_pass(indices, workers):
         """分析给定场景索引；结果按批持久化到续传缓存（在主线程，无需加锁）。返回 (i, err) 失败列表。
 
         续传缓存每次都是整份重写，原来每完成一个场景就刷一次 → 写入量随场景数平方增长
         （300 个场景约 75MB 冗余写），而且序列化发生在收结果的主循环上。改成按批刷：
         崩溃最多丢失不到一批的进度，而这些场景本来就会在重跑时被重新分析。
+        对抽帧结果完全相同的相邻极短场景（低于抽帧间隔回退到同一帧），只发起一次 VLM 请求并复用结果。
         """
         if not indices:
             return []
+        groups_by_sig = {}
+        for idx in indices:
+            groups_by_sig.setdefault(scene_frame_sigs[idx], []).append(idx)
+        reps = [group[0] for group in groups_by_sig.values()]
+        deduped = len(indices) - len(reps)
+        if deduped:
+            log(f"VLM 合并复用 {deduped} 个同帧重复场景（实际请求 {len(reps)} 次）")
         failures = []
         pending = 0
         # 与并发度对齐：一批大致就是「同时在飞的那几个场景」。
         flush_every = max(1, min(16, workers))
         with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
-            futures = {executor.submit(_analyze_single_scene, i, scenes[i]): i for i in indices}
+            futures = {
+                executor.submit(_analyze_single_scene, rep, scenes[rep], scene_frame_sigs[rep]): rep
+                for rep in reps
+            }
             try:
                 for future in as_completed(futures):
-                    i = futures[future]
+                    rep = futures[future]
+                    peers = groups_by_sig[scene_frame_sigs[rep]]
                     try:
-                        idx, result = future.result()
-                        analyses[idx] = result
-                        cache[_scene_cache_key(idx, scenes[idx])] = result
-                        pending += 1
+                        _, result = future.result()
+                        for peer in peers:
+                            peer_res = result if peer == rep else _clone_scene_result(result, peer)
+                            analyses[peer] = peer_res
+                            cache[_scene_cache_key(peer, scenes[peer])] = peer_res
+                            pending += 1
                         if pending >= flush_every:
                             _flush_vlm_scene_cache(work_dir, cache_settings, cache)
                             pending = 0
                     except Exception as e:  # noqa: BLE001 - 单个场景失败不能拖垮其余已完成的
-                        log(f"VLM 场景 {i+1} 分析失败: {e}")
-                        failures.append((i, str(e)))
+                        log(f"VLM 场景 {rep+1} 分析失败: {e}")
+                        for peer in peers:
+                            failures.append((peer, str(e)))
             finally:
                 # 无论正常结束、失败还是中断，都把这一轮已完成的场景落盘。
                 if pending:

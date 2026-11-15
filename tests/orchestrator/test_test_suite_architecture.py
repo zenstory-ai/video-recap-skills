@@ -16,14 +16,24 @@ PUBLIC_ENTRYPOINTS = (
 )
 
 
+def _collect_test_nodes(body, prefix=""):
+    found = []
+    for node in body:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name.startswith("test_")
+        ):
+            qualname = f"{prefix}::{node.name}" if prefix else node.name
+            found.append((qualname, node))
+        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            cls_prefix = f"{prefix}::{node.name}" if prefix else node.name
+            found.extend(_collect_test_nodes(node.body, cls_prefix))
+    return found
+
+
 def _test_functions(path: Path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-        and node.name.startswith("test_")
-    ]
+    return _collect_test_nodes(tree.body)
 
 
 def _body_fingerprint(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
@@ -42,9 +52,9 @@ def test_test_functions_do_not_repeat_an_exact_body():
     seen = {}
     duplicates = []
     for path in sorted((ROOT / "tests").rglob("test_*.py")):
-        for node in _test_functions(path):
+        for qualname, node in _test_functions(path):
             fingerprint = _body_fingerprint(node)
-            location = f"{path.relative_to(ROOT)}::{node.name}"
+            location = f"{path.relative_to(ROOT)}::{qualname}"
             if fingerprint in seen:
                 duplicates.append((seen[fingerprint], location))
             else:
@@ -163,6 +173,33 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
     )
 
 
+def _resolve_import_from_targets(
+    name: str, path: Path, node: ast.ImportFrom, modules: dict[str, Path]
+) -> list[str]:
+    if node.level == 0:
+        base = node.module or ""
+    else:
+        anchor = name.split(".") if path.stem == "__init__" else name.split(".")[:-1]
+        up = node.level - 1
+        if up > len(anchor):
+            return []
+        prefix = anchor[: len(anchor) - up]
+        if node.module:
+            prefix = prefix + node.module.split(".")
+        base = ".".join(prefix)
+
+    targets = []
+    for alias in node.names:
+        if alias.name != "*":
+            submod = f"{base}.{alias.name}" if base else alias.name
+            if submod in modules:
+                targets.append(submod)
+                continue
+        if base:
+            targets.append(base)
+    return targets
+
+
 def test_skill_local_import_graphs_are_acyclic():
     cycles = []
     for scripts_dir in sorted((ROOT / "skills").glob("*/scripts")):
@@ -175,10 +212,8 @@ def test_skill_local_import_graphs_are_acyclic():
                 imported = []
                 if isinstance(node, ast.Import):
                     imported = [alias.name for alias in node.names]
-                elif (
-                    isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
-                ):
-                    imported = [node.module]
+                elif isinstance(node, ast.ImportFrom):
+                    imported = _resolve_import_from_targets(name, path, node, modules)
                 for full_name in imported:
                     if full_name in modules:
                         graph[name].add(full_name)

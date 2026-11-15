@@ -5,8 +5,8 @@ from __future__ import annotations
 import array
 import math
 import random
-import struct
 import subprocess
+import sys
 import wave
 from pathlib import Path
 
@@ -19,7 +19,7 @@ SFX_PRESETS = ("whoosh_soft", "whoosh_crisp", "impact_warm", "riser_subtle")
 
 
 def synthesize_studio_sfx(preset: str, output_path: str | Path, *, seed: int = 42) -> Path:
-    """Synthesize a clean, cinema-grade stereo Foley WAV (48 kHz, 16-bit PCM)."""
+    """Synthesize a clean stereo Foley WAV (48 kHz, 16-bit PCM)."""
     if preset not in SFX_PRESETS:
         raise ValueError(f"未知音效预设 {preset!r}；可选: {', '.join(SFX_PRESETS)}")
     out = Path(output_path)
@@ -108,6 +108,8 @@ def synthesize_studio_sfx(preset: str, output_path: str | Path, *, seed: int = 4
             samples.append(int(val_l * 32767))
             samples.append(int(val_r * 32767))
 
+    if sys.byteorder != "little":
+        samples.byteswap()
     with wave.open(str(out), "wb") as wf:
         wf.setnchannels(2)
         wf.setsampwidth(2)
@@ -141,9 +143,10 @@ def _kept_dialogue_windows(work_dir: Path, tts_segments: list[dict], video_durat
             cs, ce = max(s, gs), min(e, ge)
             if ce - cs >= 0.2:
                 protected.append((cs, ce))
-    anchors = _load_work_json(work_dir, "speech_boundary_anchors_output.json") or _load_work_json(
-        work_dir, "speech_boundary_anchors.json"
-    )
+    is_cut_mode = (work_dir / "clip_plan_validated.json").is_file()
+    anchors = _load_work_json(work_dir, "speech_boundary_anchors_output.json")
+    if anchors is None and not is_cut_mode:
+        anchors = _load_work_json(work_dir, "speech_boundary_anchors.json")
     if isinstance(anchors, dict):
         for span in anchors.get("speech_spans") or ():
             s, e = float(span.get("start", 0.0)), float(span.get("end", 0.0))
@@ -162,6 +165,8 @@ def _decode_sfx_pcm(audio_path: Path) -> array.array:
                 if wf.getnchannels() == 2 and wf.getsampwidth() == 2 and wf.getframerate() == SFX_SAMPLE_RATE:
                     pcm = array.array("h")
                     pcm.frombytes(wf.readframes(wf.getnframes()))
+                    if sys.byteorder != "little":
+                        pcm.byteswap()
                     return pcm
         except wave.Error:
             pass
@@ -179,6 +184,8 @@ def _decode_sfx_pcm(audio_path: Path) -> array.array:
     usable = len(res.stdout) - (len(res.stdout) % 4)
     pcm = array.array("h")
     pcm.frombytes(res.stdout[:usable])
+    if sys.byteorder != "little":
+        pcm.byteswap()
     return pcm
 
 
@@ -215,8 +222,7 @@ def build_sfx_track(
     assets_dir.mkdir(parents=True, exist_ok=True)
     protected = _kept_dialogue_windows(root, tts_segments, video_duration)
     total_frames = max(1, int(round(float(video_duration) * SFX_SAMPLE_RATE)))
-    mix_l = [0.0] * total_frames
-    mix_r = [0.0] * total_frames
+    placed_events: list[tuple[int, int, int, float, array.array]] = []
     applied: list[dict] = []
 
     for idx, item in enumerate(raw_events):
@@ -281,15 +287,7 @@ def build_sfx_track(
         max_copy = min(frames, total_frames - s_frame)
         if max_copy <= 0:
             continue
-        fade_frames = min(int(0.015 * SFX_SAMPLE_RATE), max_copy // 3)
-        for f in range(max_copy):
-            env = gain
-            if fade_frames > 0 and f < fade_frames:
-                env *= f / fade_frames
-            elif fade_frames > 0 and f > max_copy - fade_frames:
-                env *= (max_copy - f) / fade_frames
-            mix_l[s_frame + f] += (pcm[2 * f] / 32768.0) * env
-            mix_r[s_frame + f] += (pcm[2 * f + 1] / 32768.0) * env
+        placed_events.append((idx, s_frame, max_copy, gain, pcm))
 
         applied.append({
             "index": idx,
@@ -306,17 +304,44 @@ def build_sfx_track(
         out_wav.unlink(missing_ok=True)
         return None, []
 
-    out_bytes = bytearray(total_frames * 4)
-    for f in range(total_frames):
-        vl = int(max(-0.96, min(0.96, math.tanh(mix_l[f]))) * 32767)
-        vr = int(max(-0.96, min(0.96, math.tanh(mix_r[f]))) * 32767)
-        struct.pack_into("<hh", out_bytes, f * 4, vl, vr)
+    spans: list[list] = []
+    for ev in sorted(placed_events, key=lambda e: (e[1], e[0])):
+        s_frame, max_copy = ev[1], ev[2]
+        e_frame = s_frame + max_copy
+        if spans and s_frame < spans[-1][1]:
+            spans[-1][1] = max(spans[-1][1], e_frame)
+            spans[-1][2].append(ev)
+        else:
+            spans.append([s_frame, e_frame, [ev]])
 
+    out_pcm = array.array("h", bytes(total_frames * 4))
+    for span_s, span_e, group in spans:
+        span_len = span_e - span_s
+        span_l = [0.0] * span_len
+        span_r = [0.0] * span_len
+        for _idx, s_frame, max_copy, gain, pcm in sorted(group, key=lambda e: e[0]):
+            offset = s_frame - span_s
+            fade_frames = min(int(0.015 * SFX_SAMPLE_RATE), max_copy // 3)
+            for f in range(max_copy):
+                env = gain
+                if fade_frames > 0 and f < fade_frames:
+                    env *= f / fade_frames
+                elif fade_frames > 0 and f > max_copy - fade_frames:
+                    env *= (max_copy - f) / fade_frames
+                span_l[offset + f] += (pcm[2 * f] / 32768.0) * env
+                span_r[offset + f] += (pcm[2 * f + 1] / 32768.0) * env
+        base = span_s * 2
+        for i in range(span_len):
+            out_pcm[base + 2 * i] = int(max(-0.96, min(0.96, math.tanh(span_l[i]))) * 32767)
+            out_pcm[base + 2 * i + 1] = int(max(-0.96, min(0.96, math.tanh(span_r[i]))) * 32767)
+
+    if sys.byteorder != "little":
+        out_pcm.byteswap()
     with wave.open(str(out_wav), "wb") as wf:
         wf.setnchannels(2)
         wf.setsampwidth(2)
         wf.setframerate(SFX_SAMPLE_RATE)
-        wf.writeframes(out_bytes)
+        wf.writeframes(out_pcm.tobytes())
     lib.log(f"音效合成轨: {out_wav} ({len(applied)} 处音效)")
     return out_wav, applied
 

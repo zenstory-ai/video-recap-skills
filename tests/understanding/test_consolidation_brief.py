@@ -83,19 +83,17 @@ def test_build_agent_brief_cut_mode_sizes_to_output(monkeypatch, tmp_path):
     ]
     text = _agent_brief_text(scenes, [], [], 600.0, tmp_path)
     assert "CUT OUTPUT" in text
-    assert "sized to the ~1min CUT OUTPUT, NOT the 10min source" in text
-    assert "step 1 of 2" in text
-    assert "Inspect dense scene-change candidates" in text
-    assert "restore same-source motion" in text
+    assert "体量按 ~1min CUT OUTPUT 规划，而非按 10min 源片铺满" in text
+    assert "第 1/2 步" in text
+    assert "排查密集镜头切换" in text
+    assert "恢复同源连续动作" in text
     clip_plan = next(
         item for item in _json_examples(text) if isinstance(item, dict) and "clips" in item
     )
-    reason_parts = [part.strip() for part in clip_plan["clips"][0]["reason"].split("|")]
+    reason = clip_plan["clips"][0]["reason"].strip()
     assert clip_plan["target_duration"] == "1m"
-    assert len(reason_parts) == 7
-    assert reason_parts[0].startswith("b") and "→" in reason_parts[2]
-    assert reason_parts[3].startswith("POV=")
-    assert reason_parts[-2].startswith("入点=") and reason_parts[-1].startswith("出点=")
+    assert len(reason) >= 12 and "|" not in reason
+    assert "入点" in reason and "出点" in reason
 
 
 def test_build_agent_brief_cut_pass2_narrates_output_timeline_sized_to_validated_cut(
@@ -131,11 +129,11 @@ def test_build_agent_brief_cut_pass2_narrates_output_timeline_sized_to_validated
     )
     scenes = [{"scene_id": 0, "start": 10.0, "end": 50.0, "description": "保留片段"}]
     text = _agent_brief_text(scenes, [], [], 120.0, tmp_path)
-    assert "step 2 of 2: write `narration.json` in OUTPUT time" in text
-    assert "Kept clips on the OUTPUT timeline" in text
+    assert "第 2/2 步：按 OUTPUT 成片时间轴编写 `narration.json`" in text
+    assert "成片保留片段映射（OUTPUT 时间轴）" in text
     assert "OUTPUT 0.0–10.0s ← SOURCE[0] 10.0–20.0s" in text
-    assert "step 1 of 2" not in text
-    assert "across the ~20s CUT OUTPUT" in text
+    assert "第 1/2 步" not in text
+    assert "按 ~20s CUT OUTPUT 时间轴" in text
     assert "edited_source.mp4` (~20s)" in text
     assert "~1min" not in text
 
@@ -164,7 +162,7 @@ def test_cut_brief_shows_a_90s_target_in_seconds(monkeypatch, tmp_path):
     _set_brief_mode(monkeypatch, "cut", target_duration="90s")
     scenes = [{"scene_id": 0, "start": 0.0, "end": 600.0, "description": "画面"}]
     text = _agent_brief_text(scenes, [], [], 600.0, tmp_path)
-    assert "Goal: a ~1m30s recap cut from a 10min source (sized to the ~1m30s CUT OUTPUT, NOT the 10min source)." in text
+    assert "目标：从 10min 源片剪出约 ~1m30s 的解说成片（体量按 ~1m30s CUT OUTPUT 规划，而非按 10min 源片铺满）。" in text
     assert "~2min" not in text
 
 
@@ -199,15 +197,15 @@ def test_cut_pass2_scene_guide_lists_only_kept_footage_in_output_time(
 
     text = _agent_brief_text(scenes, asr, silence, 60.0, tmp_path)
 
-    guide = text.split("## Scene timing guide (OUTPUT time)")[1]
-    assert "## Scene timing guide\n" not in text
-    assert "### OUTPUT 0.0-10.0s (source scene 1 part 1)" in guide
-    assert "### OUTPUT 10.0-20.0s (source scene 1 part 2)" in guide
+    guide = text.split("## 场景时间参考（OUTPUT 成片时间轴）")[1]
+    assert "## 场景时间参考\n" not in text
+    assert "### 成片 0.0-10.0s（源场景 1 第1段）" in guide
+    assert "### 成片 10.0-20.0s（源场景 1 第2段）" in guide
     assert "2.000s: 抬头" in guide and "剪掉的动作" not in guide
     assert "[11.0-13.0] 保留的对白。" in guide
-    assert "Quiet windows: 14.0-17.0s" in guide
+    assert "安静窗口: 14.0-17.0s" in guide
     assert "片尾演职员表" not in guide
-    assert "### Scene " not in text and "10.0-50.0s" not in text
+    assert "### 场景 " not in text and "10.0-50.0s" not in text
 
 
 def test_build_agent_brief_keeps_plan_linkage_in_the_board_not_narration_schema(
@@ -276,13 +274,10 @@ def test_build_agent_brief_preserves_freeform_style_and_artifact_contract(tmp_pa
         style=style,
     )
 
-    assert f"- Style (--style, freeform verbatim guidance): {style}" in text
-    assert (
-        "Do not translate `--style` into a preset, enum, switch, or fallback ladder"
-        in text
-    )
-    assert "style_card.json" in text and "packaging_plan.json" in text
-    assert "not a preset enum, fixed taxonomy" in text
+    assert f"- 风格指引 (--style，原样自由文本): {style}" in text
+    assert "不要把 `--style` 映射成固定枚举" in text
+    assert "style_card.json" in text and "packaging_plan.json" in text and "promo_copy.json" in text
+    assert "不做预设分类表" in text
 
 
 def test_agent_brief_ignores_malformed_optional_artifacts(monkeypatch, tmp_path):
@@ -330,7 +325,7 @@ def test_build_agent_brief_injects_background_research(monkeypatch, tmp_path):
         3.0,
         tmp_path,
     )
-    assert "Story context" in text
+    assert "故事背景资料（来自 background_research.json）" in text
     assert "五竹" in text
     assert "范闲的护卫" in text
 
@@ -647,12 +642,34 @@ def test_brief_counts_moderation_refused_scenes(tmp_path):
     text = build_agent_brief(scenes, ASR, SILENCE, 6.0, tmp_path).read_text(
         encoding="utf-8"
     )
-    count_lines = [line for line in text.splitlines() if "Moderation-refused scenes" in line]
+    count_lines = [line for line in text.splitlines() if "画面审核拒答场景" in line]
     assert len(count_lines) == 1
-    assert "1/2 (Scene 2)" in count_lines[0]
-    assert "- Visual ref (cut-point check only): (VLM 无法识别此场景画面) [moderation_refused]" in text
-    assert "[moderation_refused]" not in text.split("### Scene 1:")[1].split("### Scene 2:")[0]
+    assert "1/2（场景 2）" in count_lines[0]
+    assert "- 画面参考（仅供核对切点）: (VLM 无法识别此场景画面) [moderation_refused]" in text
+    assert "[moderation_refused]" not in text.split("### 场景 1:")[1].split("### 场景 2:")[0]
 
 
 def test_brief_has_no_moderation_line_without_refusals(tmp_path):
-    assert "Moderation-refused" not in _brief_text(tmp_path)
+    assert "画面审核拒答场景" not in _brief_text(tmp_path)
+
+
+def test_brief_omits_emotion_field_when_tts_provider_is_index_tts(monkeypatch, tmp_path):
+    _set_brief_mode(monkeypatch, "full")
+    _write_json(
+        tmp_path / "recap_run_manifest.json",
+        {"argv": ["demo.mp4", "--work-dir", str(tmp_path), "--tts-provider", "index-tts"]},
+    )
+    text = _agent_brief_text(
+        [{"scene_id": 0, "start": 0.0, "end": 8.0, "description": "门口对峙"}],
+        [{"start": 1.0, "end": 3.0, "text": "你终于来了"}],
+        [],
+        8.0,
+        tmp_path,
+    )
+    narration = next(
+        item
+        for item in _json_examples(text)
+        if isinstance(item, list) and item and "narration" in item[0]
+    )
+    assert "emotion" not in narration[0]
+    assert "当前 TTS 供应商为 `index-tts`" in text

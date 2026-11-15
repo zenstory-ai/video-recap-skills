@@ -54,13 +54,31 @@ _REQUIRED = {
 }
 METHOD_TEXT_FIELDS = ("rule", "applies_when", "avoid_when")
 BANNED_EXPORT_KEYS = {"source_facts", "labels", "entities", "evidence", "statement", "from", "path"}
+_EXPORT_SCHEMA_KEYS = {
+    "schema", "duration_s", "canvas", "width", "height", "cut_detection", "detector",
+    "hard_score", "soft_score", "isolation_ratio", "isolation_window_s", "scaled",
+    "agent_added", "agent_removed", "profile", "shot_median_s", "cuts_per_min",
+    "integrated_lufs", "mean_short_term_lufs", "narration_share", "narration_chars_per_s",
+    "switch_on_cut_share", "first_original_at", "value", "provenance", "precision",
+    "fraction", "seconds", "share", "blocks", "block_median_s", "structure",
+    "function", "at", "lead_owner", "subtitles", "burned", "max_lines", "marks_original",
+    "methods", "id", "dimension", "rule", "applies_when", "avoid_when", "applies_to",
+    "targets", "skipped_dimensions", *DIMENSIONS, *OWNERS, *FUNCTIONS, *NARRATION_JOBS,
+}
+_GENERIC_QUOTED_TERMS = {
+    "反转", "悬念", "钩子", "高潮", "留白", "伏笔", "铺垫", "冲突", "平行剪辑", "双线叙事",
+    "冷开场", "正反打", "蒙太奇", "旁白", "原声", "画外音", "同期声", "转场", "节奏",
+}
 _CJK = re.compile(r"[㐀-鿿豈-﫿]+")
 _WORD = re.compile(r"[A-Za-z0-9']+")
 # Python's \b treats CJK as word characters, so "在1:23处" has no boundary before "1"; use
 # digit/ASCII lookarounds instead. Path segments are ASCII so prose like "旁白/原声/音乐" stays legal.
+# Common aspect ratios (9:16, 16:10, 18:10, 21:10) and explicit ratio labels are excluded.
 _NUMERAL = "[0-9一二三四五六七八九十百零两]+"
 _TIMECODE = re.compile(
-    rf"(?<![\d:])\d{{1,2}}:\d{{2}}(?::\d{{2}})?(?![\d:])|第\s*{_NUMERAL}\s*秒|{_NUMERAL}\s*分钟?\s*{_NUMERAL}\s*秒")
+    rf"(?<![\d:])(?!(?:9:16|16:10|18:10|21:10|10:16)(?![\d:]))\d{{1,2}}:[0-5]\d(?::[0-5]\d)?(?![\d:])"
+    rf"(?!\s*(?:画幅|竖屏|横屏|方屏|宽高比|比例|视窗))"
+    rf"|第\s*{_NUMERAL}\s*秒|{_NUMERAL}\s*分钟?\s*{_NUMERAL}\s*秒")
 # One-segment absolute paths only for well-known roots, so prose like "原声/BGM" stays legal.
 _ABS_PATH = re.compile(
     r"(?<![A-Za-z0-9_.])/(?:[A-Za-z0-9_.-]+/)+[\w.-]*|~/[\w.-]+|(?<![A-Za-z0-9_])[A-Za-z]:[\\/][\w.-]+"
@@ -323,7 +341,10 @@ def _research_names(research):
         if isinstance(item, str) and _CJK.fullmatch(item) and len(item) <= 5:
             names.add(item)
     for text in _strings(research):
-        names.update(g for match in _QUOTED.findall(text) for g in match if g)
+        names.update(
+            g for match in _QUOTED.findall(text) for g in match
+            if g and g not in _GENERIC_QUOTED_TERMS
+        )
     return names
 
 
@@ -364,18 +385,17 @@ def leak_errors(text, where, corpus, rule="R6"):
     errors = []
     lowered = _SPACE.sub("", text).lower()
     for name in corpus["names"]:
-        if name.lower() in lowered:
+        if name.isascii():
+            matched = re.search(rf"(?<![A-Za-z0-9]){re.escape(name)}(?![A-Za-z0-9])", text, re.IGNORECASE) is not None
+        else:
+            matched = name.lower() in lowered
+        if matched:
             errors.append(f"{rule} {where}: 含原片实体名「{name}」")
     cjk, words = _ngrams(text, CJK_RUN_MIN), _word_grams(text, LATIN_RUN_MIN)
     for gram in sorted(cjk & corpus["cjk"])[:1]:
         errors.append(f"{rule} {where}: 与原片台词/背景资料共有连续 {CJK_RUN_MIN}+ 字「{gram}」")
     for gram in sorted(words & corpus["latin"])[:1]:
         errors.append(f"{rule} {where}: 与原片台词/背景资料共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」")
-    for gram in sorted(cjk & corpus.get("fact_cjk", set()))[:1]:
-        errors.append(f"{rule} {where}: 与 source_facts 的描述共有连续 {CJK_RUN_MIN}+ 字「{gram}」"
-                      "（若这是通用剪辑措辞，改写 fact 或方法任一侧）")
-    for gram in sorted(words & corpus.get("fact_latin", set()))[:1]:
-        errors.append(f"{rule} {where}: 与 source_facts 的描述共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」")
     for match in _TIMECODE.finditer(text):
         errors.append(f"{rule} {where}: 含绝对时间「{match.group(0)}」，改用相对位置或 targets")
     for match in _ABS_PATH.finditer(text):
@@ -383,14 +403,45 @@ def leak_errors(text, where, corpus, rule="R6"):
     return errors
 
 
+def _fact_overlap_warnings(text, where, corpus):
+    """Advisory check when a method shares an 8+ char / 5+ word phrase only with source_facts."""
+    warnings = []
+    cjk, words = _ngrams(text, CJK_RUN_MIN), _word_grams(text, LATIN_RUN_MIN)
+    for gram in sorted(cjk & corpus.get("fact_cjk", set()))[:1]:
+        warnings.append(
+            f"R6 {where}: 与 source_facts 的描述共有连续 {CJK_RUN_MIN}+ 字「{gram}」"
+            "（请确认未带入原片具体情节；若只是通用剪辑表述可忽略）"
+        )
+    for gram in sorted(words & corpus.get("fact_latin", set()))[:1]:
+        warnings.append(
+            f"R6 {where}: 与 source_facts 的描述共有连续 {LATIN_RUN_MIN}+ 词「{' '.join(gram)}」"
+            "（请确认未带入原片具体情节；若只是通用剪辑表述可忽略）"
+        )
+    return warnings
+
+
 def _warnings(breakdown, methods, asr_segments, asr_status, research, *, asr_evidence, source,
-              review_windows=None):
+              review_windows=None, corpus=None, skipped=None):
     warnings = []
     for method in methods:
         if not method.get("applies_when"):
             warnings.append(f"methods.{method.get('id')}: 没写 applies_when，后续制作难判断何时套用")
         if _NUMBER_IN_RULE.search(str(method.get("rule") or "")):
             warnings.append(f"methods.{method.get('id')}: rule 正文含数字，建议把数值放进 targets")
+        if corpus is not None:
+            for field in METHOD_TEXT_FIELDS:
+                if isinstance(method.get(field), str):
+                    warnings.extend(
+                        _fact_overlap_warnings(method[field], f"methods.{method.get('id')}.{field}", corpus)
+                    )
+    if methods:
+        covered = {m.get("dimension") for m in methods}
+        skipped_set = set(skipped or ())
+        for dimension in DIMENSIONS:
+            if dimension not in covered and dimension not in skipped_set:
+                warnings.append(
+                    f"R7 {dimension}: 未提炼该维度方法，也未在 skipped_dimensions 说明原因（按需补充）"
+                )
     if asr_status != "AVAILABLE_COARSE":
         warnings.append(f"ASR 状态为 {asr_status}，旁白语速与泄漏扫描的台词覆盖都不完整")
     has_cjk = any(_CJK.search(str(s.get("text") or "")) for s in asr_segments if isinstance(s, dict))
@@ -456,13 +507,12 @@ def check_breakdown(breakdown, measurements, asr_segments=(), asr_evidence=None,
             errors.append(f"R1 skipped_dimensions.{dimension}: 原因必须是非空字符串")
         else:   # exported verbatim, so scanned now rather than only at export (R8)
             errors.extend(leak_errors(reason, f"skipped_dimensions.{dimension}", corpus))
-    covered = {m.get("dimension") for m in methods}
-    for dimension in DIMENSIONS:
-        if dimension not in covered and dimension not in skipped:
-            errors.append(f"R7 {dimension}: 至少一条 method，或在 skipped_dimensions 写明原因")
+    if not methods:
+        errors.append("R7 methods: 至少提炼一条可迁移方法")
     warnings = _warnings(breakdown, methods, asr_segments, asr_status, research,
                          asr_evidence=asr_evidence, source=measurements["source"],
-                         review_windows=measurements["shots"].get("review_windows"))
+                         review_windows=measurements["shots"].get("review_windows"),
+                         corpus=corpus, skipped=skipped)
     return {"derived": derived, "errors": errors, "warnings": warnings}
 
 
@@ -497,12 +547,30 @@ def _walk(node, where="$"):
         yield "str", node, where
 
 
+_USER_TARGET_KEY_PATH = re.compile(r"\$\.methods\[\d+\]\.targets\.[^.]+")
+_EXPORT_ENUM_ELEM_PATH = re.compile(r"\.applies_to\[\d+\]$")
+_EXPORT_ENUM_PATHS = (
+    ".provenance", ".precision", ".detector", ".function", ".lead_owner", ".dimension", ".applies_to",
+)
+
+
 def export_errors(production, corpus):
-    """R8: re-scan every key and string of the serialized export and reject source-only keys."""
+    """R8: re-scan user-facing keys and strings of the serialized export and reject source-only keys."""
     errors = []
     for kind, text, where in _walk(json.loads(json.dumps(production, ensure_ascii=False))):
-        if kind == "key" and text in BANNED_EXPORT_KEYS:
-            errors.append(f"R8 {where}: 导出物不能含键 {text!r}")
+        if kind == "key":
+            if text in BANNED_EXPORT_KEYS:
+                errors.append(f"R8 {where}: 导出物不能含键 {text!r}")
+                continue
+            if text in _EXPORT_SCHEMA_KEYS and not _USER_TARGET_KEY_PATH.fullmatch(where):
+                continue
+        elif kind == "str" and (
+            where == "$.schema"
+            or where.endswith(_EXPORT_ENUM_PATHS)
+            or _EXPORT_ENUM_ELEM_PATH.search(where) is not None
+            or re.fullmatch(r"\$\.methods\[\d+\]\.id", where) is not None
+        ):
+            continue
         errors.extend(leak_errors(text, where, corpus, rule="R8"))
     return errors
 

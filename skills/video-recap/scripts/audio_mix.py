@@ -181,6 +181,20 @@ def _work_has_source_speech(work_dir, speech_spans, require_measured):
     return any(item["text"].strip() for item in _asr_segments(work_dir))
 
 
+def _separated_by_measured_silence(run_end, anchor, quiet_windows, acoustic_pauses):
+    """True when `anchor` belongs to a fresh utterance starting after silence at/after `run_end`."""
+    utterance_end = anchor["pause_start"]
+    for row in (*quiet_windows, *acoustic_pauses):
+        start, end = row["start"], row["end"]
+        if end >= utterance_end - 0.05:
+            continue
+        if start - 0.05 <= run_end <= end + 0.05 and end > run_end - 0.02:
+            return True
+        if start >= run_end - 0.05 and end - max(run_end, start) >= 0.35 and end < utterance_end - 0.10:
+            return True
+    return False
+
+
 def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
     """Keep source audio ducked until a nearby sentence boundary after narration.
 
@@ -196,6 +210,7 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
     speech_spans, quiet_windows, dialogue_spans = _handoff_speech_evidence(
         work_dir, evidence_payload
     )
+    acoustic_pauses = _timed_rows(evidence_payload.get("acoustic_pauses", []))
     require_measured = evidence_payload.get("require_measured", False)
     placed = []
     for seg in tts_segments:
@@ -271,6 +286,9 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             anchor
             for anchor in anchors
             if run["end"] - 0.01 <= anchor["time"] <= run["end"] + max_hold
+            and not _separated_by_measured_silence(
+                run["end"], anchor, quiet_windows, acoustic_pauses
+            )
         ])
         if restore_anchor is not None:
             # Hold the source low through its last spoken sample, then fit the release
@@ -289,23 +307,11 @@ def _apply_source_sentence_handoffs(tts_segments, work_dir, video_duration):
             duck_end = float(video_duration)
             status = "held_to_timeline_end"
         elif anchors:
-            # No anchor within the bound: release at the narration end unless doing so
-            # exposes the middle of an active source dialogue sentence (> 0.35s remaining).
+            # No anchor within the bound: release smoothly at the narration end instead of
+            # burying upcoming dialogue across coarse ASR windows or distant anchors.
             restore_at = run["end"] + fade
             duck_end = run["end"]
-            in_quiet = any(
-                row["start"] - 0.05 <= run["end"] <= row["end"] + 0.05
-                for row in quiet_windows
-            )
-            mid_dialogue = not in_quiet and any(
-                row["start"] - 0.05 <= run["end"] < row["end"] - 0.35
-                for row in dialogue_spans
-            )
-            if mid_dialogue:
-                last["source_handoff_blocking"] = True
-                status = "unsafe_mid_sentence_release"
-            else:
-                status = "bounded_release"
+            status = "bounded_release"
         elif source_has_speech:
             first["source_handoff_blocking"] = True
             first["source_entry_status"] = "anchors_unavailable"

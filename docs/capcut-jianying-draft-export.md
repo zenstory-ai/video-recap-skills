@@ -26,7 +26,7 @@ Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草�
 | **视频轨** | 源视频画面（在 `cut` 模式下传入 `--source-video <原片>` 后，草稿会直接引用原片文件与真实裁切区间，方便在剪映里随时拖动边缘加减帧数） |
 | **音频轨** | 逐段解说配音（直接引用实际混入成片的 `_placed_*.wav`）与背景音乐（BGM） |
 | **字幕轨** | 解说字幕，以及原声留白处带 `「」` 引号的角色原声台词 |
-| **图片叠层轨** | `packaging_layers.json` 中配置的静态边框、角标或背景图 |
+| **图片叠层轨** | `packaging_plan.json` 渲染生成的标题条、字卡、花字贴片，或 `packaging_layers.json` 中配置的静态边框、角标与背景图 |
 
 导出器默认会把视频、音频和图片复制进草稿目录下的 `Resources/local/{video,audio,image}` 并写好本地素材索引，保证草稿自包含、可迁移；只有当你确定原始媒体路径在本机永远不会移动且剪映有权限读取时，才使用 `--jianying-no-bundle-media` 省去复制。草稿只映射上述四类基础轨道，转场、蒙版、调色、花字贴纸等精修效果可在打开剪映后自由添加。
 
@@ -34,7 +34,7 @@ Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草�
 
 ## 怎样让原声留白处的台词字幕一字不差？
 
-当原片人物在旁白留白处开口飙戏时，如果需要烧录或导出对应的原声字幕，只需让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "角色原话"}]`），合成器与剪映草稿导出器就会自动在留白处渲染带 `「」` 引号的精准原声台词；系统绝不用 15 秒粗粒度 ASR 转写冒充逐句对位字幕。
+当原片人物在旁白留白处展开重头对白，且原片无硬字幕或已开启全片不透明字幕遮罩（如传入 `--subtitle-y-top`/`--subtitle-y-bot` 并设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）时，只需让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "角色原话"}]`），合成器与剪映草稿导出器就会自动在留白处渲染带 `「」` 引号的精准原声台词；不会拿 15 秒粗粒度 ASR 转写冒充逐句对位字幕。
 
 ## 自建开源流程与按月订阅 SaaS 的账单对比
 

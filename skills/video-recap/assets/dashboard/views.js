@@ -145,7 +145,7 @@ function renderScriptList(R) {
 function cleanClipReason(raw) {
   if (!raw) return "";
   const tokens = String(raw)
-    .split(/[|·]/)
+    .split(/\s*\|\s*|\s+·\s+/)
     .map((s) => s.trim())
     .filter(Boolean);
   const cleaned = tokens
@@ -220,11 +220,84 @@ function collectRunError(R) {
   const failedQc = (R.qc || []).filter((c) => c.level === "error");
   if (failedQc.length) {
     const details = failedQc
-      .flatMap((c) => (c.findings && c.findings.length ? c.findings.map((f) => f.message) : [c.text]))
+      .flatMap((c) => {
+        const blockers = (c.findings || []).filter((f) => f && f.blocking !== false);
+        return blockers.length ? blockers.map((f) => f.message) : [c.text];
+      })
       .filter(Boolean);
     return details.join("；") || "成片存在未通过的检查项";
   }
   return "";
+}
+
+function renderPromoCopy(R) {
+  const promo = R.views.film && R.views.film.promo_copy;
+  if (!promo || typeof promo !== "object" || promo.status === "missing" || promo.status === "unparseable") {
+    return "";
+  }
+  const coreAngle = typeof promo.core_angle === "string" ? promo.core_angle.trim() : "";
+  const payoffTs = typeof promo.payoff_timestamp === "number" && Number.isFinite(promo.payoff_timestamp)
+    ? promo.payoff_timestamp
+    : null;
+  const titles = Array.isArray(promo.titles) ? promo.titles : [];
+  const cover = promo.cover && typeof promo.cover === "object"
+    ? promo.cover
+    : typeof promo.cover === "string" && promo.cover.trim()
+      ? { text: promo.cover.trim() }
+      : null;
+  const desc = typeof promo.description === "string" ? promo.description.trim() : "";
+  const tags = Array.isArray(promo.tags) ? promo.tags.filter((t) => typeof t === "string" && t.trim()) : [];
+
+  const titleItems = titles
+    .map((item) => {
+      if (typeof item === "string" && item.trim()) {
+        return `<div class="small">${esc(item.trim())}</div>`;
+      }
+      if (item && typeof item === "object") {
+        const text = String(item.text || item.title || "").trim();
+        const label = String(item.label || item.type || item.platform || "").trim();
+        if (!text) return "";
+        return `<div class="chip-row">${label ? `<span class="tag">${esc(label)}</span>` : ""}<span class="small">${esc(text)}</span></div>`;
+      }
+      return "";
+    })
+    .filter(Boolean);
+
+  let coverHtml = "";
+  if (cover) {
+    const coverLines = [cover.top_line, cover.bottom_line, cover.text]
+      .filter((s) => typeof s === "string" && s.trim())
+      .map((s) => esc(s.trim()));
+    const coverTs = typeof cover.timestamp === "number" && Number.isFinite(cover.timestamp) ? cover.timestamp : null;
+    const coverReason = typeof cover.frame_reason === "string" && cover.frame_reason.trim() ? esc(cover.frame_reason.trim()) : "";
+    const metaBits = [
+      coverTs !== null ? `封面帧 ${clock(coverTs)}` : "",
+      coverReason,
+    ].filter(Boolean);
+    if (coverLines.length || metaBits.length) {
+      coverHtml = `<div>
+        <div class="sub-h">封面方案</div>
+        ${coverLines.length ? `<p class="small">${coverLines.join(" / ")}</p>` : ""}
+        ${metaBits.length ? `<p class="small muted">${metaBits.join(" · ")}</p>` : ""}
+      </div>`;
+    }
+  }
+
+  if (!coreAngle && payoffTs === null && !titleItems.length && !coverHtml && !desc && !tags.length) {
+    return "";
+  }
+
+  return `<section class="card res-card" aria-label="宣发文案">
+    <div class="rc-top">
+      <h2 class="rc-title">宣发文案</h2>
+      ${payoffTs !== null ? `<button class="btn sm" type="button" data-seek="${payoffTs}">高能点 ${clock(payoffTs)}</button>` : ""}
+    </div>
+    ${coreAngle ? `<p class="small muted">${esc(coreAngle)}</p>` : ""}
+    ${titleItems.length ? `<div><div class="sub-h">备选标题</div>${titleItems.join("")}</div>` : ""}
+    ${coverHtml}
+    ${desc ? `<div><div class="sub-h">发布简介</div><p class="small">${esc(desc)}</p></div>` : ""}
+    ${tags.length ? `<div class="chip-row">${tags.map((t) => `<span class="meta-chip">#${esc(t.trim().replace(/^#+/, ""))}</span>`).join("")}</div>` : ""}
+  </section>`;
 }
 
 function viewStudio(O, R, route) {
@@ -239,6 +312,7 @@ function viewStudio(O, R, route) {
         </div>`
       : "";
   const errorBanner = collectRunError(R);
+  const promoCard = renderPromoCopy(R);
 
   return `<div class="studio" data-view="studio">
     <aside class="rail" aria-label="成片列表">${renderRunRail(O, R.path)}</aside>
@@ -252,6 +326,7 @@ function viewStudio(O, R, route) {
         ${renderVideoStage(R)}
         <div class="card inspector" id="inspectorHost">${renderSidePanel(R, activeTab)}</div>
       </div>
+      ${promoCard}
     </section>
   </div>`;
 }

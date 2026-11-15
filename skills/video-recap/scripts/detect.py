@@ -280,9 +280,9 @@ def detect_silence_periods(video_path, work_dir, asr_result=None):
         return []
     output = result.stderr
 
-    # 解析 silence_start / silence_end
-    starts = [float(m) for m in re.findall(r'silence_start:\s*([\d.]+)', output)]
-    ends = [float(m) for m in re.findall(r'silence_end:\s*([\d.]+)', output)]
+    # 解析 silence_start / silence_end（片头静音可能出现负起点如 -0.0013，统一钳制到 0.0）
+    starts = [max(0.0, float(m)) for m in re.findall(r'silence_start:\s*(-?[\d.]+)', output)]
+    ends = [max(0.0, float(m)) for m in re.findall(r'silence_end:\s*(-?[\d.]+)', output)]
 
     # 配对所有静音段（不过滤时长，后面合并后再过滤）
     raw_periods = []
@@ -381,23 +381,34 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
         out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return report
 
-    result = run_cmd([
-        "ffmpeg", "-hide_banner", "-nostats", "-i", str(audio_path),
-        "-af", (
-            "silencedetect="
-            f"noise={CONFIG['source_boundary_noise_threshold']}:"
-            f"d={float(CONFIG['source_boundary_min_pause'])}"
-        ),
-        "-f", "null", "-",
-    ], timeout=120)
+    audio_dur = max(
+        _wav_seconds_estimate(audio_path),
+        max((float(s["end"]) for s in segments), default=0.0),
+    )
+    timeout = max(120, int(audio_dur * 0.5) + 60)
+    try:
+        result = run_cmd([
+            "ffmpeg", "-hide_banner", "-nostats", "-i", str(audio_path),
+            "-af", (
+                "silencedetect="
+                f"noise={CONFIG['source_boundary_noise_threshold']}:"
+                f"d={float(CONFIG['source_boundary_min_pause'])}"
+            ),
+            "-f", "null", "-",
+        ], timeout=timeout)
+    except subprocess.TimeoutExpired:
+        report["status"] = "failed"
+        report["reason"] = "silencedetect_timeout"
+        out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+        return report
     if result.returncode != 0:
         report["status"] = "failed"
         report["reason"] = "silencedetect_failed"
         out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
         return report
 
-    starts = [float(value) for value in re.findall(r"silence_start:\s*([\d.]+)", result.stderr or "")]
-    ends = [float(value) for value in re.findall(r"silence_end:\s*([\d.]+)", result.stderr or "")]
+    starts = [max(0.0, float(value)) for value in re.findall(r"silence_start:\s*(-?[\d.]+)", result.stderr or "")]
+    ends = [max(0.0, float(value)) for value in re.findall(r"silence_end:\s*(-?[\d.]+)", result.stderr or "")]
     pauses = []
     for index, (start, end) in enumerate(zip(starts, ends)):
         if end <= start:
@@ -421,7 +432,11 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
         if seg_end <= seg_start or not text:
             continue
         last_midpoint = seg_start - 1e-6
-        for match in re.finditer(r"[。！？!?；;]", text):
+        for match in re.finditer(r"(?:[。！？!?；;]|(?<![\d.])\.(?![\d.]))", text):
+            if match.group(0) == "." and _is_non_terminal_english_dot(
+                text, match.start(), match.end()
+            ):
+                continue
             expected = seg_start + (seg_end - seg_start) * (match.end() / max(1, len(text)))
             candidates = [
                 pause for pause in pauses
@@ -456,6 +471,28 @@ def detect_speech_boundary_anchors(work_dir, asr_result):
     out_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     log(f"检测到 {len(anchors)} 个原声句末安全切入点")
     return report
+
+
+_EN_ABBREV_BEFORE_DOT_RE = re.compile(
+    r"(?:^|[^A-Za-z])(?:mr|mrs|ms|dr|prof|sr|jr|st|mt|vs|etc|e\.g|i\.e|a\.m|p\.m)$",
+    re.IGNORECASE,
+)
+_EN_INITIAL_BEFORE_DOT_RE = re.compile(r"(?:^|[\s(\[{\".]|(?<![A-Za-z])')[A-Za-z]$")
+_EN_DOTTED_ABBREV_CONTINUATION_RE = re.compile(r"^[A-Za-z]\.")
+
+
+def _is_non_terminal_english_dot(text, dot_start, dot_end):
+    """True when `.` is mid-sentence after a common English abbreviation or initial."""
+    tail = text[dot_end:]
+    if not tail.strip():
+        return False
+    if _EN_DOTTED_ABBREV_CONTINUATION_RE.match(tail):
+        return True
+    prefix = text[:dot_start]
+    return bool(
+        _EN_ABBREV_BEFORE_DOT_RE.search(prefix)
+        or _EN_INITIAL_BEFORE_DOT_RE.search(prefix)
+    )
 
 
 def _audio_meta_path(work_dir):

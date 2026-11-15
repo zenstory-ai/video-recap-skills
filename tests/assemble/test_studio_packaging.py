@@ -297,3 +297,105 @@ def test_cjk_compound_wrap_multi_chunk_dialogue_style_and_sfx_peak_offset(tmp_pa
     # Placed 150ms early so the whoosh transient peak lands right on 1.00s
     assert applied[0]["start"] == pytest.approx(0.85, abs=0.01)
     assert applied[0]["peak_offset_ms"] == 150.0
+
+
+@pytest.mark.parametrize(
+    "promo_payload",
+    [
+        {
+            "schema": "video-recap.promo_copy.v1",
+            "titles": ["死去三年的恋人挽着亲哥进门"],
+            "cover": {"timestamp": 12.4, "top_line": "昔日恋人变未来大嫂"},
+        },
+        {
+            "titles": ["死去三年的恋人挽着亲哥进门"],
+            "description": "片段解说",
+        },
+    ],
+)
+def test_promo_copy_written_to_packaging_plan_raises_with_promo_copy_guidance(
+    tmp_path, promo_payload
+):
+    _write_plan(tmp_path, promo_payload)
+    with pytest.raises(RuntimeError, match="promo_copy\\.json"):
+        packaging.resolve_output_canvas(tmp_path, {"width": 1920, "height": 1080, "fps": 25.0})
+
+
+def test_portrait_stage_1x1_auto_callout_avoids_active_subtitle_band_and_compact_scales_callout(
+    tmp_path,
+):
+    _write_plan(
+        tmp_path,
+        {
+            "schema": "video-recap.packaging_plan.v1",
+            "preset": "portrait_stage",
+            "viewport_aspect": "1:1",
+            "callouts": [
+                # Active during narration [0.5..3.0] -> auto slot must avoid subtitle_safe_band!
+                {"start": 0.6, "end": 2.8, "text": "当着全家人的面把底牌彻底掀在桌面上", "slot": "auto"},
+                # Outside narration [5.0..7.0] -> stage_lower does not collide with inactive subtitle band!
+                {"start": 5.0, "end": 7.0, "text": "静默对视", "slot": "stage_lower"},
+            ],
+        },
+    )
+    input_canvas = {
+        "width": 1080, "height": 1080, "fps": 25.0,
+        "storage_width": 1080, "storage_height": 1080,
+        "rotation": 0, "sample_aspect_ratio": "1:1", "display_aspect_ratio": "1:1",
+    }
+    segs = [
+        {
+            "index": 0,
+            "narration": "这一刻全场鸦雀无声。",
+            "spoken_text": "这一刻全场鸦雀无声。",
+            "actual_place_start": 0.5,
+            "actual_place_end": 3.0,
+        }
+    ]
+    studio = packaging.prepare_studio_packaging(tmp_path, input_canvas, 8.0, segs)
+    assert studio is not None
+    assert studio["qc"]["blocking_codes"] == []
+    warning_codes = {w["code"] for w in studio["qc"].get("warnings", [])}
+    assert "packaging_callout_compact_scaled" in warning_codes
+
+
+def test_filter_path_escapes_apostrophe_and_unburned_subtitles_skip_overlay_collision(
+    monkeypatch, tmp_path
+):
+    from lib import CONFIG, escape_ffmpeg_filter_path
+
+    escaped = escape_ffmpeg_filter_path("/tmp/director's cut/work/sub.ass")
+    assert r"'\''" not in escaped or r"'\\\''" in escaped
+    assert r"'\\\''" in escaped
+
+    _write_plan(
+        tmp_path,
+        {
+            "schema": "video-recap.packaging_plan.v1",
+            "preset": "portrait_stage",
+            "viewport_aspect": "1:1",
+            "callouts": [{"start": 0.6, "end": 2.8, "text": "底牌掀开", "slot": "stage_lower"}],
+        },
+    )
+    input_canvas = {
+        "width": 1080, "height": 1080, "fps": 25.0,
+        "storage_width": 1080, "storage_height": 1080,
+        "rotation": 0, "sample_aspect_ratio": "1:1", "display_aspect_ratio": "1:1",
+    }
+    segs = [
+        {
+            "index": 0,
+            "narration": "这一刻全场鸦雀无声。",
+            "spoken_text": "这一刻全场鸦雀无声。",
+            "actual_place_start": 0.5,
+            "actual_place_end": 3.0,
+        }
+    ]
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
+    spans = subtitle_render.burned_subtitle_spans(segs, tmp_path, 8.0, input_canvas)
+    assert spans == []
+    studio = packaging.prepare_studio_packaging(
+        tmp_path, input_canvas, 8.0, segs, subtitle_spans=spans
+    )
+    assert studio["qc"]["blocking_codes"] == []
+

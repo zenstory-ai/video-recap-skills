@@ -25,7 +25,9 @@ def _run(stage, script, *cli_args):
     print(f"[video-recap] ▶ {stage}/{script}", flush=True)
     # Stage scripts log Chinese; on Windows a piped stdout defaults to cp1252 and the
     # first log line would crash the child with UnicodeEncodeError.
-    res = subprocess.run(cmd, env={**os.environ, "PYTHONIOENCODING": "utf-8"})
+    res = subprocess.run(
+        cmd, env={**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUTF8": "1"}
+    )
     if res.returncode != 0:
         raise SystemExit(f"{stage}/{script} 失败 (exit {res.returncode})")
 
@@ -43,7 +45,9 @@ def _read_video_duration_or_raise(path):
         "csv=p=0",
         str(path),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     if res.returncode != 0:
         detail = (res.stderr or res.stdout or "ffprobe failed").strip()
         raise SystemExit(f"无法读取成片时长: {path} ({detail})")
@@ -76,7 +80,9 @@ def _probe_display_size_or_raise(path, *, require_near_square_pixels=False):
         "json",
         str(path),
     ]
-    res = subprocess.run(cmd, capture_output=True, text=True)
+    res = subprocess.run(
+        cmd, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     try:
         stream = json.loads(res.stdout)["streams"][0]
         width, height = int(stream["width"]), int(stream["height"])
@@ -161,8 +167,17 @@ def _resume_argv(work_dir, args):
 
 
 def _write_manifest_with_argv(work_dir, payload, args):
+    extra = {}
+    if getattr(args, "audio_mode", "narration") == "narration":
+        provider = getattr(args, "tts_provider", None)
+        if isinstance(provider, str) and provider.strip():
+            extra["tts_provider"] = provider.strip().lower()
     (work_dir / RUN_MANIFEST).write_text(
-        json.dumps({**payload, "argv": _resume_argv(work_dir, args)}, ensure_ascii=False, indent=2),
+        json.dumps(
+            {**payload, **extra, "argv": _resume_argv(work_dir, args)},
+            ensure_ascii=False,
+            indent=2,
+        ),
         encoding="utf-8",
     )
 

@@ -2,7 +2,7 @@
 
 Status: implemented
 
-后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-production-reference-binding]]，已落地。
+后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-production-reference-binding]]，已落地；`R6`（`source_facts` 重合）与 `R7`（五维覆盖）的阻断口径放宽见 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]。
 
 ## Problem
 

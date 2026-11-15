@@ -25,7 +25,7 @@ MIMO_TOKEN_PLAN_API_URLS = {
     "sgp": "https://token-plan-sgp.xiaomimimo.com/v1",
     "ams": "https://token-plan-ams.xiaomimimo.com/v1",
 }
-DEFAULT_MIMO_MODEL = "mimo-v2.5"          # VLM / chat (vision understanding)
+DEFAULT_MIMO_MODEL = "mimo-v2.6-flash"    # VLM / chat (vision understanding)
 DEFAULT_MIMO_ASR_MODEL = "mimo-v2.5-asr"  # speech-to-text
 DEFAULT_MIMO_TTS_MODEL = "mimo-v2.5-tts"  # text-to-speech
 DEFAULT_FISH_TTS_API_URL = "https://api.fish.audio/v1/tts"
@@ -134,12 +134,23 @@ def material_id_for(source_path, source_identity):
     return f"{_slug(str(source_path))}-{source_identity['size']}"
 
 
-def ffmpeg_filters():
+_HOMEBREW_STOCK_FFMPEGS = {
+    "/opt/homebrew/bin/ffmpeg": "/opt/homebrew/opt/ffmpeg-full/bin",
+    "/usr/local/bin/ffmpeg": "/usr/local/opt/ffmpeg-full/bin",
+}
+
+
+def ffmpeg_filters(ffmpeg=None):
     """Filters the installed ffmpeg lists; empty when ffmpeg is absent."""
-    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+    binary = ffmpeg or shutil.which("ffmpeg") or "ffmpeg"
     try:
         result = subprocess.run(
-            [ffmpeg, "-hide_banner", "-filters"], text=True, capture_output=True, timeout=20
+            [binary, "-hide_banner", "-filters"],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            timeout=20,
         )
     except FileNotFoundError:
         return set()
@@ -156,6 +167,44 @@ def ffmpeg_filters():
         if len(parts) >= 2 and parts[0] and parts[0][0] in ".TSCAPN|":
             filters.add(parts[1])
     return filters
+
+
+def broken_homebrew_ffmpeg_full_path(ffmpeg_path=None):
+    """Return keg-only `ffmpeg-full` path when present next to stock Homebrew ffmpeg but broken."""
+    stock = ffmpeg_path if ffmpeg_path is not None else (shutil.which("ffmpeg") or "")
+    full_bin = _HOMEBREW_STOCK_FFMPEGS.get(stock)
+    if not full_bin:
+        return None
+    candidate = f"{full_bin}/ffmpeg"
+    if not os.path.isfile(candidate):
+        return None
+    try:
+        ffmpeg_filters(candidate)
+    except RuntimeError:
+        return candidate
+    return None
+
+
+def prefer_homebrew_ffmpeg_full():
+    """Prepend healthy keg-only Homebrew `ffmpeg-full/bin` when stock Homebrew ffmpeg lacks libass."""
+    stock = shutil.which("ffmpeg") or ""
+    full_bin = _HOMEBREW_STOCK_FFMPEGS.get(stock)
+    if not full_bin:
+        return None
+    candidate = f"{full_bin}/ffmpeg"
+    if not os.path.isfile(candidate):
+        return None
+    try:
+        if "subtitles" in ffmpeg_filters(stock):
+            return None
+        if "subtitles" not in ffmpeg_filters(candidate):
+            return None
+    except RuntimeError:
+        return None
+    cur_path = os.environ.get("PATH", "")
+    os.environ["PATH"] = f"{full_bin}{os.pathsep}{cur_path}" if cur_path else full_bin
+    _ffmpeg_reads_option_files.cache_clear()
+    return full_bin
 
 
 def ffmpeg_has_subtitles_filter():
@@ -257,7 +306,7 @@ CONFIG = {
     "mimo_tts_voice_source": "env" if os.environ.get("MIMO_TTS_VOICE") else "default",
     "voice_ref": os.environ.get("VOICE_REF", "").strip(),
     "mimo_tts_style": "自然、清晰、有感染力，像在给观众讲故事；随剧情起伏，该紧张时紧张、该动情时动情，不平铺直叙。",
-    "tts_provider": os.environ.get("TTS_PROVIDER", "auto").strip().lower(),
+    "tts_provider": (os.environ.get("TTS_PROVIDER") or "auto").strip().lower(),
     "tts_timeout": env_int("TTS_TIMEOUT", 300, minimum=1),
     "fish_api_key": os.environ.get("FISH_API_KEY", ""),
     "fish_tts_api_url": os.environ.get("FISH_TTS_API_URL", DEFAULT_FISH_TTS_API_URL),
@@ -400,7 +449,25 @@ def run_cmd(cmd, **kwargs):
         if len(display) > 2000:
             display = display[:1997] + "..."
     log(f"运行: {display}")
+    kwargs.setdefault("encoding", "utf-8")
+    kwargs.setdefault("errors", "replace")
     return subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+
+
+def escape_ffmpeg_filter_path(path):
+    """Escape a path embedded inside a single-quoted ffmpeg filter option (filename='...')."""
+    text = str(path).replace("\\", "/")
+    for raw, escaped in (
+        ("\\", "\\\\"),
+        (":", "\\:"),
+        (",", "\\,"),
+        (";", "\\;"),
+        ("[", "\\["),
+        ("]", "\\]"),
+        ("'", r"'\\\''"),
+    ):
+        text = text.replace(raw, escaped)
+    return text
 
 
 _LEGACY_FILTER_FILE_OPTIONS = {
@@ -423,6 +490,8 @@ def _ffmpeg_reads_option_files():
             stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=20,
         )
     return "Unrecognized option" not in result.stderr
@@ -538,7 +607,8 @@ def _prepare_api_payload(payload):
     model = str(normalized.get("model") or "")
     if (
         CONFIG["mimo_disable_thinking"]
-        and not model.endswith(("-tts", "-asr"))
+        and "-tts" not in model
+        and "-asr" not in model
         and "thinking" not in normalized
     ):
         normalized["thinking"] = {"type": "disabled"}

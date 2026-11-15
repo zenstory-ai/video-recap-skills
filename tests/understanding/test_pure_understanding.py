@@ -141,15 +141,17 @@ def test_mimo_api_headers_and_payload_mapping(monkeypatch):
     assert headers["api-key"] == "secret"
     assert "Authorization" not in headers
 
-    payload = _prepare_api_payload({"model": "mimo-v2.5", "max_tokens": 7})
+    payload = _prepare_api_payload({"model": "mimo-v2.6-flash", "max_tokens": 7})
     assert payload["max_completion_tokens"] == 7
     assert payload["thinking"] == {"type": "disabled"}
     assert "max_tokens" not in payload
 
-    # TTS and ASR models must NOT get a `thinking` field (no text-reasoning budget).
+    # TTS (including voiceclone/voicedesign) and ASR models must NOT get a `thinking` field.
     tts_payload = _prepare_api_payload({"model": "mimo-v2.5-tts", "max_tokens": 7})
     assert tts_payload["max_completion_tokens"] == 7
     assert "thinking" not in tts_payload
+    clone_payload = _prepare_api_payload({"model": "mimo-v2.5-tts-voiceclone", "max_tokens": 7})
+    assert "thinking" not in clone_payload
     asr_payload = _prepare_api_payload({"model": "mimo-v2.5-asr"})
     assert "thinking" not in asr_payload
 
@@ -175,8 +177,9 @@ except RuntimeError as exc:
     env["MIMO_ASR_API_KEY"] = "asr-only-key"
     env["PYTHONIOENCODING"] = "utf-8"  # the message is Chinese; Windows pipes default to cp1252
     out = subprocess.run(
-        [sys.executable, "-c", script, str(scripts_dir)],
-        env=env, capture_output=True, text=True, encoding="utf-8", check=True, cwd=tmp_path,
+        [sys.executable, "-X", "utf8", "-c", script, str(scripts_dir)],
+        env=env, capture_output=True, text=True, encoding="utf-8", errors="replace",
+        check=True, cwd=tmp_path,
     ).stdout
     assert "401" in out and "MIMO_ASR_API_KEY" in out
 
@@ -251,4 +254,137 @@ def test_load_background_research_missing_is_empty_and_malformed_raises(tmp_path
     (tmp_path / "background_research.json").write_text("[1, 2]", encoding="utf-8")
     with pytest.raises(ValueError, match="JSON 对象"):
         load_background_research(tmp_path)
+
+
+def test_negative_silence_start_and_english_period_sentence_anchors(monkeypatch, tmp_path):
+    from detect import detect_silence_periods
+
+    video = tmp_path / "src.mp4"
+    video.write_bytes(b"video")
+    audio = tmp_path / "audio.wav"
+    audio.write_bytes(b"\x00" * 32000 * 6)
+    monkeypatch.setattr("detect._audio_cache_matches", lambda *_a: True)
+    monkeypatch.setattr("detect.get_video_duration", lambda *_a: 6.0)
+
+    stderr_main = (
+        "[silencedetect @ 0x1] silence_start: -0.0013\n"
+        "[silencedetect @ 0x1] silence_end: 1.80 | silence_duration: 1.8013\n"
+        "[silencedetect @ 0x1] silence_start: 4.10\n"
+        "[silencedetect @ 0x1] silence_end: 5.90 | silence_duration: 1.80\n"
+    )
+    stderr_pauses = (
+        "[silencedetect @ 0x2] silence_start: -0.0013\n"
+        "[silencedetect @ 0x2] silence_end: 0.30 | silence_duration: 0.3013\n"
+        "[silencedetect @ 0x2] silence_start: 2.85\n"
+        "[silencedetect @ 0x2] silence_end: 3.15 | silence_duration: 0.30\n"
+        "[silencedetect @ 0x2] silence_start: 5.60\n"
+        "[silencedetect @ 0x2] silence_end: 5.95 | silence_duration: 0.35\n"
+    )
+
+    def fake_run(cmd, **_kwargs):
+        af = cmd[cmd.index("-af") + 1] if "-af" in cmd else ""
+        err = stderr_pauses if f"d={CONFIG['source_boundary_min_pause']}" in af else stderr_main
+        return CompletedProcess(cmd, 0, stdout="", stderr=err)
+
+    monkeypatch.setattr("detect.run_cmd", fake_run)
+    asr_rows = [{"start": 0.4, "end": 5.8, "text": "Wait 1.5 seconds. Stop right here."}]
+    periods = detect_silence_periods(video, tmp_path, asr_result=asr_rows)
+    assert [(p["start"], p["end"]) for p in periods] == [(0.0, 1.8), (4.1, 5.9)]
+
+    anchors = json.loads((tmp_path / "speech_boundary_anchors.json").read_text(encoding="utf-8"))
+    tails = [a["text_tail"] for a in anchors["sentence_anchors"]]
+    assert len(tails) == 2
+    assert tails[0].endswith("1.5 seconds.")
+    assert tails[1].endswith("right here.")
+
+
+def test_asr_segment_and_transcribe_keeps_subsecond_tail(monkeypatch, tmp_path):
+    monkeypatch.setitem(CONFIG, "asr_segment_seconds", 15.0)
+    monkeypatch.setattr(
+        asr_module,
+        "run_cmd",
+        lambda *a, **k: CompletedProcess(a[0] if a else [], 0, "", ""),
+    )
+    monkeypatch.setattr(asr_module, "_run_asr", lambda wav: "尾句")
+    segs = asr_module._segment_and_transcribe(tmp_path / "audio.wav", tmp_path, 15.4)
+    assert [(s["start"], s["end"]) for s in segs] == [(0, 15), (15, 15.4)]
+
+
+def test_speech_boundary_anchors_skip_ellipsis_and_abbreviations_and_catch_timeout(
+    monkeypatch, tmp_path
+):
+    import subprocess as sp
+    import detect
+
+    (tmp_path / "audio.wav").write_bytes(b"RIFF")
+    asr_rows = [{"start": 0.0, "end": 8.0, "text": "Wait... Dr. House arrived in the U.S. Now stop."}]
+    stderr = (
+        "[silencedetect @ 0x1] silence_start: 7.40\n"
+        "[silencedetect @ 0x1] silence_end: 7.85 | silence_duration: 0.45\n"
+    )
+    monkeypatch.setattr(detect, "get_video_duration", lambda _p: 8.0)
+    monkeypatch.setattr(
+        detect, "run_cmd", lambda cmd, **kw: CompletedProcess(cmd, 0, "", stderr)
+    )
+    report = detect.detect_speech_boundary_anchors(tmp_path, asr_rows)
+    tails = [a["text_tail"] for a in report["sentence_anchors"]]
+    assert len(tails) == 1
+    assert tails[0].endswith("Now stop.")
+
+    def _raise_timeout(cmd, **kw):
+        raise sp.TimeoutExpired(cmd=cmd, timeout=kw.get("timeout", 120))
+
+    monkeypatch.setattr(detect, "run_cmd", _raise_timeout)
+    timed_out = detect.detect_speech_boundary_anchors(tmp_path, asr_rows)
+    assert timed_out["status"] == "failed"
+    assert timed_out["reason"] == "silencedetect_timeout"
+
+
+def test_plan_asr_windows_splits_at_acoustic_valley_and_trims_dead_silence(tmp_path):
+    import array
+    import wave
+
+    wav_path = tmp_path / "audio.wav"
+    sr = 16000
+    dur = 25.0
+    samples = array.array("h", [0] * int(sr * dur))
+    # Active loud speech/BGM across 1.5s..23.0s (~ -10 dBFS = 10000), EXCEPT a quiet BGM valley
+    # around 12.40s..12.80s (amplitude 1200 ~ -28.7 dBFS), while 15.0s is loud mid-word!
+    for i in range(int(1.5 * sr), int(23.0 * sr)):
+        t = i / sr
+        amp = 1200 if 12.40 <= t <= 12.80 else 10000
+        samples[i] = amp if (i % 2 == 0) else -amp
+    with wave.open(str(wav_path), "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(samples.tobytes())
+
+    windows = asr_module._plan_asr_windows(wav_path, dur, 15)
+    assert len(windows) == 2
+    # Leading [0..1.5s] and trailing [23.0..25.0s] dead silences are trimmed with ~0.15s pad,
+    # and the split lands in the 12.40..12.80s valley rather than blind 15.0s!
+    assert 1.2 <= windows[0][0] <= 1.5
+    assert 12.40 <= windows[0][1] <= 12.85
+    assert windows[1][0] == windows[0][1]
+    assert 23.0 <= windows[1][1] <= 23.3
+
+
+def test_brief_surfaces_hardcoded_subtitles_and_tail_credits_callouts(tmp_path):
+    from briefing.builder import build_agent_brief
+
+    scenes = [
+        {"scene_id": 0, "start": 0.0, "end": 20.0, "description": "少年挥剑，底部配有台词字幕"},
+        {"scene_id": 1, "start": 20.0, "end": 40.0, "description": "两人对视，下方显示字幕"},
+        {"scene_id": 2, "start": 40.0, "end": 65.0, "description": "废墟坍塌，底部有字幕提示"},
+        {"scene_id": 3, "start": 70.0, "end": 80.0, "description": "画面右侧滚动显示演职员表"},
+        {"scene_id": 4, "start": 80.0, "end": 90.0, "description": "片尾字幕滚动，列出制作人员"},
+        {"scene_id": 5, "start": 90.0, "end": 100.0, "description": "下集预告画面闪回"},
+    ]
+    brief = build_agent_brief(scenes, [], [], 100.0, tmp_path).read_text(encoding="utf-8")
+    assert "检测到源片多处画面带有内嵌硬字幕" in brief
+    assert "检测到片尾演职员表 / 预告区间参考" in brief
+    assert "70.0s–100.0s" in brief
+
+
 

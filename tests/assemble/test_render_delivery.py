@@ -82,7 +82,7 @@ def test_rgb_pix_fmt_prefixes_match_ffmpegs_rgb_family():
     out = subprocess.run(
         ["ffprobe", "-v", "error", "-show_pixel_formats",
          "-show_entries", "pixel_format=name:flags=rgb,palette", "-of", "json"],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
     ).stdout
     formats = json.loads(out)["pixel_formats"]
     assert len(formats) > 100
@@ -337,7 +337,7 @@ def _probe(path):
         ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
          "stream=pix_fmt,color_space,color_primaries,color_transfer,color_range",
          "-of", "json", str(path)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
     ).stdout
     return json.loads(out)["streams"][0]
 
@@ -475,7 +475,7 @@ def test_real_render_drops_inherited_metadata(monkeypatch, tmp_path, pix_fmt):
     probe = json.loads(subprocess.run(
         ["ffprobe", "-v", "error", "-show_chapters", "-show_entries", "format_tags",
          "-of", "json", str(output)],
-        check=True, capture_output=True, text=True,
+        check=True, capture_output=True, text=True, encoding="utf-8", errors="replace",
     ).stdout)
     tags = probe["format"].get("tags", {})
     assert "title" not in tags and "comment" not in tags, tags

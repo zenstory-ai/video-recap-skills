@@ -9,11 +9,15 @@ from pathlib import Path
 import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "skills/video-recap/scripts"))
-from lib import CONFIG  # noqa: E402
+from lib import CONFIG, ffmpeg_has_subtitles_filter  # noqa: E402
 from source_subtitles import _combined_subtitle_entries  # noqa: E402
 from subtitles.render import _generate_ass  # noqa: E402
 
 
+@pytest.mark.skipif(
+    not ffmpeg_has_subtitles_filter(),
+    reason="ffmpeg lacks subtitles/libass filter",
+)
 def test_agent_original_subtitles_through_ass_keep_first_syllable_and_continuous_display(
     tmp_path, monkeypatch
 ):

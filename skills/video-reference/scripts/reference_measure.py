@@ -93,7 +93,7 @@ def mafd_peaks(stderr, fps, duration=None):
     return peaks
 
 
-def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE, peaks=()):
+def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE, peaks=(), duration=None):
     """(cuts, review_windows) from [time, score] pairs and mafd peaks; see the module docstring."""
     frame_s = 1.0 / fps if fps else 0.04
     adjacent = 1.5 * frame_s
@@ -119,7 +119,13 @@ def detect_cuts(scores, fps, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE
             windows[-1][1] = t
         else:
             windows.append([t, t])
-    return cut_times, [[round(max(0.0, a - REVIEW_PAD_S), 2), round(b + REVIEW_PAD_S, 2)] for a, b in windows]
+    return cut_times, [
+        [
+            round(max(0.0, a - REVIEW_PAD_S), 2),
+            round(min(duration, b + REVIEW_PAD_S) if duration is not None else b + REVIEW_PAD_S, 2),
+        ]
+        for a, b in windows
+    ]
 
 
 def _number(text):
@@ -238,7 +244,9 @@ def measure(video, work_dir, *, hard=DEFAULT_HARD_SCORE, soft=DEFAULT_SOFT_SCORE
         scores = parse_scdet(result.stderr, source["duration_s"])
         peaks = mafd_peaks(result.stderr, source.get("fps"), source["duration_s"])
         loudness = parse_ebur128(result.stderr, source["duration_s"]) if source["audio_streams"] else None
-    cuts, review_windows = detect_cuts(scores, source.get("fps"), hard=hard, soft=soft, peaks=peaks)
+    cuts, review_windows = detect_cuts(
+        scores, source.get("fps"), hard=hard, soft=soft, peaks=peaks, duration=source["duration_s"]
+    )
     payload = {
         "schema": MEASUREMENTS_SCHEMA,
         "source": source,

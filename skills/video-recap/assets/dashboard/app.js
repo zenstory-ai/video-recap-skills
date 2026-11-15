@@ -393,8 +393,10 @@ async function runSearch() {
 }
 
 function snippet(hit) {
-  const text = hit.snippet;
-  return `${esc(text.slice(0, hit.at))}<mark>${esc(text.slice(hit.at, hit.at + hit.len))}</mark>${esc(text.slice(hit.at + hit.len))}`;
+  const cps = Array.from(hit.snippet || "");
+  const at = Math.max(0, hit.at | 0);
+  const end = Math.max(at, at + (hit.len | 0));
+  return `${esc(cps.slice(0, at).join(""))}<mark>${esc(cps.slice(at, end).join(""))}</mark>${esc(cps.slice(end).join(""))}`;
 }
 
 function paintResults(text) {

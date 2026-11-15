@@ -1,6 +1,6 @@
 # Prompt 模板
 
-> 本文件由 `load_prompt()` 按 `### NAME` 标题分段读取。当前 CLI 仅读取 VLM 模板；解说词由 Agent 根据 `agent_narration_brief.md` 撰写。
+> 本文件由 `load_prompt()` 按 `### NAME` 标题分段读取。当前仅 `understand.py` 在 Python 内部直接调用大模型读取 `VLM_DEPTH_PROMPT`；故事编排与解说词由外层 Agent 阅读 `agent_narration_brief.md` 直接撰写。
 
 ## 目录
 

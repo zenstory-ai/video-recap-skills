@@ -534,3 +534,215 @@ def test_resume_of_a_manifest_recording_a_removed_feature(tmp_path, section, key
     (tmp_path / recap_runtime.RUN_MANIFEST).write_text(json.dumps(manifest), encoding="utf-8")
 
     assert (recap_timeline._manifest_mismatches(tmp_path, video, args) == []) is resumes
+
+
+def test_tts_provider_propagates_to_brief_across_cli_project_pass2_and_materials(
+    monkeypatch, tmp_path
+):
+    from briefing.builder import build_agent_brief, _resolve_tts_provider_hint
+    import materials as material_lib
+
+    monkeypatch.delenv("TTS_PROVIDER", raising=False)
+    monkeypatch.setitem(recap_runner.project_binding.__dict__, "sync_production_reference", lambda *_: None)
+    video = tmp_path / "ep1.mp4"
+    video.write_bytes(b"video-ep1")
+
+    # 1. Single-video full Pass 1 with explicit --tts-provider index-tts (before manifest exists)
+    work_cli = tmp_path / "work_cli"
+    seen_cli_args = []
+
+    def fake_understand_cli(stage, script, *cli_args):
+        seen_cli_args.append((stage, script, list(cli_args)))
+        assert "--tts-provider" in cli_args
+        idx = cli_args.index("--tts-provider")
+        assert cli_args[idx + 1] == "index-tts"
+        monkeypatch.setitem(
+            __import__("lib").CONFIG, "_explicit_tts_provider", cli_args[idx + 1]
+        )
+        build_agent_brief(
+            [{"scene_id": 0, "start": 0.0, "end": 8.0, "description": "门口对峙"}],
+            [],
+            [],
+            8.0,
+            work_cli,
+        )
+        monkeypatch.setitem(__import__("lib").CONFIG, "_explicit_tts_provider", None)
+
+    monkeypatch.setattr(recap_runner, "_run", fake_understand_cli)
+    monkeypatch.setattr(recap_runner, "_preflight_burn_subtitles", lambda _args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["recap.py", str(video), "--work-dir", str(work_cli), "--tts-provider", "index-tts"],
+    )
+    recap_runner.main()
+    brief_cli = (work_cli / "agent_narration_brief.md").read_text(encoding="utf-8")
+    assert '"emotion"' not in brief_cli
+    assert "当前 TTS 供应商为 `index-tts`" in brief_cli
+
+    # 2. Project-bound index-tts voice (omitted from manifest['argv'] by _resume_argv)
+    lib_dir = tmp_path / "lib"
+    voice_dir = lib_dir / "resources" / "voice" / "idx-narrator"
+    voice_dir.mkdir(parents=True)
+    (lib_dir / "library.json").write_text(
+        json.dumps({"schema": "video-recap.library.v1", "name": "测试库"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    (voice_dir / "resource.json").write_text(
+        json.dumps(
+            {
+                "schema": "video-recap.resource.v1",
+                "id": "idx-narrator",
+                "kind": "voice",
+                "title": "自建旁白",
+                "files": [],
+                "voice": {"provider": "index-tts", "voice_id": "narrator_v1"},
+                "origin": {"creator": "local", "url": ""},
+                "license": {"status": "owned", "terms": "自建推理", "evidence": "local"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    proj_file = tmp_path / "recap_project.json"
+    proj_file.write_text(
+        json.dumps(
+            {
+                "schema": "video-recap.project.v1",
+                "name": "idx-series",
+                "library": str(lib_dir),
+                "bindings": {"voice": "idx-narrator"},
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    work_proj = tmp_path / "work_proj"
+    monkeypatch.setenv("INDEX_TTS_ENDPOINT", "http://127.0.0.1:8000/tts")
+    seen_proj_args = []
+    monkeypatch.setattr(
+        recap_runner,
+        "_run",
+        lambda stage, script, *cli: seen_proj_args.append((stage, script, list(cli))),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["recap.py", str(video), "--work-dir", str(work_proj), "--project", str(proj_file)],
+    )
+    recap_runner.main()
+    assert "--tts-provider" in seen_proj_args[0][2]
+    proj_manifest = json.loads((work_proj / "recap_run_manifest.json").read_text(encoding="utf-8"))
+    assert "--tts-provider" not in proj_manifest["argv"]
+    assert proj_manifest["tts_provider"] == "index-tts"
+    assert _resolve_tts_provider_hint(work_proj) == "index-tts"
+
+    # 3. Material restore refreshes cached auto/MiMo brief when --tts-provider index-tts is used
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "agent_narration_brief.md").write_text('[{"emotion": "平静"}]', encoding="utf-8")
+    (seed / "scenes.json").write_text("[]", encoding="utf-8")
+    mat_dir = tmp_path / "materials"
+    _, base_args = recap_cli.parse_args([str(video)])
+    material_lib.save_material(
+        mat_dir, seed, video, recap_runtime.file_identity(video), recap_runtime._analysis_settings(base_args)
+    )
+    work_mat = tmp_path / "work_mat"
+    seen_mat_args = []
+    monkeypatch.setattr(
+        recap_runner,
+        "_run",
+        lambda stage, script, *cli: seen_mat_args.append((stage, script, list(cli))),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recap.py",
+            str(video),
+            "--work-dir",
+            str(work_mat),
+            "--material-library-dir",
+            str(mat_dir),
+            "--use-materials",
+            "--tts-provider",
+            "index-tts",
+        ],
+    )
+    recap_runner.main()
+    assert len(seen_mat_args) == 1
+    assert "--brief-only" in seen_mat_args[0][2]
+    assert "--tts-provider" in seen_mat_args[0][2]
+
+    # 4. Multi-source cut Pass 2 adding --tts-provider index-tts omits emotion in output brief
+    video2 = tmp_path / "ep2.mp4"
+    video2.write_bytes(b"video-ep2-different-size")
+    work_multi = tmp_path / "work_multi"
+    work_multi.mkdir()
+    _, m_args_pass1 = recap_cli.parse_args([str(video), str(video2), "--edit-mode", "cut"])
+    records = recap_runtime._build_multi_source_records([video, video2], m_args_pass1)
+    for rec in records:
+        swd = work_multi / rec["source_work_dir"]
+        swd.mkdir(parents=True)
+        (swd / "asr_result.json").write_text("[]", encoding="utf-8")
+        (swd / "speech_boundary_anchors.json").write_text('{"sentence_anchors":[]}', encoding="utf-8")
+    recap_runtime._write_project_run_manifest(work_multi, m_args_pass1, records)
+    (work_multi / "clip_plan.json").write_text(
+        json.dumps(
+            {"clips": [{"source_id": records[0]["source_id"], "start": 0.0, "end": 4.0, "reason": "开场"}]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_multi_cut(stage, script, *cli):
+        if script == "cut.py":
+            (work_multi / "edited_source.mp4").write_bytes(b"edited")
+            (work_multi / "clip_plan_validated.json").write_text(
+                json.dumps(
+                    {
+                        "clips": [
+                            {
+                                "source_id": records[0]["source_id"],
+                                "source_start": 0.0,
+                                "source_end": 4.0,
+                                "output_start": 0.0,
+                                "output_end": 4.0,
+                                "reason": "开场",
+                            }
+                        ],
+                        "qc": {
+                            "status": "pass",
+                            "target_duration_status": "not_requested",
+                            "total_duration": 4.0,
+                            "clip_count": 1,
+                            "join_fade_ms": 30.0,
+                            "output_geometry": {"width": 1280, "height": 720, "fps": 25.0},
+                            "output_geometry_reason": "first_clip",
+                        },
+                    },
+                    ensure_ascii=False,
+                ),
+                encoding="utf-8",
+            )
+
+    monkeypatch.setattr(recap_runner, "_run", fake_multi_cut)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "recap.py",
+            str(video),
+            str(video2),
+            "--edit-mode",
+            "cut",
+            "--work-dir",
+            str(work_multi),
+            "--tts-provider",
+            "index-tts",
+        ],
+    )
+    recap_runner.main()
+    multi_brief = (work_multi / "agent_narration_brief.md").read_text(encoding="utf-8")
+    assert '"emotion"' not in multi_brief
+    assert "当前 TTS 供应商为 `index-tts`" in multi_brief

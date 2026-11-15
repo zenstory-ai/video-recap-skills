@@ -1218,3 +1218,39 @@ def test_start_prepend_rejects_flash_sliver_across_shot_cut():
     event = snapped["qc"]["boundary_status"]["start_snaps"][0]
     assert event["action"] == "trimmed"
     assert event["fallback_from"] == "prepend_creates_flash_sliver"
+
+
+def test_normalize_clip_plan_honors_allow_overlap_and_records_skipped_short_clip_warning():
+    overlapping = [
+        {"start": 40.0, "end": 44.0, "reason": "b01 (hook)：冷开场前置高潮"},
+        {"start": 10.0, "end": 45.0, "reason": "b02 (setup)：正片完整展开"},
+    ]
+    with pytest.raises(ValueError, match="overlaps"):
+        normalize_clip_plan(overlapping, video_duration=60.0)
+
+    plan = normalize_clip_plan(
+        {"allow_overlap": True, "clips": [*overlapping, {"start": 50.0, "end": 50.2, "reason": "太短"}]},
+        video_duration=60.0,
+    )
+    assert [(c["source_start"], c["source_end"]) for c in plan["clips"]] == [(40.0, 44.0), (10.0, 45.0)]
+    warnings = plan["qc"].get("warnings", [])
+    assert any(w.get("code") == "clip_too_short_skipped" for w in warnings)
+
+
+def test_touching_contiguous_clips_do_not_overlap_on_end_snap():
+    plan = normalize_clip_plan(
+        [
+            {"start": 10.0, "end": 40.0, "reason": "b01：前段原速"},
+            {"start": 40.0, "end": 55.0, "reason": "b02：后段无缝接续"},
+        ],
+        video_duration=60.0,
+    )
+    silences = [{"start": 41.0, "end": 41.4, "has_speech": False}]
+    snapped = sentence_boundaries.snap_clip_ends_to_lines(
+        plan,
+        silences,
+        video_duration=60.0,
+        max_extend=2.5,
+    )
+    assert snapped["clips"][0]["source_end"] <= snapped["clips"][1]["source_start"]
+

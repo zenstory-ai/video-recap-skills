@@ -132,8 +132,8 @@ def test_full_over_budget_text_fails_lint_with_actionable_budget(monkeypatch, tm
     assert error["actual_chars"] == 42
     assert error["over_chars"] == 32
     assert error["tts_overhead_seconds"] == 0.45
-    assert "段 2 [10.00-13.00s] has 42 chars" in error["message"]
-    assert "32 over the limit" in error["message"]
+    assert "段 2 [10.00-13.00s] 写了 42 字" in error["message"]
+    assert "超出 32 字" in error["message"]
     assert not any(item["code"] == "over_budget" for item in lint["warnings"])
 
 
@@ -355,6 +355,8 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
     result = subprocess.run(
         [
             sys.executable,
+            "-X",
+            "utf8",
             str(Path(narration_validate.__file__)),
             "--work-dir",
             str(tmp_path),
@@ -364,13 +366,14 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
 
     assert result.returncode == 1
     assert "Traceback" not in result.stderr
-    assert "段 1 invalid_narration：narration must be a string" in result.stderr
+    assert "段 1 invalid_narration：narration 字段必须是字符串" in result.stderr
     assert str(tmp_path / "narration_lint.json") in result.stderr
     assert narration_path.read_text(encoding="utf-8") == raw
     current = _read_json(tmp_path / "narration_lint.json")
@@ -505,13 +508,13 @@ def test_cut_output_cli_duration_failure_updates_lint(tmp_path, duration):
     )
     report_path = tmp_path / "narration_lint.json"
     report_path.write_text(json.dumps({"ok": True, "stale": True}), encoding="utf-8")
-    command = [sys.executable, str(Path(narration_validate.__file__)),
+    command = [sys.executable, "-X", "utf8", str(Path(narration_validate.__file__)),
                "--work-dir", str(tmp_path), "--mode", "cut_output"]
     if duration is not None:
         command.extend(["--output-duration", duration])
 
     result = subprocess.run(
-        command, capture_output=True, text=True, encoding="utf-8", check=False,
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},  # messages carry "段 N"; Windows pipes default to cp1252
     )
 

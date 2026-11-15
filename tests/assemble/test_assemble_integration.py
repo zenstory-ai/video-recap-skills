@@ -16,7 +16,7 @@ import pytest
 
 
 from assemble import assemble_video  # noqa: E402
-from lib import CONFIG  # noqa: E402
+from lib import CONFIG, ffmpeg_has_subtitles_filter  # noqa: E402
 from tts_fixtures import tts_segment
 
 _HAVE_FFMPEG = bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
@@ -61,6 +61,7 @@ def _segment(work_dir, start, end, overlaps, dur=1.5):
 
 def test_assemble_video_runs_with_final_loudnorm(tmp_path, monkeypatch):
     monkeypatch.setitem(CONFIG, "final_loudnorm", True)
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     work = tmp_path / "work"
     work.mkdir()
     src = tmp_path / "src.mp4"
@@ -86,6 +87,7 @@ def _make_silent_source_video(path, seconds=3):
 def test_assemble_video_runs_when_source_has_no_audio_stream(tmp_path, monkeypatch):
     monkeypatch.setitem(CONFIG, "final_loudnorm", False)
     monkeypatch.setitem(CONFIG, "mask_source_subtitles", False)
+    monkeypatch.setitem(CONFIG, "burn_subtitles", False)
     work = tmp_path / "silent_work"
     work.mkdir()
     src = tmp_path / "silent_src.mp4"
@@ -159,6 +161,10 @@ def _make_portrait_source_video(path, seconds=2):
     ], check=True, capture_output=True)
 
 
+@pytest.mark.skipif(
+    not ffmpeg_has_subtitles_filter(),
+    reason="ffmpeg lacks subtitles/libass filter",
+)
 def test_portrait_source_burns_canvas_matched_subtitles(tmp_path, monkeypatch):
     """A 9:16 source must burn subtitles against a frame-matching PlayRes (not the old
     hardcoded 1280x720 16:9 box that horizontally stretched portrait glyphs)."""
@@ -258,6 +264,10 @@ def test_odd_height_422_force_reencode_does_not_abort(tmp_path, monkeypatch):
     assert w % 2 == 0 and h % 2 == 0  # normalized to even
 
 
+@pytest.mark.skipif(
+    not ffmpeg_has_subtitles_filter(),
+    reason="ffmpeg lacks subtitles/libass filter",
+)
 def test_odd_height_422_with_burned_subs_does_not_abort(tmp_path, monkeypatch):
     """Same hazard via the vf_chain branch (burned subtitles, no downscale): odd-height
     4:2:2 source must render to even yuv420p rather than aborting."""

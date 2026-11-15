@@ -151,6 +151,7 @@ def _finish_brief(
         work_dir,
         args.style,
         asr_evidence=asr_evidence_summary_for_brief(work_dir, video),
+        extra_context=getattr(args, "context", None),
     )
     _prepend_storyboard_brief_header(
         brief_path, source_storyboard, edited_storyboard, cut_mode=cut_mode
