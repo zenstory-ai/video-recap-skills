@@ -1612,7 +1612,8 @@ def test_refresh_stale_output_anchors_updates_identity_in_place(tmp_path):
             {
                 "sentence_anchors": [
                     {"time": 3.0, "pause_start": 2.8, "confidence": "high"}
-                ]
+                ],
+                "acoustic_pauses": [{"start": 2.8, "end": 3.0}],
             }
         ),
         encoding="utf-8",
@@ -1649,5 +1650,37 @@ def test_refresh_stale_output_anchors_updates_identity_in_place(tmp_path):
     refreshed = json.loads(out_anchors.read_text(encoding="utf-8"))
     assert refreshed["clip_plan_identity"] == recap.file_identity(validated)
     assert refreshed["sentence_anchors"][0]["time"] == 3.0
+    assert refreshed["acoustic_pauses"] == [{"start": 2.8, "end": 3.0}]
+
+
+def test_prefer_homebrew_ffmpeg_full_adopts_healthy_and_skips_broken(monkeypatch):
+    import lib
+
+    stock = "/opt/homebrew/bin/ffmpeg"
+    full_dir = "/opt/homebrew/opt/ffmpeg-full/bin"
+    full_bin = f"{full_dir}/ffmpeg"
+    monkeypatch.setattr("lib.shutil.which", lambda name: stock if name == "ffmpeg" else None)
+    monkeypatch.setattr("lib.os.path.isfile", lambda p: p == full_bin)
+    monkeypatch.setenv("PATH", "/opt/homebrew/bin:/usr/bin")
+
+    # Case 1: broken ffmpeg-full (e.g. missing dylib) -> safely ignored, doctor surfaces hint
+    def broken_filters(binary=None):
+        if binary == full_bin:
+            raise RuntimeError("dyld: Library not loaded")
+        return {"scale", "atempo"}
+
+    monkeypatch.setattr("lib.ffmpeg_filters", broken_filters)
+    assert lib.prefer_homebrew_ffmpeg_full() is None
+    assert not os.environ["PATH"].startswith(full_dir)
+    assert lib.broken_homebrew_ffmpeg_full_path(stock) == full_bin
+
+    # Case 2: healthy ffmpeg-full with libass -> prepended to PATH
+    monkeypatch.setattr(
+        "lib.ffmpeg_filters",
+        lambda binary=None: {"subtitles", "ass"} if binary == full_bin else {"scale"},
+    )
+    assert lib.prefer_homebrew_ffmpeg_full() == full_dir
+    assert os.environ["PATH"].startswith(f"{full_dir}:")
+
 
 

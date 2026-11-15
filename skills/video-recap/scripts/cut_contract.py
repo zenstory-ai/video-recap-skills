@@ -214,6 +214,8 @@ def _normalize_clips(raw_plan, target_duration, min_clip_duration, allow_overlap
         plan_target = raw_plan.get("target_duration")
         if target_duration is None and plan_target not in (None, ""):
             target_duration = parse_duration_seconds(plan_target)
+        if raw_plan.get("allow_overlap") is True:
+            allow_overlap = True
     elif isinstance(raw_plan, list):
         raw_clips = raw_plan
     else:
@@ -226,27 +228,30 @@ def _normalize_clips(raw_plan, target_duration, min_clip_duration, allow_overlap
 
     min_duration = max(0.05, min_clip_duration)
     clips = []
+    skipped_short = []
     accepted_ranges = {}
     cursor = 0.0
 
     for idx, raw in enumerate(raw_clips):
         if not isinstance(raw, dict):
-            log(f"  跳过无效 clip #{idx + 1}: not an object")
+            log(f"  跳过无效 clip #{idx + 1}: 不是 JSON 对象")
             continue
         overlap_key, source_duration, clip_fields = resolve_source(raw, idx)
         try:
             raw_start = float(_clip_value(raw, "start", "source_start", "in"))
             raw_end = float(_clip_value(raw, "end", "source_end", "out"))
         except (TypeError, ValueError):
-            log(f"  跳过无效 clip #{idx + 1}: missing numeric start/end")
+            log(f"  跳过无效 clip #{idx + 1}: 缺少数值型 start/end")
             continue
         if raw_end - raw_start < min_duration:
             log(f"  跳过过短 clip #{idx + 1}: {raw_start:.1f}-{raw_end:.1f}s")
+            skipped_short.append({"index": idx + 1, "start": round(raw_start, 3), "end": round(raw_end, 3)})
             continue
         start = round(max(0.0, min(raw_start, source_duration)), 3)
         end = round(max(0.0, min(raw_end, source_duration)), 3)
         if end - start < min_duration:
             log(f"  跳过过短 clip #{idx + 1}: {start:.1f}-{end:.1f}s")
+            skipped_short.append({"index": idx + 1, "start": start, "end": end})
             continue
         ranges = accepted_ranges.setdefault(overlap_key, [])
         if not allow_overlap and any(raw_start < e and raw_end > s for s, e in ranges):
@@ -273,11 +278,22 @@ def _normalize_clips(raw_plan, target_duration, min_clip_duration, allow_overlap
     if not clips:
         raise ValueError("clip_plan.json has no valid clips")
 
-    return {
+    result = {
         "clips": clips,
         "total_duration": round(sum(c["duration"] for c in clips), 3),
         "target_duration": round(target_duration, 3) if target_duration else None,
+        "allow_overlap": bool(allow_overlap),
     }
+    if skipped_short:
+        result["qc"] = {
+            "warnings": [{
+                "code": "clip_too_short_skipped",
+                "severity": "warning",
+                "min_clip_duration": round(min_duration, 3),
+                "skipped_clips": skipped_short,
+            }]
+        }
+    return result
 
 
 def normalize_multi_source_clip_plan(
@@ -317,7 +333,6 @@ def normalize_multi_source_clip_plan(
         }
         for sid, s in sources.items()
     }
-    plan["allow_overlap"] = bool(allow_overlap)
     return plan
 
 
@@ -340,5 +355,4 @@ def normalize_clip_plan(
         lambda raw, idx: (None, video_duration, {}),
     )
     plan["source_duration"] = round(video_duration, 3)
-    plan["allow_overlap"] = bool(allow_overlap)
     return plan

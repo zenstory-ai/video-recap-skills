@@ -172,6 +172,34 @@ def test_real_ffmpeg_pass_finds_cuts_shot_stats_and_loudness(tmp_path):
     assert payload["source"]["canvas"] == {"width": 320, "height": 240}
 
 
+def test_ffprobe_requests_stream_side_data_rotation_and_slash_sar(monkeypatch, tmp_path):
+    seen_cmd = []
+
+    def fake_run(cmd, **_kwargs):
+        seen_cmd.extend(cmd)
+        stdout = json.dumps(
+            {
+                "format": {"duration": "12.5"},
+                "streams": [
+                    {
+                        "codec_type": "video",
+                        "width": 1440,
+                        "height": 1080,
+                        "sample_aspect_ratio": "4/3",
+                        "avg_frame_rate": "30/1",
+                        "side_data_list": [{"rotation": -90}],
+                    }
+                ],
+            }
+        )
+        return SimpleNamespace(returncode=0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(lib, "run_cmd", fake_run)
+    info = lib.ffprobe(tmp_path / "portrait.mp4")
+    assert any("stream_side_data=rotation" in str(arg) for arg in seen_cmd)
+    assert info["canvas"] == {"width": 1080, "height": 1920}
+
+
 def _fake_runner(calls):
     def run(cmd, **_kwargs):
         calls.append(cmd[0])

@@ -47,7 +47,7 @@ def test_incomplete_sentence_is_blocking_error_while_quoted_endings_pass(tmp_pat
     assert good["ok"] is True
 
 
-def test_unsafe_source_release_blocks_mid_sentence_unmute_and_passes_near_anchor(tmp_path):
+def test_unsafe_source_release_warns_mid_sentence_unmute_and_clears_near_anchor(tmp_path):
     _seed_timing_evidence(
         tmp_path,
         anchors=[
@@ -57,13 +57,15 @@ def test_unsafe_source_release_blocks_mid_sentence_unmute_and_passes_near_anchor
         asr=[{"start": 2.5, "end": 9.2, "text": "你以为把证据烧了就能全身而退吗"}],
         silences=[{"start": 0.0, "end": 2.5, "has_speech": False}],
     )
-    # Block ends at 4.0s while dialogue continues until 9.2s (5.2s > 3.0s hold bound)
-    blocked = lint_narration(
+    # Block ends at 4.0s while coarse/detected dialogue continues until 9.2s (5.2s > 3.0s hold bound):
+    # emits non-blocking warning so pre-line setup ("垫半句、让半句") inside 15s ASR windows is not deadlocked
+    warned = lint_narration(
         [{"start": 0.2, "end": 4.0, "narration": "林砚当场亮出底牌。"}],
         [{"start": 0.0, "end": 10.0}],
         work_dir=tmp_path,
     )
-    assert "unsafe_source_release" in [e["code"] for e in blocked["errors"]]
+    assert warned["ok"] is True
+    assert "unsafe_source_release" in [w["code"] for w in warned["warnings"]]
 
     # Ending at 6.8s leaves 2.4s (<= 3.0s hold bound) to the 9.2s sentence anchor -> clean handoff
     clean = lint_narration(
@@ -71,7 +73,8 @@ def test_unsafe_source_release_blocks_mid_sentence_unmute_and_passes_near_anchor
         [{"start": 0.0, "end": 10.0}],
         work_dir=tmp_path,
     )
-    assert "unsafe_source_release" not in [e["code"] for e in clean["errors"]]
+    assert clean["ok"] is True
+    assert "unsafe_source_release" not in [w["code"] for w in clean["warnings"]]
 
 
 def test_weak_cold_open_silence_warns_late_hook_unless_dialogue_opens(tmp_path):

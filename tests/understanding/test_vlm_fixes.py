@@ -59,7 +59,7 @@ def _scene_setup(monkeypatch, tmp_path, frame_count=1, workers=1):
         f.write_bytes(b"\xff\xd8\xff\xd9")  # minimal jpeg-ish bytes
         frames.append(f)
     monkeypatch.setitem(CONFIG, "fps", 1.0)
-    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.5")
+    monkeypatch.setitem(CONFIG, "vlm_model", "mimo-v2.6-flash")
     monkeypatch.setitem(CONFIG, "vlm_workers", workers)
     monkeypatch.setitem(CONFIG, "context_info", "")
     return frames
@@ -301,3 +301,29 @@ def test_refusal_markers_are_defined_once_in_lib():
                     f"{path.name}:{node.lineno} carries its own MiMo refusal marker; "
                     "import it from lib"
                 )
+
+
+def test_analyze_scenes_deduplicates_identical_frame_signatures(monkeypatch, tmp_path):
+    frames = _scene_setup(monkeypatch, tmp_path, frame_count=2)
+    calls = {"n": 0}
+
+    def fake_api_call(_payload):
+        calls["n"] += 1
+        return _reply("【描述】闪切画面\n【深层分析】连贯动作")
+
+    monkeypatch.setattr("vlm.api_call", fake_api_call)
+    # First two sub-second scenes both snap to frame_00001 (0.0s); third scene hits frame_00002 (1.0s).
+    scenes = [
+        {"start": 0.10, "end": 0.25},
+        {"start": 0.25, "end": 0.40},
+        {"start": 0.90, "end": 1.40},
+    ]
+    analyses = analyze_scenes(scenes, frames, tmp_path)
+    assert calls["n"] == 2
+    assert [(a["scene_id"], a["start"], a["end"]) for a in analyses] == [
+        (0, 0.10, 0.25),
+        (1, 0.25, 0.40),
+        (2, 0.90, 1.40),
+    ]
+    assert all(a["description"] == "闪切画面" for a in analyses)
+

@@ -6,7 +6,7 @@ import os
 
 from pathlib import Path
 
-from lib import CONFIG, get_video_duration, log
+from lib import CONFIG, file_identity, get_video_duration, log
 
 from cut_contract import (
     SOURCES_MANIFEST_SHAPE,
@@ -26,30 +26,50 @@ from sentence_boundaries import snap_multi_source_clips, snap_source_clips
 import shot_review
 
 
-def run_cut_shot_review(edited_source_path, plan_path, work_dir, validated_plan, *, reused=False):
+def run_cut_shot_review(
+    edited_source_path, plan_path, work_dir, validated_plan, *, reused=False, scene_roi=None
+):
     """Scan rendered edited_source.mp4 for internal shot candidates and block flash slivers."""
-    if not CONFIG["cut_shot_review"]:
-        return None
     report_path = Path(work_dir) / "shot_review.json"
+    if not CONFIG["cut_shot_review"]:
+        report_path.unlink(missing_ok=True)
+        return None
     report = None
     if reused and report_path.is_file():
         try:
             cached = json.loads(report_path.read_text(encoding="utf-8"))
+            cached_identity = (
+                (cached.get("media") or {}).get("identity") if isinstance(cached, dict) else None
+            )
+            cached_roi = cached.get("scene_roi") if isinstance(cached, dict) else None
+            roi_matches = (
+                cached_roi == list(scene_roi) if scene_roi is not None else cached_roi is None
+            )
             if (
                 isinstance(cached, dict)
                 and cached.get("scan_complete") is True
                 and (cached.get("plan_binding") or {}).get("path") == str(Path(plan_path).resolve())
+                and cached_identity is not None
+                and cached_identity == file_identity(edited_source_path)
+                and cached.get("scene_threshold") == CONFIG["shot_review_threshold"]
+                and (cached.get("policy") or {}).get("flash_sliver_max_seconds")
+                == CONFIG["flash_sliver_max_seconds"]
+                and roi_matches
             ):
                 report = cached
         except (OSError, ValueError):
             report = None
     if report is None:
+        scan_kwargs = {}
+        if scene_roi is not None:
+            scan_kwargs["roi"] = scene_roi
         report = shot_review.write_scan(
             edited_source_path,
             report_path,
             threshold=CONFIG["shot_review_threshold"],
             plan_path=plan_path,
             flash_sliver_max_seconds=CONFIG["flash_sliver_max_seconds"],
+            **scan_kwargs,
         )
     slivers = report.get("flash_slivers") or []
     if slivers:

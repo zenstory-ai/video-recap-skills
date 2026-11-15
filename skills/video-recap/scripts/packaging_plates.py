@@ -62,6 +62,7 @@ def _write_stdlib_rgba_png(
     fill: tuple[int, int, int, int] = (18, 16, 14, 215),
     *,
     bands: list[tuple[int, int, tuple[int, int, int, int]]] | None = None,
+    text_rendered: bool = True,
 ) -> dict:
     """Write a valid 8-bit RGBA PNG using pure Python stdlib when Pillow is unavailable."""
     w, h = max(2, int(width)), max(2, int(height))
@@ -85,7 +86,10 @@ def _write_stdlib_rgba_png(
         + _chunk(b"IEND", b"")
     )
     out_path.write_bytes(png)
-    return {"path": str(out_path.resolve()), "width": w, "height": h}
+    meta = {"path": str(out_path.resolve()), "width": w, "height": h}
+    if not text_rendered:
+        meta["text_rendered"] = False
+    return meta
 
 
 def _save_downsampled(img2x: Image.Image, out_path: Path, size_1x: tuple[int, int]) -> dict:
@@ -115,16 +119,92 @@ def _draw_header_typography(
     top_y: int,
     max_width: int,
     scale: float,
+    max_bottom_y: int | None = None,
 ) -> None:
     """Render kicker pill + 1-2 line heavy hook headline + optional subhead on a 2x canvas."""
     draw = ImageDraw.Draw(img2x)
-    cursor_y = top_y
     kicker = str(header.get("kicker") or "").strip()
-    if kicker:
-        k_font = load_font("sans_heavy", round(24 * scale * 2))
-        kw, kh = measure_text(draw, kicker, k_font)
-        pad_x, pad_y = round(22 * scale * 2), round(8 * scale * 2)
-        pw, ph = kw + pad_x * 2, kh + pad_y * 2
+    raw_lines = header.get("lines")
+    if not raw_lines:
+        title = str(header.get("title") or "").strip()
+        raw_lines = [ln.strip() for ln in title.split("\n") if ln.strip()]
+    lines = list((raw_lines or ())[:2])
+    subhead = str(header.get("subhead") or "").strip()
+    highlights = list(header.get("highlights") or ())
+    base_size = int(header.get("font_size") or (48 if len(lines) <= 1 else 44))
+    fill_rgba = parse_rgba(header.get("color") or "#FAF6EE")
+    hl_rgba = parse_rgba(header.get("highlight_color") or "#F6CE6E")
+    dense_4 = bool(kicker and len(lines) >= 2 and subhead)
+
+    def _measure_layout(v_scale: float):
+        ks = scale * v_scale
+        k_spec = None
+        total = 0
+        if kicker:
+            k_px = max(20, round((19 if dense_4 else 24) * ks * 2))
+            k_pad_x = max(12, round((18 if dense_4 else 22) * ks * 2))
+            k_pad_y = max(4, round((4 if dense_4 else 8) * ks * 2))
+            k_font = load_font("sans_heavy", k_px)
+            kw, kh = measure_text(draw, kicker, k_font)
+            while kw + k_pad_x * 2 > max_width and k_px > 20:
+                k_px -= 2
+                k_pad_x = max(round(10 * scale * 2), k_pad_x - 2)
+                k_font = load_font("sans_heavy", k_px)
+                kw, kh = measure_text(draw, kicker, k_font)
+            ph = kh + k_pad_y * 2
+            k_gap = round((7 if dense_4 else 16) * ks * 2)
+            k_spec = (k_font, kw, kh, k_pad_x, k_pad_y, min(max_width, kw + k_pad_x * 2), ph, k_gap)
+            total += ph + k_gap
+
+        line_specs = []
+        line_base = (min(base_size, 35) if dense_4 else base_size) * v_scale
+        line_gap = round((6 if dense_4 else 14) * ks * 2)
+        stroke_px = max(2, round(2 * ks * 2))
+        for idx, line in enumerate(lines):
+            f_px = max(24, round(line_base * scale * 2))
+            font = load_font("sans_heavy", f_px)
+            lw, lh = measure_text(draw, line, font, stroke_width=stroke_px)
+            while lw > max_width and f_px > 24:
+                f_px -= 4
+                font = load_font("sans_heavy", f_px)
+                lw, lh = measure_text(draw, line, font, stroke_width=stroke_px)
+            gap = line_gap if (idx < len(lines) - 1 or subhead) else 0
+            line_specs.append((line, font, lw, lh, gap))
+            total += lh + gap
+
+        s_spec = None
+        if subhead:
+            s_lead = round((2 if dense_4 else 4) * ks * 2)
+            s_px = max(20, round((19 if dense_4 else 25) * ks * 2))
+            s_pad_x = max(12, round((18 if dense_4 else 24) * ks * 2))
+            s_pad_y = max(4, round((5 if dense_4 else 9) * ks * 2))
+            s_font = load_font("sans_medium", s_px)
+            sw, sh = measure_text(draw, subhead, s_font)
+            while sw + s_pad_x * 2 > max_width and s_px > 20:
+                s_px -= 2
+                s_pad_x = max(round(10 * scale * 2), s_pad_x - 2)
+                s_font = load_font("sans_medium", s_px)
+                sw, sh = measure_text(draw, subhead, s_font)
+            bh = sh + s_pad_y * 2
+            s_spec = (s_font, sw, sh, s_pad_x, s_pad_y, min(max_width, sw + s_pad_x * 2), bh, s_lead)
+            total += s_lead + bh
+        return total, k_spec, line_specs, s_spec
+
+    v_scale = 1.0
+    total_h, k_spec, line_specs, s_spec = _measure_layout(v_scale)
+    eff_top = top_y
+    if max_bottom_y is not None:
+        min_top = max(6, round(8 * scale * 2))
+        if eff_top + total_h > max_bottom_y:
+            eff_top = max(min_top, min(eff_top, max_bottom_y - total_h))
+        while eff_top + total_h > max_bottom_y and v_scale > 0.54:
+            v_scale = round(v_scale - 0.06, 2)
+            total_h, k_spec, line_specs, s_spec = _measure_layout(v_scale)
+            eff_top = max(min_top, min(top_y, max_bottom_y - total_h))
+
+    cursor_y = eff_top
+    if k_spec is not None:
+        k_font, kw, _kh, _kpx, k_pad_y, pw, ph, k_gap = k_spec
         px = center_x - pw // 2
         draw.rounded_rectangle(
             [px, cursor_y, px + pw, cursor_y + ph],
@@ -134,30 +214,14 @@ def _draw_header_typography(
             width=max(2, round(1.5 * scale * 2)),
         )
         draw.text(
-            (center_x - kw // 2, cursor_y + pad_y - round(2 * scale * 2)),
+            (center_x - kw // 2, cursor_y + k_pad_y - round(2 * scale * v_scale * 2)),
             kicker,
             font=k_font,
             fill=(238, 206, 136, 255),
         )
-        cursor_y += ph + round(16 * scale * 2)
+        cursor_y += ph + k_gap
 
-    raw_lines = header.get("lines")
-    if not raw_lines:
-        title = str(header.get("title") or "").strip()
-        raw_lines = [ln.strip() for ln in title.split("\n") if ln.strip()]
-    highlights = list(header.get("highlights") or ())
-    base_size = int(header.get("font_size") or (48 if len(raw_lines or ()) <= 1 else 44))
-    fill_rgba = parse_rgba(header.get("color") or "#FAF6EE")
-    hl_rgba = parse_rgba(header.get("highlight_color") or "#F6CE6E")
-
-    for line in (raw_lines or ())[:2]:
-        f_px = round(base_size * scale * 2)
-        font = load_font("sans_heavy", f_px)
-        lw, lh = measure_text(draw, line, font, stroke_width=round(2 * scale * 2))
-        while lw > max_width and f_px > 28:
-            f_px -= 4
-            font = load_font("sans_heavy", f_px)
-            lw, lh = measure_text(draw, line, font, stroke_width=round(2 * scale * 2))
+    for line, font, lw, lh, gap in line_specs:
         lx = center_x - lw // 2
         draw_styled_line(
             img2x,
@@ -168,31 +232,27 @@ def _draw_header_typography(
             fill_rgba,
             highlights=highlights,
             highlight_fill=hl_rgba,
-            stroke_width=max(2, round(1.8 * scale * 2)),
+            stroke_width=max(2, round(1.8 * scale * v_scale * 2)),
             stroke_fill=(10, 8, 7, 230),
-            shadow_blur=max(3, round(5 * scale)),
-            shadow_offset=(0, round(5 * scale)),
+            shadow_blur=max(2, round(5 * scale * v_scale)),
+            shadow_offset=(0, round(5 * scale * v_scale)),
             shadow_color=(0, 0, 0, 185),
         )
-        cursor_y += lh + round(14 * scale * 2)
+        cursor_y += lh + gap
 
-    subhead = str(header.get("subhead") or "").strip()
-    if subhead:
-        s_font = load_font("sans_medium", round(25 * scale * 2))
-        sw, sh = measure_text(draw, subhead, s_font)
-        pad_x, pad_y = round(24 * scale * 2), round(9 * scale * 2)
-        bw, bh = min(max_width, sw + pad_x * 2), sh + pad_y * 2
+    if s_spec is not None:
+        s_font, sw, _sh, _spx, s_pad_y, bw, bh, s_lead = s_spec
         bx = center_x - bw // 2
-        cursor_y += round(4 * scale * 2)
+        cursor_y += s_lead
         draw.rounded_rectangle(
             [bx, cursor_y, bx + bw, cursor_y + bh],
-            radius=round(12 * scale * 2),
+            radius=round(12 * scale * v_scale * 2),
             fill=(255, 255, 255, 24),
             outline=(255, 255, 255, 52),
             width=2,
         )
         draw.text(
-            (center_x - sw // 2, cursor_y + pad_y - round(2 * scale * 2)),
+            (center_x - sw // 2, cursor_y + s_pad_y - round(2 * scale * v_scale * 2)),
             subhead,
             font=s_font,
             fill=(232, 228, 220, 242),
@@ -213,9 +273,11 @@ def render_portrait_cinema_frame_plate(
     base_r, base_g, base_b, _ = parse_rgba(theme_color)
     if Image is None:
         band_rgba = (base_r, base_g, base_b, 255)
+        has_text = bool(header and any(str(header.get(k) or "").strip() or header.get("lines") for k in ("kicker", "title", "subhead")))
         return _write_stdlib_rgba_png(
             out_path, w, h, (0, 0, 0, 0),
             bands=[(0, header_h, band_rgba), (h - footer_h, h, band_rgba)],
+            text_rendered=not has_text,
         )
     w2, h2 = w * 2, h * 2
     hh2, fh2 = header_h * 2, footer_h * 2
@@ -263,16 +325,24 @@ def render_portrait_cinema_frame_plate(
 
     if header:
         has_kicker = bool(str(header.get("kicker") or "").strip())
+        has_subhead = bool(str(header.get("subhead") or "").strip())
         lines = header.get("lines") or [
             ln.strip() for ln in str(header.get("title") or "").split("\n") if ln.strip()
         ]
-        top_pad = round((24 if (has_kicker or len(lines) > 1) else 52) * scale * 2)
+        if has_kicker and len(lines) >= 2 and has_subhead:
+            top_pad = round(10 * scale * 2)
+        elif has_kicker or len(lines) > 1 or has_subhead:
+            top_pad = round(24 * scale * 2)
+        else:
+            top_pad = round(52 * scale * 2)
+        hairline_h = max(3, round(2 * scale * 2))
         _draw_header_typography(
             img, header,
             center_x=w2 // 2,
-            top_y=max(round(16 * scale * 2), top_pad),
+            top_y=max(round(8 * scale * 2), top_pad),
             max_width=round(w2 * 0.88),
             scale=scale,
+            max_bottom_y=hh2 - hairline_h - max(4, round(4 * scale * 2)),
         )
     return _save_downsampled(img, out_path, (w, h))
 
@@ -290,9 +360,11 @@ def render_portrait_stage_overlay_plate(
     if Image is None:
         vy, vbot = int(viewport["y"]), int(viewport["y"] + viewport["height"])
         vig = (8, 10, 15, 175 if backdrop_mode == "blurred_frame" else 0)
+        has_text = bool(header and any(str(header.get(k) or "").strip() or header.get("lines") for k in ("kicker", "title", "subhead")))
         return _write_stdlib_rgba_png(
             out_path, w, h, (0, 0, 0, 0),
             bands=[(0, vy, vig), (vbot, h, vig)],
+            text_rendered=not has_text,
         )
     w2, h2 = w * 2, h * 2
     scale = w / 1080.0
@@ -347,6 +419,7 @@ def render_portrait_stage_overlay_plate(
             top_y=top_y,
             max_width=round(w2 * 0.88),
             scale=scale,
+            max_bottom_y=vy2 - line_t - max(6, round(6 * scale * 2)),
         )
     return _save_downsampled(img, out_path, (w, h))
 
@@ -433,7 +506,7 @@ def render_title_mark_plate(out_path: Path, mark: dict, *, scale: float = 1.0) -
         bw, bh = _approx_text_px(badge, round(20 * scale)) if badge else (0, 0)
         w = tw + (bw + round(42 * scale) if badge else 0) + round(68 * scale)
         h = max(th, bh + round(16 * scale)) + round(52 * scale)
-        return _write_stdlib_rgba_png(out_path, w, h, (10, 10, 12, 132))
+        return _write_stdlib_rgba_png(out_path, w, h, (10, 10, 12, 132), text_rendered=False)
     t_font = load_font("calligraphy", round(54 * scale * 2))
     b_font = load_font("sans_heavy", round(20 * scale * 2))
     dummy = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
@@ -491,7 +564,8 @@ def render_card_plate(out_path: Path, card: dict, *, scale: float = 1.0) -> dict
         tw, th = _approx_text_px(top, round(36 * scale))
         sw, sh = _approx_text_px(sub, round(22 * scale))
         return _write_stdlib_rgba_png(
-            out_path, max(tw, sw) + round(92 * scale), th + sh + round(68 * scale), (16, 18, 24, 226)
+            out_path, max(tw, sw) + round(92 * scale), th + sh + round(68 * scale), (16, 18, 24, 226),
+            text_rendered=False,
         )
     dummy = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
     pad = round(16 * scale * 2)
@@ -604,15 +678,18 @@ def render_callout_plate(out_path: Path, callout: dict, *, scale: float = 1.0) -
     text = str(callout.get("text") or "").strip().rstrip("，。！？、；：,.!?;:")
     subtext = str(callout.get("subtext") or "").strip().rstrip("，。！？、；：,.!?;:")
     highlights = list(callout.get("highlights") or ())
+    font_scale = max(0.65, min(1.0, float(callout.get("_font_scale", 1.0))))
+    t_scale = scale * font_scale
     if Image is None:
-        tw, th = _approx_text_px(text, round(38 * scale))
-        sw, sh = _approx_text_px(subtext, round(21 * scale))
+        tw, th = _approx_text_px(text, round(38 * t_scale))
+        sw, sh = _approx_text_px(subtext, round(21 * t_scale))
         return _write_stdlib_rgba_png(
-            out_path, max(tw + round(22 * scale), sw) + round(52 * scale), th + sh + round(52 * scale), (10, 10, 14, 108)
+            out_path, max(tw + round(22 * scale), sw) + round(52 * scale), th + sh + round(52 * scale),
+            (10, 10, 14, 108), text_rendered=False,
         )
 
-    font = load_font(font_role, round((42 if font_role == "calligraphy" else 36) * scale * 2))
-    s_font = load_font("sans_medium", round(21 * scale * 2))
+    font = load_font(font_role, round((42 if font_role == "calligraphy" else 36) * t_scale * 2))
+    s_font = load_font("sans_medium", round(21 * t_scale * 2))
     dummy = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
     tw, th = measure_text(dummy, text, font, stroke_width=4)
     sw, sh_h = measure_text(dummy, subtext, s_font) if subtext else (0, 0)

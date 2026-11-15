@@ -536,3 +536,43 @@ def test_scan_materials_groups_series_orders_episodes_and_strips_debug_tags(tmp_
     assert "第一集" in series["episodes"][0]["synopsis"]
     assert "李阳" in series["characters"]
     assert all(not t.startswith(("scenes:", "asr:")) for e in series["episodes"] for t in e["tags"])
+
+
+def test_restore_material_prunes_stale_asr_evidence_and_preserves_speech_absent_cut(tmp_path):
+    from briefing.timeline import _sentence_entry_anchors_for_brief
+
+    lib = tmp_path / "library"
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    src = tmp_path / "ep.mp4"
+    src.write_bytes(b"video")
+    ident = file_identity(src)
+    (seed / "scenes.json").write_text(json.dumps([{"start_time": 0.0, "end_time": 30.0}]), encoding="utf-8")
+    (seed / "asr_result.json").write_text(
+        json.dumps([{"start": 20.0, "end": 25.0, "text": "片尾才说话。"}]), encoding="utf-8"
+    )
+    (seed / "speech_boundary_anchors.json").write_text(
+        json.dumps({"schema_version": 2, "status": "completed", "sentence_anchors": []}),
+        encoding="utf-8",
+    )
+    meta = materials.save_material(lib, seed, src, ident, SETTINGS)
+
+    dest = tmp_path / "dest"
+    dest.mkdir()
+    (dest / "asr_timing_evidence.json").write_text(
+        json.dumps({"status": "NO_AUDIO_STREAM"}), encoding="utf-8"
+    )
+    restored = materials.restore_material(
+        lib, dest, source_path=src, source_identity=ident, settings=SETTINGS, material_id=meta["material_id"]
+    )
+    assert restored["restored"] is True
+    assert not (dest / "asr_timing_evidence.json").exists()
+
+    validated = {
+        "clips": [{"clip_id": 0, "source_start": 0.0, "source_end": 8.0, "output_start": 0.0, "output_end": 8.0}]
+    }
+    (dest / "edited_source.mp4").write_bytes(b"mp4")
+    (dest / "clip_plan_validated.json").write_text(json.dumps(validated), encoding="utf-8")
+    _sentence_entry_anchors_for_brief(dest, "cut")
+    out = json.loads((dest / "speech_boundary_anchors_output.json").read_text(encoding="utf-8"))
+    assert out.get("speech_absent") is True

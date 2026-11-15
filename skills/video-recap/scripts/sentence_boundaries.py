@@ -114,6 +114,27 @@ def _plan_with_snapped_clips(plan, clips, boundary_key, events):
     return result
 
 
+def _same_clip_source(left, right):
+    return left.get("source_id") == right.get("source_id") and left.get(
+        "source_path"
+    ) == right.get("source_path")
+
+
+def _seamless_internal_seams(clips, tolerance=0.02):
+    """Return (locked_starts, locked_ends) indices of contiguous same-source splits."""
+    locked_starts, locked_ends = set(), set()
+    for i in range(len(clips) - 1):
+        left, right = clips[i], clips[i + 1]
+        if (
+            right.get("clip_id", i + 1) - left.get("clip_id", i) == 1
+            and _same_clip_source(left, right)
+            and abs(float(left["source_end"]) - float(right["source_start"])) <= tolerance
+        ):
+            locked_ends.add(i)
+            locked_starts.add(i + 1)
+    return locked_starts, locked_ends
+
+
 def _candidate_overlaps(clips, idx, new_start, new_end):
     return any(
         new_start < other["source_end"] and new_end > other["source_start"]
@@ -132,6 +153,7 @@ def snap_clip_starts_to_lines(
     *,
     shot_cuts=(),
     flash_sliver_max_seconds=0.0,
+    locked_starts=(),
 ):
     """Snap clip starts to natural quiet boundaries, preferring safe prepend over trim.
 
@@ -158,6 +180,11 @@ def snap_clip_starts_to_lines(
             "original_start": round(original_start, 3),
             "action": "kept",
         }
+
+        if i in locked_starts:
+            event["reason"] = "continuous_source_join"
+            events.append(event)
+            continue
 
         if any(w["start"] <= original_start <= w["end"] for w in silence_periods):
             event["reason"] = "already_quiet"
@@ -247,7 +274,14 @@ def snap_clip_starts_to_lines(
 
 
 def snap_clip_ends_to_lines(
-    plan, silence_periods, video_duration, max_extend, *, pause_pad=0.0, shot_cuts=(),
+    plan,
+    silence_periods,
+    video_duration,
+    max_extend,
+    *,
+    pause_pad=0.0,
+    shot_cuts=(),
+    locked_ends=(),
 ):
     """Extend each clip's source_end forward to the next natural pause, preventing mid-sentence cuts.
 
@@ -275,6 +309,11 @@ def snap_clip_ends_to_lines(
             "original_end": round(source_end, 3),
             "action": "kept",
         }
+
+        if i in locked_ends:
+            event["reason"] = "continuous_source_join"
+            events.append(event)
+            continue
 
         if any(w["start"] <= source_end <= w["end"] for w in silence_periods):
             event["reason"] = "already_quiet"
@@ -308,10 +347,14 @@ def snap_clip_ends_to_lines(
 
         # When overlaps are forbidden, cap against every other clip's source range.
         if not allow_overlap:
+            source_start = clip["source_start"]
             other_starts = [
                 c["source_start"]
                 for j, c in enumerate(clips)
-                if j != i and c["source_start"] > source_end
+                if j != i
+                and _same_clip_source(clip, c)
+                and c["source_end"] > source_start
+                and c["source_start"] >= source_end - 1e-6
             ]
             if other_starts:
                 candidate_end = min(candidate_end, min(other_starts))
@@ -380,7 +423,16 @@ _FRAME_CUT_SCAN_PAD = 0.1
 
 
 def snap_clips_off_shot_changes(
-    plan, video, margin, threshold, min_keep=0.5, found_cuts=None, *, start_lookback=0.0
+    plan,
+    video,
+    margin,
+    threshold,
+    min_keep=0.5,
+    found_cuts=None,
+    *,
+    start_lookback=0.0,
+    locked_starts=(),
+    locked_ends=(),
 ):
     """Nudge each clip's boundaries clear of the ORIGINAL footage's hard cuts to avoid 闪烁.
 
@@ -402,7 +454,7 @@ def snap_clips_off_shot_changes(
     clips = [dict(c) for c in plan["clips"]]
     n_start = n_end = 0
     events = []
-    for clip in clips:
+    for idx, clip in enumerate(clips):
         s = clip["source_start"]
         e = clip["source_end"]
         new_s, new_e = s, e
@@ -415,31 +467,37 @@ def snap_clips_off_shot_changes(
             "end_action": "kept",
         }
         # Opening: a shot-change just AFTER source_start leaves an old-shot sliver before it.
-        seen = _detect_shot_changes(
-            video, max(0.0, s - max(pad, start_lookback)), min(e, s + margin), threshold
-        )
-        found_cuts.update(seen)
-        start_changes = [c for c in seen if c > s + 1e-3]
-        if start_changes:
-            cand = max(start_changes)  # open after the last rapid cut in the window
-            if cand < e - min_keep:
-                new_s = round(cand, 3)
-                event["start_action"] = "moved_forward"
-                event["new_start"] = new_s
-            else:
-                event["start_unsnapped_reason"] = "collapse"
+        if idx in locked_starts:
+            event["start_reason"] = "continuous_source_join"
+        else:
+            seen = _detect_shot_changes(
+                video, max(0.0, s - max(pad, start_lookback)), min(e, s + margin), threshold
+            )
+            found_cuts.update(seen)
+            start_changes = [c for c in seen if c > s + 1e-3]
+            if start_changes:
+                cand = max(start_changes)  # open after the last rapid cut in the window
+                if cand < e - min_keep:
+                    new_s = round(cand, 3)
+                    event["start_action"] = "moved_forward"
+                    event["new_start"] = new_s
+                else:
+                    event["start_unsnapped_reason"] = "collapse"
         # Closing: a shot-change just BEFORE source_end leaves a next-shot sliver after it.
-        seen = _detect_shot_changes(video, max(new_s, e - margin), e + pad, threshold)
-        found_cuts.update(seen)
-        end_changes = [c for c in seen if c < e - 1e-3]
-        if end_changes:
-            cand = min(end_changes)  # close before the first rapid cut in the window
-            if cand > new_s + min_keep:
-                new_e = round(cand, 3)
-                event["end_action"] = "moved_back"
-                event["new_end"] = new_e
-            else:
-                event["end_unsnapped_reason"] = "collapse"
+        if idx in locked_ends:
+            event["end_reason"] = "continuous_source_join"
+        else:
+            seen = _detect_shot_changes(video, max(new_s, e - margin), e + pad, threshold)
+            found_cuts.update(seen)
+            end_changes = [c for c in seen if c < e - 1e-3]
+            if end_changes:
+                cand = min(end_changes)  # close before the first rapid cut in the window
+                if cand > new_s + min_keep:
+                    new_e = round(cand, 3)
+                    event["end_action"] = "moved_back"
+                    event["new_end"] = new_e
+                else:
+                    event["end_unsnapped_reason"] = "collapse"
         n_start += new_s != s
         n_end += new_e != e
         clip["source_start"] = new_s
@@ -547,6 +605,7 @@ def snap_source_clips(
     project-level understanding artifacts (single-source layout). frame_grid is a
     frame_grid.source_frame_grids() entry; None leaves edges off the grid.
     """
+    locked_starts, locked_ends = _seamless_internal_seams(plan["clips"])
     before_shot_snap = [dict(c) for c in plan["clips"]]
     scene_cuts = set()
     if do_scene_snap:
@@ -557,6 +616,8 @@ def snap_source_clips(
             threshold=scene_threshold,
             found_cuts=scene_cuts,
             start_lookback=start_max_prepend if do_line_snap else 0.0,
+            locked_starts=locked_starts,
+            locked_ends=locked_ends,
         )
     boundaries = _combine_boundary_windows(
         _load_silence_for_source(work_dir, source_id, source_work_dir),
@@ -571,6 +632,7 @@ def snap_source_clips(
             max_trim=start_max_trim,
             shot_cuts=scene_cuts,
             flash_sliver_max_seconds=flash_sliver_max_seconds,
+            locked_starts=locked_starts,
         )
         plan = snap_clip_ends_to_lines(
             plan,
@@ -579,6 +641,7 @@ def snap_source_clips(
             line_max_extend,
             pause_pad=end_pause_pad,
             shot_cuts=scene_cuts,
+            locked_ends=locked_ends,
         )
     speech_spans = _load_source_speech_spans(work_dir, source_id, source_work_dir)
     video_start = frame_grid["origin"] if frame_grid is not None else 0.0
@@ -596,8 +659,10 @@ def snap_source_clips(
 
     frame_grid = {**frame_grid, "scene_cuts": sorted(scene_cuts)}
     clips = plan["clips"]
-    joined = [idx > 0 and _continuous_source_join(clips[idx - 1], clip)
-              for idx, clip in enumerate(clips)]
+    joined = [
+        idx > 0 and (idx in locked_starts or _continuous_source_join(clips[idx - 1], clip))
+        for idx, clip in enumerate(clips)
+    ]
     clips, events = snap_edges_to_frames(
         clips, frame_grid, boundaries, classify, duration,
         allow_overlap=plan["allow_overlap"], joined_to_previous=joined,

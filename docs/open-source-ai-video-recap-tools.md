@@ -26,7 +26,7 @@
 
 - **想要点点鼠标就能用的图形界面**：优先看 **NarratoAI**。它社区体量最大，提供开箱即用的 Windows / macOS 整合包，不挑本地显卡，对接的国内配音接口也很全。如果主力用 Windows，还可以对比 **JJYB_AI_VideoAutoCut**（对配音时长与镜头长度的对齐处理很扎实，但注意其许可证禁止未授权商用）与 **解说猫 JSM**（支持导出 Premiere XML，但依赖本地 GPU 且需激活码）。
 - **想尽量在自己电脑上跑免费本地模型**：重点看 **dramaxis** 和 **movie-narrator**。两者都能直接挂本地 Ollama 模型；dramaxis 还能用本地 Whisper 跑字幕提取。movie-narrator 采用“先抓 TMDB 影评资料写稿、再回头找画面配对”的逆向做法，适合公开资料丰富的院线老电影，但需留意其 AGPL-3.0 协议及 Edge-TTS 的非商用限制。
-- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者本质上是商业 SaaS 平台的命令行遥控器，理解、写稿和渲染全在厂商云端黑盒完成，按积分扣费；而 **video-recap-skills** 把剪辑、句界门禁和混音渲染全部留在你本机的 `ffmpeg` 上执行，云端只按量调用小米 MiMo 做转写、看图和配音，并且强制要求每一拍解说都写明对应原片哪一秒的画面或原声证据，从根上管住模型乱编剧情。
+- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者本质上是商业 SaaS 平台的命令行遥控器，理解、写稿和渲染全在厂商云端黑盒完成，按积分扣费；而 **video-recap-skills** 把剪辑、句界门禁和混音渲染全部留在你本机的 `ffmpeg` 上执行，云端只按量调用小米 MiMo 做转写、看图和配音，并且要求每一拍解说都写明对应原片哪一秒的画面或原声证据，减少模型脱离素材编造剧情。
 
 ## 三、动手前务必核对的三笔账
 

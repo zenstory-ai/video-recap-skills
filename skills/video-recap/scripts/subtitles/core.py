@@ -4,6 +4,7 @@ import os
 import re
 from decimal import Decimal
 
+from agent_text import strip_inline_voice_cues
 from lib import CONFIG
 from assemble_constants import (
     SUBTITLE_STYLE_REF_H,
@@ -125,7 +126,9 @@ def _subtitle_style_config(canvas=None):
 
 def _effective_subtitle_style(canvas=None, work_dir=None):
     """Return subtitle style after measured-band fitting and optional studio packaging overrides."""
-    base = _style_for_measured_subtitle_band(_subtitle_style_config(canvas), canvas)
+    base = _style_for_measured_subtitle_band(
+        _subtitle_style_config(canvas), canvas, work_dir=work_dir
+    )
     style = {
         **base,
         "glow": float(CONFIG.get("subtitle_glow", 0.0)),
@@ -180,10 +183,10 @@ def _frame_row(canvas, display_y):
     return round(display_y * frame_h / canvas["height"])
 
 
-def _style_for_measured_subtitle_band(style, canvas):
+def _style_for_measured_subtitle_band(style, canvas, work_dir=None):
     """Fit the ASS baseline and font into explicit auto-rotated display-frame Y coordinates."""
     style = dict(style)
-    safe_area = _measured_subtitle_safe_area(style, canvas)
+    safe_area = _measured_subtitle_safe_area(style, canvas, work_dir=work_dir)
     if safe_area is None:
         return style
     alignment = style["alignment"]
@@ -219,8 +222,13 @@ def _style_for_measured_subtitle_band(style, canvas):
     return style
 
 
-def _measured_subtitle_safe_area(style, canvas):
+def _measured_subtitle_safe_area(style, canvas, work_dir=None):
     """Return the padded measured band in ASS PlayRes coordinates, or None."""
+    if work_dir is not None:
+        from packaging_studio import has_packaging_plan
+
+        if has_packaging_plan(work_dir):
+            return None
     band = _measured_subtitle_band(canvas)
     if band is None:
         return None
@@ -385,7 +393,7 @@ def _subtitle_entries(narration, *, max_chars=None, highlights_by_index=None):
     hl_map = highlights_by_index or {}
     entries = []
     for pos, seg in enumerate(narration):
-        text = seg["spoken_text"]
+        text = strip_inline_voice_cues(seg["spoken_text"]).strip()
         start, end = float(seg["actual_place_start"]), float(seg["actual_place_end"])
         seg_idx = seg.get("index", pos)
         seg_hl = seg.get("highlights") or hl_map.get(seg_idx) or ()

@@ -13,6 +13,7 @@ from agent_text import (
     TTS_UTTERANCE_OVERHEAD_SECONDS,
     _lint_char_budget,
     _scene_available_seconds,
+    _spoken_unit_count,
     _text_char_count,
 )
 from entry_suggestion import (
@@ -117,7 +118,7 @@ def _source_sentence_entry_issue(
 
 
 def _source_sentence_exit_issue(index, end, source_evidence, timeline_duration=None):
-    """Block when a narration run releases original audio mid-sentence with no nearby pause anchor."""
+    """Warn when a narration run releases original audio inside detected speech with no nearby pause anchor."""
     anchors = source_evidence["anchors"]
     if not anchors:
         return None
@@ -140,11 +141,11 @@ def _source_sentence_exit_issue(index, end, source_evidence, timeline_duration=N
     ):
         return None
     return _lint_issue(
-        "error",
+        "warning",
         index,
         "unsafe_source_release",
-        f"旁白结束于 {end:.2f}s，但此处原声仍在句子中途且后续 {SOURCE_HANDOFF_MAX_HOLD_SECONDS:g}s "
-        "内无句末停顿锚点，恢复原声会放出半截残句；请延长/调整旁白覆盖完整原句，或桥接到下一段旁白。",
+        f"旁白结束于 {end:.2f}s，处于检出对白区间内且后续 {SOURCE_HANDOFF_MAX_HOLD_SECONDS:g}s "
+        "内无句末停顿锚点；请确认此处原声尚未开口或已自然收句，避免半句放出。",
         exit_time=round(end, 3),
         max_hold_seconds=SOURCE_HANDOFF_MAX_HOLD_SECONDS,
     )
@@ -445,8 +446,8 @@ def lint_narration(
                     )
                 )
                 continue
-            char_count = _text_char_count(text)
-            if not text or char_count == 0:
+            raw_char_count = _text_char_count(text)
+            if not text or raw_char_count == 0:
                 errors.append(
                     _lint_issue(
                         "error",
@@ -458,6 +459,7 @@ def lint_narration(
                     )
                 )
                 continue
+            char_count = _spoken_unit_count(text) or 1
             budget = _lint_char_budget(start, end)
             play_rate = CONFIG["speech_rate"] * CONFIG["narration_speed"]
             estimated_tts_seconds = char_count / play_rate + TTS_UTTERANCE_OVERHEAD_SECONDS
@@ -547,7 +549,7 @@ def lint_narration(
                     idx, end, source_evidence, timeline_duration=timeline_duration
                 )
                 if exit_issue:
-                    errors.append(exit_issue)
+                    warnings.append(exit_issue)
 
             normalized.append(
                 {"index": idx, "start": start, "end": end, "char_count": char_count}

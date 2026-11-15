@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 from collections.abc import Callable, Mapping, Sequence
 
-from lib import load_json, read_json_object
+from lib import file_identity, load_json, read_json_object
 
 SCHEMA_VERSION = 2
 FINAL_QC_ARTIFACT = "final_qc.json"
@@ -208,7 +208,7 @@ def _probe_contract_findings(probe: Mapping[str, Any]) -> list[dict[str, Any]]:
     if video_stream is None:
         findings.append(_finding(
             "missing_video_stream",
-            "final output probe metadata has no video stream",
+            "最终成片探测元数据中缺少视频流",
             evidence={"streams": probe.get("streams")},
             next_action="rerender_final_output_with_video_stream",
         ))
@@ -217,7 +217,7 @@ def _probe_contract_findings(probe: Mapping[str, Any]) -> list[dict[str, Any]]:
     if problem is not None:
         findings.append(_finding(
             f"{problem}_duration",
-            "final output probe metadata is missing a positive finite duration" if problem == "missing" else "final output probe metadata duration is not positive and finite",
+            "最终成片探测元数据缺少有效的正数时长" if problem == "missing" else "最终成片探测元数据的时长不是有限正数",
             evidence={"duration": raw},
             next_action="rerender_final_output_with_valid_duration",
         ))
@@ -225,7 +225,7 @@ def _probe_contract_findings(probe: Mapping[str, Any]) -> list[dict[str, Any]]:
     if not (video_stream or {}).get("codec_name"):
         findings.append(_finding(
             "missing_codec",
-            "final output probe metadata is missing a video codec",
+            "最终成片探测元数据缺少视频编码格式",
             evidence={"video_stream": video_stream},
             next_action="rerender_final_output_with_video_codec",
         ))
@@ -234,7 +234,7 @@ def _probe_contract_findings(probe: Mapping[str, Any]) -> list[dict[str, Any]]:
     if problem is not None:
         findings.append(_finding(
             f"{problem}_fps",
-            "final output probe metadata is missing a positive finite video fps" if problem == "missing" else "final output probe metadata video fps is not positive and finite",
+            "最终成片探测元数据缺少有效的正数视频帧率" if problem == "missing" else "最终成片探测元数据的视频帧率不是有限正数",
             evidence={"fps": raw, "video_stream": video_stream},
             next_action="rerender_final_output_with_valid_fps",
         ))
@@ -289,6 +289,41 @@ def _render_warnings(work_dir: Path, final_output: Path | None) -> list[dict[str
     return relayed
 
 
+def _is_shot_review_stale(
+    root: Path,
+    selected: Path | None,
+    manifest: Mapping[str, Any],
+    run_mode: Any,
+    shot_review: Mapping[str, Any],
+) -> bool:
+    if run_mode == "full":
+        return True
+    media = shot_review.get("media")
+    if not isinstance(media, Mapping) or "identity" not in media:
+        return False
+    shot_media_id = media.get("identity")
+    if not isinstance(shot_media_id, Mapping):
+        return True
+    candidates: list[Path] = []
+    if selected is not None and selected.is_file():
+        candidates.append(selected)
+    output_path = manifest.get("output_path")
+    if isinstance(output_path, str) and output_path:
+        resolved_out = _resolve_in_work_dir(root, output_path)
+        if resolved_out.is_file():
+            candidates.append(resolved_out)
+    edited_mp4 = root / "edited_source.mp4"
+    if edited_mp4.is_file():
+        candidates.append(edited_mp4)
+    input_video = manifest.get("input_video")
+    if isinstance(input_video, str) and Path(input_video).name == "edited_source.mp4":
+        resolved_in = _resolve_in_work_dir(root, input_video)
+        if resolved_in.is_file():
+            candidates.append(resolved_in)
+    expected = dict(shot_media_id)
+    return not any(expected == file_identity(cand) for cand in candidates)
+
+
 def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
                    probe_fixture: Any = None, probe_runner: ProbeRunner | None = None,
                    decode_runner: Callable[[Path], tuple[bool | None, str | None]] | None = None) -> dict[str, Any]:
@@ -300,21 +335,21 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
     if not final_meta["exists"]:
         findings.append(_finding(
             "missing_final_output",
-            "final output mp4 is missing",
+            "最终成片 MP4 文件不存在",
             evidence={"final_output": final_meta},
             next_action="render_final_output",
         ))
     elif final_meta["bytes"] == 0:
         findings.append(_finding(
             "empty_final_output",
-            "final output mp4 is empty",
+            "最终成片 MP4 文件为空（0 字节）",
             evidence={"final_output": final_meta},
             next_action="rerender_final_output",
         ))
     elif metadata["probe_error"] is not None:
         findings.append(_finding(
             "probe_failed",
-            "ffprobe failed or was unavailable for existing non-empty final output",
+            "ffprobe 无法读取或探测最终成片文件",
             evidence=metadata["probe_error"],
             next_action="inspect_or_rerender_final_output",
         ))
@@ -329,7 +364,7 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
             if decode_ok is False:
                 findings.append(_finding(
                     "undecodable_stream",
-                    "final output tail failed to decode (truncated or corrupt media payload)",
+                    "最终成片尾部解码失败（媒体流可能截断或损坏）",
                     evidence={"decode_error": decode_detail},
                     next_action="rerender_final_output",
                 ))
@@ -345,16 +380,19 @@ def build_final_qc(work_dir: str | Path, final_output: str | Path | None = None,
             if assembly_qc.get("blocking") is True:
                 findings.append(_finding(
                     "assembly_qc_blocking",
-                    "assembly_qc.json recorded blocking delivery issues",
+                    "assembly_qc.json 记录了阻断交付的合成质检问题",
                     evidence={"blocking_codes": assembly_qc.get("blocking_codes", [])},
                     next_action="fix_assembly_qc_blockers_and_rerender",
                 ))
+            run_manifest = read_json_object(root / "recap_run_manifest.json") or {}
+            run_mode = (run_manifest.get("settings") or {}).get("edit_mode") if isinstance(run_manifest.get("settings"), Mapping) else None
             shot_review = read_json_object(root / "shot_review.json") or {}
-            slivers = shot_review.get("flash_slivers")
+            stale_shot_review = _is_shot_review_stale(root, selected, manifest, run_mode, shot_review)
+            slivers = shot_review.get("flash_slivers") if not stale_shot_review else None
             if isinstance(slivers, list) and slivers:
                 findings.append(_finding(
                     "flash_frame_sliver",
-                    "shot_review.json detected flash-frame slivers in rendered cut",
+                    "shot_review.json 在剪辑成片中检测到闪帧碎块",
                     evidence={"flash_slivers": slivers},
                     next_action="adjust_clip_boundaries_and_recut",
                 ))

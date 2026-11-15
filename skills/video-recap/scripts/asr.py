@@ -1,8 +1,12 @@
+import array
 import base64
 import json
+import math
 import os
 import re
+import sys
 import time
+import wave
 from pathlib import Path
 
 from lib import CONFIG
@@ -194,6 +198,87 @@ def _run_asr(wav_path):
     return text
 
 
+# 16-bit PCM peak <= 582 (~ -35 dBFS) is treated as dead silence when trimming window edges.
+_DEAD_SILENCE_PEAK_16BIT = 582
+
+
+def _fixed_asr_windows(total_duration, segment_length):
+    step = max(1, int(segment_length))
+    return [
+        (round(float(start), 2), round(float(min(start + step, total_duration)), 2))
+        for start in range(0, max(1, math.ceil(total_duration)), step)
+    ]
+
+
+def _plan_asr_windows(audio_wav, total_duration, segment_length):
+    """Split long 16-bit mono WAV at local acoustic valleys and trim dead-silence edges.
+
+    Even when BGM/SFX sits at -16..-22 dBFS, inter-sentence pauses create clear 150ms energy
+    valleys, avoiding mid-word cuts at fixed 15s multiples. Falls back to the fixed grid when
+    `audio_wav` is absent or not standard 16-bit mono PCM (e.g. unit-test stubs).
+    """
+    try:
+        with wave.open(str(audio_wav), "rb") as wf:
+            sr = wf.getframerate()
+            if wf.getnchannels() != 1 or wf.getsampwidth() != 2 or sr < 1000:
+                return _fixed_asr_windows(total_duration, segment_length)
+            raw = wf.readframes(wf.getnframes())
+    except (OSError, wave.Error, EOFError):
+        return _fixed_asr_windows(total_duration, segment_length)
+
+    samples = array.array("h")
+    samples.frombytes(raw[: len(raw) - (len(raw) % 2)])
+    if sys.byteorder != "little":
+        samples.byteswap()
+    hop = max(1, sr // 20)  # 50 ms frame
+    hop_sec = hop / sr
+    peaks = [
+        max(-min(samples[idx : idx + hop]), max(samples[idx : idx + hop]))
+        for idx in range(0, len(samples), hop)
+        if samples[idx : idx + hop]
+    ]
+    if len(peaks) < 20:
+        return _fixed_asr_windows(total_duration, segment_length)
+
+    smooth = [
+        (peaks[max(0, i - 1)] + peaks[i] + peaks[min(len(peaks) - 1, i + 1)]) / 3.0
+        for i in range(len(peaks))
+    ]
+    raw_windows = []
+    cur = 0.0
+    target = max(1.0, float(segment_length))
+    while cur < total_duration - 0.05:
+        if total_duration - cur <= target * 1.15:
+            raw_windows.append((round(cur, 2), round(float(total_duration), 2)))
+            break
+        lo_i = max(1, int((cur + target * 0.6) / hop_sec))
+        hi_i = min(len(smooth) - 1, int(min(total_duration - 0.8, cur + target * 1.2) / hop_sec))
+        if hi_i <= lo_i:
+            cut_t = round(min(cur + target, total_duration), 2)
+        else:
+            best_i = min(range(lo_i, hi_i + 1), key=lambda k: smooth[k])
+            cut_t = round(best_i * hop_sec, 2)
+            if cut_t <= cur + 0.5:
+                cut_t = round(min(cur + target, total_duration), 2)
+        raw_windows.append((round(cur, 2), cut_t))
+        cur = cut_t
+
+    trimmed = []
+    for win_s, win_e in raw_windows:
+        i_s = max(0, int(win_s / hop_sec))
+        i_e = min(len(peaks), max(i_s + 1, math.ceil(win_e / hop_sec)))
+        active = [k for k in range(i_s, i_e) if peaks[k] > _DEAD_SILENCE_PEAK_16BIT]
+        if not active:
+            continue
+        pad_s = round(max(win_s, (active[0] - 3) * hop_sec), 2)
+        pad_e = round(min(win_e, (active[-1] + 4) * hop_sec), 2)
+        adj_s = pad_s if pad_s - win_s >= 0.6 else win_s
+        adj_e = pad_e if win_e - pad_e >= 0.6 else win_e
+        if adj_e > adj_s:
+            trimmed.append((adj_s, adj_e))
+    return trimmed or [(0.0, round(float(total_duration), 2))]
+
+
 def _segment_and_transcribe(audio_wav, segments_dir, total_duration, segment_length=None):
     """分段转录长音频"""
     if segment_length is None:
@@ -204,11 +289,11 @@ def _segment_and_transcribe(audio_wav, segments_dir, total_duration, segment_len
     except ValueError:
         throttle = 0.0
     results = []
+    windows = _plan_asr_windows(audio_wav, total_duration, segment_length)
 
-    for i, start in enumerate(range(0, int(total_duration), segment_length)):
+    for i, (start, end) in enumerate(windows):
         if throttle and i:
             time.sleep(throttle)
-        end = min(start + segment_length, total_duration)
         seg_wav = segments_dir / f"seg_{i:03d}.wav"
 
         cmd = ["ffmpeg", "-y", "-i", str(audio_wav),
@@ -226,6 +311,6 @@ def _segment_and_transcribe(audio_wav, segments_dir, total_duration, segment_len
             "end": round(end, 2),
             "text": text,
         })
-        log(f"  段 {i+1}: {start:.0f}s-{end:.0f}s => {len(text)} 字")
+        log(f"  段 {i+1}: {start:.1f}s-{end:.1f}s => {len(text)} 字")
 
     return results

@@ -2,7 +2,7 @@
 
 Status: implemented
 
-后续关联：放宽 [[2026-10-02-video-reference-skill]] 与 [[2026-10-02-reference-cut-detection]] 中 `R6`（`source_facts` 短语重合）与 `R7`（五维强制覆盖）的阻断口径；延续 [[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]] 将残余品味阻断降级为提示；更新 [[2026-11-06-recap-reference-docs-one-home]] 中 `audio-routing.md` 与 `audio-modes.md` 的分拆事实。
+后续关联：放宽 [[2026-10-02-video-reference-skill]] 与 [[2026-10-02-reference-cut-detection]] 中 `R6`（`source_facts` 短语重合）与 `R7`（五维强制覆盖）的阻断口径；延续 [[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]] 将残余品味阻断降级为提示，并恢复 [[2026-10-02-coarse-asr-anchor-honesty]] 在粗粒度 ASR 窗口下的 `bounded_release` 非阻断原声回升；更新 [[2026-11-06-recap-reference-docs-one-home]] 中 `audio-routing.md` 与 `audio-modes.md` 的分拆事实。
 
 ## Problem
 
@@ -24,11 +24,11 @@ Status: implemented
    - `work_dir/packaging_plan.json` 专用于成片画布视觉包装（`video-recap.packaging_plan.v1`，由 `assemble.py` 读取）；`packaging_studio.py` 在校验 `schema` 不匹配或缺少合法 `preset` 时均明确提示外部宣发文案应写入 `promo_copy.json`。
    - 平台标题、封面帧与封面字、开场钩子复核等宣发备忘改名为可选产物 `work_dir/promo_copy.json`（`video-recap.promo_copy.v1`）；重写 `references/promotional-copy.md` 并删去 Remotion 整数帧 / `mtime` / `diff` 旧流程，在 `references/data-schema.md` 与 `references/resource-library.md` 中补齐一致的字段说明。
 2. **收束脚本硬门禁，保留客观底线体检**：
-   - `narration_lint.py` 与 `agent_text.py`：将 `weak_cold_open_silence`、`excessive_dead_air`、`generic_character_label` 从 `errors` 降级为 `warnings`（保留 `cut_output` 的 `over_budget` 为 `warning`，交由配音与合成阶段按实测音频时长与倍速上限裁决）；从 `COMMENTARY_CLICHE_RE` 移除 `这说明|这意味着|这证明了`；在统计有效朗读字数与句末标点前统一剥离方括号舞台提示 `[...]`，拦截纯舞台提示空段（`empty_narration`）；将剩余英文报错提示统一为自然中文，删去不存在的参数免责声明。
+   - `narration_lint.py`、`audio_mix.py` 与 `agent_text.py`：将 `unsafe_source_release`、`weak_cold_open_silence`、`excessive_dead_air`、`generic_character_label` 从 `errors` 降级为 `warnings`，并在 `audio_mix._apply_source_sentence_handoffs` 中对 3s 内无锚点的旁白出点恢复 `bounded_release` 平滑回升（避免 15s 粗窗 ASR 下在角色开口前提前收口让位被误判为半句截断而死锁；保留 `interrupts_source_sentence` 与 `unsafe_entry` 入点抢话硬阻断，保留 `cut_output` 的 `over_budget` 为 `warning` 交由配音与合成阶段按实测音频时长与倍速上限裁决）；从 `COMMENTARY_CLICHE_RE` 移除 `这说明|这意味着|这证明了`；在统计有效朗读字数与句末标点前统一剥离方括号舞台提示 `[...]`，拦截纯舞台提示空段（`empty_narration`）；将剩余英文报错提示统一为自然中文，删去不存在的参数免责声明。
    - `voiceover.py`：`_clean_narration_text` 仅剥离方括号舞台提示 `[...]` 与首尾空白，不再删除圆括号 `（...）` / `(...)` 内容。
    - `reference_check.py`：保留对原片实体名、ASR 转写与背景调研连续 8 汉字 / 5 英文词重合、绝对时间码与本机路径的 `R6` 硬阻断；将与 `source_facts[].statement` 的连续 8 汉字 / 5 英文词重合移入 `warnings`。`R7` 仅在 `methods` 为空时阻断，未覆盖且未在 `skipped_dimensions` 说明的维度改为 `warnings`。
 3. **放宽形式主义软门禁，重写中文动态简报与参考文档**：
-   - 放宽 `CREATE` 必填 2 个竞争假设为按素材歧义度决定（主线明确写 1 个，多角度取舍写 2–3 个）；放宽 `clip_plan.json` 的 7 段竖线 `reason` 为简明自然中文剪辑理由（讲清戏剧作用与入出点依据即可，历史案例快照 `examples/guohuo-60s/` 保持不动）。
+   - 放宽 `CREATE` 必填 2 个竞争假设为按素材歧义度决定（主线明确写 1 个，多角度取舍写 2–3 个）；放宽 `clip_plan.json` 的 7 段竖线 `reason` 为简明自然中文剪辑理由（讲清戏剧作用与入出点依据即可）。
    - 将 `briefing/builder.py`、`briefing/context.py` 与 `briefing/timeline.py` 生成的 `agent_narration_brief.md` 全面中文化：替换抽象套话示例，通过 `understand.py --tts-provider`、`recap_run_manifest.json` 顶层 `tts_provider` 与第二阶段/素材恢复透传，按当前 `tts_provider` 条件化展示 `emotion` 字段（`index-tts` 与 `fish-audio` 示例省略 `emotion`），统一 `hook | setup | turn | escalation | payoff` 枚举，修正多视频模式过时 MVP 提示与 `recap_inspect.py` 命令路径。
    - 合并 `references/audio-modes.md` 与 `references/audio-routing.md` 为一份中文 `references/audio-modes.md` 并删除 `references/audio-routing.md`；将 `references/config-playbook.md` 译为精炼中文参数速查表。
 4. **全仓去黑话、去冗余与事实对齐**：

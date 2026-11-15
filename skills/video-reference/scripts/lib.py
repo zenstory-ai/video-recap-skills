@@ -33,11 +33,27 @@ def _fraction(text):
     return round(value, 3) if value > 0 else None
 
 
+def _stream_rotation(video):
+    tags = video.get("tags") or {}
+    if "rotate" in tags:
+        try:
+            return int(round(float(tags["rotate"]))) % 360
+        except (TypeError, ValueError):
+            pass
+    for side in video.get("side_data_list") or []:
+        if "rotation" in side:
+            try:
+                return int(round(float(side["rotation"]))) % 360
+            except (TypeError, ValueError):
+                pass
+    return 0
+
+
 def ffprobe(video_path):
-    """Duration, canvas, fps and soft-subtitle stream count of a media file."""
+    """Duration, display-oriented canvas, fps and soft-subtitle stream count of a media file."""
     result = run_cmd([
         "ffprobe", "-v", "error", "-show_entries",
-        "format=duration:stream=codec_type,width,height,avg_frame_rate,r_frame_rate",
+        "format=duration:stream=codec_type,width,height,sample_aspect_ratio,avg_frame_rate,r_frame_rate:stream_tags=rotate:stream_side_data=rotation",
         "-of", "json", video_path,
     ])
     if result.returncode != 0:
@@ -47,12 +63,28 @@ def ffprobe(video_path):
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
     if video is None:
         raise RuntimeError(f"没有视频流: {video_path}")
-    duration = float((payload.get("format") or {}).get("duration") or 0.0)
+    try:
+        duration = float((payload.get("format") or {}).get("duration") or 0.0)
+    except (TypeError, ValueError):
+        duration = 0.0
     if duration <= 0:
         raise RuntimeError(f"无法读取时长: {video_path}")
+    width = int(video.get("width") or 0)
+    height = int(video.get("height") or 0)
+    sar = str(video.get("sample_aspect_ratio") or "").replace("/", ":")
+    if ":" in sar:
+        num, _, den = sar.partition(":")
+        try:
+            s_num, s_den = int(num), int(den)
+            if s_num > 0 and s_den > 0 and s_num != s_den:
+                width = int(round(width * s_num / s_den))
+        except ValueError:
+            pass
+    if _stream_rotation(video) in (90, 270):
+        width, height = height, width
     return {
         "duration_s": round(duration, 3),
-        "canvas": {"width": int(video.get("width") or 0), "height": int(video.get("height") or 0)},
+        "canvas": {"width": width, "height": height},
         "fps": _fraction(video.get("avg_frame_rate")) or _fraction(video.get("r_frame_rate")),
         "subtitle_streams": sum(1 for s in streams if s.get("codec_type") == "subtitle"),
         "audio_streams": sum(1 for s in streams if s.get("codec_type") == "audio"),

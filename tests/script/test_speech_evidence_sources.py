@@ -91,3 +91,41 @@ def test_interjection_guard_still_applies_next_to_dialogue_after_blank_rows_are_
         {"start": 30.0, "end": 31.0, "text": ""},
     ]
     assert _dialogue_speech_spans(rows) == [{"start": 0.0, "end": 16.0}]
+
+
+def test_cut_output_speech_absent_allows_action_only_cut_without_false_anchor_block(tmp_path):
+    from briefing.timeline import _sentence_entry_anchors_for_brief
+
+    (tmp_path / "edited_source.mp4").write_bytes(b"edited")
+    _write_json(
+        tmp_path / "clip_plan_validated.json",
+        {
+            "clips": [
+                {
+                    "clip_id": 0,
+                    "source_start": 20.0,
+                    "source_end": 28.0,
+                    "output_start": 0.0,
+                    "output_end": 8.0,
+                    "duration": 8.0,
+                }
+            ],
+            "total_duration": 8.0,
+        },
+    )
+    _write_json(tmp_path / "asr_timing_evidence.json", {"status": "AVAILABLE_COARSE"})
+    _write_json(tmp_path / "asr_result.json", [{"start": 0.0, "end": 10.0, "text": "前半段说话。"}])
+    _write_json(tmp_path / "silence_periods.json", [])
+    _write_json(tmp_path / "speech_boundary_anchors.json", {"schema_version": 2, "sentence_anchors": []})
+
+    _sentence_entry_anchors_for_brief(tmp_path, "cut")
+    out_anchors = json.loads((tmp_path / "speech_boundary_anchors_output.json").read_text(encoding="utf-8"))
+    assert out_anchors.get("speech_absent") is True
+
+    report = lint_narration(
+        [{"start": 1.2, "end": 5.5, "narration": "纯动作追逐镜头没有一句对白。", "overlaps_speech": False}],
+        mode="cut_output",
+        work_dir=tmp_path,
+    )
+    assert report["errors"] == []
+

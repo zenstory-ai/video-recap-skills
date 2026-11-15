@@ -35,8 +35,8 @@ understand.py ─▶ Agent 制定方案并写 clip_plan.json / narration.json �
 `--edit-mode` 与 `--audio-mode` 的合法组合及暂停点定义在 `skills/video-recap/SKILL.md` §1 的总表中，对应 `skills/video-recap/scripts/recap_runner.py` 中的两条执行分支：
 
 - `_run_single` 与 `_run_multi_cut`：分别处理单视频 `full / cut` 与多视频 `cut` 主流程。
-- 两条路径收尾时共用 `_deliver`：（有旁白时执行 TTS 合成与画面花字转换）→ 音画组装 → 成片确定性 QC；所有 `cut` 路径共用 `_render_cut`、`_reject_stale_cut_narration` 与 `_validate_cut_output_narration`。
+- 两条路径收尾时共用 `_deliver`：（有旁白时执行 TTS 配音）→ 音画组装（含可选画布包装与字幕渲染）→ 成片确定性 QC；所有 `cut` 路径共用 `_render_cut`、`_reject_stale_cut_narration` 与 `_validate_cut_output_narration`。
 
 ## 自动化架构守卫
 
-运行 `python3 scripts/test.py orchestrator` 会自动校验以下架构红线：禁止跨技能 `import` 或路径引用、单个 Python 模块不超过 800 行、技能内部 `import` 图无环、`lib.py` 只声明本技能实际读取的配置项，以及剪映导出子包绝不被核心渲染主链反向依赖。
+运行 `python3 scripts/test.py orchestrator` 会自动校验以下架构约束：禁止跨技能 `import` 或路径引用、单个 Python 模块不超过 800 行、技能内部 `import` 图无环、`lib.py` 只声明本技能实际读取的配置项，以及剪映导出子包不被核心渲染主链反向依赖。

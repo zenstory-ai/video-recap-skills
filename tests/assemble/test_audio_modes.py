@@ -156,11 +156,11 @@ def test_source_mix_cli_does_not_read_ambient_tts_meta(tmp_path):
 
     result = subprocess.run(
         [
-            sys.executable, str(SCRIPTS / "assemble.py"), str(source),
+            sys.executable, "-X", "utf8", str(SCRIPTS / "assemble.py"), str(source),
             "--work-dir", str(work), "--output-dir", str(delivery),
             "--audio-mode", "source-mix", "--no-burn-subtitles",
         ],
-        capture_output=True, text=True,
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
 
     assert result.returncode == 0, result.stderr
@@ -199,7 +199,7 @@ def test_isolated_copied_skill_cli_renders_source_mix(tmp_path):
         "runpy.run_path(sys.argv[0],run_name='__main__')"
     )
     command = [
-        sys.executable, "-I", "-c", launcher, copied / "scripts",
+        sys.executable, "-I", "-X", "utf8", "-c", launcher, copied / "scripts",
         copied / "scripts/assemble.py", source, "--work-dir", work,
         "--audio-mode", "source-mix", "--no-burn-subtitles",
         "--output-dir", delivery, "--recap-stem", "copied",
@@ -214,9 +214,9 @@ def test_isolated_copied_skill_cli_renders_source_mix(tmp_path):
 
 def test_removed_stream_flag_fails_at_the_parser(tmp_path):
     result = subprocess.run(
-        [sys.executable, str(SCRIPTS / "assemble.py"), "v.mp4", "--work-dir", str(tmp_path),
+        [sys.executable, "-X", "utf8", str(SCRIPTS / "assemble.py"), "v.mp4", "--work-dir", str(tmp_path),
          "--audio-mode", "source-mix", "--audio-stream-index", "1"],
-        capture_output=True, text=True, encoding="utf-8",
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
     )
     assert result.returncode == 2
     assert "--audio-stream-index" in result.stderr
@@ -238,12 +238,16 @@ def test_source_mix_rerun_in_its_own_work_dir_is_not_rejected(tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     args = [
-        sys.executable, str(SCRIPTS / "assemble.py"), str(source),
+        sys.executable, "-X", "utf8", str(SCRIPTS / "assemble.py"), str(source),
         "--work-dir", str(work), "--audio-mode", "source-mix", "--no-burn-subtitles",
         "--output-dir", str(tmp_path / "delivery"),
     ]
-    assert subprocess.run(args, capture_output=True, text=True).returncode == 0
-    second = subprocess.run(args, capture_output=True, text=True)
+    assert subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    ).returncode == 0
+    second = subprocess.run(
+        args, capture_output=True, text=True, encoding="utf-8", errors="replace"
+    )
     assert second.returncode == 0, second.stderr
 
 

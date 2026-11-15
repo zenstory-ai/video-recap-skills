@@ -121,6 +121,62 @@ def _narration_example_item(provider, *, end=11.2, text, emotion="紧张", inclu
     return json.dumps(item, ensure_ascii=False)
 
 
+_TAIL_CREDITS_MARKERS = ("演职员表", "制作人员", "制作组名单", "片尾字幕", "片尾滚动", "下集预告")
+
+
+def _visual_subtitle_and_credits_callout(
+    scenes_analysis, brief_scenes, video_duration, *, cut_pass2=False
+):
+    """Surface hardcoded-caption and tail-credits signals already observed by VLM."""
+    caption_hits = 0
+    for scene in brief_scenes or []:
+        if not isinstance(scene, dict):
+            continue
+        desc = str(scene.get("description") or "")
+        facts_obj = scene.get("frame_facts")
+        facts_text = (
+            " ".join(
+                str(item)
+                for items in facts_obj.values()
+                if isinstance(items, list)
+                for item in items
+            )
+            if isinstance(facts_obj, dict)
+            else ""
+        )
+        cleaned = (desc + " " + facts_text).replace("片尾字幕", "").replace("滚动字幕", "")
+        if "字幕" in cleaned:
+            caption_hits += 1
+
+    credit_scenes = []
+    if not cut_pass2 and float(video_duration or 0.0) >= 60.0:
+        cutoff = float(video_duration) * 0.55
+        for scene in scenes_analysis or []:
+            if not isinstance(scene, dict) or float(scene.get("start", 0.0)) < cutoff:
+                continue
+            desc = str(scene.get("description") or "")
+            if any(marker in desc for marker in _TAIL_CREDITS_MARKERS):
+                credit_scenes.append(scene)
+
+    bullets = []
+    if caption_hits >= 3:
+        bullets.extend([
+            "- **检测到源片多处画面带有内嵌硬字幕**：",
+            "  - **专有名词校准**：ASR 易把人名、地名或设定词转写成同音字，定稿前请对照下方场景的画面文字 /【帧标签】与 `background_research.json` 核准字形。",
+            "  - **烧录防叠字**：若成片烧录解说字幕，请确认是否开启底部遮罩（`MASK_SOURCE_SUBTITLES=1` 或实测 `--subtitle-y-top/--subtitle-y-bot`）或错开字幕位置；未全片不透明遮罩留白段时无需重复写 `original_subtitles.json`。",
+            "  - **封面避字**：在 `promo_copy.json` 中挑选 `cover.timestamp` 时，优先选无底部硬字幕干扰的干净镜头帧。",
+        ])
+    if len(credit_scenes) >= 3:
+        c_start = min(float(s["start"]) for s in credit_scenes)
+        c_end = max(float(s["end"]) for s in credit_scenes)
+        bullets.append(
+            f"- **检测到片尾演职员表 / 预告区间参考**：源片约 `{c_start:.1f}s–{c_end:.1f}s`（共 {len(credit_scenes)} 个场景），选段剪辑时注意剔除（除非其中含正片关键彩蛋）。"
+        )
+    if not bullets:
+        return []
+    return ["## 源片画面文字与片尾提示", "", *bullets, ""]
+
+
 def _missing_research_callout(research, context_info=""):
     if research or str(context_info or "").strip():
         return []
@@ -166,10 +222,11 @@ def _floor_gates_and_emotion_section(provider="auto"):
         "## 底线校验与质量提示（validate.py / shot_review.py）",
         "",
         "- **硬阻断（不过检不进 TTS / 合成）**：",
-        "  - 句尾与原声交接完整性（`incomplete_sentence` / `interrupts_source_sentence` / `unsafe_source_release`）：旁白须以句末标点收尾；切入与释放原声须对齐句末停顿锚点，避免半句掐断或半句放出。",
+        "  - 句尾与原声切入完整性（`incomplete_sentence` / `interrupts_source_sentence`）：旁白须以句末标点收尾；切入原声对白须对齐句末停顿锚点或静音窗，避免半句掐断。",
         f"  - 残镜闪帧与镜头切词（`flash_frame_sliver` / `shot_speech_conflict`）：单段剪辑最短 ≥ {CONFIG['min_clip_duration']:.1f}s，`shot_review` 会拦截 ≤ {CONFIG['flash_sliver_max_seconds']:.2f}s 的残帧。",
         "  - 定稿字数与占位符（`over_budget` / `placeholder_leakage`）：full 模式下超出窗口硬上限的段落会退回改稿，不静默删字；严禁残留模板占位词。",
         "- **非阻断提示（写入报告供复核）**：",
+        "  - 原声释放复核（`unsafe_source_release`）：旁白收口落在粗粒度/对白区间内且后续 3s 无句末停顿锚点时提醒试听确认，避免在角色半句话中途恢复原声。",
         f"  - 开场与留白节奏（`weak_cold_open_silence` / `excessive_dead_air`）：开场静默 > {CONFIG['max_cold_open_silence_seconds']:.1f}s 或连续 > {CONFIG['max_dead_air_seconds']:.1f}s 无旁白无对白时给出提示；若是有意留给动作或冷开场的呼吸空间可保留。",
         "  - 角色称呼与套话提醒（`generic_character_label` / `editorial_commentary_tone`）：已有角色真名时提醒避免外貌泛称；提醒删掉空泛升华总结腔，结局由画面与原声自然落定即可。",
         "",
@@ -192,6 +249,7 @@ def build_agent_brief(
     style="纪录片",
     *,
     asr_evidence=None,
+    extra_context=None,
 ):
     """Write a compact Chinese brief that guides the agent to author recap artifacts."""
     effective_rate = (
@@ -231,6 +289,12 @@ def build_agent_brief(
     if asr_evidence is None:
         asr_evidence = {"status": "MISSING_OR_STALE"}
 
+    research = load_background_research(work_dir)
+    if extra_context is not None:
+        displayed_context = extra_context.strip() or ("(已并入下方背景调研)" if research else "(无)")
+    else:
+        displayed_context = CONFIG["context_info"] or "(无)"
+
     lines.extend(
         [
             "",
@@ -242,7 +306,7 @@ def build_agent_brief(
             "- ASR 起止时间与安静窗口仅供参考，不能直接当作已验证的对白切点；保留或裁剪原声台词前请直接试听并核对画面。",
             "",
             f"- 段落默认气口: {target_pause_ms}ms",
-            f"- 补充上下文: {CONFIG['context_info'] or '(无)'}",
+            f"- 补充上下文: {displayed_context}",
             "",
             "## 动笔前的创作规划",
             "",
@@ -259,7 +323,6 @@ def build_agent_brief(
     )
 
     lines.extend(_format_moderation_refusals(scenes_analysis))
-    research = load_background_research(work_dir)
     lines.extend(_missing_research_callout(research, CONFIG["context_info"]))
     lines.extend(_format_background_research(research))
 
@@ -274,6 +337,11 @@ def build_agent_brief(
                 work_dir, scenes_analysis, asr_result, silence_periods
             )
         )
+    lines.extend(
+        _visual_subtitle_and_credits_callout(
+            scenes_analysis, brief_scenes, video_duration, cut_pass2=cut_pass2
+        )
+    )
     lines.extend(_format_sentence_entry_anchors_for_brief(work_dir, edit_mode))
 
     sample_text = "林砚刚推开档案室的门，就看见桌上那份三年前的结案报告被人换掉了签名。"
@@ -501,7 +569,7 @@ def write_multi_source_output_brief(
             "",
             "## 输出时间线写作规则",
             "- `narration.json` 只使用 `edited_source.mp4` 的 OUTPUT 时间线。",
-            "- 先为每拍确定 `audio_owner` 与 `narration_job`；7:3 不是配额，只在素材本身难以判断声画主次时作粗略参考。",
+            "- 先为每拍确定 `audio_owner` 与 `narration_job`；旁白与原声比例（如 7:3）不是配额，只在素材本身难以判断声画主次时作粗略参考。",
             "- 对照下方保留片段映射与各片源 `work_dir` 核对人物、台词与前情，只讲背景、筹码与因果潜台词，避免复述画面表象。",
         ]
     )

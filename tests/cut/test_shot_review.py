@@ -139,6 +139,11 @@ def test_bound_plan_only_locates_join_and_internal_clip_not_native_cut(tmp_path)
     assert inside["inside_bound_clip"] == 0
     assert inside["source_time_estimate"] == "12"
     assert inside["origin"] == "UNKNOWN"
+    # [48..50) is 2 frames inside clip 0 (far from join 120) -> advisory, not blocking flash_sliver;
+    # [119..120) and [120..121) are 1-frame slivers right on join 120 -> remain in flash_slivers.
+    assert [(s["start_frame"], s["end_frame"]) for s in report["flash_slivers"]] == [(119, 120), (120, 121)]
+    internal_span = next(s for s in report["short_spans"] if s["start_frame"] == 48)
+    assert internal_span["review_status"] == "SOURCE_INTERNAL_FLASH_ADVISORY"
 
 
 @pytest.mark.parametrize("which", ["media", "plan", "meta"])
@@ -257,3 +262,24 @@ def test_real_ffmpeg_detects_short_runs_inside_one_continuous_file(tmp_path):
     assert [c["frame"] for c in report["candidates"]] == [48, 50, 100, 112, 180, 194]
     assert [s["frame_count"] for s in report["short_spans"]] == [2, 12, 14]
     assert report["scan_complete"] is True
+
+
+def test_associate_plan_uses_exact_frame_count_when_ms_rounding_shifts_join():
+    # 25 / 24 = 1.041666... rounds UP to 1.042, where bisect_left(pts, 1.042) would hit frame 26!
+    pts = [Fraction(i, 24) for i in range(50)]
+    end = Fraction(50, 24)
+    plan = {
+        "clips": [
+            {"clip_id": 0, "source_start": 0.0, "source_end": 1.042, "output_start": 0.0, "output_end": 1.042, "frame_count": 25},
+            {"clip_id": 1, "source_start": 5.0, "source_end": 6.042, "output_start": 1.042, "output_end": 2.083, "frame_count": 25},
+        ]
+    }
+    report = {
+        "candidates": [{"frame": 27, "score": 0.6}],
+        "short_spans": [{"start_frame": 27, "end_frame": 29, "frame_count": 2}],
+        "flash_slivers": [{"start_frame": 27, "end_frame": 29, "frame_count": 2}],
+    }
+    shot_review._associate_plan(report, plan, pts, end)
+    assert report["plan_joins"] == [25]
+    # Frame 27 is 2 frames away from join 25, so it is an internal flash, NOT an edit-join sliver!
+    assert report["flash_slivers"] == []

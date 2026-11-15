@@ -46,7 +46,7 @@
         "clip_plan_validated.json",
         "edited_source.mp4"
       ],
-      "reason": "Reproduction generates a fresh Skill-native validated plan; final picture changes are recorded in picture-conform.json."
+      "reason": "本地复现会基于片源重新生成原生校验后的剪辑清单；终审画面微调记录在 picture-conform.json。"
     },
     {
       "stage": "script_cut_pass_2",
@@ -78,8 +78,7 @@
       "generated_but_not_distributed": [
         "_placed_*.wav",
         "output.mp4",
-        "subtitles.srt",
-        "subtitles.ass"
+        "subtitles.srt"
       ]
     },
     {
@@ -89,7 +88,7 @@
         "captions.json",
         "remotion/"
       ],
-      "note": "Optional transparent overlay after picture and audio lock."
+      "note": "音画母版锁定后叠加的可选 Remotion 透明前景包装层。"
     },
     {
       "stage": "revision_and_delivery",
@@ -100,7 +99,7 @@
         "delivery-qc.json",
         "content-qc.md"
       ],
-      "note": "Project-level change, frozen, verification, conform, and delivery records."
+      "note": "项目级返修修改项、冻结项、验收方式、画面微调与终审交付质检记录。"
     }
   ],
   "reproduction": {

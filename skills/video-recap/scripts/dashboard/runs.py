@@ -9,6 +9,8 @@ from ``recap_inspect.cmd_state``. Media is only what the run declares: the
 """
 from __future__ import annotations
 
+import math
+import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 import recap_inspect
@@ -16,6 +18,12 @@ from dashboard.io import (RUN_FILE, dir_of, media_entry, nearest, raw_text,
                           read_json, read_object, unreadable_reason)
 
 # Files cmd_state parses; each must stay under the JSON cap before it is handed over.
+STATE_MANIFEST_FILES = (
+    RUN_FILE,
+    "assembly_manifest.json",
+    "edited_source.mp4.meta.json",
+    "multi_source_manifest.json",
+)
 QC_FILES = (
     ("final_qc.json", "成片 QC"),
     ("assembly_qc.json", "合成 QC"),
@@ -56,16 +64,30 @@ def _num(value) -> float:
     return float(value)
 
 
-def run_state(rdir: Path):
-    # recap_inspect reads these without limits; vet every JSON it might open first.
-    for path in sorted(rdir.glob("*.json")):
+def _run_state_with_culprit(rdir: Path) -> tuple[dict | None, str | None, str | None]:
+    # recap_inspect only parses these four manifest files; ignore large analysis JSONs.
+    for name in STATE_MANIFEST_FILES:
+        path = rdir / name
+        if not os.path.lexists(path):
+            continue
         reason = unreadable_reason(path)
         if reason:
-            return None, f"{path.name} {reason}"
+            return None, f"{name} {reason}", name
     try:
-        return recap_inspect.cmd_state(rdir), None
+        return recap_inspect.cmd_state(rdir), None, None
     except (OSError, ValueError, KeyError, TypeError, AttributeError) as exc:
-        return None, f"无法解析运行状态: {exc}"
+        culprit = RUN_FILE
+        for name in STATE_MANIFEST_FILES:
+            path = rdir / name
+            if os.path.lexists(path) and read_json(path)[1] is not None:
+                culprit = name
+                break
+        return None, f"无法解析运行状态: {exc}", culprit
+
+
+def run_state(rdir: Path):
+    state, error, _ = _run_state_with_culprit(rdir)
+    return state, error
 
 
 def _audio_mode(rdir: Path) -> str:
@@ -333,20 +355,90 @@ def storyboard_views(root: Path, rdir: Path, state: dict | None) -> list:
     return items
 
 
+def _clean_str(value) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _opt_nonneg_float(value) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    num = float(value)
+    return round(num, 3) if math.isfinite(num) and num >= 0 else None
+
+
+def promo_view(rdir: Path) -> dict:
+    """Normalized promotional copy (`promo_copy.json`), safe for direct UI rendering."""
+    path = rdir / "promo_copy.json"
+    if not os.path.lexists(path):
+        return {"status": "missing"}
+    data, error = read_object(path)
+    if error:
+        return _fallback(path, error)
+    titles: list = []
+    raw_titles = data.get("titles")
+    if isinstance(raw_titles, list):
+        for item in raw_titles:
+            if isinstance(item, str) and item.strip():
+                titles.append(item.strip())
+            elif isinstance(item, dict):
+                text = _clean_str(item.get("text") or item.get("title"))
+                label = _clean_str(item.get("label") or item.get("type") or item.get("platform"))
+                if text:
+                    titles.append({"label": label, "text": text} if label else text)
+    elif isinstance(raw_titles, str) and raw_titles.strip():
+        titles.append(raw_titles.strip())
+
+    raw_cover = data.get("cover")
+    cover = None
+    if isinstance(raw_cover, str) and raw_cover.strip():
+        cover = {"timestamp": None, "frame_reason": "", "top_line": "", "bottom_line": "", "text": raw_cover.strip()}
+    elif isinstance(raw_cover, dict):
+        ts = _opt_nonneg_float(raw_cover.get("timestamp"))
+        frame_reason = _clean_str(raw_cover.get("frame_reason"))
+        top_line = _clean_str(raw_cover.get("top_line"))
+        bottom_line = _clean_str(raw_cover.get("bottom_line"))
+        text = _clean_str(raw_cover.get("text") or raw_cover.get("title"))
+        if any((ts is not None, frame_reason, top_line, bottom_line, text)):
+            cover = {
+                "timestamp": ts,
+                "frame_reason": frame_reason,
+                "top_line": top_line,
+                "bottom_line": bottom_line,
+                "text": text,
+            }
+
+    raw_tags = data.get("tags")
+    tags = [s for item in raw_tags if isinstance(item, str) and (s := item.strip())] if isinstance(raw_tags, list) else []
+    return {
+        "status": "ok",
+        "core_angle": _clean_str(data.get("core_angle")),
+        "payoff_timestamp": _opt_nonneg_float(data.get("payoff_timestamp")),
+        "titles": titles,
+        "cover": cover,
+        "description": _clean_str(data.get("description") or data.get("summary")),
+        "tags": tags,
+    }
+
+
 # --- runs --------------------------------------------------------------------------------
 def run_views(root: Path, rel: str, runs: set) -> dict:
     """Everything the dashboard shows about one run; each view degrades on its own."""
     rdir = dir_of(root, rel)
     parent = nearest(rel, runs)
-    state, state_error = run_state(rdir)
+    state, state_error, state_bad_file = _run_state_with_culprit(rdir)
     mode = (state or {}).get("mode") or ("cut" if (rdir / "clip_plan.json").is_file() else "full")
     audio_mode = _audio_mode(rdir)
     qc = qc_cards(rdir)
     edited = rdir / "edited_source.mp4"
+    promo = promo_view(rdir)
     views = {
         "cut": {**cut_view(rdir), "video": media_entry(root, edited) if mode == "cut" else None},
         "narration": narration_view(rdir),
-        "film": {"video": final_video(root, rdir), "timeline": timeline_view(rdir)},
+        "film": {
+            "video": final_video(root, rdir),
+            "timeline": timeline_view(rdir),
+            "promo_copy": promo if promo["status"] == "ok" else None,
+        },
         "resources": lock_view(rdir),
     }
     tl = views["film"]["timeline"]
@@ -358,10 +450,11 @@ def run_views(root: Path, rel: str, runs: set) -> dict:
     unparseable += [name for name, view in (("clip_plan_validated.json", views["cut"]),
                                             ("narration.json", views["narration"]),
                                             ("timeline.json", views["film"]["timeline"]),
+                                            ("promo_copy.json", promo),
                                             ("resource_lock.json", views["resources"]))
                     if view["status"] == "unparseable"]
-    if state_error:
-        unparseable.insert(0, RUN_FILE)
+    if state_bad_file and state_bad_file not in unparseable:
+        unparseable.insert(0, state_bad_file)
     return {
         "path": rel, "name": rdir.name or root.name, "title": _display_title(root, rel),
         "work_dir": str(rdir), "parent": parent,

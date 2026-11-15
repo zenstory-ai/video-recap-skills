@@ -350,14 +350,14 @@ def main(argv=None):
     parser.add_argument("--frames", type=int, default=50)
     parser.add_argument("--start-sec", type=float, default=10.0)
     parser.add_argument("--accept-detected", action="store_true",
-                        help="non-interactive: accept median detected coordinates")
+                        help="非交互模式：直接采用检测到的中位坐标")
     args = parser.parse_args(argv)
 
     video = Path(args.video).expanduser().resolve()
     if not video.is_file():
         parser.error(f"视频不存在: {video}")
     if args.frames <= 0:
-        parser.error("--frames must be positive")
+        parser.error("--frames 必须为正整数")
     _storage_width, _storage_height, duration, sar, rotation = _probe_video(video)
     sar_ratio = _sample_aspect_ratio(sar)
     if sar_ratio is None or abs(sar_ratio - 1.0) > SUBTITLE_BAND_SAR_TOLERANCE + 1e-9:
@@ -415,7 +415,7 @@ def main(argv=None):
         else:
             print("请查看红框预览；直接回车接受建议值。")
             y_top = _prompt_coordinate("字幕上沿 y_top", suggested_top)
-            y_bot = _prompt_coordinate("字幕下沿 y_bot（exclusive）", suggested_bot)
+            y_bot = _prompt_coordinate("字幕下沿 y_bot（半开区间上界，不含该行）", suggested_bot)
         if not 0 <= y_top < y_bot <= height:
             raise SystemExit(f"坐标无效，必须满足 0 <= top < bot <= {height}")
 

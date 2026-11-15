@@ -25,6 +25,18 @@ def _entries_for_style(narration, work_dir, video_duration, style):
     )
 
 
+def burned_subtitle_spans(narration, work_dir, video_duration, canvas=None):
+    """Return [(start, end), ...] of subtitles actually burned onto the video frame."""
+    if not CONFIG["burn_subtitles"]:
+        return []
+    style = _effective_subtitle_style(canvas, work_dir) if canvas is not None else None
+    return [
+        (float(entry["start"]), float(entry["end"]))
+        for entry in _entries_for_style(narration, work_dir, video_duration, style)
+        if float(entry["end"]) > float(entry["start"])
+    ]
+
+
 def _generate_srt(narration, work_dir, video_duration, canvas=None):
     """将解说脚本转为 SRT 字幕文件，使用实际音频放置时间；原声留白处补烧原声字幕。"""
     if canvas is None and has_packaging_plan(work_dir):

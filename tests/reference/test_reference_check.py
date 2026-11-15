@@ -417,3 +417,45 @@ def test_export_succeeds_with_partial_dimensions_and_source_fact_overlap_and_pas
     blocked_out = tmp_path / "blocked" / "production_reference.json"
     assert reference.main(["export", "--work-dir", str(work_dir(breakdown)), "--out", str(blocked_out)]) != 0
     assert not blocked_out.exists()
+
+
+def test_export_rescan_ascii_word_boundary_and_aspect_ratio_exemption():
+    corpus = leak_corpus(
+        [{"statement": "x", "entities": ["Ed", "Al", "Story", "Plan", "Clip", "Share", "Blocks"]}],
+        [],
+        None,
+        None,
+    )
+    clean_export = {
+        "schema": "video-reference.production.v1",
+        "methods": [
+            {
+                "dimension": "pacing",
+                "rule": "适配 9:16 竖屏与 16:9 横屏画布",
+                "applies_to": ["story_plan", "clip_plan"],
+                "targets": {
+                    "narr": {
+                        "value": {
+                            "seconds": 12.0,
+                            "share": 0.4,
+                            "blocks": 3,
+                            "block_median_s": 4.0,
+                            "mean_short_term_lufs": -16.2,
+                        },
+                        "provenance": "labeled",
+                    }
+                },
+            }
+        ],
+        "measurements": {"cuts": {"source": "measured", "status": "labeled"}},
+    }
+    assert export_errors(clean_export, corpus) == []
+    assert leak_errors("适配 9:16 竖屏与 16:9 横屏画布", "m1.rule", corpus) == []
+
+    leaked_export = {
+        "schema": "video-reference.production.v1",
+        "methods": [{"dimension": "pacing", "rule": "cut fast like Ed did in the opener"}],
+    }
+    errs = export_errors(leaked_export, corpus)
+    assert any("Ed" in e for e in errs)
+

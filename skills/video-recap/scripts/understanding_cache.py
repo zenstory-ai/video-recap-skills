@@ -97,7 +97,7 @@ def _scene_cache_payload(video_path):
 
 def _asr_cache_payload(video_path, *, skip_asr=False):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "stage": "asr",
         "inputs": {"video": _video_input(video_path)},
         "settings": {

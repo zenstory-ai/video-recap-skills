@@ -10,7 +10,7 @@ from assemble_constants import (
 )
 from audio_automation import coalesce_duck_windows
 from audio_mix import _seg_place_window
-from lib import CONFIG
+from lib import CONFIG, escape_ffmpeg_filter_path
 from source_subtitles import (
     _combined_subtitle_entries,
     _source_subtitle_mask,
@@ -121,10 +121,10 @@ def _subtitle_delivery_warnings(mask, *, has_subtitles):
         "delivered": "sidecar_srt",
         "mask_dropped": mask["trigger"] == "burn_subtitles_degraded",
         "message": (
-            "ffmpeg lacks the libass subtitles filter: subtitles are not burned into the "
-            "video and ship as a .srt sidecar next to it"
+            "当前 ffmpeg 缺少 libass/subtitles 滤镜：字幕未烧录进画面，"
+            "已改为在成片旁输出同名 .srt 外挂字幕"
         ),
-        "next_action": "install an ffmpeg build with libass and rerun to burn, or deliver the .srt sidecar",
+        "next_action": "如需烧录硬字幕，请安装带 libass 的 ffmpeg 后重跑，或直接随成片交付外挂 .srt 字幕",
     }]
 
 
@@ -147,7 +147,13 @@ def _build_visual_qc(
             bridge_gap_seconds=float(style.get("bridge_gap_seconds", 0.0)),
         )
     subtitle_layout = _subtitle_layout_qc(
-        entries, style, safe_area=_measured_subtitle_safe_area(style, canvas)
+        entries,
+        style,
+        safe_area=(
+            None
+            if packaging_qc is not None
+            else _measured_subtitle_safe_area(style, canvas, work_dir=work_dir)
+        ),
     )
     mask = _source_subtitle_mask()
     mask.update({
@@ -159,6 +165,8 @@ def _build_visual_qc(
         "subtitle_y_bot": CONFIG["subtitle_y_bot"],
     })
     warnings = _subtitle_delivery_warnings(mask, has_subtitles=bool(entries))
+    if packaging_qc and packaging_qc.get("warnings"):
+        warnings.extend(packaging_qc["warnings"])
     blocking_codes = []
     if subtitle_layout["overflow"]:
         blocking_codes.append("subtitle_overflow")
@@ -180,7 +188,7 @@ def _build_visual_qc(
     }
     if packaging_qc is not None:
         geometry["packaging"] = {
-            k: v for k, v in packaging_qc.items() if k != "blocking_codes"
+            k: v for k, v in packaging_qc.items() if k not in {"blocking_codes", "warnings"}
         }
     return {
         "schema_version": 1,
@@ -203,17 +211,7 @@ def _write_visual_qc(work_dir, qc):
 
 def _escape_subtitle_filter_path(path):
     """Escape a path for ffmpeg subtitle/ass video filter arguments."""
-    text = str(path).replace("\\", "/")
-    for raw, escaped in (
-        ("\\", "\\\\"),
-        (":", "\\:"),
-        ("'", "\\'"),
-        (",", "\\,"),
-        ("[", "\\["),
-        ("]", "\\]"),
-    ):
-        text = text.replace(raw, escaped)
-    return text
+    return escape_ffmpeg_filter_path(path)
 
 
 def _subtitle_burn_filter(subtitle_path, font_file=None):

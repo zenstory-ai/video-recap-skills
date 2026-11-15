@@ -454,8 +454,9 @@ def build_edited_storyboard(
         if not tiles:
             log("storyboard 跳过 edited：未解析到任何帧")
             return None
-        if len(tiles) > max_tiles:
-            tiles = tiles[:max_tiles]
+        if max_tiles and len(tiles) > max_tiles:
+            step = len(tiles) / float(max_tiles)
+            tiles = [dict(tiles[int(i * step)], tile_id=i) for i in range(max_tiles)]
 
         pages, labels_burned = _render_storyboard(work_dir, tiles, "edited_storyboard")
         if not pages:

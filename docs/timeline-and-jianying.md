@@ -54,10 +54,12 @@ times are seconds and volumes are gains, so this file has no 剪映-only units.
 - **subtitle** — display-ready narration subtitles.
 - **image** — optional local photo overlays. The optional `scale` / `position`
   transform uses normalized canvas-center coordinates with positive Y upward. `build_timeline(...,
-  image_segments=[...])` is the programmatic entrypoint. Static packaging layers
-  declared in `work_dir/packaging_layers.json` (for example from a bound
-  `packaging` template) become full-length image segments whose position and
-  scale match the ffmpeg render; recap does not invent any other image overlays.
+  image_segments=[...])` is the programmatic entrypoint. Studio packaging plates
+  compiled from `work_dir/packaging_plan.json` (headers, timed cards, callouts,
+  caption bands) and static layers declared in `work_dir/packaging_layers.json`
+  (for example from a bound `packaging` template) become timed or full-length
+  image segments whose position and scale match the ffmpeg render; recap does
+  not invent any other image overlays.
 - `volume_keyframes` are timeline-absolute `{t, gain}` points with linear ramps.
   Original-audio handoff keyframes stay low through the final source phoneme
   (`source_duck_end`) and release only inside the measured sentence pause, reaching

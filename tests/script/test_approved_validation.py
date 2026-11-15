@@ -355,6 +355,8 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
     result = subprocess.run(
         [
             sys.executable,
+            "-X",
+            "utf8",
             str(Path(narration_validate.__file__)),
             "--work-dir",
             str(tmp_path),
@@ -364,6 +366,7 @@ def test_strict_shape_cli_replaces_stale_pass_lint_with_current_failure(tmp_path
         capture_output=True,
         text=True,
         encoding="utf-8",
+        errors="replace",
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},
         check=False,
     )
@@ -505,13 +508,13 @@ def test_cut_output_cli_duration_failure_updates_lint(tmp_path, duration):
     )
     report_path = tmp_path / "narration_lint.json"
     report_path.write_text(json.dumps({"ok": True, "stale": True}), encoding="utf-8")
-    command = [sys.executable, str(Path(narration_validate.__file__)),
+    command = [sys.executable, "-X", "utf8", str(Path(narration_validate.__file__)),
                "--work-dir", str(tmp_path), "--mode", "cut_output"]
     if duration is not None:
         command.extend(["--output-duration", duration])
 
     result = subprocess.run(
-        command, capture_output=True, text=True, encoding="utf-8", check=False,
+        command, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False,
         env={**os.environ, "PYTHONIOENCODING": "utf-8"},  # messages carry "段 N"; Windows pipes default to cp1252
     )
 

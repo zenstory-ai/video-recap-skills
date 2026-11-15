@@ -342,9 +342,11 @@ print(json.dumps(names))
 """
 
     result = subprocess.run(
-        [sys.executable, "-I", "-c", code],
+        [sys.executable, "-I", "-X", "utf8", "-c", code],
         cwd=scripts_dir,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

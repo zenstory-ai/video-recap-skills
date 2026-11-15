@@ -48,7 +48,7 @@ export MIMO_API_KEY=***
 
 同一个 `MIMO_API_KEY` 即可驱动默认全链路。涉及远程网络请求的环节如下：
 
-- **视频理解（`understand.py`）**：将切分后的音频窗口发往 MiMo ASR（`mimo-v2.5-asr`），将抽帧 JPEG 连同 `background_research.json` 摘要发往 MiMo VLM（`mimo-v2.5`）。若工作目录已有完整分析产物，传 `--brief-only` 或 `--edited-storyboard-only` 则纯本地运行、不发起网络请求。
+- **视频理解（`understand.py`）**：将切分后的音频窗口发往 MiMo ASR（`mimo-v2.5-asr`），将抽帧 JPEG 连同 `background_research.json` 摘要发往 MiMo VLM（默认 `mimo-v2.6-flash`，可通过 `MIMO_MODEL` 切换 `mimo-v2.6-pro` 等）。若工作目录已有完整分析产物，传 `--brief-only` 或 `--edited-storyboard-only` 则纯本地运行、不发起网络请求。
 - **旁白配音（`voiceover.py`）**：按 `--tts-provider`（默认 `auto` 优先选已配置的 MiMo，其次 Fish Audio，不自动选 `index-tts`）将解说文本发往对应 TTS 服务：
   - `mimo-tts`：发往 MiMo TTS（`mimo-v2.5-tts`）；若显式传了 `--voice-ref <audio>`，还会将该参考音频切片发往 `mimo-v2.5-tts-voiceclone`（使用前请确认已获声音授权）。
   - `fish-audio`：需配置 `FISH_API_KEY`，将每段解说文本与 `FISH_TTS_REFERENCE_ID` 发往 `FISH_TTS_API_URL`（默认 `https://api.fish.audio/v1/tts`）。
@@ -125,18 +125,18 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 **编排 `cut` 模式下，`narration.json` 直接填写剪后成片的 OUTPUT 时间戳（`0 .. 成片总时长`）**（单独调校验器传 `validate.py --mode cut_output`）。核心写作要求（细则与正反例见 `references/creative-editing-playbook.md`）：
 
 - **背景、筹码与点名节奏**：讲清前情关系、动机筹码与动作后果，不复述画面表象；60 秒内短片点名 1–2 个核心人物即可（次要角色用身份关系称呼），3–10 分钟中长解说随节拍推进自然引入关键人物。
-- **“垫半句、让半句、接半句”与原声边界**：原声重头台词或关键动作声前提前收口让位，尾音落定后再接半句点破后果；压低原声切入（`overlaps_speech: true`）须对齐句末锚点或静音窗（违者报 `interrupts_source_sentence`），释放原声同样不能落在角色半句话中途（违者报 `unsafe_source_release` / `unsafe_source_handoff`）。
+- **“垫半句、让半句、接半句”与原声边界**：原声重头台词或关键动作声前提前收口让位，尾音落定后再接半句点破后果；压低原声切入（`overlaps_speech: true`）须对齐句末锚点或静音窗（违者报 `interrupts_source_sentence` / `unsafe_source_handoff`），释放原声同样避免落在角色半句话中途（对白区间内后续 3s 无锚点时给出 `unsafe_source_release` 复核提示，合成端做 `bounded_release` 平滑回升）。
 - **字数预算、完整收句与去套话**：每段以完整句末标点收尾（残句报 `incomplete_sentence`），靠精炼字数匹配窗口（`full` 模式超预算 1.25 倍报 `over_budget`，不静默删字）。写连贯自然的口语长短句，不写阅读理解式升华套话；结局交给画面与原声演完，兑现后不再补总结旁白。
-- **配乐与原声留白字幕**：外部配乐（`BGM_PATH`）只用纯器乐，原片已有高音量人声插曲时不叠外部配乐。开启原片字幕遮罩且保留了原声对白时，可在 `work_dir/original_subtitles.json` 按成片时间写入校对后的原声字幕。
+- **配乐与原声留白字幕**：外部配乐（`BGM_PATH`）只用纯器乐，原片已有高音量人声插曲时不叠外部配乐。传入 `--subtitle-y-top`/`--subtitle-y-bot` 默认仅在旁白区间开启 `1.0` 不透明像素带遮罩（留白段继续露出原片自带硬字幕）；若原片无硬字幕，或额外设置 `SOURCE_SUBTITLE_MASK_TIMING=all`（或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）开启全片不透明遮罩并保留了原声对白，可在 `work_dir/original_subtitles.json` 按成片时间写入校对后的原声字幕（若留白段原片硬字幕仍可见，合成器会自动跳过以免叠字）。
 - **平台宣发备忘与画布包装分开落盘**：故事定稿后如需输出平台标题、封面帧与简介方案，按 `references/promotional-copy.md` 写入 `work_dir/promo_copy.json`；成片画布视觉包装按 `references/packaging.md` 写入 `work_dir/packaging_plan.json`。
 
 ### 4.4 配音合成与音画混音渲染
 
 写好 `narration.json` 后重跑同一条 `recap.py` 命令：
 
-1. **本地确定性校验（`validate.py`）**：输出 `narration_lint.json`。对时间重叠/越界、残句、抢断原话、半句释放原声、`full` 模式超预算与模板占位符泄漏做硬阻断（`errors`）；对开场留白偏长（`weak_cold_open_silence`）、长段无声留白（`excessive_dead_air`）、外貌泛称（`generic_character_label`）与评论套话（`editorial_commentary_tone`）给出非阻断提示（`warnings`）。
+1. **本地确定性校验（`validate.py`）**：输出 `narration_lint.json`。对时间重叠/越界、残句、抢断原话、`full` 模式超预算与模板占位符泄漏做硬阻断（`errors`）；对原声释放点无邻近锚点（`unsafe_source_release`）、开场留白偏长（`weak_cold_open_silence`）、长段无声留白（`excessive_dead_air`）、外貌泛称（`generic_character_label`）与评论套话（`editorial_commentary_tone`）给出非阻断提示（`warnings`）。
 2. **TTS 配音（`voiceover.py`）**：逐段合成语音写入 `tts_segments/` 与 `tts_meta.json`，缓存按文本、音色、模型与参考音频指纹命中；若实测语速低于下限（`TTS_MIN_SPEECH_RATE`，即合成音频异常拖长）疑似异常合成，会自动重试并将异常音频另存为 `*.rejected.wav`。
-3. **音画合成（`assemble.py`）**：将画面、逐段旁白、动态闪避与句末回升后的原声、可选 BGM、可选音效、画布包装（`work_dir/packaging_plan.json` 或 `packaging_layers.json`，见 `references/packaging.md`）与片尾音频淡出合成为最终 MP4，并输出 `timeline.json`（传 `--export-jianying` 可同步导出剪映草稿）。若旁白在微加速上限内仍装不进可用时间窗，直接报 `no_safe_fit` 阻断，不截断尾音。声音模式与路由规则见 `references/audio-modes.md`。
+3. **音画合成（`assemble.py`）**：将画面、逐段旁白、动态闪避与句末回升后的原声、可选 BGM、可选音效（`work_dir/sfx_plan.json` 或 `packaging_plan.json.sfx`）、画布包装（`work_dir/packaging_plan.json` 或 `packaging_layers.json`，见 `references/packaging.md`）与片尾音频淡出合成为最终 MP4，自动抽帧导出 `work_dir/cover.jpg`（若 `promo_copy.json` 指定了封面秒数则优先采用），并输出 `timeline.json`（传 `--export-jianying` 可将视频、旁白、BGM、字幕与包装图片导出为剪映草稿）。若旁白在微加速上限内仍装不进可用时间窗，直接报 `no_safe_fit` 阻断，不截断尾音。声音模式与路由规则见 `references/audio-modes.md`。
 
 ### 4.5 多视频连剪与资源库
 

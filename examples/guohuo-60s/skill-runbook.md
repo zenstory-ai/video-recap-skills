@@ -17,7 +17,7 @@ Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级 conform 里
 生成的 source_id 与公开 example 不同时，根据 assets.json 的 episode 映射重写工作副本中的 source_id，
 不要改原片时间码。三段原声窗口保持 1.0x，旁白先写连续思路，字幕再按实际 placed audio 拆 cue。
 
-音画锁定后，再按“字幕与可选包装”流程使用 examples/guohuo-60s/remotion 做项目级透明包装；
+音画锁定后，再参照画布包装规范（references/packaging.md）使用 examples/guohuo-60s/remotion 做项目级透明包装；
 字体不可用时选同类 fallback 并抽检，不把特定字体写成核心依赖。
 
 最后进入 REVISION：读取 revision-log.json、edit-map.json 和 picture-conform.json。

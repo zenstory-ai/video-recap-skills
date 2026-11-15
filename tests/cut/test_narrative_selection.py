@@ -130,7 +130,10 @@ def test_realpath_matching_accepts_an_absolute_symlink(tmp_path):
     source = tmp_path / "episode.mp4"
     source.touch()
     alias = tmp_path / "alias.mp4"
-    alias.symlink_to(source)
+    try:
+        alias.symlink_to(source)
+    except (OSError, NotImplementedError) as exc:
+        pytest.skip(f"symlinks unavailable: {exc}")
     report = check_required_evidence(
         {"nodes": [_node(alias, track="video")], "before": []},
         {"clips": [_clip(10.0, 12.0, 0.0)]},

@@ -15,7 +15,9 @@ import pytest
 ROOT = Path(__file__).resolve().parents[2]
 LIBS = {
     "recap": ROOT / "skills/video-recap/scripts/lib.py",
+    "reference": ROOT / "skills/video-reference/scripts/lib.py",
 }
+ENV_READERS = {"env_bool", "_env_bool", "env_int", "env_float", "env_str"}
 
 # Knobs that shape the rendered audio. A skill is held to these only if it declares them,
 # i.e. only if its own code reads them — see test_audio_policy_keys_are_declared_where_read.
@@ -91,9 +93,69 @@ def _readable_source(path, *, include_lib=True):
     return "\n".join(parts)
 
 
+def _uses_env_reader(node: ast.AST) -> bool:
+    for child in ast.walk(node):
+        if isinstance(child, ast.Call):
+            func = child.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
+            if name in ENV_READERS or name == "getenv":
+                return True
+            if (
+                isinstance(func, ast.Attribute)
+                and name == "get"
+                and (
+                    (isinstance(func.value, ast.Name) and func.value.id == "environ")
+                    or (isinstance(func.value, ast.Attribute) and func.value.attr == "environ")
+                )
+            ):
+                return True
+        elif (
+            isinstance(child, ast.Subscript)
+            and isinstance(child.value, ast.Attribute)
+            and child.value.attr == "environ"
+        ):
+            return True
+    return False
+
+
+def _unread_env_declarations(path: Path) -> list[str]:
+    """Module-level env-backed assignments in lib.py that nothing in the skill ever loads."""
+    lib_tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    declared = {}
+    for stmt in lib_tree.body:
+        if isinstance(stmt, ast.Assign) and _uses_env_reader(stmt.value):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name) and target.id != "CONFIG":
+                    declared[target.id] = stmt
+
+    if not declared:
+        return []
+
+    loaded = set()
+    for stmt in lib_tree.body:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                if declared.get(node.id) is not stmt:
+                    loaded.add(node.id)
+    for other in sorted(path.parent.rglob("*.py")):
+        if other == path or "__pycache__" in other.parts:
+            continue
+        other_tree = ast.parse(other.read_text(encoding="utf-8"), filename=str(other))
+        for node in ast.walk(other_tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                loaded.add(node.id)
+
+    return sorted(name for name in declared if name not in loaded)
+
+
+def test_every_skill_lib_is_registered():
+    discovered = set((ROOT / "skills").glob("*/scripts/lib.py"))
+    assert set(LIBS.values()) == discovered
+
+
 @pytest.mark.parametrize("key", TEMPO_KEYS + MIX_KEYS)
 def test_audio_policy_value_agrees_across_every_skill_that_declares_it(libs, key):
-    declarers = {name: lib for name, lib in libs.items() if key in lib.CONFIG}
+    declarers = {name: lib for name, lib in libs.items() if key in getattr(lib, "CONFIG", {})}
     assert declarers, f"no skill declares {key!r} any more; drop it from this contract"
     values = {name: lib.CONFIG[key] for name, lib in declarers.items()}
     assert len(set(map(repr, values.values()))) == 1, f"{key} diverged: {values}"
@@ -105,7 +167,7 @@ def test_tempo_budget_helper_agrees_wherever_the_tempo_knobs_are_declared(libs):
     declarers = {
         name: lib
         for name, lib in libs.items()
-        if all(key in lib.CONFIG for key in TEMPO_KEYS)
+        if all(key in getattr(lib, "CONFIG", {}) for key in TEMPO_KEYS)
     }
     assert "recap" in declarers, (
         "video-recap enforces the tempo budget and must declare its inputs"
@@ -124,16 +186,25 @@ def test_no_skill_declares_config_it_never_reads(libs):
     a knob once declared in five CONFIGs and reported as active was read by none of them.
     """
     offenders = {}
+    unread_env = {}
     for name, path in LIBS.items():
-        readable = _readable_source(path)
-        unread = {
-            key
-            for key in libs[name].CONFIG
-            if f'"{key}"' not in readable and f"'{key}'" not in readable
-        }
-        if unread:
-            offenders[name] = sorted(unread)
+        config = getattr(libs[name], "CONFIG", None)
+        if config is not None:
+            readable = _readable_source(path)
+            unread = {
+                key
+                for key in config
+                if f'"{key}"' not in readable and f"'{key}'" not in readable
+            }
+            if unread:
+                offenders[name] = sorted(unread)
+        dead_env = _unread_env_declarations(path)
+        if dead_env:
+            unread_env[name] = dead_env
     assert not offenders, (
         f"CONFIG keys declared but read by nothing in their own skill: {offenders}. "
         "Declare a knob in the skill that implements it, not in every copy of lib.py."
+    )
+    assert not unread_env, (
+        f"Environment-backed declarations in lib.py read by nothing in their own skill: {unread_env}"
     )

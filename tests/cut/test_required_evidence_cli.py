@@ -136,7 +136,7 @@ def run_real_cut(source, work, raw, *options):
     work.mkdir(exist_ok=True)
     (work / 'clip_plan.json').write_text(json.dumps(raw), encoding='utf-8')
     result = subprocess.run([
-        sys.executable, str(Path(cut_cli.__file__).with_name('cut.py')),
+        sys.executable, '-X', 'utf8', str(Path(cut_cli.__file__).with_name('cut.py')),
         str(source), '--work-dir', str(work), *options,
     ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
     return result, json.loads((work / 'clip_plan_validated.json').read_text(encoding='utf-8'))
@@ -153,7 +153,7 @@ def test_real_render_and_cache_recheck_declared_premise(real_source, tmp_path):
     original_bytes, original_mtime = media.read_bytes(), media.stat().st_mtime_ns
     probe = subprocess.run([
         'ffprobe', '-v', 'error', '-show_streams', '-of', 'json', str(media),
-    ], check=True, capture_output=True, text=True)
+    ], check=True, capture_output=True, text=True, encoding='utf-8', errors='replace')
     streams = json.loads(probe.stdout)['streams']
     assert {stream['codec_type'] for stream in streams} == {'video', 'audio'}
     video = next(stream for stream in streams if stream['codec_type'] == 'video')
@@ -217,7 +217,7 @@ def test_resumed_cut_keeps_unchanged_validated_plan_identity(real_source, tmp_pa
 
     rendered = identity()
     resumed = subprocess.run([
-        sys.executable, str(Path(cut_cli.__file__).with_name('cut.py')),
+        sys.executable, '-X', 'utf8', str(Path(cut_cli.__file__).with_name('cut.py')),
         str(real_source), '--work-dir', str(work),
     ], env={**os.environ, 'SCENE_CUT_SNAP': '0', 'SNAP_CLIP_LINE_END': '0'}, capture_output=True, text=True, encoding='utf-8', errors='replace')
     assert resumed.returncode == 0, resumed.stdout + resumed.stderr

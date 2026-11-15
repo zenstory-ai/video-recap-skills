@@ -35,6 +35,21 @@ def volume_keyframes(keyframes, seg_start_s, new_id):
     }]
 
 
+def _gain_at(ordered, t, default_gain):
+    before = None
+    for kf in ordered:
+        if kf["t"] <= t:
+            before = kf
+        else:
+            if before is None:
+                return default_gain
+            span = kf["t"] - before["t"]
+            if span <= 1e-9:
+                return kf["gain"]
+            return before["gain"] + (kf["gain"] - before["gain"]) * ((t - before["t"]) / span)
+    return before["gain"] if before is not None else default_gain
+
+
 def windowed_volume_keyframes(keyframes, seg_start_s, seg_end_s, default_gain, new_id):
     """Window timeline-absolute keyframes for one split/looped segment."""
     if not keyframes:
@@ -50,15 +65,9 @@ def windowed_volume_keyframes(keyframes, seg_start_s, seg_end_s, default_gain, n
     if not ordered or end <= start:
         return []
 
-    start_gain = default_gain
-    for kf in ordered:
-        if kf["t"] <= start:
-            start_gain = kf["gain"]
-        else:
-            break
-    inner = [kf for kf in ordered if start <= kf["t"] <= end]
-    if not inner and abs(start_gain - default_gain) < 1e-4:
-        return []
+    start_gain = _gain_at(ordered, start, default_gain)
+    end_gain = _gain_at(ordered, end, default_gain)
+    inner = [kf for kf in ordered if start < kf["t"] < end]
 
     selected = [{"t": start, "gain": start_gain}]
     for kf in inner:
@@ -66,6 +75,10 @@ def windowed_volume_keyframes(keyframes, seg_start_s, seg_end_s, default_gain, n
             selected[-1] = {"t": start, "gain": kf["gain"]}
         else:
             selected.append(kf)
+    if end - selected[-1]["t"] >= 1e-4:
+        selected.append({"t": end, "gain": end_gain})
+    else:
+        selected[-1] = {"t": selected[-1]["t"], "gain": end_gain}
     if all(abs(kf["gain"] - default_gain) < 1e-4 for kf in selected):
         return []
     return volume_keyframes(selected, start, new_id)

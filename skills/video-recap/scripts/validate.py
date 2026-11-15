@@ -17,15 +17,30 @@ from narration_lint import NarrationLintError, validate_narration_or_raise
 from speech_ownership import _read_json, measure_narration_speech_ownership
 
 
+def _valid_positive_duration(duration):
+    return (
+        duration is not None
+        and not isinstance(duration, bool)
+        and isinstance(duration, (int, float))
+        and math.isfinite(duration)
+        and duration > 0
+    )
+
+
 def _validate_output_timeline_bounds(narration, duration, tolerance=0.05):
     """Hard-gate lint-validated cut_output narration against the rendered output timeline.
 
     cut_output narration is authored in edited_source.mp4 time. If any segment falls outside
     that media duration, fail before TTS/render instead of spending time on unusable audio.
     """
-    if not math.isfinite(duration) or duration <= 0:
+    if not _valid_positive_duration(duration):
+        detail = (
+            f"{duration!r}"
+            if duration is None or isinstance(duration, bool) or not isinstance(duration, (int, float))
+            else f"{duration:.3f}"
+        )
         raise SystemExit(
-            f"output_duration must be finite and positive, got output_duration={duration:.3f}"
+            f"output_duration must be finite and positive, got output_duration={detail}"
         )
 
     problems = []
@@ -75,6 +90,20 @@ def _parse_args():
     return ap.parse_args()
 
 
+def _record_output_timeline_error(work_dir, report, message):
+    report["errors"].append({
+        "level": "error",
+        "index": None,
+        "code": "invalid_output_timeline",
+        "message": message,
+    })
+    report["ok"] = False
+    report["error_count"] = len(report["errors"])
+    (work_dir / "narration_lint.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
 def _validate(args):
     work_dir = Path(args.work_dir)
     narration_path = work_dir / "narration.json"
@@ -82,32 +111,34 @@ def _validate(args):
     if narration is None:
         raise SystemExit(f"缺少 {narration_path}；请先按 video-recap 规则写解说词")
     cut_output = args.mode == "cut_output"
+    valid_duration = _valid_positive_duration(args.output_duration)
+    lint_duration = args.output_duration if (cut_output and valid_duration) else None
     # Lint the authored shape first, then derive speech ownership (speech spans minus quiet
     # windows) from the evidence and persist that measured flag for voiceover/assemble instead
     # of trusting JSON.
-    report = validate_narration_or_raise(
-        narration, None, mode=args.mode, work_dir=work_dir,
-        output_duration=args.output_duration if cut_output else None,
-    )
-    narration = measure_narration_speech_ownership(narration, work_dir, mode=args.mode)
+    try:
+        report = validate_narration_or_raise(
+            narration, None, mode=args.mode, work_dir=work_dir,
+            output_duration=lint_duration,
+        )
+    except NarrationLintError as exc:
+        if cut_output and not valid_duration:
+            msg = (
+                "--output-duration is required when --mode cut_output"
+                if args.output_duration is None
+                else f"output_duration must be finite and positive, got output_duration={args.output_duration:.3f}"
+            )
+            _record_output_timeline_error(work_dir, exc.report, msg)
+        raise
     if cut_output:
         try:
             if args.output_duration is None:
                 raise SystemExit("--output-duration is required when --mode cut_output")
             _validate_output_timeline_bounds(narration, args.output_duration)
         except SystemExit as exc:
-            report["errors"].append({
-                "level": "error",
-                "index": None,
-                "code": "invalid_output_timeline",
-                "message": str(exc),
-            })
-            report["ok"] = False
-            report["error_count"] = len(report["errors"])
-            (work_dir / "narration_lint.json").write_text(
-                json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            _record_output_timeline_error(work_dir, report, str(exc))
             raise
+    narration = measure_narration_speech_ownership(narration, work_dir, mode=args.mode)
     narration_path.write_text(
         json.dumps(narration, ensure_ascii=False, indent=2), encoding="utf-8"
     )

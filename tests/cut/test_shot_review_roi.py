@@ -111,9 +111,11 @@ def test_failed_decode_keeps_requested_scan_scope_and_never_leaves_old_success(t
 def test_public_cli_records_region_and_preserves_real_frame_indices(make_video, tmp_path):
     video = make_video('cli')
     output = tmp_path / 'cli.json'
-    result = subprocess.run([sys.executable, str(Path(shot_review.__file__)), str(video),
-                             '--output', str(output), '--roi', *map(str, ROI)],
-                            capture_output=True, text=True)
+    result = subprocess.run(
+        [sys.executable, '-X', 'utf8', str(Path(shot_review.__file__)), str(video),
+         '--output', str(output), '--roi', *map(str, ROI)],
+        capture_output=True, text=True, encoding='utf-8', errors='replace',
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     report = json.loads(output.read_text(encoding="utf-8"))
     assert report['scene_roi'] == ROI

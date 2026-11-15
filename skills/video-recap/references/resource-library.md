@@ -131,7 +131,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-运行 `python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 时，编排器会在进入任何阶段前先解析项目绑定：`library` 路径相对于项目文件解析，所引用的模板状态必须为 `adopted`，且涉及的资源与模板都必须通过 `check`。解析结果会转换为各阶段既有的命令行参数或环境变量下发，各阶段技能本身不直接读取资源库：
+运行 `python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 时，编排器会在进入任何阶段前先解析项目绑定：`library` 路径相对于项目文件解析，所引用的模板状态必须为 `adopted`，且涉及的资源与模板都必须通过 `check`。解析结果会转换为各子阶段入口脚本既有的命令行参数或环境变量下发，各子阶段脚本本身不直接读取资源库：
 
 | 绑定项 | 下发方式 |
 |---|---|

@@ -5,6 +5,7 @@ import io
 import json
 import os
 import socket
+import struct
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -120,8 +121,36 @@ def _validate_wav(audio):
             frames = wav.getnframes()
             decoded = wav.readframes(frames)
     except (EOFError, wave.Error) as exc:
-        raise RuntimeError("IndexTTS 返回的 WAV 结构损坏或不受支持") from exc
-    if not (1 <= channels <= 8 and 1 <= sample_width <= 4 and 8000 <= sample_rate <= 192000):
+        # Support IEEE float (tag 3) or WAVE_FORMAT_EXTENSIBLE (0xFFFE -> 1/3) WAVs
+        offset, fmt, decoded = 12, None, None
+        while offset + 8 <= len(audio):
+            cid = audio[offset:offset + 4]
+            csize = int.from_bytes(audio[offset + 4:offset + 8], "little")
+            bstart, bend = offset + 8, offset + 8 + csize
+            if bend > len(audio):
+                raise RuntimeError("IndexTTS 返回的 WAV 音频数据被截断") from exc
+            if cid == b"fmt " and csize >= 16:
+                ftag, channels, sample_rate, _, _, bits_per_sample = struct.unpack_from(
+                    "<HHIIHH", audio, bstart
+                )
+                if ftag == 0xFFFE and csize >= 26:
+                    ftag = struct.unpack_from("<H", audio, bstart + 24)[0]
+                valid_fmt = (
+                    (ftag == 1 and bits_per_sample in (8, 16, 24, 32))
+                    or (ftag == 3 and bits_per_sample in (32, 64))
+                )
+                if not valid_fmt or channels < 1 or sample_rate < 1:
+                    raise RuntimeError("IndexTTS 返回的 WAV 结构损坏或不受支持") from exc
+                sample_width = bits_per_sample // 8
+                fmt = True
+            elif cid == b"data":
+                decoded = audio[bstart:bend]
+                break
+            offset = bend + (csize & 1)
+        if not fmt or decoded is None or channels < 1 or sample_rate < 1 or sample_width <= 0:
+            raise RuntimeError("IndexTTS 返回的 WAV 结构损坏或不受支持") from exc
+        frames = len(decoded) // (channels * sample_width)
+    if not (1 <= channels <= 8 and 1 <= sample_width <= 8 and 8000 <= sample_rate <= 192000):
         raise RuntimeError("IndexTTS 返回的 WAV 音频参数越界")
     if frames <= 0:
         raise RuntimeError("IndexTTS 返回的 WAV 没有音频帧")
@@ -154,7 +183,7 @@ def synthesize_index_tts(text, output_path, *, endpoint, voice, timeout):
     except urllib.error.HTTPError as exc:
         _discard_http_error_body(exc)
         if 300 <= exc.code < 400:
-            raise RuntimeError("IndexTTS 禁止 HTTP 重定向，未向其他主机转发批准文本") from None
+            raise RuntimeError("IndexTTS 禁止 HTTP 重定向，未向其他主机发送待合成文本") from None
         raise RuntimeError(f"IndexTTS 请求失败 (HTTP {exc.code})，远端返回错误状态") from None
     except urllib.error.URLError as exc:
         kind = "超时" if isinstance(exc.reason, (TimeoutError, socket.timeout)) else "网络"

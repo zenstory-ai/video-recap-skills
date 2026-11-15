@@ -113,7 +113,7 @@ def main():
         if os.environ.get(name):
             ap.error(f"环境变量 {name} 已移除：请从环境里删掉它，改传 {flag}")
     if args.brief_only and args.edited_storyboard_only:
-        ap.error("--brief-only and --edited-storyboard-only are mutually exclusive")
+        ap.error("--brief-only 与 --edited-storyboard-only 互斥，不能同时指定")
 
     video = args.video
     work_dir = Path(args.work_dir)

@@ -23,7 +23,14 @@ def test_source_really_renders_without_narration(tmp_path, picture_mode):
         "-c:v", "libx264", "-threads", "2", "-c:a", "aac", "-shortest", str(source),
     ], check=True, capture_output=True)
     # Child process has no service credentials. No understanding/ASR/TTS may run.
-    env = {k: os.environ[k] for k in ("PATH", "HOME", "TMPDIR", "LANG") if k in os.environ}
+    env = {
+        k: os.environ[k]
+        for k in (
+            "PATH", "HOME", "TMPDIR", "LANG",
+            "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
+        )
+        if k in os.environ
+    }
     inputs = [source]
     if picture_mode == "multi-cut":
         source2 = tmp_path / "source2.mp4"
@@ -55,15 +62,16 @@ else:
     sources=_build_multi_source_records(videos,args)
     _write_project_run_manifest(work,args,sources)
     clips=[{"start":0,"end":1,"source_id":s["source_id"]} for s in sources]
-(work/"clip_plan.json").write_text(json.dumps(clips))
+(work/"clip_plan.json").write_text(json.dumps(clips), encoding="utf-8")
 '''
-        subprocess.run([sys.executable, "-c", seed, *cli_args],
+        subprocess.run([sys.executable, "-X", "utf8", "-c", seed, *cli_args],
                        cwd=root / "skills/video-recap/scripts", env=env,
-                       check=True, capture_output=True, text=True)
+                       check=True, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace")
         env.update(SCENE_CUT_SNAP="0", SNAP_CLIP_LINE_END="0")
     result = subprocess.run([
-        sys.executable, str(root / "skills/video-recap/scripts/recap.py"), *cli_args,
-    ], env=env, capture_output=True, text=True, timeout=90)
+        sys.executable, "-X", "utf8", str(root / "skills/video-recap/scripts/recap.py"), *cli_args,
+    ], env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=90)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "understanding/" not in result.stdout
     assert "voiceover/" not in result.stdout

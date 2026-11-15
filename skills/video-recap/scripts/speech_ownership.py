@@ -123,7 +123,21 @@ def load_source_sentence_evidence(work_dir, mode="full"):
         }
         speech_spans = _source_asr_rows(work_dir)
         asr_evidence = _read_json(work_dir / "asr_timing_evidence.json") or {}
-        if isinstance(asr_evidence, dict) and asr_evidence.get("status") == "NO_AUDIO_STREAM":
+        asr_result_ok = True
+        if isinstance(asr_evidence, dict) and "asr_result" in asr_evidence:
+            expected_res = asr_evidence.get("asr_result")
+            res_path = work_dir / "asr_result.json"
+            asr_result_ok = (
+                isinstance(expected_res, dict)
+                and res_path.is_file()
+                and dict(expected_res) == file_identity(res_path)
+            )
+        speech_absent = (
+            isinstance(asr_evidence, dict)
+            and asr_result_ok
+            and asr_evidence.get("status") == "NO_AUDIO_STREAM"
+        )
+        if speech_absent:
             quiet_windows = [{"start": 0.0, "end": 1e9, "has_speech": False}]
         else:
             quiet_windows = [
@@ -137,6 +151,7 @@ def load_source_sentence_evidence(work_dir, mode="full"):
             return _empty_evidence(mode)
         speech_spans = payload["speech_spans"]
         quiet_windows = payload["quiet_windows"]
+        speech_absent = bool(payload.get("speech_absent")) and not speech_spans
     anchors = [
         anchor for anchor in payload["sentence_anchors"] if anchor_boundary_use(anchor) != "none"
     ]
@@ -147,6 +162,7 @@ def load_source_sentence_evidence(work_dir, mode="full"):
         "dialogue_spans": _dialogue_speech_spans(speech_spans),
         "quiet_windows": quiet_windows,
         "require_measured": mode == "cut_output",
+        "speech_absent": speech_absent,
     }
 
 
@@ -185,6 +201,8 @@ def _speech_overlap_excluding_quiet(start, end, speech, quiet):
 
 def segment_overlaps_source_speech(seg, evidence):
     """Classify aggregate mix ownership across the complete narration interval."""
+    if evidence.get("speech_absent"):
+        return False
     start, end = seg["start"], seg["end"]
     quiet = evidence["quiet_windows"]
     quiet_min = max(0.3, (end - start) * CONFIG["quiet_overlap_min_ratio"])
@@ -200,6 +218,8 @@ def segment_overlaps_source_speech(seg, evidence):
 
 def entry_overlaps_source_speech(start, evidence, *, authored_overlap=True, tolerance=0.05):
     """Classify the entry instant; later quiet time cannot erase an unsafe start."""
+    if evidence.get("speech_absent"):
+        return False
     if any(
         row["start"] - tolerance <= start <= row["end"] + tolerance
         for row in evidence["quiet_windows"]

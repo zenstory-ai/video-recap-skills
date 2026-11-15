@@ -8,6 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from agent_text import strip_inline_voice_cues
 from providers.fish_audio import fish_speed, synthesize_fish_audio
 import providers.index_tts as index_provider
 from lib import (
@@ -44,8 +45,8 @@ def _clean_narration_text(text):
     text = re.sub(r'\*(.+?)\*', r'\1', text)       # *italic* → italic
     text = re.sub(r'「(.+?)」', r'\1', text)        # 「quote」 → quote
     text = re.sub(r'」|「|『|』', '', text)
-    # 移除方括号舞台指示（[climax]、[suspense] 等），保留圆括号内的作者正文
-    text = re.sub(r'\[[^\]]*\]', '', text)
+    # 移除方括号舞台指示（[climax]、[suspense] 等）及闭集英文语气词，保留普通圆括号正文
+    text = strip_inline_voice_cues(text)
     # 规范化省略号和重复标点
     text = re.sub(r'\.{3,}|…{2,}', '……', text)
     text = re.sub(r'……+', '……', text)
@@ -588,7 +589,7 @@ def main():
     ap.add_argument("--mimo-voice", default=None, help="MiMo TTS voice name")
     ap.add_argument(
         "--tts-provider",
-        default=os.environ.get("TTS_PROVIDER", "auto"),
+        default=(os.environ.get("TTS_PROVIDER") or "auto").strip().lower(),
         choices=["auto", "mimo-tts", "fish-audio", "index-tts"],
         help="TTS provider (default: MiMo when configured, otherwise Fish Audio)",
     )

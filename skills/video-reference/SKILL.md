@@ -35,7 +35,7 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 3. **标注音轨与段落（`labels`）**：由 Agent 在 `U/reference_breakdown.json` 中填写 `labels`——包括音轨归属 `audio_spans`、叙事功能段落 `sections`、字幕版式 `subtitles` 与标注依据 `basis`。
    - **音轨边界必须卡在真实声音起止点**：`audio_spans` 的切换点要落在**耳朵真正听见人声开口或收声的时刻**，不要照抄字幕条出现或消失的时刻（按字幕切入帧标注的旁白收尾点，实测往往比真实现场收声晚 `0.24–0.42` 秒）。若目录内已有 `U/speech_boundary_anchors.json`，直接对照其中的 `acoustic_pauses`（`start` 即上一句收声点，`end` 即下一句开口点）对齐边界；因为声画同步换手率 `switch_on_cut_share` 只认切点前后 `±0.25` 秒的误差，边界一旦标偏，算出来的换手率就会严重失真。原片人物自带的画外音或内心独白仍属于原片音轨，统一标为 `original_dialogue`，如需在做法上区分，写进后面的 `source_facts` 与 `methods` 即可。
    - 填完 `labels` 后即可先跑一次 `check`，查看终端打印出的派生统计值 `derived`（各音轨时长占比、各段落切点密度、旁白字速、声音换手落在画面硬切上的比例、全片各叙事功能段落在时间轴上的起止占比 `structure`，以及第一次原声亮相的相对位置 `first_original_at`）。
-4. **提炼事实与可迁移方法（`source_facts` 与 `methods`）**：对照刚刚算出的客观派生数据，在同一份 `reference_breakdown.json` 中继续填写原片事实 `source_facts`（必须锚定具体时间区间或测量路径，并显式列出涉及的专有名称 `entities`）与可迁移方法 `methods`（包含做法规则 `rule`、适用场景 `applies_when`、避坑条件 `avoid_when`、作用的下游文件 `applies_to`、支撑证据 `evidence` 与量化参考指标 `targets`）。注意：`targets` 里只允许写引用路径 `{"from": "<测量路径>"}`，严禁在规则正文里手写具体数字；导出时脚本会自动把实测数值填进去。
+4. **提炼事实与可迁移方法（`source_facts` 与 `methods`）**：对照刚刚算出的客观派生数据，在同一份 `reference_breakdown.json` 中继续填写原片事实 `source_facts`（必须锚定具体时间区间或测量路径，并显式列出涉及的专有名称 `entities`）与可迁移方法 `methods`（包含做法规则 `rule`、适用场景 `applies_when`、避坑条件 `avoid_when`、作用的下游文件 `applies_to`、支撑证据 `evidence` 与量化参考指标 `targets`）。注意：`targets` 里只写引用路径 `{"from": "<测量路径>"}`（数值叶子或白名单派生对象），建议不要在 `rule` 正文里直接手写阿拉伯数字（手写数字会触发非阻断 warning 提醒核查）；导出时脚本会自动把实测数值填进去。
 5. **校验并导出（`check` → `export`）**：运行 `check` 确认零 error 后，执行 `export` 导出 `production_reference.json`；导出器在写盘前会对产物再做一遍全字段防剧透泄漏扫描。
 
 完整字段定义、枚举词表以及好/坏方法写法对比见 `references/reference-schema.md`。

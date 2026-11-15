@@ -764,3 +764,55 @@ def test_tts_meta_records_the_voice_actually_used(monkeypatch, tmp_path, engine,
     assert {k: voice[k] for k in expected} == expected
     if config.get("voice_ref") == "REF":
         assert voice["reference"] == {"path": str(ref.resolve()), **voiceover.file_identity(ref)}
+
+
+def test_tts_rms_normalization_decodes_pcm24_and_ieee_float32_wav_via_stdlib(tmp_path):
+    import struct
+    import wave
+
+    def write_raw_riff(path, fmt_tag, bits_per_sample, payload):
+        block_align = bits_per_sample // 8
+        byte_rate = 24000 * block_align
+        fmt = struct.pack("<HHIIHH", fmt_tag, 1, 24000, byte_rate, block_align, bits_per_sample)
+        riff_body = b"WAVEfmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(payload)) + payload
+        path.write_bytes(b"RIFF" + struct.pack("<I", len(riff_body)) + riff_body)
+
+    frames = 6000  # 0.25s @ 24kHz
+    val24 = int(0.35 * 8388607)
+    pcm24_bytes = val24.to_bytes(3, "little", signed=True) * frames
+    flt32_bytes = struct.pack("<f", 0.35) * frames
+
+    wav24 = tmp_path / "pcm24.wav"
+    wavf32 = tmp_path / "flt32.wav"
+    out24 = tmp_path / "pcm24_norm.wav"
+    outf32 = tmp_path / "flt32_norm.wav"
+    write_raw_riff(wav24, 1, 24, pcm24_bytes)
+    write_raw_riff(wavf32, 3, 32, flt32_bytes)
+
+    meta24 = tts_audio._normalize_tts_wav_rms(wav24, out24, target_rms_dbfs=-20.0, peak_limit=0.98)
+    metaf32 = tts_audio._normalize_tts_wav_rms(wavf32, outf32, target_rms_dbfs=-20.0, peak_limit=0.98)
+
+    with wave.open(str(out24), "rb") as wf24, wave.open(str(outf32), "rb") as wff32:
+        assert wf24.getsampwidth() == 2 and wf24.getnframes() == frames
+        assert wff32.getsampwidth() == 2 and wff32.getnframes() == frames
+    assert abs(meta24["rms_dbfs_after"] - metaf32["rms_dbfs_after"]) <= 0.2
+    assert _wav_peak(out24) <= 0.98 and _wav_peak(outf32) <= 0.98
+
+
+def test_clean_text_strips_closed_voice_cues_and_float_wav_handles_nan(tmp_path):
+    import math
+    import struct
+
+    cleaned = voiceover._clean_narration_text("(whispering) 联邦调查局(FBI)[低声]连夜突袭。")
+    assert cleaned == "联邦调查局(FBI)连夜突袭。"
+
+    fmt = struct.pack("<HHIIHH", 3, 1, 24000, 96000, 4, 32)
+    payload = struct.pack("<ffff", float("nan"), 0.25, -0.25, float("inf")) * 500
+    body = b"WAVEfmt " + struct.pack("<I", len(fmt)) + fmt + b"data" + struct.pack("<I", len(payload)) + payload
+    nan_wav = tmp_path / "nan.wav"
+    out_wav = tmp_path / "nan_norm.wav"
+    nan_wav.write_bytes(b"RIFF" + struct.pack("<I", len(body)) + body)
+    meta = tts_audio._normalize_tts_wav_rms(nan_wav, out_wav, target_rms_dbfs=-20.0, peak_limit=0.98)
+    assert math.isfinite(meta["rms_dbfs_after"])
+    assert out_wav.is_file()
+

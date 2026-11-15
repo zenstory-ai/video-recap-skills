@@ -138,10 +138,16 @@ def test_removed_voice_rights_flag_is_unrecognized(monkeypatch, tmp_path, capsys
     assert "unrecognized arguments: --confirm-voice-rights" in capsys.readouterr().err
 
 
+_MINIMAL_ENV_KEYS = (
+    "PATH", "HOME", "TMPDIR", "LANG",
+    "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TEMP", "TMP",
+)
+
+
 def _minimal_env():
     return {
         key: os.environ[key]
-        for key in ("PATH", "HOME", "TMPDIR", "LANG") if key in os.environ
+        for key in _MINIMAL_ENV_KEYS if key in os.environ
     }
 
 
@@ -159,14 +165,15 @@ def _make_source(path):
 
 def _run_source_cli(source, work, output, env, *, strict):
     command = [
-        sys.executable, str(SCRIPTS / "recap.py"), str(source),
+        sys.executable, "-X", "utf8", str(SCRIPTS / "recap.py"), str(source),
         "--work-dir", str(work), "--output-dir", str(output),
         "--audio-mode", "source-mix", "--no-burn-subtitles",
     ]
     if not strict:
         command.append("--no-require-final-qc")
     return subprocess.run(
-        command, cwd=SCRIPTS, env=env, capture_output=True, text=True, timeout=90
+        command, cwd=SCRIPTS, env=env, capture_output=True,
+        text=True, encoding="utf-8", errors="replace", timeout=90,
     )
 
 
@@ -189,26 +196,40 @@ def test_real_source_cli_strict_pass_and_exact_final_probe_failure(tmp_path):
     real_ffprobe = shutil.which("ffprobe")
     wrapper_dir = tmp_path / "wrapper-bin"
     wrapper_dir.mkdir()
-    wrapper = wrapper_dir / "ffprobe"
-    wrapper.write_text(
-        """#!/usr/bin/env python3
-import json,os,sys
-args=sys.argv[1:]
-with open(os.environ['FFPROBE_CALLS'], 'a') as stream:
-    stream.write(json.dumps(args)+'\\n')
-expected=['-v','error','-print_format','json','-show_format','-show_streams',os.environ['FINAL_QC_TARGET']]
+    fake_py = wrapper_dir / "ffprobe_fake.py"
+    fake_py.write_text(
+        """import json, os, subprocess, sys
+args = sys.argv[1:]
+with open(os.environ['FFPROBE_CALLS'], 'a', encoding='utf-8') as stream:
+    stream.write(json.dumps(args) + '\\n')
+expected = [
+    '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams',
+    os.environ['FINAL_QC_TARGET'],
+]
 if args == expected:
     sys.stderr.write('isolated final QC probe rejection\\n')
     raise SystemExit(73)
-os.execv(os.environ['REAL_FFPROBE'], [os.environ['REAL_FFPROBE'], *args])
-""", encoding="utf-8"
+raise SystemExit(subprocess.call([os.environ['REAL_FFPROBE'], *args]))
+""",
+        encoding="utf-8",
+    )
+    wrapper = wrapper_dir / "ffprobe"
+    wrapper.write_text(
+        '#!/bin/sh\nexec "$PYTHON_EXE" -X utf8 "$(dirname "$0")/ffprobe_fake.py" "$@"\n',
+        encoding="utf-8",
     )
     wrapper.chmod(0o755)
+    if os.name == "nt":
+        (wrapper_dir / "ffprobe.cmd").write_text(
+            '@echo off\r\n"%PYTHON_EXE%" -X utf8 "%~dp0ffprobe_fake.py" %*\r\nexit /b %ERRORLEVEL%\r\n',
+            encoding="utf-8",
+        )
 
     def failing_env(target, calls):
         env = _minimal_env()
         env.update(
             PATH=f"{wrapper_dir}{os.pathsep}{env['PATH']}",
+            PYTHON_EXE=sys.executable,
             REAL_FFPROBE=real_ffprobe,
             FINAL_QC_TARGET=str(target),
             FFPROBE_CALLS=str(calls),
