@@ -10,6 +10,10 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-11-15
+
+升级后请将原写入 `work_dir/packaging_plan.json` 的平台发布标题与封面看点备忘迁至 `work_dir/promo_copy.json`，`packaging_plan.json` 现仅用于画布视觉包装；未显式设置 `MIMO_MODEL` 时默认请求 `mimo-v2.6-flash`（旧 `mimo-v2.5` 已由服务端下线）。本版同时收束语境依赖型校验门禁、全面中文化动态创作简报，并修复实片制作中的短台词让口、声学谷值 ASR 分窗、同帧 VLM 去重与跨平台运行边界。
+
 ### Changed
 
 - **升级默认 MiMo 画面理解模型至 `mimo-v2.6-flash`。** 因云端已下线 `mimo-v2.5`，将 `DEFAULT_MIMO_MODEL` 切换至 `mimo-v2.6-flash`（仍可通过 `MIMO_MODEL` 选配 `mimo-v2.6-pro` 等），并修正 `_prepare_api_payload` 对 `mimo-v2.5-tts-voiceclone` 等 `-tts` / `-asr` 变体模型不注入 `thinking` 字段。
@@ -523,7 +527,8 @@ recap feels like a recap, not captions over a clip.
   MiMo API key. Five independent skills (understanding, script, cut, voiceover, assemble)
   plus a thin orchestrator; optional 剪映 draft export.
 
-[Unreleased]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.2...v0.7.0
 [0.6.2]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/zenstory-ai/video-recap-skills/compare/v0.6.0...v0.6.1
