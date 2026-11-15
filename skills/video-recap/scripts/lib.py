@@ -175,7 +175,7 @@ def broken_homebrew_ffmpeg_full_path(ffmpeg_path=None):
     full_bin = _HOMEBREW_STOCK_FFMPEGS.get(stock)
     if not full_bin:
         return None
-    candidate = os.path.join(full_bin, "ffmpeg")
+    candidate = f"{full_bin}/ffmpeg"
     if not os.path.isfile(candidate):
         return None
     try:
@@ -191,7 +191,7 @@ def prefer_homebrew_ffmpeg_full():
     full_bin = _HOMEBREW_STOCK_FFMPEGS.get(stock)
     if not full_bin:
         return None
-    candidate = os.path.join(full_bin, "ffmpeg")
+    candidate = f"{full_bin}/ffmpeg"
     if not os.path.isfile(candidate):
         return None
     try:

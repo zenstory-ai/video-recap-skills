@@ -1661,7 +1661,7 @@ def test_prefer_homebrew_ffmpeg_full_adopts_healthy_and_skips_broken(monkeypatch
     full_bin = f"{full_dir}/ffmpeg"
     monkeypatch.setattr("lib.shutil.which", lambda name: stock if name == "ffmpeg" else None)
     monkeypatch.setattr("lib.os.path.isfile", lambda p: p == full_bin)
-    monkeypatch.setenv("PATH", "/opt/homebrew/bin:/usr/bin")
+    monkeypatch.setenv("PATH", f"/opt/homebrew/bin{os.pathsep}/usr/bin")
 
     # Case 1: broken ffmpeg-full (e.g. missing dylib) -> safely ignored, doctor surfaces hint
     def broken_filters(binary=None):
@@ -1680,7 +1680,7 @@ def test_prefer_homebrew_ffmpeg_full_adopts_healthy_and_skips_broken(monkeypatch
         lambda binary=None: {"subtitles", "ass"} if binary == full_bin else {"scale"},
     )
     assert lib.prefer_homebrew_ffmpeg_full() == full_dir
-    assert os.environ["PATH"].startswith(f"{full_dir}:")
+    assert os.environ["PATH"].startswith(f"{full_dir}{os.pathsep}")
 
 
 
