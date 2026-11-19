@@ -3,12 +3,12 @@
   "owner": {
     "name": "PiteChen"
   },
-  "description": "Self-contained production skill plus on-demand reference skill for Chinese-narration recaps from supported video files: local Python/ffmpeg, remote Xiaomi MiMo ASR/VLM/default TTS, optional Fish Audio TTS or a self-hosted HTTP TTS endpoint, and required final playback review.",
+  "description": "Agent skills that turn videos into narrated Chinese recaps and editable JianYing/CapCut drafts—scene cutting, visual scriptwriting, voiceover mixing, and canvas packaging, with no GPU required. AI 视频解说 Agent 技能包：自动切镜、看画面写解说词、配音混音与画框包装合成成片，可导出剪映/CapCut 草稿，无需 GPU。",
   "plugins": [
     {
       "name": "video-recap-skills",
       "source": "./",
-      "description": "Self-contained production skill plus on-demand reference skill for Chinese-narration recaps from supported video files: local Python/ffmpeg; remote Xiaomi MiMo ASR, VLM, and default TTS; optional Fish Audio TTS with a separate API key or a self-hosted HTTP TTS endpoint; final playback review required.",
+      "description": "Agent skills that turn videos into narrated Chinese recaps and editable JianYing/CapCut drafts—scene cutting, visual scriptwriting, voiceover mixing, and canvas packaging, with no GPU required. AI 视频解说 Agent 技能包：自动切镜、看画面写解说词、配音混音与画框包装合成成片，可导出剪映/CapCut 草稿，无需 GPU。",
       "homepage": "https://github.com/zenstory-ai/video-recap-skills",
       "license": "MIT"
     }
