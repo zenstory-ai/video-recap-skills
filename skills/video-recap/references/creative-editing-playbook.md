@@ -1,6 +1,6 @@
 # 创作剪辑工作法
 
-写 `clip_plan.json` 或 `narration.json` 前，先把故事主线、选镜依据与声画分工定妥落盘。
+写 `clip_plan.json` 或 `narration.json` 前，先把故事主线、选镜理由与声音分工定好写进计划文件。
 
 ## 先判断创作控制模式
 

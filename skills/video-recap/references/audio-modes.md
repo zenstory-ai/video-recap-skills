@@ -16,13 +16,13 @@
 
 ## 2. 工作目录绑定与参数互斥
 
-- **清单隔离**：`recap_run_manifest.json` 单独记录 `audio: {mode, selected_stream_index}`（`selected_stream_index` 固定为 `0`）。切换 `--audio-mode` 必须换用新的 `--work-dir`；缺少 `audio` 字段的旧清单或已含 `narration.json` 的未绑定目录均不可直接改跑 `source-mix`，防止旧 TTS 产物串入原声成片。
+- **工作目录隔离**：`recap_run_manifest.json` 单独记录 `audio: {mode, selected_stream_index}`（`selected_stream_index` 固定为 `0`）。切换 `--audio-mode` 必须换用新的 `--work-dir`；缺少 `audio` 字段的旧清单或已含 `narration.json` 的未绑定目录均不可直接改跑 `source-mix`，防止旧 TTS 产物串入原声成片。
 - **显式 TTS 参数拦截**：在 `source-mix` 模式下显式传入 `--tts-provider`、`--mimo-tts-voice`、`--voice-ref`、`--allow-partial-tts` 会直接报错拒绝；环境变量中的全局 TTS 默认值因不运行配音而自动忽略，不会写入续跑命令。
 - **包装图层兼容**：`packaging_plan.json` 与 `packaging_layers.json` 在两种音频模式下均正常生效。
 
 ## 3. 音频响度、淡出与重编码说明
 
-两种模式均属于后处理混音交付，不会原样拷贝（stream copy）源音频数据包：
+两种模式都会经过重新混音与编码，不会直接原样复制（stream copy）源视频音轨：
 
 - 默认开启 `FINAL_LOUDNORM=true`：将终混响度统一归一至 `-14 LUFS`，并通过真峰值限制与编码器复验守住 `<= -1.0 dBTP` 上限。
 - 最终音轨统一重编码为 48 kHz、192 kbps AAC，按视频总时长裁齐，并在片尾对原声与 BGM 施加平滑淡出（`ENDING_AUDIO_FADE_MS`，默认 `350ms`），实际执行的处理步骤记录在 `assembly_qc.json`。

@@ -18,11 +18,11 @@ video-recap（多源理解 understand.py）
 
 - 先用 [`recap_story_plan.json`](recap_story_plan.json) 明确观众看点、主视角（POV）、核心悬念以及每一拍的局势翻转。
 - 用 [`visual_audio_board.json`](visual_audio_board.json) 排好每一拍由画面动作、原片狠话还是解说旁白主导，按“垫半句、让半句、接半句”交接声音。
-- 送 TTS 合成的文稿按一口气讲完的完整意思分段，屏幕上的字幕条再根据实际朗读时间拆成顺眼的短句，绝不为了迁就短字幕去把语音切得一惊一乍。
+- 送 TTS 合成的文稿按一口气讲完的完整意思分段，屏幕上的字幕条再根据实际朗读时间拆成顺眼的短句，不为了迁就短字幕把配音切得一惊一乍。
 - 切点分数（scene-change score）和抽帧拼图只用来初筛可疑位置，接点顺不顺一律以原速播放看感为准。
 - 遇到短时间内扎堆的切点候选，先区分是原片自带切镜还是本次拼接留下的切口：无关碎镜头整段删掉；有戏但太短的反应镜头回原片把起落扩完整；人工拼接切口则优先恢复同源连续运动或合并相邻片段。
-- 画面、声音与字幕时序彻底锁定后再上外层包装；画面花字只点破人物潜台词，绝不重复底下正在滚动的字幕。
-- 修补卡顿或跳接时直接回原片恢复连续动作，绝不拿叠化或闪白遮丑。
+- 画面、声音与字幕时间定稿后再加画框和花字；画面花字只点破人物潜台词，不重复底下的字幕。
+- 修补卡顿或跳接时直接回原片恢复连续动作，不用叠化或闪白硬盖过去。
 
 复现步骤见 [`skill-runbook.md`](skill-runbook.md)，多轮看片打磨的取舍记录见 [`iteration-notes.md`](iteration-notes.md)。
 
@@ -40,7 +40,7 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 |---|---|---|
 | 背景调研与多源理解 | [`background_research.json`](background_research.json)、[`multi_source_manifest.json`](multi_source_manifest.json) | 提前锁定人物化名与前情关系，固定多集片源的 `source_id`；单集 ASR/VLM 产物在复现时现场生成 |
 | 创作第一阶段（Pass 1） | [`recap_story_plan.json`](recap_story_plan.json)、[`visual_audio_board.json`](visual_audio_board.json)、[`style_card.json`](style_card.json)、[`clip_plan.json`](clip_plan.json) | 定好二少主视角、十个叙事节点与声画让位方案，写出基于原片秒数的初剪选段 |
-| 初剪渲染（`cut.py`） | 运行时生成，不入库 | 根据 `clip_plan.json` 吸附句界并渲染 `clip_plan_validated.json` 与 `edited_source.mp4`；本案例后期做过项目级画面微调，故单列 [`picture-conform.json`](picture-conform.json) 记录，不冒充原生输出 |
+| 初剪渲染（`cut.py`） | 运行时生成，不入库 | 根据 `clip_plan.json` 对齐台词停顿切镜头，生成 `clip_plan_validated.json` 与 `edited_source.mp4`；本案例后期做过项目级画面微调，故单列 [`picture-conform.json`](picture-conform.json) 记录，不冒充原生输出 |
 | 创作第二阶段（Pass 2） | [`narration.json`](narration.json)、[`original_subtitles.json`](original_subtitles.json) | 对照剪后成片时间线编写 7 段解说词，并标出三处原速保留的原声名场面 |
 | 配音合成（`voiceover.py`） | 运行时生成，不入库 | 调用 Fish Audio 逐段合成解说语音 |
 | 母版混音（`assemble.py`） | [`timeline.json`](timeline.json)、[`assembly_manifest.json`](assembly_manifest.json)、[`assembly_qc.json`](assembly_qc.json) | 记录多轨混音、原声闪避（ducking）、逐段语音完整性、响度实测值及质检结论（本地绝对路径已替换为逻辑占位符） |
@@ -59,7 +59,7 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 案例优先调用 `Hannotate SC`（字幕）与 `Xingkai SC`（片名/花字），并在代码中预留了系统字体回退链。由于不同操作系统的字体渲染度量存在差异，正式出片前务必在目标机器上抽帧检查片头、亮场、暗场、人物近景与全片最长字幕。
 
-当 Agent 按 [`skill-runbook.md`](skill-runbook.md) 跑完 `assemble.py` 拿到音画锁定母版后，进入 `remotion/` 安装依赖并渲染透明 PNG 序列，再将透明层叠加到母版画面上，同时用 `-c:a copy` 原封不动复制已验收通过的母版音轨，确保包装环节不伤分毫声音。
+当 Agent 按 [`skill-runbook.md`](skill-runbook.md) 跑完 `assemble.py` 拿到音画锁定母版后，进入 `remotion/` 安装依赖并渲染透明 PNG 序列，再将透明层叠加到母版画面上，同时用 `-c:a copy` 原样复制已验收通过的母版音轨，保证加外层包装时完全不动成片音轨。
 
 ## REVISION：成片接点精修
 
@@ -76,7 +76,7 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 截至 2026-08-24（北京时间），成片中的人物身份、剧情先后顺序与原声引述均经原片画面、正片硬字幕及官方公开物料交叉核实，无任何捏造或错位。解说词中有两处口语化浓缩表达，边界说明如下：
 
 - **“前任变大嫂”**：剧中此时的严格名分是“大哥的未婚妻（准大嫂）”，但慕容清峄在家宴上已当面改口称呼“大嫂”，解说词直接沿用了剧中极具冲击力的当面称谓。
-- **“男主全懂了”**：指慕容清峄从她替自己挡击和递蜜饯安抚他的下意识举动里，彻底确认她心里仍然装着自己，并非指他到这一刻才第一次认出她的长相。
+- **“男主全懂了”**：指慕容清峄从她替自己挡击和递蜜饯安抚他的下意识举动里，确认她心里仍然装着自己（男主在开篇家宴时就已认出她的长相，这里指看穿心意）。
 
 逐句证据对照表与出处链接见 [`content-qc.md`](content-qc.md)。
 

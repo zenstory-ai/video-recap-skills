@@ -1,15 +1,15 @@
 # 导出剪映草稿继续精修
 
-用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，含 1 个统一生产技能 + 1 个按需参考技能）在合成出片的同时，会把原片视频、逐段解说配音、BGM、字幕和静态包装图层一并写入剪映草稿目录（含 `draft_content.json`、`draft_info.json`、`draft_meta_info.json`），默认将用到的媒体文件打包进草稿内部的 `Resources/local/`，哪怕把整个草稿文件夹拷到另一台电脑上也能直接双击打开。全流程本机只依赖 Python 标准库与 `ffmpeg`，云端只需配置一个小米 MiMo API Key。
+用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，包含做片用的 `video-recap` 和拆解参考片用的 `video-reference` 两个技能）在合成出片的同时，会把原片视频、逐段解说配音、BGM、字幕和画框花字贴图一并写入剪映草稿目录（含 `draft_content.json`、`draft_info.json`、`draft_meta_info.json`），默认把用到的媒体文件打包进草稿内部的 `Resources/local/`，拷到另一台电脑上也能直接打开。全流程本机只需 Python 标准库与 `ffmpeg`，云端只需配一个小米 MiMo API Key。
 
 ## 端到端制作流程
 
 ```text
-源视频 → ① 视频理解（切点检测 · ASR · VLM）→ ② Agent 定主线与声画分工、写稿 → ③ TTS 配音 → ④ 合成组装（混音 · 字幕 · 多轨时间线）→ recap_<名>.mp4
-                                           └─ 剪辑模式（cut）：先剪出画面母版，再对着成片时间轴写解说词
+源视频 → ① 看片理解（切镜头 · 听台词 · 识画面）→ ② 定主线、留原声与写词 → ③ TTS 配音 → ④ 混音、加字幕与生成时间线 → recap_<名>.mp4
+                                                └─ 剪辑模式（cut）：先按台词停顿剪出定长画面，再对着成片时间轴写解说词
 ```
 
-日常使用时无需手动敲复杂的命令行参数，直接把视频路径和要求发给 Agent 即可：
+日常使用时不用手敲命令行参数，直接把视频路径和要求发给 Agent 即可：
 
 ```text
 给 /path/to/video.mp4 做一个中文解说成片。这是《庆余年》第一集，主角是范闲，字幕烧进画面，同时导出剪映草稿。
@@ -28,13 +28,13 @@ Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草�
 | **字幕轨** | 解说字幕，以及原声留白处带 `「」` 引号的角色原声台词 |
 | **图片叠层轨** | `packaging_plan.json` 渲染生成的标题条、字卡、花字贴片，或 `packaging_layers.json` 中配置的静态边框、角标与背景图 |
 
-导出器默认会把视频、音频和图片复制进草稿目录下的 `Resources/local/{video,audio,image}` 并写好本地素材索引，保证草稿自包含、可迁移；只有当你确定原始媒体路径在本机永远不会移动且剪映有权限读取时，才使用 `--jianying-no-bundle-media` 省去复制。草稿只映射上述四类基础轨道，转场、蒙版、调色、花字贴纸等精修效果可在打开剪映后自由添加。
+导出器默认会把视频、音频和图片复制进草稿目录下的 `Resources/local/{video,audio,image}` 并写好本地素材索引，方便整个文件夹随拷随开；只有确定原始视频和音频路径不会挪动、剪映也能直接读取时，才传 `--jianying-no-bundle-media` 省去复制。草稿只映射上述四类基础轨道，转场、蒙版、调色、花字贴纸等效果可在打开剪映后自由添加。
 
-注意两条使用边界：第一，剪映草稿直接引用未烧录字幕的源视频，因此源视频画面自带的硬字幕仍会显示，如需遮挡可在剪映内添加遮罩；第二，`ffmpeg` 渲染出的 `recap_<名>.mp4` 才是流水线的标准交付物，剪映草稿是供你二次微调的工程附件。
+注意两条使用边界：第一，剪映草稿直接引用未烧录字幕的源视频，源片画面自带的硬字幕仍会显示，如需遮挡可在剪映内添加遮罩；第二，`ffmpeg` 渲染出的 `recap_<名>.mp4` 是标准成片，剪映草稿是供你二次微调的工程文件。
 
 ## 怎样让原声留白处的台词字幕一字不差？
 
-当原片人物在旁白留白处展开重头对白，且原片无硬字幕或已开启全片不透明字幕遮罩（如传入 `--subtitle-y-top`/`--subtitle-y-bot` 并设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）时，只需让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "角色原话"}]`），合成器与剪映草稿导出器就会自动在留白处渲染带 `「」` 引号的精准原声台词；不会拿 15 秒粗粒度 ASR 转写冒充逐句对位字幕。
+当原片人物在旁白留白处展开重头对白，且原片无硬字幕或已开启全片不透明字幕遮罩（如传入 `--subtitle-y-top`/`--subtitle-y-bot` 并设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）时，只需让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "角色原话"}]`），合成器与剪映草稿导出器就会自动在留白处渲染带 `「」` 引号的核对台词；不会拿 15 秒一段的粗转写结果直接当逐句字幕贴上去。
 
 ## 自建开源流程与按月订阅 SaaS 的账单对比
 
