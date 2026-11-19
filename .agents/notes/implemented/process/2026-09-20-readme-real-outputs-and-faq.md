@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续更新：[[2026-11-19-slim-readme-and-unify-en-filename]]。
+
 ## Problem
 
 #90 把两份 README 排成给人看的顺序，#91 统一了居中 masthead，与同组织 oh-story-claudecode（#432/#433）、drama-skills（#171/#172）、novel-to-game（#58/#59）的前两步一致。但正文仍然全是说明文字：「为什么用它」八条描述能力，`examples/guohuo-60s/` 里完整的故事计划、声音分工、旁白、时间线、看片修改日志和三份 QC 报告一处都没有被节选引用；读者提过的唯一问题（issue #79，无旁白视频能否加旁白）README 没有回答。三个姊妹仓库的第三步（oh-story #434、drama-skills #173、novel-to-game #60）在 2026-09-18 用真实产出替换说明文字并加了常见问题，本仓库照此补上。

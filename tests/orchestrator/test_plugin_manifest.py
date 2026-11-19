@@ -100,7 +100,7 @@ def test_skill_frontmatter_exposes_router_writing_and_reference_skills():
 def test_public_readmes_are_skill_first_and_document_verified_hosts():
     readmes = {
         "zh": (ROOT / "README.md").read_text(encoding="utf-8"),
-        "en": (ROOT / "README.en.md").read_text(encoding="utf-8"),
+        "en": (ROOT / "README_EN.md").read_text(encoding="utf-8"),
     }
 
     for language, text in readmes.items():

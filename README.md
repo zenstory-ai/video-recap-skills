@@ -5,7 +5,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>面向影视解说创作者、短剧二创与视频编导的 AI 剪辑工作流：两个自包含技能装进你正在用的编程 Agent，从一段或多集长片串联产出中文解说成片、画布包装与可编辑剪映草稿。</b>
+  <b>给影视解说、短剧二创与视频编导用的 AI 剪辑技能：装进你常用的编程 Agent，把一段或多集长视频剪成带画框和字幕的中文解说成片，并导出可继续精修的剪映草稿。</b>
 </p>
 
 <p align="center">
@@ -17,7 +17,7 @@
   &nbsp;·&nbsp;
   <a href="#看看它的输出"><b>看看它的输出</b></a>
   &nbsp;·&nbsp;
-  <a href="README.en.md"><b>English</b></a>
+  <a href="README_EN.md"><b>English</b></a>
 </p>
 
 <p align="center">
@@ -36,17 +36,17 @@
 
 https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
-上面这条 59 秒横屏解说《这一秒过火》，是从四集长剧跨集选段、剪辑、写稿、配音、混音、加包装并经多轮看片打磨后的最终交付；全套结构化产物（故事方案、声画分镜板、解说词、多轨时间线、返修账本与质检报告）均公开在 [examples/guohuo-60s/](examples/guohuo-60s/)。
+上面这条 59 秒横屏解说《这一秒过火》，从四集长剧里跨集挑戏、剪辑、写词、配音、混音、加字幕框，经过几轮看片微调做成；背后的故事大纲、声音分工表、解说词、时间线、修改记录和质检结果都在 [examples/guohuo-60s/](examples/guohuo-60s/)。
 
 ## 这是什么
 
-`video-recap-skills` 把整条中文视频解说产线收敛为两个自包含技能（生产主技能 `video-recap` + 按需拆片技能 `video-reference`），装进 Claude Code、Codex CLI、OpenCode 或 OpenClaw 即可使用。直接用自然语言给出视频路径（`.mp4 / .mov / .mkv / .webm`）与创作要求，Agent 就会连贯完成：**画面与对白理解 → 导演主线与声画分工 → 句界安全剪辑 → 解说撰稿与底线门禁 → TTS 配音 → 多轨混音、画布包装与剪映草稿导出**。
+`video-recap-skills` 包含两个配套技能（做片用的 `video-recap` 和拆解参考片用的 `video-reference`），装进 Claude Code、Codex CLI、OpenCode 或 OpenClaw 就能用。直接用日常话说出视频路径（`.mp4 / .mov / .mkv / .webm`）和你想怎么讲，Agent 就会一路做完：**看懂画面与台词 → 定主线与留原声位置 → 按台词停顿切镜头 → 写解说词并检查闪帧与超速 → 配音 → 混音、加画框字幕并导出剪映草稿**。
 
-- **一个 Key 跑通全链，本机零第三方 Python 依赖** — 语音转写（ASR）、画面理解（VLM）与默认配音（TTS）统一走[小米 MiMo](https://platform.xiaomimimo.com)；本机仅需 Python 标准库与 `ffmpeg`，无需 GPU、无需 `pip install`、无需下载模型权重。配音可按需切换为 Fish Audio 或自托管 IndexTTS。
-- **先立主视角与声画让位，再按“垫半句、让半句、接半句”写词** — 动笔前先在 `recap_story_plan.json` 明确核心看点、主视角（POV）与局势翻转，并在 `visual_audio_board.json` 指定每一拍的主导音源：重头对手戏原速让给演员原声，动作冲突让给现场声，旁白只垫处境与潜台词。
-- **先剪画面后写旁白，确定性底线门禁与节奏告警分层把关** — 剪辑模式（`cut`）先按句末停顿锚点与镜头硬切剪出恒定帧率母版，再对照真实成片时间轴撰稿；硬阻断拦截剪辑切点附近的 `<= 0.20s` 残帧闪帧、半句掐断或半句放回原声、残句与时间窗配速超载，并对长留白、冷开场静音与笼统外貌代称输出非阻断告警。
-- **画幅与字卡包装、多轨混音与响度控制一次成型** — 内置声明式包装引擎（`packaging_plan.json`），支持 `9:16` 竖屏 `4:3` 舞台视窗 / 上下分栏画框与 `16:9` 横屏浅底圆角字幕条、`@2x` 超采样标题/花字/人物名牌/数据卡、重字重中文字体排版与自动封面图导出；混音层内置人声 EQ 提亮压缩、配乐 `2.2kHz` 人声让位凹槽、瞬态峰值对齐音效与 `-1.0 dBTP` 真峰值限制。
-- **一键导出剪映草稿，配套五维素材库与极简审片台** — 多轨 `timeline.json` 可直接导出为自包含的剪映/CapCut 草稿目录；本地只读工作台提供成片审看，以及按**原片剧目 / 配乐 / 音效 / 音色 / 样式与样片**五维归类的素材在线试听试看。
+- **一个 Key 跑通，本机不用 `pip install`** — 听写台词、看画面和默认配音都走[小米 MiMo](https://platform.xiaomimimo.com) API；本机只要 Python 标准库和 `ffmpeg`，不用显卡、不用 `pip install`、不用下模型。配音也可以换成 Fish Audio 或本地部署的 IndexTTS。
+- **重头戏留给原声，旁白不抢台词** — 动笔前先在 `recap_story_plan.json` 定好核心看点和主视角，再在 `visual_audio_board.json` 标清每一段谁出声：高光对手戏原速留给演员原声，打斗冲突留给现场声，旁白只在前后交代处境和潜台词。
+- **先剪画面再写词，自动检查闪帧与语速超载** — 剪辑模式（`cut`）先按台词停顿和镜头切换剪出定长画面，再对着真实成片时间轴写解说词，不怕词画错位；切点处不掐半句话，还会自动拦住 `<= 0.20s` 的碎闪帧、没说完的残句和塞不进时间窗的超长句，并对过长冷场或“黑衣男子”这类笼统称呼给出提醒。
+- **自带横竖屏画框、字幕样式与防爆音混音** — 支持 `9:16` 竖屏（`4:3` 居中画框或上下分栏）和 `16:9` 横屏浅底圆角字幕条，能加双行标题、花字、人物名牌和数据卡，顺带生成 `cover.jpg` 封面；混音时自动提亮人声、压低配乐与人声冲突的频段、对齐转场音效，并把音量峰值控制在 `-1.0 dBTP` 以内防止爆音。
+- **导出剪映草稿，自带本地审片与素材页** — 多轨时间线（`timeline.json`）能一键转成剪映 / CapCut 草稿目录，换台电脑也能直接打开细调；本地只读网页可以对照看成片与解说词，还能按**原片剧目、配乐、音效、音色、样式与样片**在线试听试看素材。
 
 ## 安装
 
@@ -60,7 +60,7 @@ export MIMO_API_KEY=your-mimo-key          # Windows PowerShell：$env:MIMO_API_
 export MIMO_TOKEN_PLAN_CLUSTER=cn          # 仅 tp-* Token Plan 密钥需要：cn | sgp | ams
 ```
 
-> **macOS 硬字幕说明**：烧录硬字幕需 `ffmpeg` 含 `libass` 滤镜。Homebrew 默认 `ffmpeg` 不带 `libass` 时，默认运行会自动降级输出同名 `.srt` 外挂字幕并在 `final_qc.json` 记录提醒；如需烧录硬字幕，可执行 `brew install ffmpeg-full` 并将其 `bin` 目录置于 `PATH` 首位。
+> **macOS 硬字幕说明**：烧录硬字幕需 `ffmpeg` 含 `libass` 滤镜。Homebrew 默认 `ffmpeg` 不带 `libass` 时，默认会改为输出同名 `.srt` 外挂字幕并在 `final_qc.json` 记录提醒；如需直接烧录硬字幕，可执行 `brew install ffmpeg-full` 并将其 `bin` 目录放到 `PATH` 首位。
 
 ### 2. 安装技能到编程 Agent
 
@@ -71,7 +71,7 @@ export MIMO_TOKEN_PLAN_CLUSTER=cn          # 仅 tp-* Token Plan 密钥需要：
 /plugin install video-recap-skills@video-recap
 ```
 
-或在任意支持直接导入 GitHub 仓库的 Agent 中说一句话：
+或在支持直接导入 GitHub 仓库的 Agent 中说一句话：
 
 ```text
 安装这个插件：https://github.com/zenstory-ai/video-recap-skills
@@ -104,22 +104,22 @@ openclaw plugins install ./video-recap-skills
 openclaw skills list
 ```
 
-同一套技能只注册到一个发现目录即可，避免重名或重复触发。
+用其中一种方式安装即可，不用同时注册多个目录。
 
 </details>
 
 <details>
-<summary><strong>可选：切换 Fish Audio 或自托管 IndexTTS 配音</strong></summary>
+<summary><strong>可选：切换 Fish Audio 或本地 IndexTTS 配音</strong></summary>
 
-切换配音后端后，ASR 与 VLM 仍走 MiMo（本地参考音频克隆 `--voice-ref` 仅在 MiMo 路径下可用）：
+切换配音后，台词听写和画面分析仍走 MiMo（本地参考音频克隆 `--voice-ref` 仅在 MiMo 配音通道下可用）：
 
 ```bash
-# 方案 A：Fish Audio（默认模型 s2.1-pro-free，默认音色“娱乐扒妹”，计费以官方策略为准）
+# 方案 A：Fish Audio（默认模型 s2.1-pro-free，内置音色“娱乐扒妹”，按官方计费）
 export TTS_PROVIDER=fish-audio
 export FISH_API_KEY=your-fish-key
 export FISH_TTS_REFERENCE_ID=5653cea4ac83480aaf2bf45406556185   # 可选自定义音色 ID
 
-# 方案 B：自托管 IndexTTS（通过 TTS_PROVIDER=index-tts 或 --tts-provider index-tts 显式启用）
+# 方案 B：自托管 IndexTTS（通过 TTS_PROVIDER=index-tts 或 --tts-provider index-tts 启用）
 export TTS_PROVIDER=index-tts
 export INDEX_TTS_ENDPOINT=http://127.0.0.1:8000/tts
 export INDEX_TTS_VOICE=narrator_default
@@ -129,49 +129,49 @@ export INDEX_TTS_VOICE=narrator_default
 
 ### 3. 验证环境就绪
 
-安装后可直接让 Agent 做一次环境自检：
+装好后可以直接让 Agent 自检一遍：
 
 ```text
 检查 video-recap 的运行环境，告诉我 Python、ffmpeg/libass 和 MiMo 配置是否就绪。
 ```
 
-ClawHub 分发条目与包指纹由[显式发布清单](.clawhub/publish.json)管理（`video-recap` 与 `video-reference` 均为独立自包含包）。历次版本变更见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zenstory-ai/video-recap-skills/releases)（仓库已由 `worldwonderer/video-recap-skills` 迁移至 `zenstory-ai/video-recap-skills`）。
+版本更新见 [CHANGELOG.md](CHANGELOG.md) 与 [Releases](https://github.com/zenstory-ai/video-recap-skills/releases)（仓库原地址 `worldwonderer/video-recap-skills` 已迁至 `zenstory-ai/video-recap-skills`；ClawHub 包清单见 [publish.json](.clawhub/publish.json)）。
 
 ## 快速开始
 
-复制下方任一指令、替换为你的本地视频路径即可开跑，无需手动拼装底层命令：
+复制下面任意一条指令，换成你的本地视频路径就能开跑，不用手写底层命令：
 
 ```text
 # 1. 单集或整段视频解说成片
 给 /path/to/video.mp4 做一个中文解说成片。这是《庆余年》第一集，主角是范闲，字幕烧进画面。
 
-# 2. 多集长片浓缩为一条主线（先剪出母版，再对成片时间轴写词）
+# 2. 多集长片剪成一条主线（先剪画面，再对成片时间轴写词）
 用 /path/to/ep1.mp4 和 /path/to/ep2.mp4 做一个十分钟解说，围绕同一条主线剪辑，保留关键原声和人物反应，不要分成两个小总结。
 
-# 3. 竖屏 9:16 舞台视窗包装 + 同步导出剪映草稿
-把 /path/to/ep1.mp4 剪成 90 秒竖屏短剧解说，采用 4:3 舞台视窗包装加上顶部主标题、人物名牌与转场音效，并导出剪映草稿。
+# 3. 竖屏 9:16 画框字幕 + 导出剪映草稿
+把 /path/to/ep1.mp4 剪成 90 秒竖屏短剧解说，用 4:3 居中画框加上顶部标题、人物名牌和转场音效，并导出剪映草稿。
 
-# 4. 绑定五维素材库与系列模板统一出片
-按 /path/to/series/recap_project.json 绑定的音色、纯器乐配乐和竖屏包装模板，给 /path/to/ep3.mp4 生成本集解说成片。
+# 4. 套用系列固定的音色、配乐和画框样式
+按 /path/to/series/recap_project.json 里设好的音色、纯音乐配乐和竖屏画框样式，给 /path/to/ep3.mp4 做一集解说。
 
-# 5. 在浏览器打开本地极简审片台与五维素材库
-在本机打开审片台，看看 /path/to/projects 下面的成片、解说词镜头对照和素材库。
+# 5. 在浏览器打开本地审片与素材页
+打开本地审片页，看看 /path/to/projects 下面的成片、解说词镜头对照和素材库。
 ```
 
-如果第一轮只想先对齐**分镜与声画让位方案**、暂不调用配音或渲染：
+如果想先确认**故事主线和原声保留位置**，满意后再配音合成：
 
-> 先基于 `/path/to/video.mp4` 给出故事主视角与分拍声音分工方案：哪句原声台词或动作停顿完整保留、哪里安排旁白及对应画面证据，确认方案后再进入配音和渲染。
+> 先看看 `/path/to/video.mp4` 怎么讲：定一下主视角，标出哪几句原声台词和动作停顿完整保留、哪里放旁白，等我确认方案后再配音和合成。
 
 ## 流程与架构
 
 ```mermaid
 flowchart LR
-    video(["源视频"]) --> understand["① 理解<br/>切镜 · ASR · VLM"]
-    research["人物与前情调研 · 可选"] -.-> understand
-    understand --> plan["② 导演立意与写稿<br/>主视角 · 声画分工 · 底线校验"]
-    understand -. "剪辑模式 (cut) · 先剪后配" .-> cut["句界安全剪辑<br/>edited_source.mp4"] -.-> plan
+    video(["源视频"]) --> understand["① 看片理解<br/>切镜头 · 听台词 · 识画面"]
+    research["人物与前情补充 · 可选"] -.-> understand
+    understand --> plan["② 定主线与写词<br/>留原声 · 写旁白 · 时长检查"]
+    understand -. "剪辑模式 (cut) · 先剪后写" .-> cut["按台词停顿切镜头<br/>edited_source.mp4"] -.-> plan
     plan --> voiceover["③ 配音合成<br/>MiMo / Fish / IndexTTS"]
-    voiceover --> assemble["④ 混音与包装合成<br/>包装 · 字幕 · 真峰值限制"]
+    voiceover --> assemble["④ 混音与加画框字幕<br/>横竖屏画框 · 字幕 · 防爆音"]
     assemble --> output(["recap_*.mp4 + 剪映草稿"])
     classDef io fill:#0f172a,stroke:#0f172a,color:#fff;
     classDef stage fill:#eff6ff,stroke:#3b82f6,color:#1e293b;
@@ -181,22 +181,22 @@ flowchart LR
     class research,cut opt;
 ```
 
-两个自包含技能通过 `work_dir/` 下的结构化文件交接，互不耦合：
+两个技能独立运行，通过工作目录 `work_dir/` 下的文件交接数据：
 
-| 技能 | 定位与职责 | 输入 → 核心交付 |
+| 技能 | 用途 | 输入 → 输出 |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | **统一生产主技能**：场景/ASR/VLM 理解（`understand.py`）· 导演立意与声画分镜 · 句界安全剪辑与残帧体检（`cut.py` / `shot_review.py`）· 解说底线门禁（`validate.py`）· TTS 配音（`voiceover.py`）· 多轨混音、声明式画布包装与字幕渲染（`assemble.py`）· 剪映草稿导出 · 五维素材库与本地工作台 | `源视频` → `recap_<名>.mp4` + `cover.jpg` + `subtitles.srt/.ass` + `timeline.json` + `final_qc.json` |
-| [`video-reference`](skills/video-reference/) | **按需拆片参考技能**（不在日常生产链上）：实测优秀成片的镜头节奏、响度与声画交接，剥离原片剧情事实，导出可迁移的制作参考模板 | `参考成片 + 理解产物` → `production_reference.json` |
+| [`video-recap`](skills/video-recap/) | **日常做片主技能**：切镜头与台词/画面识别（`understand.py`）· 故事主线与声音分工 · 按台词停顿剪辑与闪帧检查（`cut.py` / `shot_review.py`）· 解说词时长与断句检查（`validate.py`）· 配音合成（`voiceover.py`）· 多轨混音、横竖屏画框与字幕合成（`assemble.py`）· 剪映草稿导出 · 本地审片与素材页 | `源视频` → `recap_<名>.mp4` + `cover.jpg` + `subtitles.srt/.ass` + `timeline.json` + `final_qc.json` |
+| [`video-reference`](skills/video-reference/) | **参考片拆解技能**（按需调用）：测量优秀成片的镜头长短、音量起伏与原声旁白衔接方式，去掉原片剧情细节，整理成可复用的剪辑参考 | `参考成片 + 理解文件` → `production_reference.json` |
 
-字段定义与跨阶段契约见[数据结构规范](skills/video-recap/references/data-schema.md)与[仓库架构说明](docs/architecture.md)。
+各阶段文件格式与代码结构见[数据结构说明](skills/video-recap/references/data-schema.md)与[仓库架构说明](docs/architecture.md)。
 
 ## 看看它的输出
 
-以下片段摘自仓库公开案例 [examples/guohuo-60s/](examples/guohuo-60s/)（仅收录脱敏结构化配置、质检记录与包装代码，不含原剧音视频）。
+下面摘自公开案例 [examples/guohuo-60s/](examples/guohuo-60s/)（目录内只放脱敏后的配置文件、质检记录和画框代码，不含原剧音视频）。
 
-### 1. 先立观众看点，再把名场面完整让给演员原声
+### 1. 先定看点，再把重头戏完整留给演员原声
 
-动刀前，Agent 先写出 [`recap_story_plan.json`](examples/guohuo-60s/recap_story_plan.json) 明确全片观众承诺与主视角，并在 [`visual_audio_board.json`](examples/guohuo-60s/visual_audio_board.json) 中为每一拍指定主导音源。例如洗手台逼问这一拍明确由原声独占（`audio_owner: "original_dialogue"`、`narration_job: "none"`、保持 `1.0x` 原速）：
+开剪前，Agent 先写 [`recap_story_plan.json`](examples/guohuo-60s/recap_story_plan.json) 定下全片看点和主视角，再在 [`visual_audio_board.json`](examples/guohuo-60s/visual_audio_board.json) 里给每一段分好声音归属。比如洗手台逼问这一段，直接标明归演员原声（`audio_owner: "original_dialogue"`、`narration_job: "none"`、保持 `1.0x` 原速）：
 
 ```json
 {
@@ -213,7 +213,7 @@ flowchart LR
 }
 ```
 
-对应到 [`narration.json`](examples/guohuo-60s/narration.json)，上一句旁白在 `10.2s` 干净收声，中间整整 13 秒完全让给演员原声与原片画面自带硬字幕（校对后的台词时间轴同步记录在 [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json) 供全片遮罩或外挂字幕复用，本案例前景字幕条不在该区间叠字），直到 `23.047s` 情绪反转瞬间才接回下一句解说：
+落到 [`narration.json`](examples/guohuo-60s/narration.json) 里，上一句旁白在 `10.2s` 收住，中间整整 13 秒完全留给演员原声和画面自带字幕（校对后的原片台词时间轴另存为 [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json)，需要遮罩重排或导出外挂字幕时直接用，这里不再叠一层字幕），直到 `23.047s` 情绪反转时才接回下一句解说：
 
 ```json
 [
@@ -232,11 +232,11 @@ flowchart LR
 ]
 ```
 
-### 2. 看片返修锁定账本与终审机器质检
+### 2. 分轮改片不串改，出片前自动跑完质检
 
-多轮看片返修在 [`revision-log.json`](examples/guohuo-60s/revision-log.json) 中严格拆分“本轮修改项（`change_set`）”与“冻结不动项（`frozen_set`）”，杜绝改坏已验收的声音和字幕；交付前经 [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json)、[`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json) 与 [`content-qc.md`](examples/guohuo-60s/content-qc.md) 完成编码、响度真峰值与逐句事实核查：
+看片微调时，[`revision-log.json`](examples/guohuo-60s/revision-log.json) 会把“本轮要改的地方（`change_set`）”和“锁住不动的部分（`frozen_set`）”分开记清，修一个切点不会碰乱已经调好的配音和字幕；出片前还会生成 [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json)、[`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json) 和 [`content-qc.md`](examples/guohuo-60s/content-qc.md)，核对视频解码、音量峰值和台词事实：
 
-[`revision-log.json`](examples/guohuo-60s/revision-log.json)（第 4 轮仅解冻画面拼接）：
+[`revision-log.json`](examples/guohuo-60s/revision-log.json)（第 4 轮只修画面衔接，其余全部锁定）：
 
 ```json
 {
@@ -250,7 +250,7 @@ flowchart LR
 }
 ```
 
-[`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json)（终审机器核验）：
+[`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json)（出片前画面与音频检查）：
 
 ```json
 {
@@ -259,72 +259,58 @@ flowchart LR
 }
 ```
 
-### 3. 一键导出剪映草稿继续精修
+### 3. 导出剪映草稿继续细调
 
-只需在对话中加一句“导出剪映草稿”，`timeline.json` 即转换为自包含的多轨剪映草稿目录（原片片段、逐段解说、BGM、字幕与包装图片图层分轨排布，媒体自动打包进 `Resources/local` 跨机即开）：
+在对话里加一句“导出剪映草稿”，`timeline.json` 就会转成完整的多轨剪映草稿文件夹——原片片段、逐句配音、背景音乐、字幕和画框贴图各自独立成轨，所用素材一并打包进 `Resources/local`，换台电脑也能直接打开：
 
 <img alt="导出的剪映多轨草稿：原片、解说、BGM 与字幕分轨可编辑" src="docs/jianying-export.jpg" width="100%">
 
-### 4. 本地极简审片台与五维分类素材库
+### 4. 本地审片与素材页
 
-审片台仅监听本机 `127.0.0.1` 且严格只读（仅响应 `GET` 与 `HEAD`），收敛为清爽的 **成片** 与 **素材库** 双视图：支持成片与无解说原剪一键切换播放、解说词与镜头时间轴点击跳转，以及按**原片剧目、配乐、音效、音色、样式与样片**五维分类检索与样片预览：
+本地审片页只在 `127.0.0.1` 打开且纯只读，分成 **成片** 和 **素材库** 两栏：**成片**栏可以一键切换带解说成片与无解说原剪，点任意一句解说词或镜头就能跳到对应秒数；**素材库**栏按**原片剧目、配乐、音效、音色、样式与样片**分类，方便直接试听音色配乐、预览横竖屏画框和字幕样式：
 
-<img alt="审片台成片视图：成片与无解说原剪切换播放、解说词与镜头时间轴同步对照" src="docs/dashboard-film.png" width="100%">
+<img alt="本地审片页成片栏：成片与无解说原剪切换播放、解说词与镜头时间轴同步对照" src="docs/dashboard-film.png" width="100%">
 
-<img alt="审片台素材库视图：五维分类检索与竖横屏画面包装、字幕样式及参考样片预览" src="docs/dashboard-templates.png" width="100%">
+<img alt="本地审片页素材库栏：按剧目、配乐、音效、音色、样式分类预览" src="docs/dashboard-templates.png" width="100%">
 
 ## 进阶能力一览
 
-| 场景 | 对 Agent 怎么说 / 怎么配 | 机制与边界说明 |
+| 场景 | 对 Agent 怎么说 | 说明 |
 |---|---|---|
-| **跨集复用理解缓存** | `分析 /path/to/ep1.mp4 并保存到 /path/to/.video-materials，后续优先复用` | 仅存轻量 JSON/MD 与索引，不重复拷贝大体积视频，无需外部数据库或向量库 |
-| **系列绑定素材库与画布包装** | `用 /path/to/library 里的音色、纯器乐 BGM 和 portrait-stage-4x3@v1 模板绑定 recap_project.json 出片` | 支持 `portrait_stage` / `portrait_cinema` / `landscape_cinema` 包装模板；解说模式自动拦截带人声歌词的 BGM，落盘 `resource_lock.json` 记录授权状态（详见[资源库规范](skills/video-recap/references/resource-library.md)与[包装规范](skills/video-recap/references/packaging.md)） |
-| **原片硬字幕带检测遮罩** | `先检测 /path/to/video.mp4 的原片字幕带并让我确认预览，再把解说字幕贴到同一区域` | 预览图输出至 `.subtitle_measure/`，支持近方形像素（SAR 偏差 `<= 2%`）的底部硬字幕 |
-| **授权参考音频克隆音色** | `用 /path/to/voice-ref.wav 的音色给 /path/to/video.mp4 配解说；我已获声音所有者授权` | 仅在 MiMo TTS 路径下可用，参考音频将发往云端克隆接口，请务必先获本人授权 |
-| **无解说纯原声剧情精剪** | `把 /path/to/ep1.mp4 和 ep2.mp4 按主线剪成纯原声高光短片，不加解说配音` | 走 `source-mix` 音频路由，保留原声对白、可选纯器乐配乐与片尾平滑淡出 |
+| **多集追更复用看片结果** | `分析 /path/to/ep1.mp4 并存到 /path/to/.video-materials，后面做同剧优先直接用` | 只保存轻量的台词与镜头分析文件，不重复拷贝大体积视频，也不用装数据库 |
+| **整季统一音色、配乐与画框** | `把 /path/to/library 里的音色、纯音乐 BGM 和 portrait-stage-4x3@v1 画框绑进 recap_project.json 出片` | 内置 `portrait_stage` / `portrait_cinema` / `landscape_cinema` 三套横竖屏样式；解说模式会自动拦下带歌词的 BGM，并在 `resource_lock.json` 记下素材来源（见[素材库说明](skills/video-recap/references/resource-library.md)与[画框样式说明](skills/video-recap/references/packaging.md)） |
+| **遮挡原片自带硬字幕** | `先测一下 /path/to/video.mp4 底部的原片字幕位置给我看预览图，再把新字幕贴在同一块区域` | 预览图存在 `.subtitle_measure/`，适合常规像素比例（SAR 偏差 `<= 2%`）的底部硬字幕 |
+| **用授权录音克隆解说音色** | `用 /path/to/voice-ref.wav 的声音给 /path/to/video.mp4 配解说，我已拿到本人授权` | 仅支持 MiMo 配音通道；参考音频会上传用于合成，使用前请先取得声音本人同意 |
+| **不加旁白的纯原声高光混剪** | `把 /path/to/ep1.mp4 和 ep2.mp4 按主线剪成纯原声高光短片，不配解说` | 保留干净原声对白，可叠加纯音乐配乐并在片尾自然淡出 |
 
 ## 常见问题
 
-### 原视频本身没有旁白、甚至一句对白都没有，能直接配解说吗？
+### 原视频没有旁白，甚至一句台词都没有，能做解说吗？
 
-完全可以。理解阶段靠 VLM 直接阅读抽帧画面；若素材连人物对白或音轨都没有（如纯画面纪录片、无声 MOV 素材），脚本会自动降级为空转写，也可让 Agent 传入 `--skip-asr` 直接基于画面撰稿（见 [issue #79](https://github.com/zenstory-ai/video-recap-skills/issues/79)）。
+可以。看片阶段会直接抽帧识别画面内容；如果素材里没人说话，甚至压根没有音轨（比如空镜素材、无声纪录片），听写步骤会自动留空跳过，也可以让 Agent 加上 `--skip-asr` 纯看画面写词（见 [issue #79](https://github.com/zenstory-ai/video-recap-skills/issues/79)）。
 
-### 长视频跑到一半遇上 429 限流或意外中断，需要从头重跑吗？
+### 长视频跑到一半遇到 429 限流或中途断了，要重头再来吗？
 
-不需要。VLM 场景分析逐镜实时落盘，遇限流自动降并发重试；中断后重跑原命令即可复用已完成缓存继续推进。写完 `clip_plan.json` 或 `narration.json` 后续跑同理，脚本会自动校验源视频指纹与运行参数一致性。
+不用。画面分析每跑完一个镜头就会存盘，遇到限流会自动放慢并发重试；中断后原样重跑，做完的镜头会直接跳过。写好 `clip_plan.json` 或 `narration.json` 后继续往下跑也一样，脚本核对视频和参数没变就会接着做。
 
-### 为什么 VLM 认不出角色名字，解说里容易出现“黑衣男子”？
+### 为什么画面分析认不出角色名字，稿子里老出现“黑衣男子”？
 
-只要已知片名或剧集名，开跑前让 Agent 按[背景调研指南](skills/video-recap/references/research-guide.md)将主要角色全名与关系写入 `work_dir/background_research.json`：VLM 抽帧分析与写稿简报会直接对齐真实人名，且校验器会通过 `generic_character_label` 告警提示仍退回笼统外貌代称的稿件。
-
-## 文档导航
-
-| 类别 | 文档链接 |
-|---|---|
-| **创作与实操指南** | [视频到解说完整流程](https://zenstory.ai/zh/video-recap/video-to-narration) · [原声与旁白分工](https://zenstory.ai/zh/video-recap/original-audio-and-narration) · [影视解说文案怎么写](docs/video-recap-script-writing.md) · [AI 视频分析防编造指南](docs/ai-video-analysis-without-invented-plot.md) · [创作剪辑与去 AI 味手册](skills/video-recap/references/creative-editing-playbook.md) |
-| **剪映导出与选型对比** | [剪映 / CapCut 草稿导出指南](https://zenstory.ai/zh/video-recap/capcut-draft) · [导出剪映草稿与成本账单](docs/capcut-jianying-draft-export.md) · [多轨时间线与剪映协议](docs/timeline-and-jianying.md) · [开源 AI 影视解说工具横向对比](docs/open-source-ai-video-recap-tools.md) |
-| **架构、包装与配置规范** | [仓库架构说明](docs/architecture.md) · [生产能力边界与验收原则](docs/production-boundaries.md) · [数据结构规范](skills/video-recap/references/data-schema.md) · [画布包装规范](skills/video-recap/references/packaging.md) · [素材与资源库规范](skills/video-recap/references/resource-library.md) · [全量配置手册](skills/video-recap/references/config-playbook.md) |
-| **公开案例复盘** | [《这一秒过火》案例产物目录](examples/guohuo-60s/) · [案例复现手册](examples/guohuo-60s/skill-runbook.md) · [从初剪母版到终审交付的四轮复盘](examples/guohuo-60s/iteration-notes.md) |
+只要知道片名或剧名，开跑前让 Agent 按[背景调研指南](skills/video-recap/references/research-guide.md)把主要角色名字和关系写进 `work_dir/background_research.json`。看画面和写稿时就会直接用上真名；如果稿子里还写出“黑衣男子”这类泛称，检查时也会给出提醒。
 
 ## 致谢
 
-- [LINUX DO - 新的理想型社区](https://linux.do) — 社区交流与反馈支持
-- 剪映草稿协议参考了 [pyJianYingDraft](https://github.com/GuanYixuan/pyJianYingDraft)、[capcut-mate](https://github.com/Hommy-master/capcut-mate) 与 [duo-video](https://github.com/duoec/duo-video)
-- 原片字幕带检测算法改编自 [ops120/video-recap-skills-plus](https://github.com/ops120/video-recap-skills-plus)
+- <https://linux.do>
+- <https://github.com/GuanYixuan/pyJianYingDraft> · <https://github.com/Hommy-master/capcut-mate> · <https://github.com/duoec/duo-video> · <https://github.com/ops120/video-recap-skills-plus>
 
-## 开源许可
+## ZenStory AI 项目
 
-MIT License，详见 [LICENSE](LICENSE)。
+由 [ZenStory AI](https://zenstory.ai/zh) 维护——面向故事创作、改编与视听制作的开源 Agent 工具集（GitHub：[@zenstory-ai](https://github.com/zenstory-ai)）：
 
-## ZenStory AI 开源矩阵
-
-本项目由 [ZenStory AI](https://zenstory.ai/zh) 维护——致力于打造开源的 Agent 故事创作、改编与视听生产工具链（GitHub 组织：[zenstory-ai](https://github.com/zenstory-ai)）：
-
-| 项目 | 定位与用途 |
+| 项目 | 用途 |
 | --- | --- |
 | [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | 网文写作 Skill 包：扫榜、拆书、正文创作、去 AI 味精修与封面生成 |
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI 短剧 / 漫剧创作 Skill 合集：剧本、角色资产、分镜、生图/生视频提示词与独立审稿 |
 | [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 小说改编互动游戏 Skill 合集：原著拆解、运行环境构建与实机交互验收 |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 将长视频或多集剧集制作成中文解说成片，支持多预设画布包装与导出剪映/CapCut 草稿（本仓库） |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 把长视频或多集剧集剪成带画框字幕的中文解说成片，并导出剪映 / CapCut 草稿（本仓库） |
 | [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 社区插件，集成小说、短剧、游戏与视频解说工作台 |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | 对话即创作的 AI 小说写作工作台（[app.zenstory.ai](https://app.zenstory.ai)） |

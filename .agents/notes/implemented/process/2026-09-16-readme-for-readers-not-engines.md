@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续更新：[[2026-09-20-readme-real-outputs-and-faq]]、[[2026-11-19-slim-readme-and-unify-en-filename]]。
+
 ## Problem
 
 2026 年 9 月的 GEO 工作把 README.md 与 README.en.md 改写成了面向答案引擎的形态：顶部先放项目页与全部项目的链接条，演示之后紧跟一张指向站外"实用指南"的表格和一条带大量边界说明的示例请求，安装、用法与 Fish Audio 段落里反复出现"不是长期免费承诺""最终交付仍需完整播放复核"一类的免责句。README 的读者是想给视频做解说的创作者和写手，他们需要在前两屏看到演示、装好插件并发出第一条请求。GitHub 流量数据显示 Google/Bing/Baidu 带来的引荐约为 ChatGPT 类引擎的 7 倍，README 首先要服务人类读者和传统搜索。
