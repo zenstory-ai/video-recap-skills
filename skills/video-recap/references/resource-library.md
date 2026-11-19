@@ -19,7 +19,7 @@ python3 scripts/library.py --library-dir <library> list [--kind bgm]
 python3 scripts/library.py --library-dir <library> show <id|id@vN>
 ```
 
-也可以启动只读看板浏览资源、模板与样片（支持图片、音频与样片预览）：`python3 scripts/dashboard_server.py --root <library 或其上层目录>`。
+也可以打开本地只读审片与素材页浏览资源、模板与样片（支持图片、音频与样片预览）：`python3 scripts/dashboard_server.py --root <library 或其上层目录>`。
 
 以上查询命令都不改写资源库。新增或修改条目时直接编辑 JSON，再跑 `check` 校验。**错误（error）**表示该条目无法投入使用；**警告（warning）**表示可以使用但需要人工复核（例如版权或声音授权未确认、样片文件不在本机、模板采纳后底层资源文件发生过变动）。
 
@@ -50,7 +50,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 | `kind` | 必需文件 | 额外字段 |
 |---|---|---|
 | `bgm` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | 可选分类与声学画像：`category`（未填时自动继承二级分类目录名）、`sub_category`、`moods`、`scene_fit`、`energy`、`tempo_band`、`bpm`、`has_vocal`（布尔值；`true` 时 `check` 报警告且解说模式拒绝绑定）、`speech_friendly`、`measured`（如 `{duration_sec, lufs_i}`） |
-| `sfx` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | 可选 `category`（如 `whoosh` / `impact` / `riser` / `accent`）、`tone`、`scene_fit`、`peak_offset_ms`（瞬态峰值毫秒偏移，混音时自动前移对齐切点）、`recommended_gain_db`、`measured` |
+| `sfx` | 至少一个音频文件（wav / mp3 / m4a / aac / flac / ogg） | 可选 `category`（如 `whoosh` / `impact` / `riser` / `accent`）、`tone`、`scene_fit`、`peak_offset_ms`（音效最响处的毫秒位置，混音时自动前移对齐画面切点）、`recommended_gain_db`、`measured` |
 | `voice` | 可选参考音频 | `voice.provider` ∈ `mimo-tts` / `fish-audio` / `index-tts`，并填写 `voice.voice_id` 或附带一个参考音频；附带参考音频时必须填写 `consent.status` ∈ `unknown` / `granted` / `denied`；可选 `category`、`persona`、`gender`、`languages`、`recommended_speed` |
 | `font` | 至少一个字体文件（ttf / otf / ttc） | 可选 `font.family`、`font.index`、`visibility` |
 | `image` | 至少一张图片（png / jpg / webp），用于角标、包框或片尾卡 | 可选 `visibility` ∈ `public` / `internal`（`internal` 供模板内部引用，不在素材库主视图平铺展示） |
@@ -83,7 +83,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 - 凡带 `provenance` 的参数都必须包含 `value`，且 `provenance` ∈ `measured`（从成片画面实测）/ `fitted`（调试校准得出）/ `specified`（人工直接指定）/ `unknown`。剪辑软件面板上的字号读数不等于实际像素高，应记为 `specified` 或 `unknown`。
 - 引用库内资源时写 `{"resource": "<id>"}`：`params.font` 必须指向 `font` 资源，包装图层的 `image` 必须指向 `image` 资源。
 - `subtitle_style` 必须包含 `params.font`（填 `resource` 或 `family`）、`params.size_px` 与 `params.max_chars`（按该画布能容纳的最长单行字数校准）；当 `size_px × max_chars` 超过画布宽度减去左右各 40px 默认边距时报错。可选参数为 `outline_px`、`shadow_px`、`primary_color`、`outline_color`、`max_lines`、`band`，出现其他参数名直接报错；若给出 `params.band.value`，需满足 `0 <= y_top < y_bot <= canvas.height`。
-- `packaging` 支持静态图层 `params.layers` 或声明式演播室版式 `params.studio_plan`（`preset` ∈ `portrait_cinema` / `portrait_stage` / `landscape_cinema`），也可二者同时组合；静态图层包含唯一 `name`、`image` 资源引用以及落在画布内的整数 `rect {x, y, width, height}`；可选 `params.safe_rect`。
+- `packaging` 支持静态图层 `params.layers` 或画框版式配置 `params.studio_plan`（`preset` ∈ `portrait_cinema` / `portrait_stage` / `landscape_cinema`），也可二者同时组合；静态图层包含唯一 `name`、`image` 资源引用以及落在画布内的整数 `rect {x, y, width, height}`；可选 `params.safe_rect`。
 - `production_reference` 模板见下一节。
 - `status` ∈ `draft` / `adopted` / `retired`。状态为 `adopted` 时必须填写 `adoption.date`（YYYY-MM-DD）、`by`、`statement`（用户确认原话）与 `scope`。可选 `adoption.resources` 记录采纳当下底层资源文件的大小与修改时间：
 
@@ -118,7 +118,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-样片是核对模板效果的实物依据，不是模板本身：`demonstrates` 写明它示范了哪些版式或节奏特征，`not_reusable` 写明哪些具体内容（人物、台词字幕、时间点等）绝不能照搬，`templates` 用 `id@vN` 指回它所对应的模板版本。
+样片是核对模板效果的实物依据，不是模板本身：`demonstrates` 写明它示范了哪些版式或节奏特征，`not_reusable` 写明哪些具体内容（人物、台词字幕、时间点等）不能照搬，`templates` 用 `id@vN` 指回它所对应的模板版本。
 
 ## 项目绑定 `recap_project.json`
 
@@ -138,10 +138,10 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 | `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布宽高，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（转成 ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，若引用字体资源则同时设置 `SUBTITLE_FONT_FILE` |
 | `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |
 | `bgm` | `BGM_PATH` ← 该资源下的第一个音频文件 |
-| `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`（保留导出物原内容并附上 `written_by` 与 `template {id, version}`），仅供写稿 Agent 阅读，无任何脚本消费，也不校验画布。若该路径已有非 `--project` 生成的文件：内容与导出物一致则原样保留，不一致则直接报错中止；解除绑定后只删除编排器自己写出的副本，不碰调用方手动放置的文件 |
+| `production_reference` | 第一次暂停前写出 `work_dir/production_reference.json`（保留导出物原内容并附上 `written_by` 与 `template {id, version}`），仅供写稿 Agent 阅读，做片脚本不会读取，也不校验画布。若该路径已有非 `--project` 生成的文件：内容与导出物一致则原样保留，不一致则直接报错中止；解除绑定后只删除编排器自己写出的副本，不碰调用方手动放置的文件 |
 | `packaging` | 合成前将模板 `params.layers` 写出到 `work_dir/packaging_layers.json`（含图层图片路径与 `rect`），并将 `params.studio_plan` 写出到 `work_dir/packaging_plan.json`（`video-recap.packaging_plan.v1`），由合成阶段渲染画布包装并同步写入 `timeline.json` |
 
-- 若命令行或环境变量已显式传入某项配置，且与项目绑定解析出的值不一致，程序会在启动前报错中止并指明冲突项，绝不静默覆盖。
+- 若命令行或环境变量已显式传入某项配置，且与项目绑定解析出的值不一致，程序会在启动前报错中止并指明冲突项，不会悄悄覆盖。
 - 合成前会核对字幕模板、包装模板的画布尺寸与成片实际画布是否一致；尺寸不符立即中止，换画幅必须绑定对应画幅的模板。
 - 参考音频的 `consent.status` 为 `denied` 时拒绝绑定。
 - 暂停打印的续跑命令只携带 `--project`，不把绑定展开成一长串散装参数；中途修改 `recap_project.json` 后续跑，会按新绑定重新解析。

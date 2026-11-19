@@ -1,19 +1,19 @@
 ---
 name: video-recap
-description: 从输入视频生成中文解说成片或原声剧情短片。用户提供 .mp4 / .mov / .mkv / .webm，并要求剪辑、添加旁白、配音、总结或制作短剧/电视剧/电影/纪录片/科普解说时使用。在同一个自包含技能内完成视频理解、导演立意与选镜剪辑、解说撰稿与校验、TTS 配音及音画混音合成。触发词：视频解说、视频旁白、生成解说、视频 recap、video recap、voiceover、narration、recap。
+description: 把一段或多集视频做成带画框字幕的中文解说成片或纯原声高光短片。用户提供 .mp4 / .mov / .mkv / .webm，要求做影视解说、短剧二创、加旁白配音、跨集混剪或导出剪映草稿时使用；串联完成看片识台词、定主线与留原声、按台词停顿切镜头、写词检查、TTS 配音与混音加字幕。触发词：视频解说、影视解说、视频旁白、生成解说、视频 recap、video recap、voiceover、narration、recap。
 ---
 
 ## 1. 定位与流程
 
-本技能是自包含的视频解说与剪辑生产技能，将视频理解、故事立意、画面剪辑、旁白撰稿、配音合成与音画混音放在同一工作目录 `work_dir` 下串联完成：
+本技能把看片理解、定故事主线、切镜头、写解说词、TTS 配音与混音加字幕放在同一个工作目录 `work_dir` 下串联完成：
 
 ```text
-understand.py（视频理解）─▶ Agent 制定故事/声画方案并写 clip_plan.json 或 narration.json ─▶ [cut.py（剪辑与重出简报）] ─▶ validate.py（本地底线校验）─▶ voiceover.py（TTS 配音）─▶ assemble.py（混音与字幕渲染）
+understand.py（视频理解）─▶ Agent 制定故事/声画方案并写 clip_plan.json 或 narration.json ─▶ [cut.py（剪辑与重出简报）] ─▶ validate.py（本地时长与断句检查）─▶ voiceover.py（TTS 配音）─▶ assemble.py（混音与字幕渲染）
 ```
 
 日常使用可直接运行总入口 `scripts/recap.py` 串联全流程并在创作节点自动暂停，也可按需单独调用 `scripts/` 下的单阶段脚本（`understand.py`、`cut.py`、`validate.py`、`voiceover.py`、`assemble.py`）。
 
-把外部成片拆解为制作参考（`production_reference.json`）不在默认生产链上。当用户要求拆片学习时：先对样片跑 `understand.py`（建议设 `ASR_SEGMENT_SECONDS=5`），再用独立的拆片技能执行测量、标注、校验与导出，将导出的 `production_reference.json` 放入下一轮运行的 `work_dir`，或登记为资源库里的 `production_reference` 模板并经 `--project` 绑定。主流程不会自动拆片，也不拿新成片与参考片做机械打分比对。
+把外部成片拆解为制作参考（`production_reference.json`）不在默认做片流程里。当用户要求拆片学习时：先对样片跑 `understand.py`（建议设 `ASR_SEGMENT_SECONDS=5`），再用独立的拆片技能执行测量、标注、校验与导出，将导出的 `production_reference.json` 放入下一轮运行的 `work_dir`，或登记为资源库里的 `production_reference` 模板并经 `--project` 绑定。日常做片不会自动拆片，也不会拿新成片跟参考片机械打分比对。
 
 全流程支持断点续跑：写完 `clip_plan.json` 或 `narration.json` 后重跑同一条 `recap.py` 命令即可继续。续跑时脚本会核对 `recap_run_manifest.json` 记录的源视频身份与参数，若工作目录来自其他视频或不同参数组合会拒绝复用；暂停时终端打印的续跑命令已将路径转为绝对路径并补齐 `--work-dir`。
 
@@ -46,14 +46,14 @@ understand.py（视频理解）─▶ Agent 制定故事/声画方案并写 clip
 export MIMO_API_KEY=***
 ```
 
-同一个 `MIMO_API_KEY` 即可驱动默认全链路。涉及远程网络请求的环节如下：
+配好一个 `MIMO_API_KEY` 就能跑通默认全流程。涉及远程网络请求的环节如下：
 
 - **视频理解（`understand.py`）**：将切分后的音频窗口发往 MiMo ASR（`mimo-v2.5-asr`），将抽帧 JPEG 连同 `background_research.json` 摘要发往 MiMo VLM（默认 `mimo-v2.6-flash`，可通过 `MIMO_MODEL` 切换 `mimo-v2.6-pro` 等）。若工作目录已有完整分析产物，传 `--brief-only` 或 `--edited-storyboard-only` 则纯本地运行、不发起网络请求。
 - **旁白配音（`voiceover.py`）**：按 `--tts-provider`（默认 `auto` 优先选已配置的 MiMo，其次 Fish Audio，不自动选 `index-tts`）将解说文本发往对应 TTS 服务：
   - `mimo-tts`：发往 MiMo TTS（`mimo-v2.5-tts`）；若显式传了 `--voice-ref <audio>`，还会将该参考音频切片发往 `mimo-v2.5-tts-voiceclone`（使用前请确认已获声音授权）。
   - `fish-audio`：需配置 `FISH_API_KEY`，将每段解说文本与 `FISH_TTS_REFERENCE_ID` 发往 `FISH_TTS_API_URL`（默认 `https://api.fish.audio/v1/tts`）。
   - `index-tts`：仅在显式指定 `--tts-provider index-tts` 时启用，将文本与 `INDEX_TTS_VOICE` 发往用户自建的 `INDEX_TTS_ENDPOINT`（详见 `references/index-tts.md`）。
-- **解说校验（`validate.py`）、视频剪辑（`cut.py`、`shot_review.py`）与音画合成（`assemble.py`）**：纯本地确定性逻辑与 `ffmpeg` / `ffprobe` 调用，不发起网络请求。
+- **解说校验（`validate.py`）、视频剪辑（`cut.py`、`shot_review.py`）与音画合成（`assemble.py`）**：只在本地运行检查逻辑与 `ffmpeg` / `ffprobe`，不发起网络请求。
 
 以 `tp-` 开头的 Token Plan 密钥默认发往中国区集群，可通过 `MIMO_TOKEN_PLAN_CLUSTER` 切换集群。配置项见 `references/config-playbook.md`，产物格式见 `references/data-schema.md`。下文 `scripts/...` 均相对于本技能目录。
 
@@ -63,13 +63,13 @@ export MIMO_API_KEY=***
 
 只要能从文件名或用户说明识别出片名、剧集名或科普主题，开跑前先按 `references/research-guide.md` 核实人物关系与前情，写入 `work_dir/background_research.json`（多视频连剪写在项目根 `work_dir`，脚本会自动同步到 `sources/<source_id>/`）。
 
-随后启动编排入口：
+随后运行总入口脚本：
 
 ```bash
 python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 ```
 
-脚本完成音频提取、静音与句末停顿锚点检测（`speech_boundary_anchors.json`）、场景切分、VLM 帧分析与 ASR 转写后，生成故事板拼图 `storyboard/storyboard_*.jpg` 与创作简报 `agent_narration_brief.md` 并暂停。
+脚本完成音频提取、静音与台词停顿点检测（`speech_boundary_anchors.json`）、场景切分、VLM 帧分析与 ASR 转写后，生成故事板拼图 `storyboard/storyboard_*.jpg` 与创作简报 `agent_narration_brief.md` 并暂停。
 
 ### 4.2 导演意图与选镜计划（cut 第一阶段）
 
@@ -101,10 +101,10 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 - **简明剪辑理由（`reason`）**：用自然中文写清该段承担的节拍作用（`hook | setup | turn | escalation | payoff`）与入出点画面/声音依据，无需拼固定段数的竖线模板。
 - **必保画面与原声证据（`required_evidence`）**：不可丢失的关键动作、反应或原声问答可登记在 `required_evidence`；若边界吸附裁掉必保区间或颠倒 `before` 顺序，脚本会报错拦截。
 - **晚进场与冷开场取舍**：默认顺时序“晚进场”（直接从冲突或反差动作切入，省去进门寒暄铺垫）；正序冲突出现较晚时可前置一段冷开场悬念镜，时长随悬念动作自然收住，做到不靠铺垫也能看懂、不与正片重复同一机位、只留悬念不提前亮底牌。旁白压低原声时优先垫反应镜、动作细节或稳态画面，避免角色正脸连续张嘴说话却被压低消音。
-- **句末安全切点与收尾气口**：切点须落在源片首尾、句末停顿锚点、静音窗口或同源无缝顺接处；句末吸附会在停顿窗内预留最多 `0.30s` 气口且不跨硬切点，单段最短 `>= 0.8s`，片尾最后一拍留出表情或动作落定的余韵。切进台词中途会报 `unsafe_clip_sentence_boundary`（若同时引发闪帧与切词冲突则报 `shot_speech_conflict`）。
-- **密集快切与碎镜排查**：`cut.py` 渲染 `edited_source.mp4` 后会自动运行 `shot_review.py` 生成 `shot_review.json`，拦截 `<= 0.20s` 的极短残镜闪帧（`flash_slivers`）。遇到动作戏或密集反打时，也可运行 `ffmpeg -i <video> -vf "select='gt(scene,0.35)',showinfo" -f null -` 或 `scripts/shot_review.py`（见 `references/shot-review.md`）检查切点，区分原片切点与拼接切点——将**原片自带的无关短镜头整段删除**或把边界移到快切簇外侧；对**由本次拼接制造的切点**（如硬切边缘残留几帧邻镜），外扩入出点或合并同源相邻段，不用转场遮掩坏接点。
+- **对齐台词停顿与收尾气口**：切点须落在源片首尾、句末停顿点、静音窗口或同源无缝顺接处；句末对齐会在停顿窗内预留最多 `0.30s` 气口且不跨硬切点，单段最短 `>= 0.8s`，片尾最后一拍留出表情或动作落定的余韵。切进台词中途会报 `unsafe_clip_sentence_boundary`（若同时引发闪帧与切词冲突则报 `shot_speech_conflict`）。
+- **密集快切与碎镜排查**：`cut.py` 渲染 `edited_source.mp4` 后会自动运行 `shot_review.py` 生成 `shot_review.json`，拦住 `<= 0.20s` 的极短闪帧（`flash_slivers`）。遇到动作戏或密集反打时，也可运行 `ffmpeg -i <video> -vf "select='gt(scene,0.35)',showinfo" -f null -` 或 `scripts/shot_review.py`（见 `references/shot-review.md`）检查切点，区分原片切点与拼接切点——将**原片自带的无关短镜头整段删除**或把边界移到快切簇外侧；对**由本次拼接制造的切点**（如硬切边缘残留几帧邻镜），外扩入出点或合并同源相邻段，不用转场遮掩坏接点。
 
-写好 `clip_plan.json` 后重跑 `recap.py`，脚本完成边界吸附、渲染恒定帧率 `edited_source.mp4` 并重映射输出时间轴证据（`speech_boundary_anchors_output.json`、`storyboard/edited_storyboard.*`），随后暂停等待写解说词。
+写好 `clip_plan.json` 后重跑 `recap.py`，脚本完成边界对齐、渲染恒定帧率 `edited_source.mp4` 并换算出成片输出时间轴（`speech_boundary_anchors_output.json`、`storyboard/edited_storyboard.*`），随后暂停等待写解说词。
 
 ### 4.3 解说词与原声留白创作（full / cut 第二阶段）
 
@@ -126,17 +126,17 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 
 - **背景、筹码与点名节奏**：讲清前情关系、动机筹码与动作后果，不复述画面表象；60 秒内短片点名 1–2 个核心人物即可（次要角色用身份关系称呼），3–10 分钟中长解说随节拍推进自然引入关键人物。
 - **“垫半句、让半句、接半句”与原声边界**：原声重头台词或关键动作声前提前收口让位，尾音落定后再接半句点破后果；压低原声切入（`overlaps_speech: true`）须对齐句末锚点或静音窗（违者报 `interrupts_source_sentence` / `unsafe_source_handoff`），释放原声同样避免落在角色半句话中途（对白区间内后续 3s 无锚点时给出 `unsafe_source_release` 复核提示，合成端做 `bounded_release` 平滑回升）。
-- **字数预算、完整收句与去套话**：每段以完整句末标点收尾（残句报 `incomplete_sentence`），靠精炼字数匹配窗口（`full` 模式超预算 1.25 倍报 `over_budget`，不静默删字）。写连贯自然的口语长短句，不写阅读理解式升华套话；结局交给画面与原声演完，兑现后不再补总结旁白。
+- **字数预算、完整收句与去套话**：每段以完整句末标点收尾（残句报 `incomplete_sentence`），靠精炼字数匹配窗口（`full` 模式超预算 1.25 倍报 `over_budget`，不会擅自删字）。写连贯自然的口语长短句，不写阅读理解式升华套话；结局交给画面与原声演完，兑现后不再补总结旁白。
 - **配乐与原声留白字幕**：外部配乐（`BGM_PATH`）只用纯器乐，原片已有高音量人声插曲时不叠外部配乐。传入 `--subtitle-y-top`/`--subtitle-y-bot` 默认仅在旁白区间开启 `1.0` 不透明像素带遮罩（留白段继续露出原片自带硬字幕）；若原片无硬字幕，或额外设置 `SOURCE_SUBTITLE_MASK_TIMING=all`（或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）开启全片不透明遮罩并保留了原声对白，可在 `work_dir/original_subtitles.json` 按成片时间写入校对后的原声字幕（若留白段原片硬字幕仍可见，合成器会自动跳过以免叠字）。
-- **平台宣发备忘与画布包装分开落盘**：故事定稿后如需输出平台标题、封面帧与简介方案，按 `references/promotional-copy.md` 写入 `work_dir/promo_copy.json`；成片画布视觉包装按 `references/packaging.md` 写入 `work_dir/packaging_plan.json`。
+- **平台宣发备忘与画框包装分开保存**：故事定稿后如需输出平台标题、封面帧与简介方案，按 `references/promotional-copy.md` 写入 `work_dir/promo_copy.json`；成片画框与花字样式按 `references/packaging.md` 写入 `work_dir/packaging_plan.json`。
 
 ### 4.4 配音合成与音画混音渲染
 
 写好 `narration.json` 后重跑同一条 `recap.py` 命令：
 
-1. **本地确定性校验（`validate.py`）**：输出 `narration_lint.json`。对时间重叠/越界、残句、抢断原话、`full` 模式超预算与模板占位符泄漏做硬阻断（`errors`）；对原声释放点无邻近锚点（`unsafe_source_release`）、开场留白偏长（`weak_cold_open_silence`）、长段无声留白（`excessive_dead_air`）、外貌泛称（`generic_character_label`）与评论套话（`editorial_commentary_tone`）给出非阻断提示（`warnings`）。
-2. **TTS 配音（`voiceover.py`）**：逐段合成语音写入 `tts_segments/` 与 `tts_meta.json`，缓存按文本、音色、模型与参考音频指纹命中；若实测语速低于下限（`TTS_MIN_SPEECH_RATE`，即合成音频异常拖长）疑似异常合成，会自动重试并将异常音频另存为 `*.rejected.wav`。
-3. **音画合成（`assemble.py`）**：将画面、逐段旁白、动态闪避与句末回升后的原声、可选 BGM、可选音效（`work_dir/sfx_plan.json` 或 `packaging_plan.json.sfx`）、画布包装（`work_dir/packaging_plan.json` 或 `packaging_layers.json`，见 `references/packaging.md`）与片尾音频淡出合成为最终 MP4，自动抽帧导出 `work_dir/cover.jpg`（若 `promo_copy.json` 指定了封面秒数则优先采用），并输出 `timeline.json`（传 `--export-jianying` 可将视频、旁白、BGM、字幕与包装图片导出为剪映草稿）。若旁白在微加速上限内仍装不进可用时间窗，直接报 `no_safe_fit` 阻断，不截断尾音。声音模式与路由规则见 `references/audio-modes.md`。
+1. **本地解说词检查（`validate.py`）**：输出 `narration_lint.json`。对时间重叠/越界、残句、抢断原话、`full` 模式超预算与模板占位符泄漏直接报错拦截（`errors`）；对原声回升点附近无停顿点（`unsafe_source_release`）、开场留白偏长（`weak_cold_open_silence`）、长段无声留白（`excessive_dead_air`）、外貌泛称（`generic_character_label`）与评论套话（`editorial_commentary_tone`）给出不阻断渲染的提醒（`warnings`）。
+2. **TTS 配音（`voiceover.py`）**：逐段合成语音写入 `tts_segments/` 与 `tts_meta.json`，缓存按文本、音色、模型与参考音频匹配复用；若实测语速低于下限（`TTS_MIN_SPEECH_RATE`，合成音频异常拖长），会自动重试并将异常音频另存为 `*.rejected.wav`。
+3. **音画合成（`assemble.py`）**：把画面、逐段旁白、动态压低并按句末停顿回升的原声、可选 BGM、可选音效（`work_dir/sfx_plan.json` 或 `packaging_plan.json.sfx`）、画框与花字包装（`work_dir/packaging_plan.json` 或 `packaging_layers.json`，见 `references/packaging.md`）与片尾音频淡出合成为最终 MP4，顺带抽帧导出 `work_dir/cover.jpg`（若 `promo_copy.json` 指定了封面秒数则优先采用），并输出 `timeline.json`（传 `--export-jianying` 可一并导出剪映多轨草稿）。若旁白在允许的微加速范围内仍塞不进可用时间窗，直接报 `no_safe_fit` 拦截，不会裁掉尾音。声音模式与混音规则见 `references/audio-modes.md`。
 
 ### 4.5 多视频连剪与资源库
 
@@ -169,14 +169,14 @@ python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --work-dir cut_work --a
 
 `source-mix` 同样执行原声响度归一、可选 BGM 混音、片尾淡出与音频重编码；切换音频模式须换用新工作目录。详见 `references/audio-modes.md`。
 
-## 5. 自检与只读看板
+## 5. 环境自检与本地审片页
 
 ```bash
 python3 scripts/doctor.py
 python3 scripts/dashboard_server.py --root <目录> [--port 0] [--open]
 ```
 
-`doctor.py` 检查本机 `ffmpeg` / `ffprobe`、字幕滤镜与远程服务密钥配置；`dashboard_server.py` 在本地 `127.0.0.1` 启动只读审片台（仅响应 `GET` 与 `HEAD`），浏览 `--root` 下的成片目录、解说时间轴与素材库。
+`doctor.py` 检查本机 `ffmpeg` / `ffprobe`、字幕滤镜与远程服务密钥配置；`dashboard_server.py` 在本地 `127.0.0.1` 启动只读审片与素材页（仅响应 `GET` 与 `HEAD`），方便对照查看 `--root` 下的成片、解说时间轴与素材库。
 
 ## 6. 输出与参数
 
@@ -184,12 +184,12 @@ python3 scripts/dashboard_server.py --root <目录> [--port 0] [--open]
 
 - `recap_<video>.mp4`：最终解说或原声成片。
 - `subtitles.srt` / `subtitles.ass`：生成的字幕文件。
-- `work_dir/`：中间分析、创作计划与校验产物，字段契约见 `references/data-schema.md`。
+- `work_dir/`：中间分析、创作计划与校验产物，字段说明见 `references/data-schema.md`。
 - `work_dir/recap_story_plan.json` 与 `visual_audio_board.json`：Agent 编写的故事规划与分镜声画表。
 
 命令行参数以 `python3 scripts/recap.py --help` 及各阶段脚本 `--help` 为准；`--style` 作为自由文本原样传给写稿 Agent，不映射为固定枚举。
 
 ## 7. 能力边界
 
-- 确定性底线检查（残镜闪帧、台词截断、旁白抢断或半句释放原声、`full` 模式字数硬上限、超长削尾、必保画面丢失、占位符泄漏、解码与封装规格）作为硬门禁运行。
-- 故事立意、开场节奏、留白长短、角色点名密度与口播文风不设机械打分门禁，由 Agent 结合画面证据、原声时间轴与 `references/creative-editing-playbook.md` 自主把控并经成片视听复核确认。
+- 客观硬伤检查（极短闪帧、切碎台词、旁白抢话或半句放开原声、`full` 模式字数超上限、超长配音塞不进时间窗、裁丢必保画面、残留示例占位符、视频解码与封装异常）由脚本自动拦截。
+- 故事立意、开场节奏、留白长短、角色点名密度与口播文风不做机械打分，由 Agent 结合画面证据、原声时间轴与 `references/creative-editing-playbook.md` 把控，并在出片后原速看片确认。

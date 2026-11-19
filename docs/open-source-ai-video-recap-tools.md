@@ -20,19 +20,19 @@
 此外还有三个常被搜到的相关仓库：
 - [video-recap-skills-plus](https://github.com/ops120/video-recap-skills-plus)：基于本仓库早期版本派生的扩展分支，加入了原片字幕位置检测、音色克隆与旁白期间静音原声（本仓库现已吸收并重写了字幕带位置检测能力）。
 - [Narrator-AI-Master-Coze](https://github.com/Narrator-AI/Narrator-AI-Master-Coze)：面向扣子（Coze）工作流的商业转售模板仓库，内含 SQL 脚本与图文教程，不含本地可运行的剪辑代码。
-- [OpenMontage](https://github.com/calesthio/OpenMontage)（AGPL-3.0）：面向通用视频生产的 Agent 编排系统，并未针对中文影视解说做专门的声画让位或句界门禁设计。
+- [OpenMontage](https://github.com/calesthio/OpenMontage)（AGPL-3.0）：面向通用视频制作的 Agent 编排工具，没有专门针对中文影视解说做原声让位或防切词处理。
 
 ## 二、按你的使用场景对号入座
 
 - **想要点点鼠标就能用的图形界面**：优先看 **NarratoAI**。它社区体量最大，提供开箱即用的 Windows / macOS 整合包，不挑本地显卡，对接的国内配音接口也很全。如果主力用 Windows，还可以对比 **JJYB_AI_VideoAutoCut**（对配音时长与镜头长度的对齐处理很扎实，但注意其许可证禁止未授权商用）与 **解说猫 JSM**（支持导出 Premiere XML，但依赖本地 GPU 且需激活码）。
 - **想尽量在自己电脑上跑免费本地模型**：重点看 **dramaxis** 和 **movie-narrator**。两者都能直接挂本地 Ollama 模型；dramaxis 还能用本地 Whisper 跑字幕提取。movie-narrator 采用“先抓 TMDB 影评资料写稿、再回头找画面配对”的逆向做法，适合公开资料丰富的院线老电影，但需留意其 AGPL-3.0 协议及 Edge-TTS 的非商用限制。
-- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者本质上是商业 SaaS 平台的命令行遥控器，理解、写稿和渲染全在厂商云端黑盒完成，按积分扣费；而 **video-recap-skills** 把剪辑、句界门禁和混音渲染全部留在你本机的 `ffmpeg` 上执行，云端只按量调用小米 MiMo 做转写、看图和配音，并且要求每一拍解说都写明对应原片哪一秒的画面或原声证据，减少模型脱离素材编造剧情。
+- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者是商业 SaaS 平台的命令行入口，理解、写稿和渲染都在厂商服务端完成，按积分扣费；**video-recap-skills** 则在本机用 `ffmpeg` 完成剪辑、防切词检查和混音加字幕，云端只按量调用小米 MiMo 做语音转写、画面识别和配音，并要求每一拍解说写明对应原片哪一秒的画面或原声台词，减少模型脱离素材乱编剧情。
 
-## 三、动手前务必核对的三笔账
+## 三、动手前建议核对的三件事
 
-1. **商用合规账**：MIT 协议项目（NarratoAI、dramaxis、superAIAutoCutVideo、video-recap-skills）对软件本身的商用限制最宽松；`JJYB_AI_VideoAutoCut` 明确禁止未经书面授权的商业使用；`movie-narrator` 采用 AGPL-3.0；`JSM` 未声明开源协议。除此之外，还要单独确认**配音接口**（例如微软 Edge-TTS 条款明确限制商业用途）以及**原片影视素材自身**的版权归属。
-2. **事实准确账（防 AI 脑补）**：绝大多数自动化工具让模型扫一眼抽帧或残缺字幕就直接生成全篇解说词，极易把“两个人说话”脑补成“密谋背叛”。正式投产前，建议拿一集你熟知剧情的片子试跑，逐句核对解说词有没有无中生有；具体防脑补方法见[《AI 分析视频总爱乱编剧情怎么办》](ai-video-analysis-without-invented-plot.md)。
-3. **API 消耗账**：开源软件本身免费，真金白银花在云端视觉理解、语音转写和 TTS 配音上。原片越长、抽帧越密，账单越高。以 `video-recap-skills` 实测为例，跑完一条完整视频的 MiMo API 消耗约 1.3 元人民币；建议先拿自己日常要做的单集片长实测一轮，算清每条成片的真实边际成本。
+1. **商用合规**：MIT 协议项目（NarratoAI、dramaxis、superAIAutoCutVideo、video-recap-skills）对软件本身的商用限制最宽松；`JJYB_AI_VideoAutoCut` 明确禁止未经书面授权的商业使用；`movie-narrator` 采用 AGPL-3.0；`JSM` 未声明开源协议。除此之外，还要单独确认**配音接口**（例如微软 Edge-TTS 条款明确限制商业用途）以及**原片影视素材自身**的版权归属。
+2. **事实准确度（防 AI 脑补）**：很多自动化工具让模型扫一眼抽帧或残缺字幕就直接生成整篇解说词，容易把“两个人说话”编成“密谋背叛”。正式用起来之前，建议拿一集你熟知剧情的片子试跑，逐句核对解说词有没有无中生有；具体排查方法见[《AI 分析视频总爱乱编剧情怎么办》](ai-video-analysis-without-invented-plot.md)。
+3. **API 用量开销**：开源软件本身免费，主要开销在云端画面识别、语音转写和 TTS 配音上。原片越长、抽帧越密，费用越高。以 `video-recap-skills` 实测为例，跑完一条完整解说的 MiMo API 费用约 1.3 元人民币；建议先拿日常要做的单集片长试跑一轮，算清每条成片的实际开销。
 
 ## 常见问题
 

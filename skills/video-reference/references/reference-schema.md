@@ -16,7 +16,7 @@
 
 ## `reference_breakdown.json`（Agent 唯一需要编写的文件）
 
-顶层只允许出现 `schema`、`labels`、`source_facts`、`methods`、`skipped_dimensions` 五个键；每一层对象均采用严格封闭键集。
+顶层只允许出现 `schema`、`labels`、`source_facts`、`methods`、`skipped_dimensions` 五个键；每一层对象只接受固定字段，多写未定义字段会报错。
 
 ```json
 {
@@ -75,7 +75,7 @@
 | 派生路径 | 指标含义 |
 |---|---|
 | `derived.by_owner.<owner>` | 该音源主导的总秒数 `seconds`、全片时长占比 `share`、连续段落数 `blocks`、段落中位时长 `block_median_s`、每分钟切点数 `cuts_per_min`、平均短期响度 `mean_short_term_lufs` |
-| `derived.narration_chars_per_s.value` | 旁白每秒字数数值叶子（仅统计被旁白覆盖 `≥80%` 的 ASR 分窗；未跑 ASR 时为 `null`，引用时须带 `.value`） |
+| `derived.narration_chars_per_s.value` | 旁白每秒字数（仅统计被旁白覆盖 `≥80%` 的 ASR 分窗；未跑 ASR 时为 `null`，引用时须带 `.value`） |
 | `derived.switch_on_cut_share` | 声音主导权切换点恰好落在画面硬切点 `±0.25` 秒内的比例（衡量声画同步换手率） |
 | `derived.by_section.<function>` | 该叙事功能段落的总秒数 `seconds`、每分钟切点数 `cuts_per_min`、旁白时长占比 `narration_share` |
 | `derived.structure` | 全片叙事段落排布结构：`[{function, at: [起点全片占比, 终点全片占比], lead_owner}]` |
