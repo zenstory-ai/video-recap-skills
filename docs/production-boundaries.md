@@ -30,7 +30,8 @@
 - **必保画面与原声提前核对**：Agent 在 `clip_plan.json` 的 `required_evidence` 里标出不能剪丢的关键问答与反应，脚本在对齐边界后、正式渲染前逐条检查。
 - **台词收尾留气口与片尾淡出**：切出对白时默认预留最多 `0.30s` 反应和呼吸气口（中间遇到硬切点则收在切点前），片尾自动对原声与配乐做 `350ms` 淡出，避免声音突然断开。
 - **扫描真实成片切点，拦住极短闪帧**：`cut.py` 剪出画面后自动解码扫描切点，遇到拼接点附近 `<= 0.20s`（1–5 帧）的碎闪帧（`flash_frame_sliver`）或镜头吸附与完整台词冲突（`shot_speech_conflict`）直接报错停下；原片单镜头内部自带的闪光灯或雷电则记为 `SOURCE_INTERNAL_FLASH_ADVISORY`，同时注明“未检出候选不代表完全没有闪帧”。
-- **硬伤报错与语境提醒分开处理**：旁白没写完的残句（`incomplete_sentence`）、半句打断原片台词（`interrupts_source_sentence` / `unsafe_source_handoff`）和残留示例占位符（`placeholder_leakage`）一律在配音或合成阶段直接拦截；而受粗分段 ASR 或题材语境影响的情况——旁白收口落在粗转写对白区间内且后续 3s 无停顿点（`unsafe_source_release`，合成端按 `bounded_release` 平滑回升音量）、片头超过 `2.5s` 无对白/旁白（`weak_cold_open_silence`）、连续超过 `5.0s` 无对白/旁白留白（`excessive_dead_air`），以及已有具名角色资料却写出“黑衣男子”等外貌泛称（`generic_character_label`）——统一记为不阻断渲染的 `warning` 提醒复核，避免误拦台词前提前让位、无声冷开场、长动作戏或路人角色。
+- **硬伤直接报错拦截**：旁白没写完的残句（`incomplete_sentence`）、半句打断原片台词（`interrupts_source_sentence` / `unsafe_source_handoff`）和残留示例占位符（`placeholder_leakage`）一律在配音或合成前直接拦下。
+- **语境相关情况只记警告（`warning`），不阻断渲染**：包括旁白收尾落在粗转写对白区间内且后续 3s 无停顿点（`unsafe_source_release`，合成端按 `bounded_release` 平滑回升音量）、片头超过 `2.5s` 无对白或旁白（`weak_cold_open_silence`）、连续超过 `5.0s` 无对白或旁白留白（`excessive_dead_air`），以及已有具名角色资料却仍写出“黑衣男子”等外貌泛称（`generic_character_label`）。这样既能提醒复核，又不会误拦台词前提前让位、无声冷开场、长动作戏或路人角色。
 - **出片质检默认严格把关（`--require-final-qc` 默认开启）**：只要 `final_qc.json` 里检出阻断问题（包括 `assembly_qc.json` 的混音报错和 `shot_review.json` 的闪帧报错），命令就会以非零退出码停下（仅显式传 `--no-require-final-qc` 时改为只记录不阻断）。
 
 至于故事和表达层面的要求——解说词有没有画面与原声支撑、有没有脑补原片没拍的情节、有没有占掉本该留给演员原声的重头戏（`validate.py` 只检查与对白的时间重叠，不读 `visual_audio_board.json`）、开场钩子在后文有没有兑现、有没有空洞套话（脚本只拦示例占位符泄漏）——不做机械打分，由 `video-recap` 里的 Agent 自检和出片后原速看片把关；不要把 `validate.py` 通过当成故事已经讲好。

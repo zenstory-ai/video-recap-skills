@@ -26,7 +26,7 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 ## 通用规则
 
 - `id` 必须与所在目录名一致，只能使用小写字母、数字和 `. _ -`；模板版本目录命名为 `v<version>`。
-- 顶层字段受严格校验：出现未定义的字段直接报错，防止拼写错误被静默忽略。
+- 顶层字段受严格校验：出现未定义的字段直接报错，防止拼写错误不报错就被跳过。
 - 资源与模板内的文件路径相对于记录所在目录解析，且解析后的真实路径必须留在资源库根目录内（`..` 越界、绝对路径和指向库外的符号链接都会报错）。唯一例外是样片记录可以填写库外绝对路径，方便直接指向存放在外部磁盘上的成片。
 - 文件身份只比对 `{size, mtime_ns}`，不计算内容哈希。
 - 运行中生成的派生文件（如归一化 WAV、转码片段）只写入 `work_dir`，不会回写进资源库。
@@ -131,9 +131,9 @@ python3 scripts/library.py --library-dir <library> show <id|id@vN>
 }
 ```
 
-运行 `python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 时，编排器会在进入任何阶段前先解析项目绑定：`library` 路径相对于项目文件解析，所引用的模板状态必须为 `adopted`，且涉及的资源与模板都必须通过 `check`。解析结果会转换为各子阶段入口脚本既有的命令行参数或环境变量下发，各子阶段脚本本身不直接读取资源库：
+运行 `python3 scripts/recap.py <video> --project <recap_project.json 或所在目录> …` 时，编排器会在进入任何阶段前先解析项目绑定：`library` 路径相对于项目文件解析，所引用的模板状态必须为 `adopted`，且涉及的资源与模板都必须通过 `check`。解析结果会转换为各子阶段入口脚本既有的命令行参数或环境变量传递给各阶段脚本，子阶段脚本本身不直接读取资源库：
 
-| 绑定项 | 下发方式 |
+| 绑定项 | 传递方式 |
 |---|---|
 | `subtitle_style` | `SUBTITLE_PLAY_RES_X/Y` = 模板画布宽高，`SUBTITLE_FONT_SIZE` ← `size_px`，`SUBTITLE_OUTLINE` ← `outline_px`，`SUBTITLE_SHADOW` ← `shadow_px`，`SUBTITLE_PRIMARY_COLOR` / `SUBTITLE_OUTLINE_COLOR`（转成 ASS `&HAABBGGRR`），`SUBTITLE_MAX_CHARS` / `SUBTITLE_MAX_LINES`；`band` → 底对齐 `SUBTITLE_ALIGNMENT=2` 且 `SUBTITLE_MARGIN_V` = 画布高 − `y_bot`；`font.family` → `SUBTITLE_FONT_NAME`，若引用字体资源则同时设置 `SUBTITLE_FONT_FILE` |
 | `voice` | provider → `--tts-provider`；MiMo 预置音色 → `--mimo-tts-voice`，参考音频 → `--voice-ref`；Fish Audio → `FISH_TTS_REFERENCE_ID`；index-tts → `INDEX_TTS_VOICE` |

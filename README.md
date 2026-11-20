@@ -44,7 +44,7 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 - **一个 Key 跑通，本机不用 `pip install`** — 听写台词、看画面和默认配音都走[小米 MiMo](https://platform.xiaomimimo.com) API；本机只要 Python 标准库和 `ffmpeg`，不用显卡、不用 `pip install`、不用下模型。配音也可以换成 Fish Audio 或本地部署的 IndexTTS。
 - **重头戏留给原声，旁白不抢台词** — 动笔前先在 `recap_story_plan.json` 定好核心看点和主视角，再在 `visual_audio_board.json` 标清每一段谁出声：高光对手戏原速留给演员原声，打斗冲突留给现场声，旁白只在前后交代处境和潜台词。
-- **先剪画面再写词，自动检查闪帧与语速超载** — 剪辑模式（`cut`）先按台词停顿和镜头切换剪出定长画面，再对着真实成片时间轴写解说词，不怕词画错位；切点处不掐半句话，还会自动拦住 `<= 0.20s` 的碎闪帧、没说完的残句和塞不进时间窗的超长句，并对过长冷场或“黑衣男子”这类笼统称呼给出提醒。
+- **先剪画面再写词，自动拦住闪帧与超长句** — 剪辑模式（`cut`）先按台词停顿和镜头切换剪出定长画面，再对着真实成片时间轴写解说词，不怕词画错位；切点处不掐半句话，还会自动拦住 `<= 0.20s` 的碎闪帧、没说完的残句和塞不进时间窗的超长句，并对过长冷场或“黑衣男子”这类笼统称呼给出提醒。
 - **自带横竖屏画框、字幕样式与防爆音混音** — 支持 `9:16` 竖屏（`4:3` 居中画框或上下分栏）和 `16:9` 横屏浅底圆角字幕条，能加双行标题、花字、人物名牌和数据卡，顺带生成 `cover.jpg` 封面；混音时自动提亮人声、压低配乐与人声冲突的频段、对齐转场音效，并把音量峰值控制在 `-1.0 dBTP` 以内防止爆音。
 - **导出剪映草稿，自带本地审片与素材页** — 多轨时间线（`timeline.json`）能一键转成剪映 / CapCut 草稿目录，换台电脑也能直接打开细调；本地只读网页可以对照看成片与解说词，还能按**原片剧目、配乐、音效、音色、样式与样片**在线试听试看素材。
 
@@ -139,7 +139,7 @@ export INDEX_TTS_VOICE=narrator_default
 
 ## 快速开始
 
-复制下面任意一条指令，换成你的本地视频路径就能开跑，不用手写底层命令：
+复制下面任意一条指令，换成你的本地视频路径就能开跑，不用手写命令：
 
 ```text
 # 1. 单集或整段视频解说成片
@@ -185,7 +185,7 @@ flowchart LR
 
 | 技能 | 用途 | 输入 → 输出 |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | **日常做片主技能**：切镜头与台词/画面识别（`understand.py`）· 故事主线与声音分工 · 按台词停顿剪辑与闪帧检查（`cut.py` / `shot_review.py`）· 解说词时长与断句检查（`validate.py`）· 配音合成（`voiceover.py`）· 多轨混音、横竖屏画框与字幕合成（`assemble.py`）· 剪映草稿导出 · 本地审片与素材页 | `源视频` → `recap_<名>.mp4` + `cover.jpg` + `subtitles.srt/.ass` + `timeline.json` + `final_qc.json` |
+| [`video-recap`](skills/video-recap/) | **日常做片主技能**：切镜头与台词/画面识别 · 定故事主线与声音分工 · 按台词停顿剪辑与闪帧检查 · 解说词时长与断句检查 · 配音合成 · 多轨混音、横竖屏画框与字幕合成 · 剪映草稿导出 · 本地审片与素材页 | `源视频` → `recap_<名>.mp4` + `cover.jpg` + `subtitles.srt/.ass` + `timeline.json` + `final_qc.json` |
 | [`video-reference`](skills/video-reference/) | **参考片拆解技能**（按需调用）：测量优秀成片的镜头长短、音量起伏与原声旁白衔接方式，去掉原片剧情细节，整理成可复用的剪辑参考 | `参考成片 + 理解文件` → `production_reference.json` |
 
 各阶段文件格式与代码结构见[数据结构说明](skills/video-recap/references/data-schema.md)与[仓库架构说明](docs/architecture.md)。
@@ -213,7 +213,7 @@ flowchart LR
 }
 ```
 
-落到 [`narration.json`](examples/guohuo-60s/narration.json) 里，上一句旁白在 `10.2s` 收住，中间整整 13 秒完全留给演员原声和画面自带字幕（校对后的原片台词时间轴另存为 [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json)，需要遮罩重排或导出外挂字幕时直接用，这里不再叠一层字幕），直到 `23.047s` 情绪反转时才接回下一句解说：
+落到 [`narration.json`](examples/guohuo-60s/narration.json) 里，上一句旁白在 `10.2s` 收住，中间整整 13 秒完全留给演员原声和画面自带字幕，直到 `23.047s` 情绪反转时才接回下一句解说。校对后的原片台词时间轴另存在 [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json) 里，需要遮罩重排或导出外挂字幕时直接使用，这里不再叠第二层字幕：
 
 ```json
 [
@@ -234,7 +234,7 @@ flowchart LR
 
 ### 2. 分轮改片不串改，出片前自动跑完质检
 
-看片微调时，[`revision-log.json`](examples/guohuo-60s/revision-log.json) 会把“本轮要改的地方（`change_set`）”和“锁住不动的部分（`frozen_set`）”分开记清，修一个切点不会碰乱已经调好的配音和字幕；出片前还会生成 [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json)、[`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json) 和 [`content-qc.md`](examples/guohuo-60s/content-qc.md)，核对视频解码、音量峰值和台词事实：
+看片微调时，[`revision-log.json`](examples/guohuo-60s/revision-log.json) 会把本轮要改的地方（`change_set`）和锁住不动的部分（`frozen_set`）分开记清，修一个切点不会碰乱已经调好的配音和字幕；出片前还会生成 [`assembly_qc.json`](examples/guohuo-60s/assembly_qc.json)、[`delivery-qc.json`](examples/guohuo-60s/delivery-qc.json) 和 [`content-qc.md`](examples/guohuo-60s/content-qc.md)，核对视频解码、音量峰值和台词事实：
 
 [`revision-log.json`](examples/guohuo-60s/revision-log.json)（第 4 轮只修画面衔接，其余全部锁定）：
 
@@ -279,7 +279,7 @@ flowchart LR
 |---|---|---|
 | **多集追更复用看片结果** | `分析 /path/to/ep1.mp4 并存到 /path/to/.video-materials，后面做同剧优先直接用` | 只保存轻量的台词与镜头分析文件，不重复拷贝大体积视频，也不用装数据库 |
 | **整季统一音色、配乐与画框** | `把 /path/to/library 里的音色、纯音乐 BGM 和 portrait-stage-4x3@v1 画框绑进 recap_project.json 出片` | 内置 `portrait_stage` / `portrait_cinema` / `landscape_cinema` 三套横竖屏样式；解说模式会自动拦下带歌词的 BGM，并在 `resource_lock.json` 记下素材来源（见[素材库说明](skills/video-recap/references/resource-library.md)与[画框样式说明](skills/video-recap/references/packaging.md)） |
-| **遮挡原片自带硬字幕** | `先测一下 /path/to/video.mp4 底部的原片字幕位置给我看预览图，再把新字幕贴在同一块区域` | 预览图存在 `.subtitle_measure/`，适合常规像素比例（SAR 偏差 `<= 2%`）的底部硬字幕 |
+| **遮挡原片自带硬字幕** | `先测一下 /path/to/video.mp4 底部的原片字幕位置给我看预览图，再把新字幕贴在同一块区域` | 预览图存在 `.subtitle_measure/`，适合常规底部硬字幕 |
 | **用授权录音克隆解说音色** | `用 /path/to/voice-ref.wav 的声音给 /path/to/video.mp4 配解说，我已拿到本人授权` | 仅支持 MiMo 配音通道；参考音频会上传用于合成，使用前请先取得声音本人同意 |
 | **不加旁白的纯原声高光混剪** | `把 /path/to/ep1.mp4 和 ep2.mp4 按主线剪成纯原声高光短片，不配解说` | 保留干净原声对白，可叠加纯音乐配乐并在片尾自然淡出 |
 
@@ -291,7 +291,7 @@ flowchart LR
 
 ### 长视频跑到一半遇到 429 限流或中途断了，要重头再来吗？
 
-不用。画面分析每跑完一个镜头就会存盘，遇到限流会自动放慢并发重试；中断后原样重跑，做完的镜头会直接跳过。写好 `clip_plan.json` 或 `narration.json` 后继续往下跑也一样，脚本核对视频和参数没变就会接着做。
+不用。画面分析每跑完一个镜头就会自动保存，遇到限流会自动放慢并发重试；中断后原样重跑，做完的镜头会直接跳过。写好 `clip_plan.json` 或 `narration.json` 后继续往下跑也一样，脚本核对视频和参数没变就会接着做。
 
 ### 为什么画面分析认不出角色名字，稿子里老出现“黑衣男子”？
 
@@ -308,9 +308,9 @@ flowchart LR
 
 | 项目 | 用途 |
 | --- | --- |
-| [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | 网文写作 Skill 包：扫榜、拆书、正文创作、去 AI 味精修与封面生成 |
-| [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI 短剧 / 漫剧创作 Skill 合集：剧本、角色资产、分镜、生图/生视频提示词与独立审稿 |
-| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 小说改编互动游戏 Skill 合集：原著拆解、运行环境构建与实机交互验收 |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | 把长视频或多集剧集剪成带画框字幕的中文解说成片，并导出剪映 / CapCut 草稿（本仓库） |
-| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 社区插件，集成小说、短剧、游戏与视频解说工作台 |
-| [zenstory](https://github.com/zenstory-ai/zenstory) | 对话即创作的 AI 小说写作工作台（[app.zenstory.ai](https://app.zenstory.ai)） |
+| [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | 网文写作技能包：扫榜、拆文、大纲细纲、长短篇写作、伏笔追踪、去 AI 味与封面生成 |
+| [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI 短剧与漫剧制作技能包：原著与对标拆解、剧本、视觉设定、分镜、生图/生视频提示词、确认后生产与剪辑成片 |
+| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | 小说改游戏技能包：通读拆书、玩法与美术设计、代码构建与盲玩验收，支持网页、互动影游与微信/抖音/TapTap 小游戏 |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | AI 视频解说技能包：自动切镜、看画面写解说词、配音混音合成硬字幕成片，并可导出剪映 / CapCut 草稿（本仓库） |
+| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | DeepSeek Harness 社区插件：集成网文写作、短剧漫剧、小说改游戏与视频解说四个可视化工作台 |
+| [zenstory](https://github.com/zenstory-ai/zenstory) | 对话即创作的 AI 小说与短剧网页工作台（[app.zenstory.ai](https://app.zenstory.ai)） |

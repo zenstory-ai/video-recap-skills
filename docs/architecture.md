@@ -20,12 +20,12 @@ understand.py ─▶ Agent 制定方案并写 clip_plan.json / narration.json �
 
 | 技能 / 阶段 | 核心职责 | 顶层入口脚本 | 内部功能子包 |
 |---|---|---|---|
-| `video-recap`（流程编排与公共工具） | 全流程串联、断点续跑核对、看片缓存与素材库管理、出片前质检、环境自检、本地只读审片页（dashboard） | `recap.py`、`recap_inspect.py`、`library.py`、`dashboard_server.py`、`doctor.py`、`final_qc.py` | `dashboard/`、`resources/` |
+| `video-recap`（流程编排与公共工具） | 全流程串联、断点续跑核对、看片缓存与素材库管理、出片前质检、环境自检、本地只读审片页 | `recap.py`、`recap_inspect.py`、`library.py`、`dashboard_server.py`、`doctor.py`、`final_qc.py` | `dashboard/`、`resources/` |
 | `video-recap`（理解阶段） | 切镜头、ASR 语音转写、VLM 抽帧看画面、静音与台词停顿点检测，并生成供 Agent 写稿的 `agent_narration_brief.md`（含 `cut` 模式剪完后的成片时间轴简报） | `understand.py`（传 `--brief-only` 仅重建简报） | `briefing/` |
 | `video-recap`（写稿与检查阶段） | 故事主线、剪辑与旁白规范，解说词时长与断句检查，Agent 出片前自查清单 | `validate.py` | — |
 | `video-recap`（剪辑阶段） | 按 `clip_plan.json` 对齐台词停顿切镜头，输出 `edited_source.mp4` 与 `clip_plan_validated.json`；扫描成片里的极短闪帧与密集切点 | `cut.py`、`shot_review.py` | — |
 | `video-recap`（配音阶段） | 解说旁白分段语音合成（支持 MiMo、Fish Audio、自托管 IndexTTS） | `voiceover.py` | `providers/` |
-| `video-recap`（合成阶段） | 多轨混音、压低原声（ducking）、生成并烧录字幕、输出 `timeline.json`、混音质检、导出剪映草稿 | `assemble.py`、`export_jianying.py` | `subtitles/`、`jianying/` |
+| `video-recap`（合成阶段） | 多轨混音、压低原声、生成并烧录字幕、输出 `timeline.json`、混音质检、导出剪映草稿 | `assemble.py`、`export_jianying.py` | `subtitles/`、`jianying/` |
 | `video-reference`（独立按需技能） | 实测参考成片的镜头长短与音量起伏，校验原片剧情与通用手法是否分开（R1–R8），导出脱敏后的 `production_reference.json` | `reference.py` | — |
 
 子包划分原则（见 `architecture/2026-09-21-scripts-subpackages-jianying.md`）：`scripts/` 顶层保留命令行入口与主干模块；只在特定环节用到的代码（如简报生成 `briefing/`、TTS 接口 `providers/`、字幕生成 `subtitles/`、剪映草稿导出 `jianying/`、本地只读审片页 `dashboard/`、素材库绑定与资源记录 `resources/`）各自放进独立子包。

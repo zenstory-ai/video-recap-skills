@@ -1,7 +1,7 @@
 {
   "name": "video-recap-skills",
   "version": "0.7.1",
-  "description": "Agent skills that turn videos into narrated Chinese recaps and editable JianYing/CapCut drafts—scene cutting, visual scriptwriting, voiceover mixing, and canvas packaging, with no GPU required. AI 视频解说 Agent 技能包：自动切镜、看画面写解说词、配音混音与画框包装合成成片，可导出剪映/CapCut 草稿，无需 GPU。",
+  "description": "Agent skills that turn videos into framed, subtitled Chinese-narration recaps and editable JianYing / CapCut drafts—auto shot-cutting, visual narration scripting, voiceover mixing, and no GPU required. AI 视频解说 Agent 技能包：自动切镜、看画面写解说词、配音混音并加画框字幕合成成片，可导出剪映 / CapCut 草稿，无需 GPU。",
   "author": {
     "name": "PiteChen"
   }

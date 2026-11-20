@@ -6,7 +6,7 @@
 
 ## 1. 画布包装配置 `packaging_plan.json`
 
-在 `work_dir/packaging_plan.json` 中声明 `video-recap.packaging_plan.v1`，`assemble.py` 会通过内置 `@2x` 超采样字卡渲染（Pillow LANCZOS 降采样；若环境未安装 Pillow 则降级为无字底板并在 `visual_qc.json` 记 `packaging_text_renderer_unavailable` 提示）与单遍 FFmpeg 滤镜图合成画框、重点词高亮字幕及点缀音效（若同目录存在独立的 `sfx_plan.json`，音效优先读 `sfx_plan.json` 混入成片音轨）；画框与花字图片图层会同步写入 `timeline.json`（支持随视频、旁白、BGM、字幕一并导出剪映草稿），成片渲染后还会自动抽帧生成 `work_dir/cover.jpg` 封面图。
+在 `work_dir/packaging_plan.json` 中声明 `video-recap.packaging_plan.v1` 后，`assemble.py` 会通过内置 `@2x` 超采样字卡渲染与单遍 FFmpeg 滤镜图合成画框、重点词高亮字幕及点缀音效。字卡默认用 Pillow LANCZOS 降采样生成，环境未安装 Pillow 时退回无字底板并在 `visual_qc.json` 记 `packaging_text_renderer_unavailable` 提示；若同目录存在独立的 `sfx_plan.json`，音效优先读 `sfx_plan.json`。画框与花字图片图层会同步写入 `timeline.json`，可随视频、旁白、BGM 和字幕一并导出剪映草稿；成片渲染后还会自动抽帧生成 `work_dir/cover.jpg`。
 
 ### 三种画幅与版式预设（`preset`）
 
@@ -84,5 +84,5 @@
 
 ## 5. 版面字量与防重叠检查
 
-- **控制字量**：1 分钟短片花字建议控制在 3–5 处，单条建议 8–10 字以内（`16` 加权字宽以内使用标准字号，`16–26` 字宽自动缩字号紧凑排版并记 `packaging_callout_compact_scaled` 提示，超过 `26` 字宽触发 `packaging_callout_too_long` 报错拦截；句末标点自动剥离），只补潜台词不复读旁白；人物铭牌已标出身份时，旁白无需重复念履历。
+- **控制字量**：1 分钟短片花字建议控制在 3–5 处，单条建议 8–10 字以内，只补潜台词不复读旁白；人物铭牌已标出身份时，旁白无需重复念履历。长度限制按加权字宽计算：`16` 字宽以内使用标准字号，`16–26` 字宽自动缩字号紧凑排版并记 `packaging_callout_compact_scaled` 提示，超过 `26` 字宽报 `packaging_callout_too_long` 拦截，句末标点自动剥离。
 - **字卡与字幕防重叠检查**：`visual_qc.json` 的 `geometry.packaging` 会按活跃时间段检查定时字卡、花字与实际出现的字幕安全区在同一时间段是否位置重叠（`slot: "auto"` 会自动避让同时间段活跃的字幕安全区），一旦重叠即报 `packaging_overlay_collision` 阻断渲染。

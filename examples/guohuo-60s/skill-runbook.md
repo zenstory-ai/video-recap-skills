@@ -13,21 +13,21 @@
 创作控制模式用 DIRECTED：examples/guohuo-60s 是已采用的内容基线，不再另起故事方向。
 先按标准 cut 两阶段流程生成理解产物、核心 cut、剪后旁白、配音和音画锁定母版；
 background_research.json 放在项目 work_dir 下，合成时加 --no-burn-subtitles（字幕由 Remotion 透明层提供）。
-Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级 conform 里完成。
+Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级画面微调里完成。
 生成的 source_id 与公开 example 不同时，根据 assets.json 的 episode 映射重写工作副本中的 source_id，
-不要改原片时间码。三段原声窗口保持 1.0x，旁白先写连续思路，字幕再按实际 placed audio 拆 cue。
+不要改原片时间码。三段原声窗口保持 1.0x，旁白先写连续思路，字幕再按实际混入成片的配音时长拆行。
 
 音画锁定后，再参照画布包装规范（references/packaging.md）使用 examples/guohuo-60s/remotion 做项目级透明包装；
-字体不可用时选同类 fallback 并抽检，不把特定字体写成核心依赖。
+字体不可用时选同类回退字体并抽检，不把特定字体写成核心依赖。
 
 最后进入 REVISION：读取 revision-log.json、edit-map.json 和 picture-conform.json。
 只修复最终反馈点，恢复 42 秒后源镜头的连续运动；旁白、原声、音效、字幕时序、片名和花字冻结。
-正常速度完整观看最终文件，逐接点播放，并只听声音复核；再做解码、规格、音频 stream-copy 和小于 10 MB 的交付检查。
+正常速度完整观看最终文件，逐接点播放，并只听声音复核；再做解码、规格、音频无损复制和小于 10 MB 的交付检查。
 ```
 
 ## 分阶段执行细节
 
-### 1. 多源视频理解（`understand.py`）
+### 1. 多集视频理解（`understand.py`）
 
 由 `video-recap` 编排多集视频理解，依次生成每集的 ASR 转写、VLM 帧分析、切点、静音区间、台词句末停顿点、故事板拼图及固定 `source_id`。仓库仅公开 [`background_research.json`](background_research.json) 与脱敏后的 [`multi_source_manifest.json`](multi_source_manifest.json)；复现时必须对实际片源重新跑出理解数据，不能假定不同版本片源的片头时长或时间轴完全一致。
 
@@ -48,11 +48,11 @@ Skill 母版沿用片源画布，1080p 与 BT.709 标记在项目级 conform 里
 
 ### 3. 执行初剪（`cut.py`）
 
-运行剪辑阶段检查台词边界并生成 `clip_plan_validated.json` 与 `edited_source.mp4`。切点分数（scene-change score）仅用于提示可疑接点，Agent 仍需逐个播放核对。公开目录不附带运行时生成的 `clip_plan_validated.json`；目录内的 [`picture-conform.json`](picture-conform.json) 是终审返修阶段的局部微调记录，不要拿它直接覆盖 `cut.py` 的原生校验结果。
+运行剪辑阶段检查台词边界并生成 `clip_plan_validated.json` 与 `edited_source.mp4`。切点检测分数仅用于提示可疑接点，Agent 仍需逐个播放核对。公开目录不附带运行时生成的 `clip_plan_validated.json`；目录内的 [`picture-conform.json`](picture-conform.json) 是终审返修阶段的局部微调记录，不要拿它直接覆盖 `cut.py` 的原生校验结果。
 
 ### 4. 二阶段写稿、配音与母版合成（`validate.py` → `voiceover.py` → `assemble.py`）
 
-对照剪后输出时间线放入 [`narration.json`](narration.json)，调用 `voiceover.py`（显式传 `--tts-provider fish-audio`）生成 7 段解说语音，再由 `assemble.py` 完成音频铺轨、原声闪避（ducking）与母版合成。由于本案例使用 Remotion 透明层渲染字幕，运行 `recap.py` 时需加上 `--no-burn-subtitles`，避免母版先烧进一层 ASS 字幕、外层又叠一套 Remotion 字幕（[`assembly_manifest.json`](assembly_manifest.json) 中记录的正是 `burn_subtitles: false`）。
+对照剪后输出时间线放入 [`narration.json`](narration.json)，调用 `voiceover.py`（显式传 `--tts-provider fish-audio`）生成 7 段解说语音，再由 `assemble.py` 完成音频铺轨、原声自动压低与母版合成。由于本案例使用 Remotion 透明层渲染字幕，运行 `recap.py` 时需加上 `--no-burn-subtitles`，避免母版先烧进一层 ASS 字幕、外层又叠一套 Remotion 字幕（[`assembly_manifest.json`](assembly_manifest.json) 中记录的正是 `burn_subtitles: false`）。
 
 本案例的 7 段解说词字数约为各自时间窗保守推荐字数的 `1.5–2.3` 倍。在 `cut` 模式第二阶段，`validate.py --mode cut_output` 只会将超字数记为 `over_budget` 警告而不会阻断；但如果复现时换用了语速较慢的音色，某段音频可能会塞不下时间窗：
 

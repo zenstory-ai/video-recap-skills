@@ -1,4 +1,4 @@
-<!-- Last synced with README.md: 2026-11-19 -->
+<!-- Last synced with README.md: 2026-11-20 -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/zenstory-ai/zenstory/main/apps/web/public/brand/zenstory-ai-mark.svg" alt="ZenStory AI" width="76" height="76">
 </p>
@@ -186,7 +186,7 @@ Both skills run independently and hand off files inside `work_dir/`:
 
 | Skill | What it does | Input → Output |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | **Main recap skill**: shot, speech, and visual analysis (`understand.py`) · story angle & sound plan · pause-aligned cutting & flash-frame check (`cut.py` / `shot_review.py`) · script timing & sentence check (`validate.py`) · voiceover synthesis (`voiceover.py`) · multi-track mixing, 9:16 / 16:9 framing & captions (`assemble.py`) · JianYing draft export · local review & asset page | `source video` → `recap_<name>.mp4` + `cover.jpg` + `subtitles.srt/.ass` + `timeline.json` + `final_qc.json` |
+| [`video-recap`](skills/video-recap/) | **Main recap skill**: shot, speech, and visual analysis · story angle & sound plan · pause-aligned cutting & flash-frame check · script timing & sentence check · voiceover synthesis · multi-track mixing, 9:16 / 16:9 framing & captions · JianYing draft export · local review & asset page | `source video` → `recap_<name>.mp4` + `cover.jpg` + `subtitles.srt/.ass` + `timeline.json` + `final_qc.json` |
 | [`video-reference`](skills/video-reference/) | **Reference breakdown skill** (on demand): measures shot pacing, loudness, and dialogue-to-narration handoffs from a finished edit, stripping out plot spoilers into a reusable editing reference | `reference video + analysis files` → `production_reference.json` |
 
 File formats and stage boundaries are documented in the [Data Schema](skills/video-recap/references/data-schema.md) and [Architecture Overview](docs/architecture.md).
@@ -214,7 +214,7 @@ Before cutting, the agent writes [`recap_story_plan.json`](examples/guohuo-60s/r
 }
 ```
 
-In [`narration.json`](examples/guohuo-60s/narration.json), the previous line finishes cleanly at `10.2s`, leaving the next 13 seconds untouched for the actor's voice and the episode's burned-in subtitles (verified transcript timing is saved in [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json) for subtitle masking or `.srt` export without stacking duplicate captions here), and comes back in at `23.047s` right on the emotional turn:
+In [`narration.json`](examples/guohuo-60s/narration.json), the previous line finishes cleanly at `10.2s`, leaving the next 13 seconds untouched for the actor's voice and the episode's burned-in subtitles, and comes back in at `23.047s` right on the emotional turn. Verified transcript timing is kept separately in [`original_subtitles.json`](examples/guohuo-60s/original_subtitles.json) for subtitle masking or `.srt` export, without stacking duplicate captions here:
 
 ```json
 [
@@ -280,8 +280,8 @@ Bound to `127.0.0.1` and strictly read-only, the local review page splits into t
 |---|---|---|
 | **Reuse analysis across episodes** | `Analyze /path/to/ep1.mp4 and save it under /path/to/.video-materials so later episodes can reuse it` | Saves lightweight transcript and shot files only—never copies heavy video files or needs a database |
 | **Keep one voice, BGM & frame style all season** | `Bind the voice, instrumental BGM, and portrait-stage-4x3@v1 frame from /path/to/library in recap_project.json` | Includes `portrait_stage` / `portrait_cinema` / `landscape_cinema` layouts; blocks BGM with vocals in narration mode and records asset sources in `resource_lock.json` ([Resource Library](skills/video-recap/references/resource-library.md) · [Packaging Spec](skills/video-recap/references/packaging.md)) |
-| **Cover burned-in source subtitles** | `Measure the bottom subtitle band in /path/to/video.mp4 and show me a preview before placing new captions over it` | Writes preview frames to `.subtitle_measure/` for bottom hard subtitles on standard pixel aspect ratios (SAR within `2%`) |
-| **Clone a voice from authorized audio** | `Use the voice in /path/to/voice-ref.wav for /path/to/video.mp4; I have the speaker's permission` | Available on the MiMo TTS path; reference audio is uploaded for synthesis—obtain the speaker's consent first |
+| **Cover burned-in source subtitles** | `Measure the bottom subtitle band in /path/to/video.mp4 and show me a preview before placing new captions over it` | Writes preview frames to `.subtitle_measure/` for standard bottom hard subtitles |
+| **Clone a voice from authorized audio** | `Use the voice in /path/to/voice-ref.wav for /path/to/video.mp4; I have the speaker's permission` | Available on the MiMo TTS path only; reference audio is uploaded for synthesis—obtain the speaker's consent first |
 | **Cut an original-dialogue highlight reel** | `Cut /path/to/ep1.mp4 and ep2.mp4 into an original-dialogue highlight reel with no voiceover` | Keeps clean original dialogue with optional instrumental BGM and a smooth fade-out at the end |
 
 ## FAQ
@@ -292,7 +292,7 @@ Yes. Scene analysis reads sampled frames directly. When a file has no speech or 
 
 ### A long video hit a 429 rate limit or stopped halfway. Do I have to start over?
 
-No. Visual analysis saves each completed shot to disk and slows down concurrency automatically on rate limits. Running the same command again skips finished shots—and the same applies when continuing after `clip_plan.json` or `narration.json` as long as the source video and run flags match.
+No. Visual analysis saves each completed shot as it finishes and slows down concurrency automatically on rate limits. Running the same command again skips finished shots—and the same applies when continuing after `clip_plan.json` or `narration.json` as long as the source video and run flags match.
 
 ### Why does visual analysis call characters "man in black" instead of their names?
 
@@ -309,9 +309,9 @@ Maintained by [ZenStory AI](https://zenstory.ai) — open-source agent tools for
 
 | Project | What it does |
 | --- | --- |
-| [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | Web-fiction writing skill pack: chart scanning, deconstruction, drafting, de-AI-flavor polish, and cover design |
-| [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI short-drama / motion-comic suite: scripts, character assets, storyboards, image/video prompts, and independent review |
-| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | Agent skills for source-grounded novel adaptation, runtime builds, and interactive QA |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | Cut long videos or multi-episode series into framed, subtitled Chinese-narration recaps with editable JianYing / CapCut drafts (this repo) |
-| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | Community DeepSeek Harness plugin integrating novel, short-drama, game, and video-recap workbenches |
-| [zenstory](https://github.com/zenstory-ai/zenstory) | Chat-to-create AI novel-writing workbench ([app.zenstory.ai](https://app.zenstory.ai)) |
+| [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | Web-fiction skill pack: chart scanning, deconstruction, outlining, long/short drafting, continuity tracking, de-AI-flavor polish, and covers |
+| [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI short-drama & motion-comic skill suite: source/benchmark breakdown, scripts, visual settings, storyboards, image/video prompts, confirmed production, and final cuts |
+| [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | Novel-to-game skill pack: source analysis, gameplay & art design, builds, and blind-playtest QA for web games, interactive films, and WeChat/Douyin/TapTap mini-games |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | AI video-recap skill pack: auto shot-cutting, visual narration scripting, voiceover/mix with burned-in subtitles, and editable JianYing / CapCut draft export (this repo) |
+| [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | Community DeepSeek Harness plugin bundling visual workbenches for novels, short dramas, games, and video recaps |
+| [zenstory](https://github.com/zenstory-ai/zenstory) | Chat-to-create AI web workbench for novels and short dramas ([app.zenstory.ai](https://app.zenstory.ai)) |

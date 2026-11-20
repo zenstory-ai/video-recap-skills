@@ -36,7 +36,7 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
    - **音轨边界必须卡在真实声音起止点**：`audio_spans` 的切换点要落在**耳朵真正听见人声开口或收声的时刻**，不要照抄字幕条出现或消失的时刻（按字幕切入帧标注的旁白收尾点，实测往往比真实现场收声晚 `0.24–0.42` 秒）。若目录内已有 `U/speech_boundary_anchors.json`，直接对照其中的 `acoustic_pauses`（`start` 即上一句收声点，`end` 即下一句开口点）对齐边界；因为声画同步换手率 `switch_on_cut_share` 只认切点前后 `±0.25` 秒的误差，边界一旦标偏，算出来的换手率就会严重失真。原片人物自带的画外音或内心独白仍属于原片音轨，统一标为 `original_dialogue`，如需在做法上区分，写进后面的 `source_facts` 与 `methods` 即可。
    - 填完 `labels` 后即可先跑一次 `check`，查看终端打印出的派生统计值 `derived`（各音轨时长占比、各段落切点密度、旁白字速、声音换手落在画面硬切上的比例、全片各叙事功能段落在时间轴上的起止占比 `structure`，以及第一次原声亮相的相对位置 `first_original_at`）。
 4. **提炼事实与可迁移方法（`source_facts` 与 `methods`）**：对照刚刚算出的客观派生数据，在同一份 `reference_breakdown.json` 中继续填写原片事实 `source_facts`（必须锚定具体时间区间或测量路径，并显式列出涉及的专有名称 `entities`）与可迁移方法 `methods`（包含做法规则 `rule`、适用场景 `applies_when`、避坑条件 `avoid_when`、作用的下游文件 `applies_to`、支撑证据 `evidence` 与量化参考指标 `targets`）。注意：`targets` 里只写引用路径 `{"from": "<测量路径>"}`（数值叶子或白名单派生对象），建议不要在 `rule` 正文里直接手写阿拉伯数字（手写数字会触发非阻断 warning 提醒核查）；导出时脚本会自动把实测数值填进去。
-5. **校验并导出（`check` → `export`）**：运行 `check` 确认零 error 后，执行 `export` 导出 `production_reference.json`；导出器在写盘前会对产物再做一遍全字段防剧透泄漏扫描。
+5. **校验并导出（`check` → `export`）**：运行 `check` 确认零 error 后，执行 `export` 导出 `production_reference.json`；导出器在写入文件前会对产物再做一遍全字段防剧透泄漏扫描。
 
 完整字段定义、枚举词表以及好/坏方法写法对比见 `references/reference-schema.md`。
 
@@ -63,7 +63,7 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 
 ## 5. 交付物与后续使用
 
-最终导出的 `production_reference.json` 只包含：成片总时长与画布尺寸、`cut_detection`（切点检测参数及人工增删的切点数）、`profile`（核心节奏与响度指标，附带数据来源标记 `provenance`：`measured` 表示纯算法实测、`reviewed` 表示经过 `cut_fixes` 人工复核、`labeled` 表示依赖人工音轨/段落标注）、全片各叙事段落在时间轴上的相对位置分布 `structure`、字幕版式特征 `subtitles`、可迁移方法列表 `methods` 以及跳过的维度说明 `skipped_dimensions`。
+最终导出的 `production_reference.json` 只包含：成片总时长与画布尺寸、`cut_detection`（切点检测参数及人工增删的切点数）、`profile`（核心节奏与响度指标）、全片各叙事段落在时间轴上的相对位置分布 `structure`、字幕版式特征 `subtitles`、可迁移方法列表 `methods` 以及跳过的维度说明 `skipped_dimensions`。其中 `profile` 每项指标都附带数据来源标记 `provenance`：`measured` 表示纯算法实测，`reviewed` 表示经过 `cut_fixes` 人工复核，`labeled` 表示依赖人工音轨或段落标注。
 
 使用方法：将导出的 `production_reference.json` 放进下一次制作任务的 `work_dir`（或通过资源库的 `production_reference` 模板绑定）。下游写稿阶段发现该文件存在时会主动读取，并在 `recap_story_plan.json` 的可选字段 `reference_methods` 中逐条记录对每条方法的采纳决定（`adopt` / `adapt` / `skip`）。借鉴参考方法时始终以新素材的真实画面和台词为准，不要把参考片的切点密度或留白比例当成硬指标生搬硬套。后续做片脚本不会校验这份参考文件，也不会因为它的存在而改变任何检查结果。
 
@@ -72,6 +72,6 @@ python3 scripts/reference.py export  --work-dir U --out <下次运行的 work_di
 ## 6. 能力边界
 
 - 全程纯本地计算，不调用 MiMo 或任何大模型，不修改上游视频理解产物，也不给成片好坏打分或计算“新片与参考片的差距”。
-- 镜头切点基于 ffmpeg `scdet` 分数加人工看图复核：慢速叠化转场无法被算法自动检出；间隔不足 `0.3` 秒的连续快切、恰好卡在 `soft_score` 临界线上的切点（不同 ffmpeg 版本可能存在微小浮点差异）、以及剧烈运动后突入暗场的硬切（得分可能低于 1.0）都不会直接算作自动切点，而是收进 `shots.review_windows` 交由 `frames --review` 人工看图确认。
+- 镜头切点基于 ffmpeg `scdet` 分数加人工看图复核：慢速叠化转场无法被算法自动检出；间隔不足 `0.3` 秒的连续快切、卡在 `soft_score` 临界线上的切点（不同 ffmpeg 版本可能有微小浮点差异），以及剧烈运动后突入暗场的低分硬切，都不会直接算作自动切点，而是收进 `shots.review_windows` 交由 `frames --review` 人工看图确认。
 - 旁白占比与语速属于 `labeled` 级别精度：由人工标注的音轨区间结合 ASR 分段转写估算得出，不等同于逐字对轴的时间戳。
 - 防剧透泄漏扫描基于字面字符串比对，Agent 落笔时仍需主动自查，确保 `methods` 只写通用剪辑与叙事手法，不带入原片故事梗概。
