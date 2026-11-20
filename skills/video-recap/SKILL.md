@@ -31,8 +31,8 @@ understand.py（视频理解）─▶ Agent 制定故事/声画方案并写 clip
 
 创作判断由 Agent 负责。动笔前先区分本轮的**创作控制模式**（`CREATE` 新建创作 / `DIRECTED` 按指定方案执行 / `REVISION` 定稿返修，与 `--edit-mode` 独立），并在配音渲染前完成五项判断：
 
-1. **导演判断**：明确观众点进来看什么、跟谁的主视角（POV）走、核心悬念是什么、情绪从哪儿起到哪儿落，以及哪张底牌留到最后揭晓。
-2. **故事编辑**：每一拍（beat）交代清楚局势、关系或筹码发生了什么实质变化，不写流水账摘要。
+1. **导演判断**：明确观众点进来看什么、跟谁的主视角走、核心悬念是什么、情绪从哪儿起到哪儿落，以及哪张底牌留到最后揭晓。
+2. **故事编辑**：每一拍交代清楚局势、关系或筹码发生了什么实质变化，不写流水账摘要。
 3. **画面剪辑**：选出有动作推进与人物反应的镜头和入出点，删掉拖沓过场。
 4. **声音/旁白**：先定每一拍由画面、原声对白、动作声、静音还是旁白主导，再按“垫半句、让半句、接半句”写词。
 5. **观众复核**：站在首次观看的视角做关旁白看画面、闭眼纯听声音和首尾兑现检查。
@@ -125,9 +125,9 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 **编排 `cut` 模式下，`narration.json` 直接填写剪后成片的 OUTPUT 时间戳（`0 .. 成片总时长`）**（单独调校验器传 `validate.py --mode cut_output`）。核心写作要求（细则与正反例见 `references/creative-editing-playbook.md`）：
 
 - **背景、筹码与点名节奏**：讲清前情关系、动机筹码与动作后果，不复述画面表象；60 秒内短片点名 1–2 个核心人物即可（次要角色用身份关系称呼），3–10 分钟中长解说随节拍推进自然引入关键人物。
-- **“垫半句、让半句、接半句”与原声边界**：原声重头台词或关键动作声前提前收口让位，尾音落定后再接半句点破后果；压低原声切入（`overlaps_speech: true`）须对齐句末锚点或静音窗（违者报 `interrupts_source_sentence` / `unsafe_source_handoff`），释放原声同样避免落在角色半句话中途（对白区间内后续 3s 无锚点时给出 `unsafe_source_release` 复核提示，合成端做 `bounded_release` 平滑回升）。
+- **“垫半句、让半句、接半句”与原声边界**：原声重头台词或关键动作声前提前收声让位，尾音落定后再接半句点破后果；压低原声切入（`overlaps_speech: true`）须对齐句末锚点或静音窗，违者报 `interrupts_source_sentence` / `unsafe_source_handoff`。释放原声同样避免落在角色半句话中途；若对白区间内后续 3s 无锚点，会给出 `unsafe_source_release` 复核提示，合成端按 `bounded_release` 平滑回升音量。
 - **字数预算、完整收句与去套话**：每段以完整句末标点收尾（残句报 `incomplete_sentence`），靠精炼字数匹配窗口（`full` 模式超预算 1.25 倍报 `over_budget`，不会擅自删字）。写连贯自然的口语长短句，不写阅读理解式升华套话；结局交给画面与原声演完，兑现后不再补总结旁白。
-- **配乐与原声留白字幕**：外部配乐（`BGM_PATH`）只用纯器乐，原片已有高音量人声插曲时不叠外部配乐。传入 `--subtitle-y-top`/`--subtitle-y-bot` 默认仅在旁白区间开启 `1.0` 不透明像素带遮罩（留白段继续露出原片自带硬字幕）；若原片无硬字幕，或额外设置 `SOURCE_SUBTITLE_MASK_TIMING=all`（或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）开启全片不透明遮罩并保留了原声对白，可在 `work_dir/original_subtitles.json` 按成片时间写入校对后的原声字幕（若留白段原片硬字幕仍可见，合成器会自动跳过以免叠字）。
+- **配乐与原声留白字幕**：外部配乐（`BGM_PATH`）只用纯器乐，原片已有高音量人声插曲时不叠外部配乐。传入 `--subtitle-y-top`/`--subtitle-y-bot` 默认只在旁白区间开启 `1.0` 不透明像素带遮罩，留白段继续露出原片自带硬字幕。如果原片无硬字幕，或额外设置了全片不透明遮罩（`SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true`、`SOURCE_SUBTITLE_MASK_TIMING=all` 与 `SUBTITLE_MASK_OPACITY=1.0`）并保留了原声对白，可在 `work_dir/original_subtitles.json` 按成片时间写入校对后的原声字幕；若留白段原片硬字幕仍可见，合成器会自动跳过以免叠字。
 - **平台宣发备忘与画框包装分开保存**：故事定稿后如需输出平台标题、封面帧与简介方案，按 `references/promotional-copy.md` 写入 `work_dir/promo_copy.json`；成片画框与花字样式按 `references/packaging.md` 写入 `work_dir/packaging_plan.json`。
 
 ### 4.4 配音合成与音画混音渲染
@@ -136,7 +136,7 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 
 1. **本地解说词检查（`validate.py`）**：输出 `narration_lint.json`。对时间重叠/越界、残句、抢断原话、`full` 模式超预算与模板占位符泄漏直接报错拦截（`errors`）；对原声回升点附近无停顿点（`unsafe_source_release`）、开场留白偏长（`weak_cold_open_silence`）、长段无声留白（`excessive_dead_air`）、外貌泛称（`generic_character_label`）与评论套话（`editorial_commentary_tone`）给出不阻断渲染的提醒（`warnings`）。
 2. **TTS 配音（`voiceover.py`）**：逐段合成语音写入 `tts_segments/` 与 `tts_meta.json`，缓存按文本、音色、模型与参考音频匹配复用；若实测语速低于下限（`TTS_MIN_SPEECH_RATE`，合成音频异常拖长），会自动重试并将异常音频另存为 `*.rejected.wav`。
-3. **音画合成（`assemble.py`）**：把画面、逐段旁白、动态压低并按句末停顿回升的原声、可选 BGM、可选音效（`work_dir/sfx_plan.json` 或 `packaging_plan.json.sfx`）、画框与花字包装（`work_dir/packaging_plan.json` 或 `packaging_layers.json`，见 `references/packaging.md`）与片尾音频淡出合成为最终 MP4，顺带抽帧导出 `work_dir/cover.jpg`（若 `promo_copy.json` 指定了封面秒数则优先采用），并输出 `timeline.json`（传 `--export-jianying` 可一并导出剪映多轨草稿）。若旁白在允许的微加速范围内仍塞不进可用时间窗，直接报 `no_safe_fit` 拦截，不会裁掉尾音。声音模式与混音规则见 `references/audio-modes.md`。
+3. **音画合成（`assemble.py`）**：把画面、逐段旁白、动态压低并按句末停顿回升的原声、可选 BGM、可选音效（读 `work_dir/sfx_plan.json` 或 `packaging_plan.json.sfx`）、画框与花字包装（见 `references/packaging.md`，读 `work_dir/packaging_plan.json` 或 `packaging_layers.json`）及片尾淡出合成为最终 MP4。同时自动抽帧生成 `work_dir/cover.jpg`（`promo_copy.json` 指定了封面秒数时优先采用），写出 `timeline.json`，传 `--export-jianying` 可一并导出剪映多轨草稿。若旁白在允许的微加速范围内仍塞不进可用时间窗，直接报 `no_safe_fit` 拦截，不会裁掉尾音。声音模式与混音规则见 `references/audio-modes.md`。
 
 ### 4.5 多视频连剪与资源库
 
@@ -146,7 +146,7 @@ python3 scripts/recap.py <video> --work-dir <work_dir> --context "背景"
 python3 scripts/recap.py ep1.mp4 ep2.mp4 --edit-mode cut --target-duration 10m --work-dir work_dir_multi_ep
 ```
 
-可通过 `--material-library-dir .video-materials --save-materials` 与 `--use-materials` 跨集复用单源理解缓存；同一库根目录下还可登记配乐、音效、音色、字体、贴图及可复用模板（`subtitle_style`、`packaging`、`production_reference`），用 `scripts/library.py check|list|show` 查询并通过 `--project recap_project.json` 绑定，合成后自动生成 `work_dir/resource_lock.json`（详见 `references/resource-library.md`）。测量原片硬字幕纵向遮罩区间可查看抽帧图片，或在源码仓库下运行 `tools/measure_subtitle.py <video>` 后传入 `--subtitle-y-top` 与 `--subtitle-y-bot`。
+可通过 `--material-library-dir .video-materials --save-materials` 与 `--use-materials` 跨集复用单集理解缓存；同一库根目录下还可登记配乐、音效、音色、字体、贴图及可复用模板（`subtitle_style`、`packaging`、`production_reference`），用 `scripts/library.py check|list|show` 查询并通过 `--project recap_project.json` 绑定，合成后自动生成 `work_dir/resource_lock.json`（详见 `references/resource-library.md`）。测量原片硬字幕纵向遮罩区间可查看抽帧图片，或在源码仓库下运行 `tools/measure_subtitle.py <video>` 后传入 `--subtitle-y-top` 与 `--subtitle-y-bot`。
 
 ### 4.6 最终观看与交付复核
 

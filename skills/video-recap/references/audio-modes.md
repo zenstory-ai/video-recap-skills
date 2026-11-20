@@ -6,7 +6,7 @@
 
 | 音频模式 | 解说校验 (`validate.py`) | TTS 配音 (`voiceover.py`) | 合成输入与混音行为 (`assemble.py`) |
 |---|---|---|---|
-| `narration`（默认） | 执行 | 执行 | 读取非空 `tts_meta.json`，铺放旁白轨，对原声做动态闪避（压低至 `SPEECH_DUCKING_VOLUME=0.12` / `ZONE_DUCKING_VOLUME=0.12`，在有意留出的原声对白段回升至 `IDLE_ORIG_VOLUME=1.0`），混入可选纯器乐 `BGM_PATH`；若源视频无音轨则自动生成 48 kHz 立体声静音底轨混音 |
+| `narration`（默认） | 执行 | 执行 | 读取非空 `tts_meta.json`，铺放旁白轨，动态压低原声（压低至 `SPEECH_DUCKING_VOLUME=0.12` / `ZONE_DUCKING_VOLUME=0.12`，在有意留出的原声对白段回升至 `IDLE_ORIG_VOLUME=1.0`），混入可选纯器乐 `BGM_PATH`；若源视频无音轨则自动生成 48 kHz 立体声静音底轨混音 |
 | `source-mix` | 跳过 | 跳过 | 不读 `tts_meta.json` 也不生成旁白；按 `IDLE_ORIG_VOLUME` 保留原声 `0:a:0`（若源视频缺少 `a:0` 音轨则直接报错退出），混入可选 `BGM_PATH`（声明的 `BGM_PATH` 文件不存在时直接报错；`narration` 模式则告警跳过） |
 
 - **解说配乐纪律**：`narration` 模式下若提供 `BGM_PATH`，应选用无歌词的纯器乐且贴合场景情绪；若源片已带无法避开的大音量人声插曲，请勿再加外部配乐。
@@ -22,7 +22,7 @@
 
 ## 3. 音频响度、淡出与重编码说明
 
-两种模式都会经过重新混音与编码，不会直接原样复制（stream copy）源视频音轨：
+两种模式都会重新混音与编码，不会跳过重编码直接复制源视频音轨：
 
 - 默认开启 `FINAL_LOUDNORM=true`：将终混响度统一归一至 `-14 LUFS`，并通过真峰值限制与编码器复验守住 `<= -1.0 dBTP` 上限。
 - 最终音轨统一重编码为 48 kHz、192 kbps AAC，按视频总时长裁齐，并在片尾对原声与 BGM 施加平滑淡出（`ENDING_AUDIO_FADE_MS`，默认 `350ms`），实际执行的处理步骤记录在 `assembly_qc.json`。

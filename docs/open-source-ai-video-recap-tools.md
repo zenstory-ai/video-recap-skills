@@ -14,7 +14,7 @@
 | [dramaxis](https://github.com/Agions/dramaxis)（原 Voxplore） | 跨平台桌面应用（Tauri） | MIT | 449 / 2026-10-27 | FFmpeg 场景切点检测 + 多模态关键帧分析 + 本地 Whisper 提取字幕 | 主打第一人称独白式解说；TTS 可选 Edge、GPT-SoVITS、MiniMax | 支持 | README 列出 11 家供应商，含 Ollama、LM Studio 本地模型 |
 | [superAIAutoCutVideo](https://github.com/xiaohu2206/superAIAutoCutVideo) | 桌面应用（Tauri + FastAPI），安装包通过网盘分发 | MIT | 209 / 2026-04-19 | FunASR 转字幕 + moondream 看抽帧；短剧解说目前仅依赖字幕分析 | TTS 可选 Edge、腾讯云、Qwen3-TTS | 支持 | 接入 OpenRouter 等聚合接口 |
 | [解说猫 JSM](https://github.com/UUUBBB/JSM) | Windows 桌面客户端（从 Releases 下载安装包） | 仓库未声明 | 69 / 2026-07-02 | Gemini 分析场景、角色与剧情 + TransNet 切镜头（需本地 GPU） | TTS 可选 Edge、IndexTTS、CosyVoice、豆包 | 支持，另可导出 CapCut 与 Premiere XML | 用户自配；更新日志提及需激活码授权，具体价格未公开 |
-| [narrator-ai-cli-skill](https://github.com/NarratorAI-Studio/narrator-ai-cli-skill) / [narrator-ai-cli](https://github.com/NarratorAI-Studio/narrator-ai-cli) | Agent Skill + 命令行，底层调用商业平台 Narrator AI | MIT（仅客户端） | 3,080 / 2026-07-05；CLI 146 / 2026-07-27 | 在商业平台服务端完成，具体算法未公开 | 服务端云合成，平台内置成套影片、BGM 与音色库 | 未说明 | 需向平台厂商申请 API Key，按积分充值扣费 |
+| [narrator-ai-cli-skill](https://github.com/NarratorAI-Studio/narrator-ai-cli-skill) / [narrator-ai-cli](https://github.com/NarratorAI-Studio/narrator-ai-cli) | Agent Skill + 命令行，实际调用商业平台 Narrator AI | MIT（仅客户端） | 3,080 / 2026-07-05；CLI 146 / 2026-07-27 | 在商业平台服务端完成，具体算法未公开 | 服务端云合成，平台内置成套影片、BGM 与音色库 | 未说明 | 需向平台厂商申请 API Key，按积分充值扣费 |
 | [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills)（本项目） | Agent Skill，直接装进 Claude Code、Codex、OpenCode、OpenClaw | MIT | 598 / 2026-10-30 | 本机 FFmpeg 场景检测与抽帧 + 小米 MiMo 语音转写与画面理解 | 先剪画面后配旁白；TTS 支持 MiMo / Fish Audio / IndexTTS，本机 FFmpeg 混音烧字幕 | 支持（可选） | 仅需一个小米 MiMo Key 按量计费；写稿直接用 Agent 自身的模型 |
 
 此外还有三个常被搜到的相关仓库：

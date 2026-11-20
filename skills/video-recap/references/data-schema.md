@@ -106,7 +106,7 @@
 }
 ```
 
-其中 `clip_plan_identity` 记录生成该文件时 `clip_plan_validated.json` 的 `{size, mtime_ns}`：旁白校验阶段要求两者完全一致，合成阶段则要求该文件修改时间不早于 `clip_plan_validated.json`。当理解阶段已完成音频与转写检查（或源片无音轨）且剪后保留片段内完全没有对白时，`speech_absent` 会标记为 `true`，供纯动作/纯配乐片段安全放行而不误报缺少句末锚点。由于剪辑阶段在剪辑计划未变时重跑不会改写 `clip_plan_validated.json`，第二阶段生成的输出时间证据在后续续跑时依然有效；一旦重新修改并保存了 `clip_plan.json`，则会触发全套重写。缺失、过期或损坏的输出时间证据一律直接报错停下（fail closed），不会退回用原片时间，也不会轻信手写的 `overlaps_speech=false`。多源剪辑下的每条映射还会额外保留 `source_id` 与原片起止时间。
+其中 `clip_plan_identity` 记录生成该文件时 `clip_plan_validated.json` 的 `{size, mtime_ns}`：旁白校验阶段要求两者完全一致，合成阶段则要求该文件修改时间不早于 `clip_plan_validated.json`。当理解阶段已完成音频与转写检查（或源片无音轨）且剪后保留片段内完全没有对白时，`speech_absent` 会标记为 `true`，供纯动作/纯配乐片段安全通过检查而不误报缺少句末锚点。由于剪辑阶段在剪辑计划未变时重跑不会改写 `clip_plan_validated.json`，第二阶段生成的输出时间证据在后续续跑时依然有效；一旦重新修改并保存了 `clip_plan.json`，则会触发全套重写。缺失、过期或损坏的输出时间证据一律直接报错停下，不会退回用原片时间，也不会轻信手写的 `overlaps_speech=false`。多视频剪辑下的每条映射还会额外保留 `source_id` 与原片起止时间。
 
 ## narration.json
 
@@ -146,7 +146,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 ## recap_story_plan.json / visual_audio_board.json（Agent 创作工作产物）
 
-这两份 JSON 是创作阶段的结构化记录：`recap_story_plan.json` 保存导演意图、候选剪辑方案、主视角（POV）/主线与逐拍局势变化；`visual_audio_board.json`（支持顶层 JSON 数组，或形如 `{"schema_version": 1, "items": [...]}` 的包装对象）保存每一拍选定的画面表演瞬间、出入点理由、原声锚点、声音主导方（`audio_owner`）与旁白任务（`narration_job`）。完整字段定义见 `./creative-editing-playbook.md`。
+这两份 JSON 是创作阶段的结构化记录：`recap_story_plan.json` 保存导演意图、候选剪辑方案、主视角与主线，以及逐拍局势变化；`visual_audio_board.json`（支持顶层 JSON 数组，或形如 `{"schema_version": 1, "items": [...]}` 的包装对象）保存每一拍选定的画面表演瞬间、出入点理由、原声锚点、声音主导方（`audio_owner`）与旁白任务（`narration_job`）。完整字段定义见 `./creative-editing-playbook.md`。
 
 合成脚本不会校验这两份文件；Agent 用它们记清选镜、原声留白和旁白分工，方便后续复查与按反馈定向修改。
 
@@ -210,7 +210,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 ## multi_source_manifest.json（多视频 cut）
 
-多视频剪辑模式下，项目根目录下的 `work_dir/multi_source_manifest.json` 是编排、剪辑与合成阶段共用的多源清单。其中 `source_id` 根据源文件名主干与字节大小生成（格式为 `src_<stem>_<size>`，同名同大小的后续文件按顺序追加 `_2`、`_3`）；`source_video_identity` 记录各源文件的 `{size, mtime_ns}`，供断点续跑时逐项核验：
+多视频剪辑模式下，项目根目录下的 `work_dir/multi_source_manifest.json` 是编排、剪辑与合成阶段共用的多视频清单。其中 `source_id` 根据源文件名主干与字节大小生成（格式为 `src_<stem>_<size>`，同名同大小的后续文件按顺序追加 `_2`、`_3`）；`source_video_identity` 记录各源文件的 `{size, mtime_ns}`，供断点续跑时逐项核验：
 
 ```json
 {
@@ -306,7 +306,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
               "video_start_offset": 0.0, "start_snapped": true}]}
 ```
 
-单源剪辑时 `output_frame_rate` 沿用源视频的 `r_frame_rate`（若隔行扫描素材报的是场频，或可变帧率素材的标称帧率高出 `avg_frame_rate` 1.5 倍以上，则改取实际平均帧率）；多源混剪时统一使用目标画布帧率（NTSC 帧率写作 `30000/1001`）。`output_start/end` 与 `total_duration` 均按累计 `frame_count` 精确换算，与实际渲染出的画面帧数严格对齐。若某源视频帧率未知（报 `0/0` 或超过 120），则标记 `start_snapped: false`，入点保持不动、仅将片段时长对齐到整数输出帧。
+单视频剪辑时 `output_frame_rate` 沿用源视频的 `r_frame_rate`（若隔行扫描素材报的是场频，或可变帧率素材的标称帧率高出 `avg_frame_rate` 1.5 倍以上，则改取实际平均帧率）；多视频混剪时统一使用目标画布帧率（NTSC 帧率写作 `30000/1001`）。`output_start/end` 与 `total_duration` 均按累计 `frame_count` 精确换算，与实际渲染出的画面帧数严格对齐。若某源视频帧率未知（报 `0/0` 或超过 120），则标记 `start_snapped: false`，入点保持不动、仅将片段时长对齐到整数输出帧。
 
 多视频 `clip_plan_validated.json` 还会额外保留来源标识字段，方便第二阶段简报、`timeline.json` 与剪映草稿反查原片：
 
@@ -357,7 +357,7 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 ## original_subtitles.json（可选，原声留白字幕）
 
-当成片留有原声段落（`>= 1.5s` 的无旁白留白窗口），且原片无硬字幕、或已开启全片不透明字幕遮罩（如传入 `--subtitle-y-top`/`--subtitle-y-bot` 并加设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）时，可在 `work_dir/original_subtitles.json` 中按**成片 OUTPUT 时间轴**写出校对后的原声对白，合成阶段会在留白窗口内渲染带 `「」` 引号的原声台词字幕（若留白段原片硬字幕仍可见，合成器会自动跳过该文件并打印提示，避免双层字幕叠字；也不会拿 15 秒粗分段 ASR 的窗口中点凑数）：
+当成片留有 `>= 1.5s` 的无旁白原声窗口，且原片无硬字幕或已开启全片不透明字幕遮罩（传入 `--subtitle-y-top`/`--subtitle-y-bot` 并加设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true`、`SOURCE_SUBTITLE_MASK_TIMING=all` 与 `SUBTITLE_MASK_OPACITY=1.0`）时，可在 `work_dir/original_subtitles.json` 中按**成片 OUTPUT 时间轴**写出校对后的原声对白。合成阶段会在留白窗口内渲染带 `「」` 引号的原声台词字幕；若留白段原片硬字幕仍可见，合成器会自动跳过该文件并打印提示以免叠字，也不会拿 15 秒粗分段 ASR 的窗口中点凑数：
 
 ```json
 [
@@ -437,11 +437,11 @@ Agent 撰写的旁白解说稿。`full` 模式填原片秒数；**编排 `cut` �
 
 ## assembly_manifest.json 的 audio_segments[]
 
-音画组装完成后，`assembly_manifest.json.audio_segments[]` 会逐段记录落点与压低（ducking）明细：`fit_status`、`truncated`、`truncate_reason`、`placed_audio_duration`、`placed_audio_path`、`source_duck_end`、`source_restore_at`、`source_handoff_status`、`source_entry_status` 与 `written_start`。注意以下核心机制：
+音画组装完成后，`assembly_manifest.json.audio_segments[]` 会逐段记录落点与压低原声的明细：`fit_status`、`truncated`、`truncate_reason`、`placed_audio_duration`、`placed_audio_path`、`source_duck_end`、`source_restore_at`、`source_handoff_status`、`source_entry_status` 与 `written_start`。注意以下核心机制：
 
 - **不裁切旁白尾音**：若某段配音在允许的倍速上限内仍塞不进可用窗口，合成器直接以 `no_safe_fit` 报错阻断。`placed_audio_path` 指向实际写入 `narration.wav` 的最终逐段音频，`timeline.json` 与剪映草稿必须引用该文件，一旦引用了加速前的原始长音频会以 `timeline_audio_mismatch` 阻断。
 - **原声回升贴紧句末停顿与片尾平滑收音**：一段旁白读完后，原声最多可保持压低状态 3 秒，等待这 3 秒内出现的第一个句末锚点——一直压到该锚点的停顿起点 `pause_start`（记为 `source_duck_end`），再在实测停顿区间内平滑渐强，到 `source_restore_at` 恢复原音量，从而避免渐强过早把上一句原话的尾巴漏出来。`source_handoff_status` 记录回升方式：`sentence_boundary`（命中已验证锚点）、`sentence_boundary_unverified`（命中 `unverified` 锚点）、`held_to_timeline_end`（3 秒内无锚点且距片尾不足 3 秒，直接压到片尾）、`bounded_release`（3 秒内无锚点，在旁白出点处按 `duck_fade_seconds` 平滑回升，避免在 15 秒分段 ASR 窗口或台词起首前长时间闷住原声）、`anchors_unavailable`（原声有人说话但无可用锚点，直接报 `unsafe_source_handoff` 阻断）或 `no_source_speech`。成片尾部默认对原声轨与 BGM 轨施加 `350ms` 平滑淡出（`ending_audio_fade_ms`），避免片尾声音突然中断。
-- **切入状态**：每个连续压低区间的首块会记录切入状态 `source_entry_status`（`sentence_boundary`、`sentence_boundary_unverified`、`quiet_source`、`non_dialogue_source`、`unverified`、`unsafe_entry` 或 `anchors_unavailable`），其中落在静音区的 `quiet_source` 与落在纯语气词窗口的 `non_dialogue_source` 均安全放行。单次压低延续时长（`source_restore_at - actual_place_end`）的最大值记入 `assembly_qc.json` 的 `summary.max_source_duck_hold_seconds` 供参考。
+- **切入状态**：每个连续压低区间的首块会记录切入状态 `source_entry_status`（`sentence_boundary`、`sentence_boundary_unverified`、`quiet_source`、`non_dialogue_source`、`unverified`、`unsafe_entry` 或 `anchors_unavailable`），其中落在静音区的 `quiet_source` 与落在纯语气词窗口的 `non_dialogue_source` 均视为安全切入。单次压低延续时长（`source_restore_at - actual_place_end`）的最大值记入 `assembly_qc.json` 的 `summary.max_source_duck_hold_seconds` 供参考。
 
 ## final_qc.json
 

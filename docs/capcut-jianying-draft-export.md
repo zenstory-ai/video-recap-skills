@@ -1,6 +1,6 @@
 # 导出剪映草稿继续精修
 
-用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，包含做片用的 `video-recap` 和拆解参考片用的 `video-reference` 两个技能）在合成出片的同时，会把原片视频、逐段解说配音、BGM、字幕和画框花字贴图一并写入剪映草稿目录（含 `draft_content.json`、`draft_info.json`、`draft_meta_info.json`），默认把用到的媒体文件打包进草稿内部的 `Resources/local/`，拷到另一台电脑上也能直接打开。全流程本机只需 Python 标准库与 `ffmpeg`，云端只需配一个小米 MiMo API Key。
+用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，含做片主技能 `video-recap` 和参考拆片技能 `video-reference`）会在合成出片的同时，把原片视频、逐段解说配音、BGM、字幕和画框花字贴图一并写入剪映草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`）。导出器默认把用到的媒体打包进草稿里的 `Resources/local/`，换台电脑也能直接打开；全流程本机只需 Python 标准库与 `ffmpeg`，云端只需配一个小米 MiMo API Key。
 
 ## 端到端制作流程
 
@@ -34,7 +34,7 @@ Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草�
 
 ## 怎样让原声留白处的台词字幕一字不差？
 
-当原片人物在旁白留白处展开重头对白，且原片无硬字幕或已开启全片不透明字幕遮罩（如传入 `--subtitle-y-top`/`--subtitle-y-bot` 并设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true` + `SOURCE_SUBTITLE_MASK_TIMING=all` + `SUBTITLE_MASK_OPACITY=1.0`）时，只需让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（`[{"start": 秒, "end": 秒, "text": "角色原话"}]`），合成器与剪映草稿导出器就会自动在留白处渲染带 `「」` 引号的核对台词；不会拿 15 秒一段的粗转写结果直接当逐句字幕贴上去。
+当原片人物在旁白留白处展开重头对白，且原片无硬字幕或已开启全片不透明字幕遮罩（传入 `--subtitle-y-top`/`--subtitle-y-bot` 并设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true`、`SOURCE_SUBTITLE_MASK_TIMING=all` 与 `SUBTITLE_MASK_OPACITY=1.0`）时，让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（格式为 `[{"start": 秒, "end": 秒, "text": "角色原话"}]`）。合成器与剪映草稿导出器会自动在留白处渲染带 `「」` 引号的核对台词，不会拿 15 秒一段的粗转写结果直接当逐句字幕贴上去。
 
 ## 自建开源流程与按月订阅 SaaS 的账单对比
 

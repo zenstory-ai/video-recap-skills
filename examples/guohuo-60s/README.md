@@ -3,23 +3,23 @@
 本目录展示如何从多集长视频里提炼出一条 58.96 秒的横屏剧情解说成片，涵盖剪辑式解说（`cut` 模式）、可选包装与看片返修（`REVISION`）的完整流程：
 
 ```text
-video-recap（多源理解 understand.py）
+video-recap（多集理解 understand.py）
   → 创作第一阶段（故事与声画方案 + 原片时间 clip_plan.json）
   → 初剪渲染（cut.py → clip_plan_validated.json + edited_source.mp4）
   → 创作第二阶段（对照剪后成片时间线写 narration.json 并过 validate.py）
   → 配音合成（voiceover.py）
   → 混音与母版渲染（assemble.py → 音画锁定母版 + timeline + assembly QC）
   → 项目级包装（可选 Remotion 透明前景层）
-  → REVISION：看片反馈 → 画面微调 conform → 冻结项复核
+  → REVISION：看片反馈 → 画面接点微调 → 冻结项复核
   → 最终交付 QC
 ```
 
 公开产物清单见 [`workflow-manifest.json`](workflow-manifest.json)。本案例重点示范以下实战做法：
 
-- 先用 [`recap_story_plan.json`](recap_story_plan.json) 明确观众看点、主视角（POV）、核心悬念以及每一拍的局势翻转。
+- 先用 [`recap_story_plan.json`](recap_story_plan.json) 明确观众看点、主视角、核心悬念以及每一拍的局势翻转。
 - 用 [`visual_audio_board.json`](visual_audio_board.json) 排好每一拍由画面动作、原片狠话还是解说旁白主导，按“垫半句、让半句、接半句”交接声音。
 - 送 TTS 合成的文稿按一口气讲完的完整意思分段，屏幕上的字幕条再根据实际朗读时间拆成顺眼的短句，不为了迁就短字幕把配音切得一惊一乍。
-- 切点分数（scene-change score）和抽帧拼图只用来初筛可疑位置，接点顺不顺一律以原速播放看感为准。
+- 切点检测分数和抽帧拼图只用来初筛可疑位置，接点顺不顺一律以原速播放看感为准。
 - 遇到短时间内扎堆的切点候选，先区分是原片自带切镜还是本次拼接留下的切口：无关碎镜头整段删掉；有戏但太短的反应镜头回原片把起落扩完整；人工拼接切口则优先恢复同源连续运动或合并相邻片段。
 - 画面、声音与字幕时间定稿后再加画框和花字；画面花字只点破人物潜台词，不重复底下的字幕。
 - 修补卡顿或跳接时直接回原片恢复连续动作，不用叠化或闪白硬盖过去。
@@ -38,13 +38,13 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 | 阶段 | 公开文件 | 在制作流程中的作用 |
 |---|---|---|
-| 背景调研与多源理解 | [`background_research.json`](background_research.json)、[`multi_source_manifest.json`](multi_source_manifest.json) | 提前锁定人物化名与前情关系，固定多集片源的 `source_id`；单集 ASR/VLM 产物在复现时现场生成 |
+| 背景调研与多集理解 | [`background_research.json`](background_research.json)、[`multi_source_manifest.json`](multi_source_manifest.json) | 提前锁定人物化名与前情关系，固定多集片源的 `source_id`；单集 ASR/VLM 产物在复现时现场生成 |
 | 创作第一阶段（Pass 1） | [`recap_story_plan.json`](recap_story_plan.json)、[`visual_audio_board.json`](visual_audio_board.json)、[`style_card.json`](style_card.json)、[`clip_plan.json`](clip_plan.json) | 定好二少主视角、十个叙事节点与声画让位方案，写出基于原片秒数的初剪选段 |
 | 初剪渲染（`cut.py`） | 运行时生成，不入库 | 根据 `clip_plan.json` 对齐台词停顿切镜头，生成 `clip_plan_validated.json` 与 `edited_source.mp4`；本案例后期做过项目级画面微调，故单列 [`picture-conform.json`](picture-conform.json) 记录，不冒充原生输出 |
 | 创作第二阶段（Pass 2） | [`narration.json`](narration.json)、[`original_subtitles.json`](original_subtitles.json) | 对照剪后成片时间线编写 7 段解说词，并标出三处原速保留的原声名场面 |
 | 配音合成（`voiceover.py`） | 运行时生成，不入库 | 调用 Fish Audio 逐段合成解说语音 |
-| 母版混音（`assemble.py`） | [`timeline.json`](timeline.json)、[`assembly_manifest.json`](assembly_manifest.json)、[`assembly_qc.json`](assembly_qc.json) | 记录多轨混音、原声闪避（ducking）、逐段语音完整性、响度实测值及质检结论（本地绝对路径已替换为逻辑占位符） |
-| 音效点缀与画面包装 | [`sfx_mix_plan.json`](sfx_mix_plan.json)、[`captions.json`](captions.json)、[`remotion/`](remotion/) | 在音画锁定母版上叠加克制的转场重音（注：本 Remotion 案例自定义文件名为 `sfx_mix_plan.json`，标准 `assemble.py` 管线直接读取 `sfx_plan.json`）、顶部片名、四处潜台词花字与底部字幕条 |
+| 母版混音（`assemble.py`） | [`timeline.json`](timeline.json)、[`assembly_manifest.json`](assembly_manifest.json)、[`assembly_qc.json`](assembly_qc.json) | 记录多轨混音、原声自动压低、逐段语音完整性、响度实测值及质检结论（本地绝对路径已替换为逻辑占位符） |
+| 音效点缀与画面包装 | [`sfx_mix_plan.json`](sfx_mix_plan.json)、[`captions.json`](captions.json)、[`remotion/`](remotion/) | 在音画锁定母版上叠加克制的转场重音（本 Remotion 案例自定义文件名为 `sfx_mix_plan.json`，标准 `assemble.py` 流程直接读取 `sfx_plan.json`）、顶部片名、四处潜台词花字与底部字幕条 |
 | 看片返修与交付质检 | [`revision-log.json`](revision-log.json)、[`edit-map.json`](edit-map.json)、[`picture-conform.json`](picture-conform.json)、[`delivery-qc.json`](delivery-qc.json)、[`content-qc.md`](content-qc.md) | 将看片反馈拆解为“本轮修改项”与“锁定不动项”，完成长廊镜头连续性修复与全片事实核查 |
 
 所有公开 JSON 中的本地媒体路径均已脱敏为 `MEDIA_NOT_DISTRIBUTED/...`，`episode-02` 等为逻辑片源 ID；本地复现时的片源路径映射模板见 [`assets.example.json`](assets.example.json)。
