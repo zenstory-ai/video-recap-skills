@@ -1,11 +1,38 @@
 {
-  "schema": "video-recap.project.v1",
-  "name": "合成示例项目",
-  "library": "../resource-library",
-  "bindings": {
-    "subtitle_style": "clean-white@v1",
-    "voice": "narrator-demo",
-    "bgm": "pulse-demo"
+  "meta": {
+    "title": "合成示例频道预设",
+    "voice": {
+      "engine": "local",
+      "voice_id": "narrator-demo",
+      "consent": "synthetic"
+    }
   },
-  "notes": "演示用：把合成示例库里已采用的字幕样式、MiMo 默认音色与合成 BGM 绑定到一次运行。模板按 900x1600 校准，只适用于同画布的成片。"
+  "canvas": {
+    "width": 900,
+    "height": 1600,
+    "fps": 30
+  },
+  "sources": {
+    "bgm_demo": "resources/bgm/pulse-demo/pulse-demo.wav"
+  },
+  "subtitle_style": {
+    "font_name": "PingFang SC",
+    "font_size": 42,
+    "primary_color": "#FFFFFF",
+    "outline_color": "#0A0A0D",
+    "outline": 2.0,
+    "shadow": 1.2,
+    "max_chars": 15,
+    "safe_y": [0.74, 0.86],
+    "strip_trailing_punct": true
+  },
+  "mix": {
+    "target_lufs": -14.0,
+    "true_peak_dbtp": -1.5,
+    "duck": {
+      "under_narration": 0.18,
+      "bgm_under_narration": 0.12,
+      "fade_s": 0.25
+    }
+  }
 }

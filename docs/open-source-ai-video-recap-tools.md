@@ -15,7 +15,7 @@
 | [superAIAutoCutVideo](https://github.com/xiaohu2206/superAIAutoCutVideo) | 桌面应用（Tauri + FastAPI），安装包通过网盘分发 | MIT | 209 / 2026-04-19 | FunASR 转字幕 + moondream 看抽帧；短剧解说目前仅依赖字幕分析 | TTS 可选 Edge、腾讯云、Qwen3-TTS | 支持 | 接入 OpenRouter 等聚合接口 |
 | [解说猫 JSM](https://github.com/UUUBBB/JSM) | Windows 桌面客户端（从 Releases 下载安装包） | 仓库未声明 | 69 / 2026-07-02 | Gemini 分析场景、角色与剧情 + TransNet 切镜头（需本地 GPU） | TTS 可选 Edge、IndexTTS、CosyVoice、豆包 | 支持，另可导出 CapCut 与 Premiere XML | 用户自配；更新日志提及需激活码授权，具体价格未公开 |
 | [narrator-ai-cli-skill](https://github.com/NarratorAI-Studio/narrator-ai-cli-skill) / [narrator-ai-cli](https://github.com/NarratorAI-Studio/narrator-ai-cli) | Agent Skill + 命令行，实际调用商业平台 Narrator AI | MIT（仅客户端） | 3,080 / 2026-07-05；CLI 146 / 2026-07-27 | 在商业平台服务端完成，具体算法未公开 | 服务端云合成，平台内置成套影片、BGM 与音色库 | 未说明 | 需向平台厂商申请 API Key，按积分充值扣费 |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills)（本项目） | Agent Skill，直接装进 Claude Code、Codex、OpenCode、OpenClaw | MIT | 598 / 2026-10-30 | 本机 FFmpeg 场景检测与抽帧 + 小米 MiMo 语音转写与画面理解 | 先剪画面后配旁白；TTS 支持 MiMo / Fish Audio / IndexTTS，本机 FFmpeg 混音烧字幕 | 支持（可选） | 仅需一个小米 MiMo Key 按量计费；写稿直接用 Agent 自身的模型 |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills)（本项目） | Agent Skill，直接装进 Claude Code、Codex、OpenCode、OpenClaw | MIT | 598 / 2026-10-30 | 本机 FFmpeg 探测/抽帧拼图（`frames.py`）由宿主多模态 Agent 直接看片 + 本地优先字幕/Whisper 转写 | 单一 `timeline.json` v3 总线；本机 FFmpeg 渲染、可选 Remotion 透明动效包装；TTS 本地离线优先，可选 Fish Audio（`s2.1-pro-free`）/ OpenAI / IndexTTS | 支持（独立叶工具 `export_jianying.py`） | 默认 100% 本地零额外 API 费用；写稿看片直接用宿主 Agent，云端 ASR/TTS 均按需自选 |
 
 此外还有三个常被搜到的相关仓库：
 - [video-recap-skills-plus](https://github.com/ops120/video-recap-skills-plus)：基于本仓库早期版本派生的扩展分支，加入了原片字幕位置检测、音色克隆与旁白期间静音原声（本仓库现已吸收并重写了字幕带位置检测能力）。
@@ -26,13 +26,13 @@
 
 - **想要点点鼠标就能用的图形界面**：优先看 **NarratoAI**。它社区体量最大，提供开箱即用的 Windows / macOS 整合包，不挑本地显卡，对接的国内配音接口也很全。如果主力用 Windows，还可以对比 **JJYB_AI_VideoAutoCut**（对配音时长与镜头长度的对齐处理很扎实，但注意其许可证禁止未授权商用）与 **解说猫 JSM**（支持导出 Premiere XML，但依赖本地 GPU 且需激活码）。
 - **想尽量在自己电脑上跑免费本地模型**：重点看 **dramaxis** 和 **movie-narrator**。两者都能直接挂本地 Ollama 模型；dramaxis 还能用本地 Whisper 跑字幕提取。movie-narrator 采用“先抓 TMDB 影评资料写稿、再回头找画面配对”的逆向做法，适合公开资料丰富的院线老电影，但需留意其 AGPL-3.0 协议及 Edge-TTS 的非商用限制。
-- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者是商业 SaaS 平台的命令行入口，理解、写稿和渲染都在厂商服务端完成，按积分扣费；**video-recap-skills** 则在本机用 `ffmpeg` 完成剪辑、防切词检查和混音加字幕，云端只按量调用小米 MiMo 做语音转写、画面识别和配音，并要求每一拍解说写明对应原片哪一秒的画面或原声台词，减少模型脱离素材乱编剧情。
+- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者是商业 SaaS 平台的命令行入口，理解、写稿和渲染都在厂商服务端完成，按积分扣费；**video-recap-skills** 默认完全在本机运行：用极简无状态原子 CLI（`probe.py` / `frames.py` / `transcribe.py` / `tts.py` / `render.py` / `check.py`）围绕单一 `timeline.json` v3 完成抽帧看片、剪辑、混音加字幕、Remotion 动态包装与剪映导出，由宿主多模态 Agent 亲眼对照拼图和转写做创作判断，云端 ASR/TTS（如 Fish Audio `s2.1-pro-free`、OpenAI 或自托管 IndexTTS）完全按需自选。
 
 ## 三、动手前建议核对的三件事
 
 1. **商用合规**：MIT 协议项目（NarratoAI、dramaxis、superAIAutoCutVideo、video-recap-skills）对软件本身的商用限制最宽松；`JJYB_AI_VideoAutoCut` 明确禁止未经书面授权的商业使用；`movie-narrator` 采用 AGPL-3.0；`JSM` 未声明开源协议。除此之外，还要单独确认**配音接口**（例如微软 Edge-TTS 条款明确限制商业用途）以及**原片影视素材自身**的版权归属。
 2. **事实准确度（防 AI 脑补）**：很多自动化工具让模型扫一眼抽帧或残缺字幕就直接生成整篇解说词，容易把“两个人说话”编成“密谋背叛”。正式用起来之前，建议拿一集你熟知剧情的片子试跑，逐句核对解说词有没有无中生有；具体排查方法见[《AI 分析视频总爱乱编剧情怎么办》](ai-video-analysis-without-invented-plot.md)。
-3. **API 用量开销**：开源软件本身免费，主要开销在云端画面识别、语音转写和 TTS 配音上。原片越长、抽帧越密，费用越高。以 `video-recap-skills` 实测为例，跑完一条完整解说的 MiMo API 费用约 1.3 元人民币；建议先拿日常要做的单集片长试跑一轮，算清每条成片的实际开销。
+3. **API 用量开销**：开源软件本身免费，主要开销取决于你是否接入云端画面识别、语音转写和 TTS 配音。像 `video-recap-skills` 这类宿主多模态优先的方案，看片直接走现有编程 Agent，字幕与离线配音可全程零云端成本，只有显式启用商业云端 TTS / ASR 时才按量计费；建议先拿单集常规片长试跑一轮，算清实际开销。
 
 ## 常见问题
 

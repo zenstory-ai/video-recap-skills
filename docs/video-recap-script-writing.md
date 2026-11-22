@@ -30,7 +30,7 @@
 
 ## 解说旁白与原片声音怎么配合？
 
-每一拍动笔前，先在分镜声画板上定好主导音源（`audio_owner`）：原声对白、动作声响、环境/配乐、刻意留白，还是解说旁白。凡是角色当面立规矩、放狠话、拆穿谎言或崩溃认怂的戏眼，必须原速原调留给原声；凡是扇耳光、摔门、砸扳手等靠动静说话的瞬间，旁白提前收声让出冲击力；凡是千言万语全在停顿里的对视，安静本身就是最好的戏。
+每一拍动笔前，先在 `EDIT_PLAN.md` 里定好主导音源：原声对白、动作声响、环境/配乐、刻意留白，还是解说旁白，并遵循**“块状聚拢、克制切换”**——绝不在 60 秒成片里每三四秒就用一句旁白与原声乒乓来回打断沉浸感（约 60 秒成片旁白↔原声切换控制在 2–4 次）。凡是角色当面立规矩、放狠话、拆穿谎言或崩溃认怂的戏眼，必须原速原调留给原声（并在 `timeline.json` 中标入 `keep_windows`）；凡是扇耳光、摔门、砸扳手等靠动静说话的瞬间，旁白提前收声让出冲击力；凡是千言万语全在停顿里的对视，安静本身就是最好的戏。
 
 解说旁白只干五件活：
 
@@ -116,20 +116,20 @@
 
 ## 用本仓库的 Skill 怎么跑？
 
-安装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），直接用日常话跟 Agent 说即可，例如：“用 `/video-recap` 为这组素材规划解说”（在 Codex 中写作 `$video-recap`）。Agent 会先写出包含观众承诺、主视角和局势转折节点的 `recap_story_plan.json` 与 `visual_audio_board.json`，按素材里的真实画面与台词分配原声留白和旁白，不替原片编造没拍出来的动机与结局。
+安装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），直接用日常话跟 Agent 说即可，例如：“用 `/video-recap` 为这组素材规划解说”（在 Codex 中写作 `$video-recap`）。Agent 会先用 `probe.py`、`frames.py` 与 `transcribe.py` 亲眼看画面与台词，在纯 Markdown 的 `MEDIA_NOTES.md` 和 `EDIT_PLAN.md` 中定好主视角、局势转折与块状声画分工，再落入单一 `timeline.json`（v3）并用 `tts.py` 实测配音真实时长，绝不替原片编造没拍出来的动机与结局。
 
 ## 常见问题
 
 **影视解说一定要从头到尾铺满旁白吗？**
 
-千万别铺满。原片里极具张力的当面质问、动作撞击声、环境音和窒息的沉默，往往比旁白更有力量。旁白只在需要帮观众补前情、串因果或点破伪装时才开口。
+千万别铺满。原片里极具张力的当面质问、动作撞击声、环境音和窒息的沉默，往往比旁白更有力量。旁白应块状聚拢、克制切换，只在需要补前情、串因果或点破伪装时开口，高光对手戏一口气交还给演员原声。
 
 **应该先写解说词，还是先挑镜头？**
 
-先定主视角、核心悬念和每一拍的局势翻转（`recap_story_plan.json`），再去挑镜头（`clip_plan.json`），等初剪成片出来后，最后对着真实的成片画面和停顿窗口写解说词（`narration.json`）。脱离素材闭门造车写出来的稿子，十有八九对不上画面口型与气口；反过来不立主线就顺着原片瞎剪，又只会剪出流水账。
+先在 `EDIT_PLAN.md` 定主视角、核心悬念与每一拍的局势翻转，看拼图挑出真实画面与完整原声区间写入 `timeline.json`（v3），再用 `tts.py` 实测每段旁白真实时长（绝不变速挤压）来微调文稿与留白。脱离素材闭门造车写出来的稿子，十有八九对不上画面口型与气口；反过来不立主线就顺着原片瞎剪，又只会剪出流水账。
 
 ## 延伸链接
 
 - 在线指南原文（含更多案例）：https://zenstory.ai/zh/video-recap/recap-script
-- 创作剪辑与去 AI 味手册：[`skills/video-recap/references/creative-editing-playbook.md`](../skills/video-recap/references/creative-editing-playbook.md)
+- 通用剪辑与声画创作原则：[`skills/video-recap/references/editorial-craft.md`](../skills/video-recap/references/editorial-craft.md)
 - 代码仓库：https://github.com/zenstory-ai/video-recap-skills

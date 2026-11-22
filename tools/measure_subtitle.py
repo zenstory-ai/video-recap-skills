@@ -2,8 +2,8 @@
 """Measure a source video's burned-in subtitle band using only stdlib + ffmpeg.
 
 The tool samples deterministic frames, detects wide bright text-like bands in the
-lower half, writes grid/band previews, and emits ``subtitle_positions.json``.  The
-coordinates can be passed to recap.py with ``--subtitle-y-top/--subtitle-y-bot``.
+lower half, writes grid/band previews, and emits ``subtitle_positions.json`` plus
+a normalized ``subtitle_style.safe_y`` snippet for ``timeline.json`` v3.
 """
 
 import argparse
@@ -26,8 +26,7 @@ def _run(command):
     return subprocess.run(command, capture_output=True, text=True)
 
 
-# Same value as the renderer's and the orchestrator's copies (parity-tested): within it the
-# measured rows convert exactly to the display canvas and a burned line is stretched invisibly.
+# Near-square SAR tolerance: within this bound measured rows convert cleanly onto the display canvas.
 SUBTITLE_BAND_SAR_TOLERANCE = 0.02
 
 
@@ -426,10 +425,10 @@ def main(argv=None):
         shutil.rmtree(staging, ignore_errors=True)
 
     positions = out_dir / "subtitle_positions.json"
+    safe_y = [round(y_top / height, 4), round(y_bot / height, 4)]
     print(f"最终预览: {out_dir / 'preview'}")
     print(f"坐标文件: {positions}")
-    print(f"使用: python3 skills/video-recap/scripts/recap.py {video} "
-          f"--subtitle-y-top {y_top} --subtitle-y-bot {y_bot}")
+    print(f'timeline.json v3 字幕安全区: "subtitle_style": {{"safe_y": {json.dumps(safe_y)}}}')
     return 0
 
 

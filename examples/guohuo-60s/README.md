@@ -1,5 +1,7 @@
 # 《这一秒过火》60 秒剧情解说案例
 
+> **归档说明**：本目录为 `v0.7.0` 时期产出的完整脱敏案例存档（对应历史多阶段 CLI 与 `timeline.json` v2 产物，保留供创作复盘参考）；新版原子 CLI 与 `timeline.json` v3 用法请见仓库根 [`README.md`](../../README.md) 与 [`skills/video-recap/SKILL.md`](../../skills/video-recap/SKILL.md)。
+
 本目录展示如何从多集长视频里提炼出一条 58.96 秒的横屏剧情解说成片，涵盖剪辑式解说（`cut` 模式）、可选包装与看片返修（`REVISION`）的完整流程：
 
 ```text

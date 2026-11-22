@@ -1,56 +1,54 @@
 # 导出剪映草稿继续精修
 
-用 Agent 生成解说成片后，只需在指令里加一句“导出剪映草稿”（或传 `--export-jianying`），就能把整条多轨时间线直接转成剪映可编辑草稿。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，含做片主技能 `video-recap` 和参考拆片技能 `video-reference`）会在合成出片的同时，把原片视频、逐段解说配音、BGM、字幕和画框花字贴图一并写入剪映草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`）。导出器默认把用到的媒体打包进草稿里的 `Resources/local/`，换台电脑也能直接打开；全流程本机只需 Python 标准库与 `ffmpeg`，云端只需配一个小米 MiMo API Key。
+用 Agent 剪辑并渲染成片后，只需在对话里加一句“导出剪映草稿”，单向叶工具 `export_jianying.py` 就会读取同一份规范 `timeline.json`（v3），直接生成可跨机打开的剪映 / CapCut 多轨草稿目录（`draft_content.json`、`draft_info.json`、`draft_meta_info.json`）。**Video Recap Skills**（`zenstory-ai/video-recap-skills`，MIT 开源，含通用剪辑主技能 `video-recap` 与按需参考拆片技能 `video-reference`）全程默认 **100% 本地优先**，仅依赖 Python 3.10+ 标准库与 `ffmpeg` / `ffprobe`，无需强制绑定任何单一云端 API Key。
 
 ## 端到端制作流程
 
 ```text
-源视频 → ① 看片理解（切镜头 · 听台词 · 识画面）→ ② 定主线、留原声与写词 → ③ TTS 配音 → ④ 混音、加字幕与生成时间线 → recap_<名>.mp4
-                                                └─ 剪辑模式（cut）：先按台词停顿剪出定长画面，再对着成片时间轴写解说词
+源视频 → ① 探测/抽帧拼图/本地优先转写（probe.py · frames.py · transcribe.py）
+      → ② Agent 亲眼看图定主线与画幅，写纯 Markdown 方案（BRIEF.md · MEDIA_NOTES.md · EDIT_PLAN.md）
+      → ③ 写 timeline.json v3，按需配音（tts.py 实测时长）与 Remotion/PNG 视觉包装（packaging.py）
+      → ④ 渲染与硬/软双层体检（render.py → out/final.mp4；check.py → check.json）
+      → ⑤ 按需导出剪映草稿（export_jianying.py timeline.json --out-dir out/jianying_draft）
 ```
 
-日常使用时不用手敲命令行参数，直接把视频路径和要求发给 Agent 即可：
+日常使用时不用手敲底层命令，直接把视频路径和要求发给 Agent 即可：
 
 ```text
-给 /path/to/video.mp4 做一个中文解说成片。这是《庆余年》第一集，主角是范闲，字幕烧进画面，同时导出剪映草稿。
+用 /path/to/ep1.mp4 剪一条 60 秒 3:4 满屏剧集解说，保留高光原声对白，用 Remotion 加现代杂志风无底框花字并导出剪映草稿。
 ```
-
-Agent 会自动串联理解、选段、剪辑、写稿、配音、合成与草稿导出。
 
 ## 剪映草稿里包含哪些轨道？
 
-合成阶段（`assemble.py`）通过 `--export-jianying` 读取标准时间线 `timeline.json`，生成多轨剪映草稿：
+`export_jianying.py` 是严格单向消费 `timeline.json` v3 的叶工具（核心渲染从不反向依赖它），会把时间线一比一映射到剪映多轨：
 
 | 剪映轨道 | 轨道内容说明 |
 |---|---|
-| **视频轨** | 源视频画面（在 `cut` 模式下传入 `--source-video <原片>` 后，草稿会直接引用原片文件与真实裁切区间，方便在剪映里随时拖动边缘加减帧数） |
-| **音频轨** | 逐段解说配音（直接引用实际混入成片的 `_placed_*.wav`）与背景音乐（BGM） |
-| **字幕轨** | 解说字幕，以及原声留白处带 `「」` 引号的角色原声台词 |
-| **图片叠层轨** | `packaging_plan.json` 渲染生成的标题条、字卡、花字贴片，或 `packaging_layers.json` 中配置的静态边框、角标与背景图 |
+| **视频主轨** | `video[]` 多源片段与真实裁切区间（保留源素材完整引用，进剪映后可随时拖拽入出点微调帧数），并附与 `render.py` 同源的 `KFTypeVolume` 原声闪避关键帧 |
+| **叠加视频 / 图片轨** | `overlays[]` 声明的透明动态视频（`packaging.py remotion-render` 产出的 ProRes 4444 `.mov` / VP9 `.webm`）或静态 `@2x` PNG 标题/卡片图层，自动换算为剪映中心原点坐标 |
+| **多路独立音频轨** | 旁白 `audio.narration[]`、循环背景音乐 `audio.bgm[]`（带同源闪避关键帧）与真实素材音效 `audio.sfx[]` 分别独立成轨 |
+| **可编辑字幕轨** | `subtitles[]` 与 `subtitle_style` 转为剪映原生文本轨（正确处理 UTF-16 字符范围，默认语义均衡双行、去行尾标点） |
 
-导出器默认会把视频、音频和图片复制进草稿目录下的 `Resources/local/{video,audio,image}` 并写好本地素材索引，方便整个文件夹随拷随开；只有确定原始视频和音频路径不会挪动、剪映也能直接读取时，才传 `--jianying-no-bundle-media` 省去复制。草稿只映射上述四类基础轨道，转场、蒙版、调色、花字贴纸等效果可在打开剪映后自由添加。
+导出器默认将所有引用的音视频与图片按 MD5 去重拷贝到草稿目录的 `Resources/local/{video,audio,image}`，整个文件夹拷到另一台电脑也能直接打开；仅当确认本机素材路径不移动时，才显式传 `--no-bundle-media` 省去拷贝。
 
-注意两条使用边界：第一，剪映草稿直接引用未烧录字幕的源视频，源片画面自带的硬字幕仍会显示，如需遮挡可在剪映内添加遮罩；第二，`ffmpeg` 渲染出的 `recap_<名>.mp4` 是标准成片，剪映草稿是供你二次微调的工程文件。
+注意两条使用边界：第一，剪映草稿引用未烧录字幕的源视频，源片画面自带的硬字幕仍会显示，可在剪映内自行加遮罩或用 `3:4` `fit="cover"` 裁切避让；第二，`render.py` 渲染出的 `out/final.mp4` 是标准成片，剪映草稿用于二次精修，在剪映内手改的内容不会自动回写 `timeline.json`。
 
-## 怎样让原声留白处的台词字幕一字不差？
+## 成本结构：默认本地免费，云端按需自选
 
-当原片人物在旁白留白处展开重头对白，且原片无硬字幕或已开启全片不透明字幕遮罩（传入 `--subtitle-y-top`/`--subtitle-y-bot` 并设 `SOURCE_SUBTITLE_MASK_TIMING=all`，或同时设 `MASK_SOURCE_SUBTITLES=true`、`SOURCE_SUBTITLE_MASK_TIMING=all` 与 `SUBTITLE_MASK_OPACITY=1.0`）时，让 Agent 对照画面与原声核实后写入 `work_dir/original_subtitles.json`（格式为 `[{"start": 秒, "end": 秒, "text": "角色原话"}]`）。合成器与剪映草稿导出器会自动在留白处渲染带 `「」` 引号的核对台词，不会拿 15 秒一段的粗转写结果直接当逐句字幕贴上去。
+不同于按席位包月的封闭 SaaS 剪辑工具，本仓库默认本地即可跑通全链路，云端能力完全按需可选：
 
-## 自建开源流程与按月订阅 SaaS 的账单对比
-
-市面上按席位包月的商业解说工具通常把云端算力、配音额度和模板绑成固定月费；而本仓库采用“本地免费工具 + 云端按量 API”的轻量组合：
-
-- **本机零成本**：只用 Python 标准库和 `ffmpeg`，不需要独显 GPU，也不用在本地跑几十 GB 的大模型。
-- **云端按实际用量计费**：语音转写（ASR）、画面理解（VLM）和默认配音（TTS）全部共用同一个小米 MiMo Key，跑多少秒算多少秒的钱（实测制作一条完整解说视频的 API 消耗约 1.3 元人民币）；配音也可以单独切换为 Fish Audio（`--tts-provider fish-audio`）。
+- **纯本地零费用**：看图由宿主多模态 Agent 直接看 `frames.py` 拼图；转写优先读外挂/内封字幕或本机 Whisper；配音支持纯离线本机引擎（`--engine local`）；剪辑、混音、字幕烧录、物理体检、静态审片页与剪映导出均仅需 Python 标准库 + `ffmpeg`（Remotion 动效包装在本地 Node 无头渲染）。
+- **按需接入云端配音或转写**：追求自然讲故事口吻的中文/多语种旁白时，可显式启用 Fish Audio（`tts.py --engine fish`，默认免费层可用模型 `s2.1-pro-free`，支持 `--whole-article` 整篇连贯合成与 `spoken_text` 读音分离）、OpenAI TTS 或自托管 IndexTTS；详见[远程调用披露](../skills/video-recap/references/remote-services.md)。
 
 ## 能力边界
 
 - 支持的输入视频封装：`.mp4 / .mov / .mkv / .webm`。
-- 剪映草稿仅在显式开启 `--export-jianying` 时生成；默认运行产出 `recap_<名>.mp4`、`subtitles.srt/.ass` 与 `timeline.json`。
-- 只要能从文件名或需求里认出剧名，建议先让 Agent 把人物全名与关系写入 `background_research.json`，能大幅减少 VLM 把角色叫成“黑衣男子”和 ASR 听错人名的情况。
+- 剪映草稿按需通过 `python3 skills/video-recap/scripts/export_jianying.py timeline.json --out-dir out/jianying_draft` 导出，不与核心渲染耦合。
+- 草稿导出专注映射视频、叠加层、多路音频、闪避关键帧与字幕基础轨道；转场特效、调色 LUT、贴纸等可在打开剪映后自由叠加。
 
 ## 延伸链接
 
-- 多轨时间线与剪映草稿协议细节：[`docs/timeline-and-jianying.md`](timeline-and-jianying.md)
-- 在线图文指南：https://zenstory.ai/zh/video-recap/capcut-draft · https://zenstory.ai/zh/video-recap/video-to-narration
-- 代码仓库：https://github.com/zenstory-ai/video-recap-skills（原 `worldwonderer/video-recap-skills`，旧地址自动跳转）
+- 多轨 `timeline.json` v3 与剪映草稿协议细节：[`docs/timeline-and-jianying.md`](timeline-and-jianying.md)
+- 技能内剪映导出参考：[`skills/video-recap/references/jianying-export.md`](../skills/video-recap/references/jianying-export.md)
+- 竖横屏 Remotion 包装与音效规范：[`skills/video-recap/references/packaging-and-sfx.md`](../skills/video-recap/references/packaging-and-sfx.md)
+- 代码仓库：https://github.com/zenstory-ai/video-recap-skills
