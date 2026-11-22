@@ -1,0 +1,42 @@
+{
+  "name": "landscape-editorial",
+  "description": "16:9 horizontal cinema framing with top-left title mark and clean lower-third editorial subtitle zone.",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "backdrop": {
+      "kind": "none"
+    },
+    "viewport": {
+      "x": 0.0,
+      "y": 0.0,
+      "w": 1.0,
+      "h": 1.0
+    }
+  },
+  "subtitle_style": {
+    "font_size": 46,
+    "primary_color": "#FFFDF8",
+    "outline_color": "#0E0E12",
+    "outline": 2.8,
+    "shadow": 1.4,
+    "glow": 1.5,
+    "max_chars": 22,
+    "safe_y": [0.84, 0.95]
+  },
+  "palette": {
+    "bg": "#F2EDE7F0",
+    "border": "#B8431EE0",
+    "title": "#1E1916FF",
+    "accent": "#B8431EFF",
+    "muted": "#5C534CFF",
+    "coral": "#C2412BFF"
+  },
+  "slots": {
+    "header": {"x": 0.03, "y": 0.04, "w": 0.34, "h": 0.11},
+    "card_left": {"x": 0.04, "y": 0.70, "w": 0.32, "h": 0.11},
+    "card_right": {"x": 0.64, "y": 0.70, "w": 0.32, "h": 0.11},
+    "callout_upper": {"x": 0.25, "y": 0.06, "w": 0.50, "h": 0.09},
+    "callout_lower": {"x": 0.25, "y": 0.72, "w": 0.50, "h": 0.09}
+  }
+}

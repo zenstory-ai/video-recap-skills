@@ -1,0 +1,45 @@
+{
+  "name": "portrait-cinema",
+  "description": "9:16 vertical cinema framing with dark top header and bottom subtitle band around a full-width central viewport.",
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "backdrop": {
+      "kind": "blur",
+      "color": "#0A0A0D",
+      "blur_sigma": 22
+    },
+    "viewport": {
+      "x": 0.0,
+      "y": 0.10,
+      "w": 1.0,
+      "h": 0.80,
+      "fit": "cover"
+    }
+  },
+  "subtitle_style": {
+    "font_size": 50,
+    "primary_color": "#FFFFFF",
+    "outline_color": "#100D0B",
+    "outline": 2.8,
+    "shadow": 1.2,
+    "glow": 2.0,
+    "max_chars": 16,
+    "safe_y": [0.89, 0.97]
+  },
+  "palette": {
+    "bg": "#120F0CEB",
+    "border": "#CFA75EE0",
+    "title": "#FAF3E4FF",
+    "accent": "#F5D07AFF",
+    "muted": "#D1C8BAFF",
+    "coral": "#F09B82FF"
+  },
+  "slots": {
+    "header": {"x": 0.04, "y": 0.015, "w": 0.92, "h": 0.08},
+    "card_left": {"x": 0.04, "y": 0.72, "w": 0.44, "h": 0.08},
+    "card_right": {"x": 0.52, "y": 0.72, "w": 0.44, "h": 0.08},
+    "callout_upper": {"x": 0.12, "y": 0.12, "w": 0.76, "h": 0.06},
+    "callout_lower": {"x": 0.12, "y": 0.81, "w": 0.76, "h": 0.06}
+  }
+}

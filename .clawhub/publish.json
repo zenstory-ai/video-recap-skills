@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "686c81ecd210656cba57a246fd874bdb9ab4738317f6e94f5c4896923779de85",
+      "packageDigest": "c4fda5e2bf7f9dee0ce4f3eb68cece997eb5754a17cb575a7ffb8f12fbf8f6a3",
       "path": "skills/video-recap",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.25"
+      "version": "2.0.0"
     },
     {
       "catalogMigration": true,
@@ -57,7 +57,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "e642c4f97725b731639c384bc4b022dec6e30c5959b7adc5c79f35061bcc55c6",
+      "packageDigest": "9d40829edf97f39b6782663dc230a4283907c6d3512fa95c368dbf5bb9168637",
       "path": "skills/video-reference",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -78,7 +78,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "1.0.9"
+      "version": "2.0.0"
     }
   ]
 }

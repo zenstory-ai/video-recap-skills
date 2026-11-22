@@ -1,0 +1,45 @@
+{
+  "name": "portrait-stage",
+  "description": "9:16 vertical stage framing for 16:9/4:3 footage with blurred backdrop, top title band, and bottom safe subtitle zone.",
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "backdrop": {
+      "kind": "blur",
+      "color": "#0D1017",
+      "blur_sigma": 22
+    },
+    "viewport": {
+      "x": 0.0,
+      "y": 0.28,
+      "w": 1.0,
+      "h": 0.34,
+      "fit": "cover"
+    }
+  },
+  "subtitle_style": {
+    "font_size": 52,
+    "primary_color": "#FFE294",
+    "outline_color": "#0B0E14",
+    "outline": 3.0,
+    "shadow": 1.4,
+    "glow": 2.4,
+    "max_chars": 16,
+    "safe_y": [0.70, 0.84]
+  },
+  "palette": {
+    "bg": "#111622E6",
+    "border": "#D9B460EB",
+    "title": "#FFF8EAFF",
+    "accent": "#F6D684FF",
+    "muted": "#C9D0DCFF",
+    "coral": "#F2A890FF"
+  },
+  "slots": {
+    "header": {"x": 0.05, "y": 0.04, "w": 0.90, "h": 0.16},
+    "card_left": {"x": 0.04, "y": 0.52, "w": 0.44, "h": 0.08},
+    "card_right": {"x": 0.52, "y": 0.52, "w": 0.44, "h": 0.08},
+    "callout_upper": {"x": 0.14, "y": 0.21, "w": 0.72, "h": 0.06},
+    "callout_lower": {"x": 0.14, "y": 0.63, "w": 0.72, "h": 0.06}
+  }
+}

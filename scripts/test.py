@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 GROUPS = [
-    "understanding", "cut", "voiceover", "assemble", "script", "orchestrator", "reference",
+    "core", "companions", "reference", "orchestrator",
 ]
 
 _SUBTITLES_FILTER_RE = re.compile(r"(?:^|\s)subtitles(?:\s|$)", re.MULTILINE)

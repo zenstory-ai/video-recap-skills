@@ -1,42 +1,38 @@
 # 仓库架构说明
 
-本仓库包含两个各自独立的技能：日常做片主技能 `skills/video-recap/` 在同一目录内串联完成视频理解、定主线与选镜、切镜头、解说词检查、TTS 配音及混音加字幕；参考片拆解技能 `skills/video-reference/` 在需要分析优秀成片时按需调用，生成可复用的 `production_reference.json`。各技能的完整命令与参数见对应目录下的 `SKILL.md` 及 `--help` 输出；历次架构取舍笔记可在 `.agents/notes/` 下检索。
+本仓库采用 `1 + 1` 自包含技能结构：通用视频剪辑与解说主技能 `skills/video-recap/`（6 支核心原子 CLI + 4 支单向配套叶工具，围绕单一 `timeline.json` v3 协作），加上按需拆片参考技能 `skills/video-reference/`（1 支本地测量与抽帧 CLI，产出脱敏 Markdown 笔记）。架构演进见 `.agents/notes/implemented/architecture/2026-11-21-atomic-primitives-and-timeline-bus.md`。
 
-## 技能分工与数据交接
+## 技能拓扑与单一数据总线
 
 ```text
-                               skills/video-recap/（做片主技能，由 recap.py 串联全流程）
-                                                        │
-understand.py ─▶ Agent 制定方案并写 clip_plan.json / narration.json ─▶ [cut.py] ─▶ validate.py ─▶ voiceover.py ─▶ assemble.py
+源视频 ─▶ probe.py / frames.py / transcribe.py ─▶ Agent 亲眼看片并写 MEDIA_NOTES.md & EDIT_PLAN.md
+                                                          │
+                                                          ▼
+             timeline.json (v3 单一机器契约) ◀── tts.py (实测时长) / packaging.py (按需主题图层)
+                 │            │              │              │
+                 ▼            ▼              ▼              ▼
+             render.py     check.py   export_jianying.py  dashboard.py / library.py
 ```
 
-- **创作各环节连贯衔接**：定故事主线（`recap_story_plan.json`）、分声音归属（`visual_audio_board.json`）、挑镜头剪辑（`clip_plan.json`）和写解说词（`narration.json`）都在同一个流程里完成，不用在多个技能目录之间来回切换（见 `architecture/2026-11-10-converge-production-skills-into-video-recap.md`）。
-- **参考片拆解按需独立运行**：`video-reference` 不在默认做片流程里，只在用户需要拆解优秀成片时单独运行；导出的 `production_reference.json` 只供写稿 Agent 阅读参考，做片脚本不会读取或打分（登记为资源库模板并通过 `--project` 绑定时，也只是把副本拷进 `work_dir`）。
-- **每个技能各自独立**：两个技能都能单独拷贝安装；`skills/<name>/scripts/`（含子包）只 `import` 本技能内部的模块，源码与文档都不引用另一个技能的路径。
-- **Agent 负责创作取舍，脚本负责执行与基础检查**：`clip_plan.json`、`narration.json`、`recap_story_plan.json` 和 `visual_audio_board.json` 都由 Agent 编写；Python 脚本负责生成写稿简报、检查客观硬伤（拦住极短闪帧、切碎半句台词、旁白抢话、时间窗装不下配音、裁丢必保画面和残留示例占位符）、调用 TTS 接口以及用 ffmpeg 渲染合成（见 `architecture/2026-05-18-agent-owned-narration-cli-mechanical.md` 与 `simplification/2026-11-10-scripts-for-hands-and-floor-agent-for-craft.md`）。
-- **统一以 `timeline.json` 为时间线基准**：最终交付以 ffmpeg 渲染出的成片和通用时间线文件 `timeline.json` 为准，剪映草稿直接读取同一份 `timeline.json` 按需导出（见 `architecture/2026-06-14-timeline-json-canonical-jianying-optional.md`）。
+- **判断归 Agent，机械归原子 CLI**：选材、立意、节奏、原声留白、旁白文案与审美复核全由宿主多模态 Agent 直接看拼图与转写完成，记录在普通 Markdown（`BRIEF.md`、`MEDIA_NOTES.md`、`EDIT_PLAN.md`、`PROMO.md`）；Python 脚本只做无状态媒体探测、抽帧、本地优先转写/配音、帧精确渲染、物理体检与配套导出。
+- **单一 `timeline.json` v3 契约，零清单锁**：删除旧版 50 个跨阶段 JSON 与 `{size, mtime_ns}` 指纹锁。修改任意镜头、字幕、配音或图层后，直接重跑受影响的单个 CLI 即可。
+- **核心与配套严格单向隔离**：核心模块（`_common.py`、`_audio.py`、`_subtitles.py` 及 6 支核心 CLI）绝不导入配套叶工具（`export_jianying.py`、`dashboard.py`、`packaging.py`、`library.py`）；叶工具之间互不导入，统一通过 `timeline.json` 与工作区文件交互（`export_jianying.py` 与 `render.py` 共用 `_audio.py` 中的闪避曲线计算）。
+- **每个技能彻底自包含**：`skills/video-recap/` 与 `skills/video-reference/` 均可独立拷贝安装，互不导入、不互相引用路径；`video-reference` 产出的 `REFERENCE_NOTES.md` 仅供 Agent 阅读，无任何生产脚本机械消费。
 
-## 技能与内部模块划分
+## 模块划分
 
-| 技能 / 阶段 | 核心职责 | 顶层入口脚本 | 内部功能子包 |
+| 技能 | 层次 | 脚本与资产 | 职责 |
 |---|---|---|---|
-| `video-recap`（流程编排与公共工具） | 全流程串联、断点续跑核对、看片缓存与素材库管理、出片前质检、环境自检、本地只读审片页 | `recap.py`、`recap_inspect.py`、`library.py`、`dashboard_server.py`、`doctor.py`、`final_qc.py` | `dashboard/`、`resources/` |
-| `video-recap`（理解阶段） | 切镜头、ASR 语音转写、VLM 抽帧看画面、静音与台词停顿点检测，并生成供 Agent 写稿的 `agent_narration_brief.md`（含 `cut` 模式剪完后的成片时间轴简报） | `understand.py`（传 `--brief-only` 仅重建简报） | `briefing/` |
-| `video-recap`（写稿与检查阶段） | 故事主线、剪辑与旁白规范，解说词时长与断句检查，Agent 出片前自查清单 | `validate.py` | — |
-| `video-recap`（剪辑阶段） | 按 `clip_plan.json` 对齐台词停顿切镜头，输出 `edited_source.mp4` 与 `clip_plan_validated.json`；扫描成片里的极短闪帧与密集切点 | `cut.py`、`shot_review.py` | — |
-| `video-recap`（配音阶段） | 解说旁白分段语音合成（支持 MiMo、Fish Audio、自托管 IndexTTS） | `voiceover.py` | `providers/` |
-| `video-recap`（合成阶段） | 多轨混音、压低原声、生成并烧录字幕、输出 `timeline.json`、混音质检、导出剪映草稿 | `assemble.py`、`export_jianying.py` | `subtitles/`、`jianying/` |
-| `video-reference`（独立按需技能） | 实测参考成片的镜头长短与音量起伏，校验原片剧情与通用手法是否分开（R1–R8），导出脱敏后的 `production_reference.json` | `reference.py` | — |
+| `video-recap` | 核心内部模块（3） | `_common.py`、`_audio.py`、`_subtitles.py` | 通用命令/原子 JSON/错误脱敏、闪避与响度闭环、SRT/ASS 字幕生成 |
+| `video-recap` | 核心原子 CLI（6） | `probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py` | 探测、拼图抽帧、本地优先转写、实测时长配音、多轨渲染、7 项物理体检 |
+| `video-recap` | 配套叶工具（4） | `packaging.py`、`export_jianying.py`、`dashboard.py`、`library.py` | 数据驱动主题包装与防撞音效、剪映草稿导出、静态/本地审片台、跨项目素材库与合规审计 |
+| `video-recap` | 静态资产与骨架 | `assets/dashboard.html`、`assets/themes/*.json`、`references/jianying/*` | 审片页模板、竖横屏 JSON 主题、剪映协议骨架 |
+| `video-reference` | 独立按需技能（1） | `analyze_reference.py` | 本地实测参考成片切点、节奏曲线、响度密度与拼图 |
 
-子包划分原则（见 `architecture/2026-09-21-scripts-subpackages-jianying.md`）：`scripts/` 顶层保留命令行入口与主干模块；只在特定环节用到的代码（如简报生成 `briefing/`、TTS 接口 `providers/`、字幕生成 `subtitles/`、剪映草稿导出 `jianying/`、本地只读审片页 `dashboard/`、素材库绑定与资源记录 `resources/`）各自放进独立子包。
+## 自动化架构与防膨胀守卫
 
-## 编排器内部路由
+运行 `python3 scripts/test.py orchestrator` 自动守卫以下红线：
 
-`--edit-mode` 与 `--audio-mode` 的合法组合及暂停点定义在 `skills/video-recap/SKILL.md` §1 的总表中，对应 `skills/video-recap/scripts/recap_runner.py` 中的两条执行分支：
-
-- `_run_single` 与 `_run_multi_cut`：分别处理单视频 `full / cut` 与多视频 `cut` 主流程。
-- 两条路径收尾时共用 `_deliver`：（有旁白时执行 TTS 配音）→ 混音加画框字幕 → 成片质检（`final_qc.py`）；所有 `cut` 路径共用 `_render_cut`、`_reject_stale_cut_narration` 与 `_validate_cut_output_narration`。
-
-## 架构测试检查
-
-运行 `python3 scripts/test.py orchestrator` 会自动检查以下规则：不跨技能 `import` 或引用路径、单个 Python 模块不超过 800 行、技能内部 `import` 无循环引用、`lib.py` 只声明本技能实际读取的配置项，以及核心渲染代码不反向依赖剪映导出子包。
+- **技能散文预算**：单份 `SKILL.md <= 4,000` 字符、单份参考 `<= 2,500` 字符、全仓 `skills/**/*.md <= 22,000` 字符。
+- **运行时 Python 预算**：单文件 `<= 550` 行、全仓 `skills/*/scripts/**/*.py <= 5,000` 行、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个。
+- **隔离与纯度**：禁止跨技能导入/引用、技能内 import 图无环、核心模块禁止导入配套叶工具、所有脚本可在 `python -I` 隔离拷贝下独立导入、所有文本 I/O 显式声明 `encoding="utf-8"`。

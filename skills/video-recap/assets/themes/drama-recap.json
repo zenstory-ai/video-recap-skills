@@ -1,0 +1,53 @@
+{
+  "name": "drama-recap",
+  "description": "3:4 full-bleed Modern Editorial Stacked Typography layout with clean bold sans masthead, short amber accent bar, asymmetric two-tier ivory-gold gradient huazi, soft scrims, and crisp 2-line subtitles.",
+  "canvas": {
+    "width": 1080,
+    "height": 1440,
+    "backdrop": {
+      "kind": "none"
+    },
+    "viewport": {
+      "x": 0.0,
+      "y": 0.0,
+      "w": 1.0,
+      "h": 1.0,
+      "fit": "cover"
+    }
+  },
+  "subtitle_style": {
+    "font_size": 46,
+    "primary_color": "#FFFFFF",
+    "outline_color": "#0A0A0D",
+    "outline": 2.0,
+    "shadow": 1.5,
+    "glow": 1.2,
+    "max_chars": 15,
+    "safe_y": [0.72, 0.82],
+    "strip_trailing_punct": true
+  },
+  "remotion": {
+    "header_style": "drama_minimal",
+    "show_progress_bar": false,
+    "scrim": true,
+    "accent": "#F3CE7A",
+    "text": "#FFFFFF"
+  },
+  "palette": {
+    "bg": "#09090C00",
+    "border": "#F3CE7A00",
+    "title": "#FFFFFFFF",
+    "accent": "#F3CE7AFF",
+    "muted": "#FFFFFFE0",
+    "coral": "#FFD84DFF"
+  },
+  "slots": {
+    "header": {"x": 0.041, "y": 0.029, "w": 0.84, "h": 0.095},
+    "huazi": {"x": 0.041, "y": 0.135, "w": 0.88, "h": 0.088},
+    "reaction": {"x": 0.08, "y": 0.145, "w": 0.84, "h": 0.075},
+    "card_left": {"x": 0.041, "y": 0.135, "w": 0.88, "h": 0.088},
+    "card_right": {"x": 0.041, "y": 0.135, "w": 0.88, "h": 0.088},
+    "callout_upper": {"x": 0.041, "y": 0.135, "w": 0.88, "h": 0.088},
+    "callout_lower": {"x": 0.08, "y": 0.62, "w": 0.84, "h": 0.07}
+  }
+}

@@ -1,3 +1,1 @@
-"""Importing the helpers puts video-recap's scripts on sys.path for every module here."""
-
-import _helpers  # noqa: F401
+"""Orchestrator group: repository-wide architecture, packaging, and guardrail tests."""

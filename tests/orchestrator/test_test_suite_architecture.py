@@ -1,39 +1,49 @@
 import ast
 import importlib.util
-from pathlib import Path
 from collections import defaultdict
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
-MAX_SCRIPT_MODULE_LINES = 800
+
+# Hard anti-bloat guardrails (raise explicitly with an .agents/notes/ rationale if needed).
+MAX_SCRIPT_MODULE_LINES = 550
+SKILL_TOTAL_PY_LOC_BUDGET = 5000
+MAX_PY_FILES_PER_SKILL = 20
+SKILL_MD_CHAR_BUDGET = 4000
+REFERENCE_CHAR_BUDGET = 2500
+SKILL_TOTAL_CHAR_BUDGET = 22000
+
+CORE_MODULES = frozenset({
+    "probe", "frames", "transcribe", "tts", "render", "check",
+    "_common", "_audio", "_subtitles",
+})
+CORE_CLI_MODULES = frozenset({"probe", "frames", "transcribe", "tts", "render", "check"})
+COMPANION_MODULES = frozenset({"export_jianying", "dashboard", "packaging", "library"})
 
 PUBLIC_ENTRYPOINTS = (
-    "skills/video-recap/scripts/assemble.py",
-    "skills/video-recap/scripts/cut.py",
-    "skills/video-recap/scripts/recap.py",
-    "skills/video-recap/scripts/understand.py",
-    "skills/video-reference/scripts/reference.py",
+    "skills/video-recap/scripts/probe.py",
+    "skills/video-recap/scripts/frames.py",
+    "skills/video-recap/scripts/transcribe.py",
+    "skills/video-recap/scripts/tts.py",
+    "skills/video-recap/scripts/render.py",
+    "skills/video-recap/scripts/check.py",
+    "skills/video-recap/scripts/export_jianying.py",
+    "skills/video-recap/scripts/dashboard.py",
+    "skills/video-recap/scripts/packaging.py",
+    "skills/video-recap/scripts/library.py",
+    "skills/video-reference/scripts/analyze_reference.py",
 )
-
-
-def _collect_test_nodes(body, prefix=""):
-    found = []
-    for node in body:
-        if (
-            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name.startswith("test_")
-        ):
-            qualname = f"{prefix}::{node.name}" if prefix else node.name
-            found.append((qualname, node))
-        elif isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
-            cls_prefix = f"{prefix}::{node.name}" if prefix else node.name
-            found.extend(_collect_test_nodes(node.body, cls_prefix))
-    return found
 
 
 def _test_functions(path: Path):
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return _collect_test_nodes(tree.body)
+    return [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+    ]
 
 
 def _body_fingerprint(node: ast.FunctionDef | ast.AsyncFunctionDef) -> str:
@@ -52,9 +62,9 @@ def test_test_functions_do_not_repeat_an_exact_body():
     seen = {}
     duplicates = []
     for path in sorted((ROOT / "tests").rglob("test_*.py")):
-        for qualname, node in _test_functions(path):
+        for node in _test_functions(path):
             fingerprint = _body_fingerprint(node)
-            location = f"{path.relative_to(ROOT)}::{qualname}"
+            location = f"{path.relative_to(ROOT)}::{node.name}"
             if fingerprint in seen:
                 duplicates.append((seen[fingerprint], location))
             else:
@@ -90,11 +100,6 @@ def _script_modules():
 
 
 def _module_name(scripts_dir: Path, path: Path) -> str:
-    """Dotted module name of ``path`` relative to ``scripts_dir``.
-
-    ``jianying/schema.py`` -> ``jianying.schema``; ``jianying/__init__.py`` ->
-    ``jianying``.
-    """
     parts = path.relative_to(scripts_dir).with_suffix("").parts
     if parts[-1] == "__init__":
         parts = parts[:-1]
@@ -105,17 +110,82 @@ def _line_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
-def test_all_skill_script_modules_stay_within_the_strict_line_budget():
+def _imported_top_level_modules(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            imported.add(node.module.split(".", 1)[0])
+    return imported
+
+
+def test_all_skill_script_modules_stay_within_the_strict_line_and_file_budgets():
+    modules = _script_modules()
     oversized = {
         str(path.relative_to(ROOT)): _line_count(path)
-        for path in _script_modules()
+        for path in modules
         if _line_count(path) > MAX_SCRIPT_MODULE_LINES
     }
-
     assert not oversized, (
-        f"Every skill Python module must stay at or below {MAX_SCRIPT_MODULE_LINES} lines; "
-        f"split responsibilities instead of extending an oversized file: {oversized}"
+        f"Every skill Python module must stay <= {MAX_SCRIPT_MODULE_LINES} lines: {oversized}"
     )
+
+    total_loc = sum(_line_count(path) for path in modules)
+    assert total_loc <= SKILL_TOTAL_PY_LOC_BUDGET, (
+        f"Total runtime Python LOC ({total_loc}) exceeds {SKILL_TOTAL_PY_LOC_BUDGET}; "
+        "cut equivalent code or raise SKILL_TOTAL_PY_LOC_BUDGET with an agent note."
+    )
+
+    per_skill: dict[str, int] = defaultdict(int)
+    for path in modules:
+        per_skill[path.relative_to(ROOT / "skills").parts[0]] += 1
+    too_many = {k: v for k, v in per_skill.items() if v > MAX_PY_FILES_PER_SKILL}
+    assert not too_many, (
+        f"Each skill may have at most {MAX_PY_FILES_PER_SKILL} .py files: {too_many}"
+    )
+
+
+def test_skill_markdown_stays_within_character_budgets():
+    total = 0
+    violations = []
+    for path in sorted((ROOT / "skills").rglob("*.md")):
+        size = len(path.read_text(encoding="utf-8"))
+        total += size
+        rel = path.relative_to(ROOT / "skills").as_posix()
+        if path.name == "SKILL.md" and size > SKILL_MD_CHAR_BUDGET:
+            violations.append(f"{rel}: {size} > {SKILL_MD_CHAR_BUDGET} chars")
+        elif path.name != "SKILL.md" and size > REFERENCE_CHAR_BUDGET:
+            violations.append(f"{rel}: {size} > {REFERENCE_CHAR_BUDGET} chars")
+    if total > SKILL_TOTAL_CHAR_BUDGET:
+        violations.append(f"total skills/**/*.md: {total} > {SKILL_TOTAL_CHAR_BUDGET} chars")
+    assert not violations, (
+        "Skill prose exceeded attention budget; trim equivalent prose or raise budget with rationale:\n"
+        + "\n".join(violations)
+    )
+
+
+def test_core_and_companion_isolation_is_strictly_unidirectional():
+    scripts_dir = ROOT / "skills" / "video-recap" / "scripts"
+    violations = []
+    for path in sorted(scripts_dir.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        mod = _module_name(scripts_dir, path).split(".", 1)[0]
+        imported = _imported_top_level_modules(path)
+        if mod in CORE_MODULES:
+            bad = sorted(imported & COMPANION_MODULES)
+            if bad:
+                violations.append(f"core {mod}.py must not import companion(s) {bad}")
+        if mod in COMPANION_MODULES:
+            bad_peers = sorted(imported & (COMPANION_MODULES - {mod}))
+            bad_clis = sorted(imported & CORE_CLI_MODULES)
+            if bad_peers:
+                violations.append(f"companion {mod}.py must not import peer companion(s) {bad_peers}")
+            if bad_clis:
+                violations.append(f"companion {mod}.py must not import core CLI(s) {bad_clis}")
+    assert not violations, "Unidirectional core -> companion boundary violated:\n" + "\n".join(violations)
 
 
 def test_skill_scripts_do_not_import_other_skill_scripts():
@@ -125,9 +195,7 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
         scripts_dir = skill_dir / "scripts"
         if not scripts_dir.is_dir():
             continue
-        paths = sorted(
-            p for p in scripts_dir.rglob("*.py") if "__pycache__" not in p.parts
-        )
+        paths = sorted(p for p in scripts_dir.rglob("*.py") if "__pycache__" not in p.parts)
         dotted_modules = {_module_name(scripts_dir, p) for p in paths}
         top_level_modules = {name.split(".", 1)[0] for name in dotted_modules}
         local_modules = dotted_modules | top_level_modules
@@ -136,7 +204,7 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
             module_owners[module].add(skill_dir.name)
 
     violations = []
-    for skill_name, (scripts_dir, local_modules, paths) in skill_script_dirs.items():
+    for skill_name, (_scripts_dir, local_modules, paths) in skill_script_dirs.items():
         other_script_paths = {
             f"skills/{other_skill}/scripts"
             for other_skill in skill_script_dirs
@@ -146,58 +214,15 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
             source = path.read_text(encoding="utf-8")
             for other_path in sorted(other_script_paths):
                 if other_path in source:
+                    violations.append(f"{path.relative_to(ROOT)} references cross-skill path {other_path}")
+            for module in sorted(_imported_top_level_modules(path)):
+                if module in module_owners and module not in local_modules:
+                    owners = sorted(module_owners[module])
                     violations.append(
-                        f"{path.relative_to(ROOT)} references cross-skill path {other_path}"
+                        f"{path.relative_to(ROOT)} imports {module!r} owned by other skill(s) {owners}"
                     )
 
-            tree = ast.parse(source, filename=str(path))
-            for node in ast.walk(tree):
-                imported = []
-                if isinstance(node, ast.Import):
-                    imported = [alias.name.split(".", 1)[0] for alias in node.names]
-                elif (
-                    isinstance(node, ast.ImportFrom) and node.level == 0 and node.module
-                ):
-                    imported = [node.module.split(".", 1)[0]]
-                for module in imported:
-                    if module in module_owners and module not in local_modules:
-                        owners = sorted(module_owners[module])
-                        violations.append(
-                            f"{path.relative_to(ROOT)}:{node.lineno} imports {module!r} "
-                            f"owned by other skill(s) {owners}"
-                        )
-
-    assert not violations, (
-        "Every skill must remain self-contained; scripts may only import their own "
-        f"skill's modules: {violations}"
-    )
-
-
-def _resolve_import_from_targets(
-    name: str, path: Path, node: ast.ImportFrom, modules: dict[str, Path]
-) -> list[str]:
-    if node.level == 0:
-        base = node.module or ""
-    else:
-        anchor = name.split(".") if path.stem == "__init__" else name.split(".")[:-1]
-        up = node.level - 1
-        if up > len(anchor):
-            return []
-        prefix = anchor[: len(anchor) - up]
-        if node.module:
-            prefix = prefix + node.module.split(".")
-        base = ".".join(prefix)
-
-    targets = []
-    for alias in node.names:
-        if alias.name != "*":
-            submod = f"{base}.{alias.name}" if base else alias.name
-            if submod in modules:
-                targets.append(submod)
-                continue
-        if base:
-            targets.append(base)
-    return targets
+    assert not violations, f"Every skill must remain self-contained: {violations}"
 
 
 def test_skill_local_import_graphs_are_acyclic():
@@ -207,27 +232,15 @@ def test_skill_local_import_graphs_are_acyclic():
         modules = {_module_name(scripts_dir, p): p for p in paths}
         graph = {name: set() for name in modules}
         for name, path in modules.items():
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                imported = []
-                if isinstance(node, ast.Import):
-                    imported = [alias.name for alias in node.names]
-                elif isinstance(node, ast.ImportFrom):
-                    imported = _resolve_import_from_targets(name, path, node, modules)
-                for full_name in imported:
-                    if full_name in modules:
-                        graph[name].add(full_name)
-                    else:
-                        top_level = full_name.split(".", 1)[0]
-                        if top_level in modules:
-                            graph[name].add(top_level)
+            for top_level in _imported_top_level_modules(path):
+                if top_level in modules:
+                    graph[name].add(top_level)
 
-        visited = set()
-        active = []
+        visited, active = set(), []
 
         def visit(module):
             if module in active:
-                cycle = active[active.index(module) :] + [module]
+                cycle = active[active.index(module):] + [module]
                 cycles.append(f"{scripts_dir.parent.name}: {' -> '.join(cycle)}")
                 return
             if module in visited:
@@ -248,6 +261,7 @@ def test_public_entrypoints_have_no_private_compatibility_surface():
     violations = []
     for relative in PUBLIC_ENTRYPOINTS:
         path = ROOT / relative
+        assert path.is_file(), f"Missing public entrypoint: {relative}"
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         private_imports = []
         declared_exports = None
@@ -265,49 +279,39 @@ def test_public_entrypoints_have_no_private_compatibility_surface():
                 declared_exports = ast.literal_eval(node.value)
 
         if private_imports:
-            violations.append(
-                f"{relative} imports private compatibility symbols: {private_imports}"
-            )
+            violations.append(f"{relative} imports private compatibility symbols: {private_imports}")
         if declared_exports is None:
             violations.append(f"{relative} must declare its public __all__")
         elif any(str(name).startswith("_") for name in declared_exports):
-            violations.append(
-                f"{relative} exports private compatibility symbols: {declared_exports}"
-            )
+            violations.append(f"{relative} exports private compatibility symbols: {declared_exports}")
 
     assert not violations, f"Entrypoints must expose public APIs only: {violations}"
 
 
-# Only the skill that produces production_reference.json, the library shape check that registers
-# an export as a template, and the binding that copies an adopted one into work_dir may name it in
-# code. Every other reader is the writing agent (prose only); a script that starts reading it would
-# grow the reference back into a per-run evaluation layer, so that has to be an explicit test change.
-PRODUCTION_REFERENCE_WRITERS = (
-    "skills/video-reference/scripts/",
-    "skills/video-recap/scripts/library.py",
-    "skills/video-recap/scripts/resources/project_binding.py",
-)
-
-
-def test_only_the_reference_skill_and_its_binding_name_production_reference_in_scripts():
-    offenders = [
-        relative
-        for path in _script_modules()
-        if not (relative := path.relative_to(ROOT).as_posix()).startswith(PRODUCTION_REFERENCE_WRITERS)
-        and "production_reference.json" in path.read_text(encoding="utf-8")
-    ]
-
+def test_no_production_scripts_mechanically_consume_reference_outputs():
+    recap_scripts = ROOT / "skills" / "video-recap" / "scripts"
+    forbidden = ("production_reference.json", "reference_metrics.json", "REFERENCE_NOTES.md")
+    offenders = []
+    for path in sorted(recap_scripts.rglob("*.py")):
+        if "__pycache__" in path.parts:
+            continue
+        text = path.read_text(encoding="utf-8")
+        # Read-only dashboard.py may display REFERENCE_NOTES.md prose to humans.
+        checked = (
+            ("production_reference.json", "reference_metrics.json")
+            if path.name == "dashboard.py"
+            else forbidden
+        )
+        hits = [name for name in checked if name in text]
+        if hits:
+            offenders.append((str(path.relative_to(ROOT)), hits))
     assert not offenders, (
-        "production_reference.json is an optional, prose-only input for the writing agent; "
-        f"only the reference skill and the library binding may name it: {offenders}"
+        "Reference outputs are prose-only inspiration for the Agent, never mechanical inputs: "
+        f"{offenders}"
     )
 
 
 def _text_io_without_encoding(call: ast.Call) -> bool:
-    """`open`/`Path.open`/`read_text`/`write_text` in text mode without an encoding.
-
-    ruff's PLW1514 only sees receivers it can type as Path, so `(tmp_path / "x").read_text()`
-    passes ruff; this reads the call shape instead. Windows' locale codec is not UTF-8."""
     func = call.func
     if isinstance(func, ast.Name) and func.id == "open":
         encoding_pos, mode_pos = 3, 1
@@ -345,4 +349,4 @@ def test_text_file_io_names_its_encoding():
                 for node in ast.walk(tree)
                 if isinstance(node, ast.Call) and _text_io_without_encoding(node)
             )
-    assert not violations, "text I/O without encoding=\"utf-8\":\n" + "\n".join(violations)
+    assert not violations, 'text I/O without encoding="utf-8":\n' + "\n".join(violations)

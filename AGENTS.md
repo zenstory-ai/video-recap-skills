@@ -2,21 +2,24 @@
 
 ## 仓库是什么
 
-把一段或几段视频做成中文解说成片的 skill 包。`skills/` 下两个自包含技能（1 个生产技能 + 1 个按需拆片参考技能）：
+通用 AI 视频剪辑与解说制作 skill 包。`skills/` 下两个自包含技能（`1 + 1` 结构）：
 
-- `video-recap`：统一生产技能，串联完成视频理解（`understand.py`）→ Agent 制定故事/声画方案与写稿 → 视频剪辑（`cut.py`）→ 底线门禁校验（`validate.py`）→ TTS 配音（`voiceover.py`）→ 音画混音与字幕渲染（`assemble.py`），由总入口 `recap.py` 编排串联。
-- `video-reference`：不在默认生产流水线上，按需把现有优秀成片拆成 `production_reference.json`。
-- 各阶段拥有什么、入口脚本和功能子包见 `docs/architecture.md`；能力边界与验收原则见 `docs/production-boundaries.md`。
+- `video-recap`：通用视频剪辑与解说生产技能。创作判断（看拼图选镜、定主线、写旁白、安排原声与包装）归宿主多模态 Agent 并记录在纯 Markdown 工作区；机械执行收敛为 6 支无状态核心原子 CLI（`probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py`）与 4 支单向配套叶工具（`packaging.py`、`export_jianying.py`、`dashboard.py`、`library.py`），统一通过单一规范 `timeline.json` v3 协作。
+- `video-reference`：不在默认生产路径上，按需本地实测优秀成片的镜头节奏、响度密度并抽帧拼图（`analyze_reference.py`），辅助 Agent 写出脱敏 Markdown 参考笔记 `REFERENCE_NOTES.md`。
+- 架构与模块划分见 `docs/architecture.md`；能力边界与验收原则见 `docs/production-boundaries.md`。
 - 分发渠道：Claude 插件（`.claude-plugin/`，OpenClaw 的 `plugins install` 也读它）、源码 Release（`.release/policy.json`）和 ClawHub（`.clawhub/`）。
 
 ## 改动前必须知道的规矩
 
-- **每个 skill 自包含**：`skills/<name>/scripts/`（含子包）只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；各阶段之间通过 `work_dir` 里的 JSON / MP4 交接数据，`lib.py` 只声明本技能实际读取的配置项（`tests/orchestrator/test_audio_policy_parity.py` 守；见 `architecture/2026-11-10-converge-production-skills-into-video-recap.md`）。
-- **结构上限**：每个脚本模块不超过 800 行，skill 内 import 图无环（`tests/orchestrator/test_test_suite_architecture.py`）。
-- **运行时只用 Python 标准库和 ffmpeg / ffprobe**，README 承诺不需要 `pip install`；最低 Python 3.10（README），CI 用 3.12。
-- **创作产物归 Agent**：`clip_plan.json`、`narration.json` 等由 Agent 写，脚本只准备 brief、做确定性校验、执行 TTS 与渲染（`architecture/2026-05-18-agent-owned-narration-cli-mechanical.md`）。
-- **远程调用必须写明**：任何把数据发出本机的路径，都要在对应 `SKILL.md` 写清发什么、发给谁、怎样关闭（`process/2026-10-03-remote-call-disclosure-and-dub-consent.md`；dub 已移除，见 `simplification/2026-11-06-remove-dub-mode.md`）。
-- **SKILL.md frontmatter 单行键值**：`description` 写成一行，不用 `>` / `|` 块，不超过 1024 字符（`test_plugin_manifest.py` 守）。
+- **每个 skill 自包含**：`skills/<name>/scripts/` 只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；`video-recap` 内核心模块严禁反向导入 4 支配套叶工具，叶工具之间互不导入，统一以 `timeline.json` 与工作区文件交接。
+- **硬性防膨胀预算（`tests/orchestrator/test_test_suite_architecture.py` 守）**：
+  - 技能散文按字符计：单份 `SKILL.md <= 4,000` 字符、单份 `references/*.md <= 2,500` 字符、全仓 `skills/**/*.md <= 22,000` 字符。
+  - 运行时 Python 预算：单文件 `<= 550` 行、全仓 `skills/*/scripts/**/*.py <= 5,000` 行、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个、skill 内 import 图无环。
+  - **禁止静默膨胀**：超过预算必须先删等量内容，或在同次提交中显式提高预算常量并附 `.agents/notes/` 实测失败证据说明理由。
+- **运行时只用 Python 标准库和 `ffmpeg` / `ffprobe`**，README 承诺不需要 `pip install`；最低 Python 3.10，CI 用 3.12；所有文本 I/O 必须显式指定 `encoding="utf-8"`。
+- **判断归 Agent，物理体检归脚本**：创意、题材、节奏与文案审美由 Agent 把关；`check.py` 只检验 7 项物理健康指标，严禁引入主观品味/字速/关键词正则阻断门禁或 `{size, mtime_ns}` 清单锁。
+- **远程调用必须写明**：任何把数据发出本机的路径，都要在对应 `SKILL.md` 及 `references/remote-services.md` 写清发什么、发给谁、怎样关闭（默认 100% 本地优先）。
+- **SKILL.md frontmatter 单行键值**：`description` 写成一行，不用 `>` / `|` 块，不超过 1024 字符；正文 `## ` 标题为顺序编号中文（`test_plugin_manifest.py` 与 `test_creative_skill_contract.py` 守）。
 
 ## 验证
 
@@ -24,12 +27,12 @@
 
 ```bash
 ruff check skills tests scripts      # CI 固定 ruff==0.15.11，规则见 pyproject.toml
-python3 scripts/test.py              # 全量，每个 skill 组一个独立 pytest 进程
-python3 scripts/test.py orchestrator # 单组；组名见 scripts/test.py 的 GROUPS
-python3 -m pytest tests/script -q    # 调试单组
+python3 scripts/test.py              # 全量，逐组独立 pytest 进程
+python3 scripts/test.py orchestrator # 单组（core / companions / reference / orchestrator）
+python3 -m pytest tests/core -q      # 调试单组
 ```
 
-- 不要直接跑根目录 `pytest` 或 `pytest tests/`：各 skill 都有自己的 `lib.py`，根级 `conftest.py` 会拒绝跨组收集。
+- 不要直接跑根目录 `pytest` 或 `pytest tests/`：根级 `conftest.py` 会拒绝跨组收集。
 - 新增测试目录必须加进 `scripts/test.py` 的 `GROUPS`，架构测试会拦漏跑；测试分层与写法约束见 `tests/README.md`。
 - 改 SKILL.md、frontmatter、插件清单或打包相关文件后至少跑 `orchestrator` 组；真实渲染用例需要带 libass / drawtext 的 ffmpeg，缺失时会失败或跳过，结果里要说明。
 
