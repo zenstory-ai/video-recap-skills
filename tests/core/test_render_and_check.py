@@ -177,6 +177,8 @@ def test_check_edge_audio_warnings_detect_leak_and_truncation(synthetic_media: d
 
 
 def test_check_soft_warn_review_hints_vs_hard_fail(tmp_path: Path) -> None:
+    if not check.has_tool("ffmpeg") or not check.has_tool("ffprobe"):
+        pytest.skip("ffmpeg/ffprobe unavailable")
     import subprocess
 
     black_mp4 = tmp_path / "black_card.mp4"
