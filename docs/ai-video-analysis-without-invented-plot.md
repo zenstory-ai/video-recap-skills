@@ -74,7 +74,7 @@
 
 ## 用本仓库的 Skill 怎么跑？
 
-装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），可以直接对 Agent 说：“用 `/video-recap` 分析这段视频，先看拼图和转写写出 `MEDIA_NOTES.md`，确认后再剪”（Codex 中写作 `$video-recap`）。技能会调用本地原子工具 `probe.py`、`frames.py`（生成带时间戳的抽帧拼图与局部特写裁切）和 `transcribe.py`（本地优先读取字幕/Whisper 转写），由宿主多模态 Agent 亲眼对照画面与转写记录事实、有限解读与未知项，遇到静音或听不清的片段如实留空，绝不替空白画面编造台词。
+装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），可以直接对 Agent 说：“用 `/video-recap` 分析这段视频，先看拼图和转写写出 `MEDIA_NOTES.md`，确认后再剪”（Codex 中写作 `$video-recap`）。技能会调用本地工具 `probe.py`、`frames.py`（生成带时间戳的抽帧拼图与局部特写裁切）和 `transcribe.py`（本地优先读取字幕/Whisper 转写），由宿主多模态 Agent 对照画面与转写记录事实、有限解读与未知项，遇到静音或听不清的片段如实留空，不替空白画面编造台词。
 
 ## 常见问题
 

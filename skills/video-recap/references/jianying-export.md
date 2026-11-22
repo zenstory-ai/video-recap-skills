@@ -1,6 +1,6 @@
 # 剪映 / CapCut 多轨草稿导出
 
-`export_jianying.py` 是单向叶工具：仅读取标准 `timeline.json`（以及本技能内置的 `references/jianying/` 协议骨架），输出自包含、可跨机打开的剪映 / CapCut 多轨草稿目录；核心渲染链路从不反向依赖本工具。
+`export_jianying.py` 是单向配套工具：仅读取标准 `timeline.json`（以及本技能内置的 `references/jianying/` 协议骨架），输出自包含、可跨机打开的剪映 / CapCut 多轨草稿目录；核心渲染链路不反向依赖本工具。
 
 ## 命令用法
 

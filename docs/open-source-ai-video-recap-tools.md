@@ -15,7 +15,7 @@
 | [superAIAutoCutVideo](https://github.com/xiaohu2206/superAIAutoCutVideo) | 桌面应用（Tauri + FastAPI），安装包通过网盘分发 | MIT | 209 / 2026-04-19 | FunASR 转字幕 + moondream 看抽帧；短剧解说目前仅依赖字幕分析 | TTS 可选 Edge、腾讯云、Qwen3-TTS | 支持 | 接入 OpenRouter 等聚合接口 |
 | [解说猫 JSM](https://github.com/UUUBBB/JSM) | Windows 桌面客户端（从 Releases 下载安装包） | 仓库未声明 | 69 / 2026-07-02 | Gemini 分析场景、角色与剧情 + TransNet 切镜头（需本地 GPU） | TTS 可选 Edge、IndexTTS、CosyVoice、豆包 | 支持，另可导出 CapCut 与 Premiere XML | 用户自配；更新日志提及需激活码授权，具体价格未公开 |
 | [narrator-ai-cli-skill](https://github.com/NarratorAI-Studio/narrator-ai-cli-skill) / [narrator-ai-cli](https://github.com/NarratorAI-Studio/narrator-ai-cli) | Agent Skill + 命令行，实际调用商业平台 Narrator AI | MIT（仅客户端） | 3,080 / 2026-07-05；CLI 146 / 2026-07-27 | 在商业平台服务端完成，具体算法未公开 | 服务端云合成，平台内置成套影片、BGM 与音色库 | 未说明 | 需向平台厂商申请 API Key，按积分充值扣费 |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills)（本项目） | Agent Skill，直接装进 Claude Code、Codex、OpenCode、OpenClaw | MIT | 598 / 2026-10-30 | 本机 FFmpeg 探测/抽帧拼图（`frames.py`）由宿主多模态 Agent 直接看片 + 本地优先字幕/Whisper 转写 | 单一 `timeline.json` v3 总线；本机 FFmpeg 渲染、可选 Remotion 透明动效包装；TTS 本地离线优先，可选 Fish Audio（`s2.1-pro-free`）/ OpenAI / IndexTTS | 支持（独立叶工具 `export_jianying.py`） | 默认 100% 本地零额外 API 费用；写稿看片直接用宿主 Agent，云端 ASR/TTS 均按需自选 |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills)（本项目） | Agent Skill，直接装进 Claude Code、Codex、OpenCode、OpenClaw | MIT | 598 / 2026-10-30 | 本机 FFmpeg 探测与抽帧拼图（`frames.py`），由宿主多模态 Agent 直接看片 + 本地优先字幕/Whisper 转写 | 统一 `timeline.json` v3 时间线；本机 FFmpeg 渲染、可选 Remotion 透明动效包装；TTS 本地离线优先，可选 Fish Audio（`s2.1-pro-free`）/ OpenAI / IndexTTS | 支持（配套工具 `export_jianying.py`） | 默认本地运行零额外 API 费用；看片写稿直接用宿主 Agent，云端 ASR/TTS 按需选用 |
 
 此外还有三个常被搜到的相关仓库：
 - [video-recap-skills-plus](https://github.com/ops120/video-recap-skills-plus)：基于本仓库早期版本派生的扩展分支，加入了原片字幕位置检测、音色克隆与旁白期间静音原声（本仓库现已吸收并重写了字幕带位置检测能力）。
@@ -26,7 +26,7 @@
 
 - **想要点点鼠标就能用的图形界面**：优先看 **NarratoAI**。它社区体量最大，提供开箱即用的 Windows / macOS 整合包，不挑本地显卡，对接的国内配音接口也很全。如果主力用 Windows，还可以对比 **JJYB_AI_VideoAutoCut**（对配音时长与镜头长度的对齐处理很扎实，但注意其许可证禁止未授权商用）与 **解说猫 JSM**（支持导出 Premiere XML，但依赖本地 GPU 且需激活码）。
 - **想尽量在自己电脑上跑免费本地模型**：重点看 **dramaxis** 和 **movie-narrator**。两者都能直接挂本地 Ollama 模型；dramaxis 还能用本地 Whisper 跑字幕提取。movie-narrator 采用“先抓 TMDB 影评资料写稿、再回头找画面配对”的逆向做法，适合公开资料丰富的院线老电影，但需留意其 AGPL-3.0 协议及 Edge-TTS 的非商用限制。
-- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者是商业 SaaS 平台的命令行入口，理解、写稿和渲染都在厂商服务端完成，按积分扣费；**video-recap-skills** 默认完全在本机运行：用极简无状态原子 CLI（`probe.py` / `frames.py` / `transcribe.py` / `tts.py` / `render.py` / `check.py`）围绕单一 `timeline.json` v3 完成抽帧看片、剪辑、混音加字幕、Remotion 动态包装与剪映导出，由宿主多模态 Agent 亲眼对照拼图和转写做创作判断，云端 ASR/TTS（如 Fish Audio `s2.1-pro-free`、OpenAI 或自托管 IndexTTS）完全按需自选。
+- **平时已经在用 Claude Code、Codex 等编程 Agent**：对比 **video-recap-skills** 与 **narrator-ai-cli-skill**。后者是商业 SaaS 平台的命令行入口，理解、写稿和渲染都在厂商服务端完成，按积分扣费；**video-recap-skills** 默认完全在本机运行：通过一组无状态本地工具（`probe.py` / `frames.py` / `transcribe.py` / `tts.py` / `render.py` / `check.py`）围绕统一的 `timeline.json` v3 完成抽帧看片、剪辑、混音加字幕、Remotion 动态包装与剪映导出，由宿主多模态 Agent 对照拼图和转写做编导判断，云端 ASR/TTS（如 Fish Audio `s2.1-pro-free`、OpenAI 或自托管 IndexTTS）完全按需自选。
 
 ## 三、动手前建议核对的三件事
 

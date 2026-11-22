@@ -17,9 +17,9 @@ python3 scripts/packaging.py remotion-render media/remotion --timeline timeline.
 
 产出的透明视频以 `id: "remotion_packaging"` 写入 `overlays[]`，`render.py` 直接带 Alpha 叠加，`export_jianying.py` 同步导出为视频轨。
 
-- **把 `src/PackagingOverlay.tsx` 当作可定制画布，绝不照搬千篇一律的模板**：`remotion-init` 生成的是起点，应按每部片子的气质（悬疑冷调、甜宠暖金、喜剧明快、纪录片克制）直接微调配色、衬线/无衬线字重搭配与动效节奏，发挥 Remotion 独有的物理缓动、遮罩揭幕与 SVG 笔触优势，避免套用生硬黑框、英文科技 pill 或模仿单一爆款样板。
-- **剧集解说默认起点（`drama-recap` 主题）**：`1080×1440`（3:4）满屏 `fit="cover"` + 逐镜头 `focus` 裁切（不把宽屏剧孤悬在 9:16 大黑边里），内置上下柔光保护暗角（`scrim`），采用现代杂志风**双层极简无衬线刊头**（粗黑主标 + 28px 暖金短杠 + 干净白字副标，`show_progress_bar: false`，零 `|` 竖线、零 `◆` 圆点、零多余角标）。
-  - `kind: "huazi"`：无底框**上下双层错落动态排版**（前句细白轻入 + 紧随放大的象牙暖金渐变后句与柔和阴影，无 `◆` 符号、无波浪下划线、无生硬盒子），每处 **4–8 字无末尾标点**，专写潜台词/反差，停留 3.0–4.5s、全片分散 3–5 处，置于左上不压脸与字幕。
+- **把 `src/PackagingOverlay.tsx` 当作可定制画布，按影片气质微调**：`remotion-init` 生成的是排版起点，可按影片风格（悬疑冷调、甜宠暖金、喜剧明快、纪录片克制）直接调整配色、字重搭配与入场节奏，发挥 Remotion 的缓动、遮罩揭幕与矢量线条优势，避免套用厚重黑底框或固定样式。
+- **剧集解说默认起点（`drama-recap` 主题）**：`1080×1440`（3:4）满画幅 `fit="cover"` + 逐镜头 `focus` 裁切（避免将宽屏剧留在 9:16 大黑边里），内置上下压暗渐变（`scrim`），采用现代简约**双层无衬线片头**（粗体主标 + 28px 暖金短线 + 简洁白字副标，`show_progress_bar: false`，无多余竖线与角标）。
+  - `kind: "huazi"`：无底框**上下双层错落动效排版**（前句细白轻入 + 后句暖金渐变放大配柔和阴影，无多余装饰符号与底框），每处 **4–8 字无行尾标点**，用于补充潜台词或反差，停留 3.0–4.5s、全片分散 3–5 处，置于左上避开人脸与字幕。
   - `kind: "reaction"`：无底框粗描边反应花字（2–7 字口语吐槽/震惊），后置半拍不抢包袱。
 - **泛知识/人物故事**：可选 `portrait-cinema`、`portrait-stage`、`landscape-editorial` 的半透明磨砂 `chapter`/`quote`/`scene` 卡片与 `callouts`。
 

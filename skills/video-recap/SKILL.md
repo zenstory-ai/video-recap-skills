@@ -42,10 +42,10 @@ description: General-purpose AI video editing and narration recap skill powered 
 ## 3. 制作流程与迭代
 
 1. **需求与画幅确认（开工前必问）**：先用 `probe.py` 看源片朝向；若用户未明确指定，**动工规划或渲染前必须先向用户确认目标画幅比例与构图方式**（按源片与平台给出推荐：`3:4` 满屏 / `9:16` / `16:9`，以及 `cover` 裁切满屏 vs `contain` 保留原画幅），连同语言、旁白/原声模式与联网授权一并写入 `BRIEF.md`。
-2. **探测与亲眼看片**：运行 `transcribe.py` 与 `frames.py` 生成拼图；亲眼看画面并对照转写写出 `MEDIA_NOTES.md`。
+2. **探测与看图拉片**：运行 `transcribe.py` 与 `frames.py` 生成拼图；对照画面与转写写出 `MEDIA_NOTES.md`。
 3. **写剪辑与声画方案**：按 `references/editorial-craft.md` 写出 `EDIT_PLAN.md`（需用户拍板时在此停靠）。
-4. **粗剪与实测时长**：写初版 `timeline.json`。有旁白先跑 `tts.py` 拿真实 `actual_s` 与 `overflow_s`，超窗改词或延画面，绝不变速硬塞；用 `render.py --preview` 快速出 480p 粗剪验节奏。
-5. **渲染与双层验收**：跑 `render.py` 出 `out/final.mp4`、`check.py` 出 `check.json`（确认无硬性 `fail` 并逐条复核 `review_hints`），再抽成片拼图审看构图、字幕与人像。返修只改源文档或 `timeline.json` 并重跑单工具。
+4. **粗剪与配音测时**：写初版 `timeline.json`。有旁白先跑 `tts.py` 拿真实 `actual_s` 与 `overflow_s`，超时改词或延展画面，不做音频加速挤压；用 `render.py --preview` 快速出 480p 粗剪验节奏。
+5. **渲染与质检复核**：跑 `render.py` 出 `out/final.mp4`、`check.py` 出 `check.json`（确认无硬性 `fail` 并逐条复核 `review_hints`），再抽成片拼图审看构图、字幕与人像。返修只改源文档或 `timeline.json` 并重跑单工具。
 
 ## 4. 远程调用披露与本地模式
 
