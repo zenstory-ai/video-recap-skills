@@ -302,6 +302,10 @@ def test_tts_measure_only_from_other_cwd_and_local_short_audio_warning(
     assert rep["segments"][0]["cached"] is True
     assert rep["segments"][0]["actual_s"] == pytest.approx(0.6, abs=0.02)
 
+    # Pre-recorded WAV with empty text also works in --measure-only mode.
+    empty_txt_rep = tts.synthesize_segments([{"id": "n1", "at": 0.0, "file": "media/vo/n1.wav"}], vo_dir, engine="local", measure_only=True, base_dir=work)
+    assert empty_txt_rep["segments"][0]["actual_s"] == pytest.approx(0.6, abs=0.02)
+
     # Missing WAV in --measure-only must raise FileNotFoundError instead of synthesizing.
     wav_p.unlink()
     with pytest.raises(FileNotFoundError, match="--measure-only WAV not found"):

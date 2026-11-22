@@ -239,3 +239,40 @@ def test_render_all_mute_video_with_narration_bgm_sfx(synthetic_media: dict[str,
     chk = check.check_media(out_mp4, timeline=tl)
     assert chk["ok"] is True
     assert chk["checks"]["audio_health"]["status"] == "pass"
+
+
+def test_render_range_exact_duration_and_single_quote_ass_dir(synthetic_media: dict[str, Path], tmp_path: Path) -> None:
+    import _common
+
+    work_dir = tmp_path / "Alice's render dir"
+    tl = {
+        "schema_version": 3,
+        "canvas": {"width": 320, "height": 240, "fps": "25"},
+        "sources": {"v1": str(synthetic_media["v1"])},
+        "video": [
+            {"id": "c1", "source": "v1", "in": 0.0, "out": 1.5},
+            {"id": "c2", "source": "v1", "in": 0.0, "out": 1.5},
+        ],
+        "subtitles": [{"start": 0.5, "end": 1.4, "text": "Range slice subtitle"}],
+    }
+    out_mp4 = tmp_path / "ranged.mp4"
+    render.render_timeline(tl, out_mp4, preview=True, time_range=(0.5, 1.5), work_dir=work_dir)
+    assert out_mp4.is_file()
+    assert _common.probe_media(out_mp4)["duration_s"] == pytest.approx(1.0, abs=0.2)
+
+
+def test_check_catches_odd_dimensions_and_handles_null_audio(synthetic_media: dict[str, Path], tmp_path: Path) -> None:
+    import subprocess
+
+    _ = synthetic_media
+    odd_mp4 = tmp_path / "odd.mp4"
+    subprocess.run([
+        "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
+        "-f", "lavfi", "-i", "testsrc=size=321x240:rate=25:duration=1.0",
+        "-c:v", "libx264", "-pix_fmt", "yuv444p", str(odd_mp4),
+    ], check=True)
+    tl = {"schema_version": 3, "audio": None, "subtitles": [{"start": 0.1, "end": 0.8, "text": "Null audio ok"}]}
+    report = check.check_media(odd_mp4, timeline=tl)
+    assert report["ok"] is False
+    assert "odd dimensions 321x240" in report["checks"]["geometry_and_cfr"]["detail"]
+    assert report["checks"]["subtitle_and_timing"]["status"] == "pass"

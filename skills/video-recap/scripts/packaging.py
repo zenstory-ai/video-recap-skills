@@ -157,7 +157,7 @@ def _render_with_magick(out_path: Path, width: int, height: int, lines: list[str
     text = "\n".join(ln.strip() for ln in lines if ln and ln.strip()) or " "
     cmd = [tool, "-size", f"{width}x{height}", f"xc:{palette.get('bg', '#111622E6')}", "-gravity", "center", "-fill", palette.get("title", "#FFF8EA")]
     cmd += (["-font", font_path] if font_path else []) + ["-pointsize", str(max(18, height // max(3, len(lines) + 1))), "-annotate", "+0+0", text, str(out_path)]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=30).returncode == 0 and out_path.is_file()
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30).returncode == 0 and out_path.is_file()
 
 
 def _esc_dt(text: str) -> str:
@@ -184,18 +184,14 @@ def _render_with_ffmpeg_drawtext(out_path: Path, width: int, height: int, lines:
             sz, col = int(base_sz * (0.76 if (i == 0 and len(clean) > 1) else 1.0)), _ff_color(accent_col if (i == 0 and len(clean) > 1) else title_col)
             filters.append(f"drawtext={f_opt}text='{_esc_dt(ln)}':fontsize={sz}:fontcolor={col}:x=(w-text_w)/2:y={start_y + i * step}")
     cmd = [ffmpeg, "-y", "-f", "lavfi", "-i", f"color=c=black@0.0:s={max(2, width)}x{max(2, height)}:d=0.1", "-vf", ",".join(filters), "-frames:v", "1", str(out_path)]
-    return subprocess.run(cmd, capture_output=True, text=True, timeout=20).returncode == 0 and out_path.is_file()
+    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=20).returncode == 0 and out_path.is_file()
 
 
 def render_plate_png(out_path: str | Path, width: int, height: int, lines: list[str], palette: dict, *, font_file: str = "") -> dict:
     """Render an RGBA overlay plate PNG via Pillow -> ImageMagick -> ffmpeg drawtext -> stdlib fallback."""
     out, (font_path, font_idx) = Path(out_path).expanduser().resolve(), _resolve_font(font_file)
-    for name, ok in (
-        ("pillow", _render_with_pillow(out, width, height, lines, palette, font_path, font_idx)),
-        ("imagemagick", False),
-    ):
-        if ok:
-            return {"path": str(out), "width": width, "height": height, "renderer": name}
+    if _render_with_pillow(out, width, height, lines, palette, font_path, font_idx):
+        return {"path": str(out), "width": width, "height": height, "renderer": "pillow"}
     if _render_with_magick(out, width, height, lines, palette, font_path):
         return {"path": str(out), "width": width, "height": height, "renderer": "imagemagick"}
     if _render_with_ffmpeg_drawtext(out, width, height, lines, palette, font_path):
@@ -343,7 +339,8 @@ def remotion_render(
     """Render transparent PackagingOverlay via Remotion CLI and register it idempotently in `timeline.json`."""
     if codec not in {"prores", "vp9"}:
         raise ValueError(f"codec must be 'prores' or 'vp9'; got {codec!r}")
-    if not shutil.which("node") or not shutil.which("npx"):
+    npx = shutil.which("npx")
+    if not shutil.which("node") or not npx:
         raise RuntimeError("Node.js (`node` and `npx`) is required for remotion-render; install Node or use static `packaging.py apply`.")
     rdir = Path(remotion_dir).expanduser().resolve()
     if not (rdir / "package.json").is_file():
@@ -356,7 +353,7 @@ def remotion_render(
             npm = shutil.which("npm")
             if not npm:
                 raise RuntimeError("`npm` is required to install Remotion dependencies (or pass --node-modules <cached_dir>).")
-            inst = runner([npm, "install", "--no-audit", "--no-fund"], cwd=str(rdir), capture_output=True, text=True, timeout=600)
+            inst = runner([npm, "install", "--no-audit", "--no-fund"], cwd=str(rdir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
             if inst.returncode != 0:
                 raise RuntimeError(f"npm install failed: {(inst.stderr or inst.stdout)[-400:]}")
 
@@ -364,8 +361,8 @@ def remotion_render(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     codec_args = (["--codec=prores", "--prores-profile=4444", "--image-format=png", "--pixel-format=yuva444p10le"]
                   if codec == "prores" else ["--codec=vp9", "--image-format=png", "--pixel-format=yuva420p"])
-    cmd = ["npx", "remotion", "render", "PackagingOverlay", str(out_path), *codec_args, "--overwrite"]
-    res = runner(cmd, cwd=str(rdir), capture_output=True, text=True, timeout=600)
+    cmd = [npx, "remotion", "render", "PackagingOverlay", str(out_path), *codec_args, "--overwrite"]
+    res = runner(cmd, cwd=str(rdir), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600)
     if res.returncode != 0:
         raise RuntimeError(f"remotion render failed: {(res.stderr or res.stdout)[-400:]}")
 

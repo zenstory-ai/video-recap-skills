@@ -81,7 +81,7 @@ def _probe_media(path: str) -> tuple[int, int, int]:
     result = subprocess.run(
         ["ffprobe", "-v", "error", "-of", "json",
          "-show_entries", "format=duration:stream=width,height,codec_type", str(path)],
-        capture_output=True, text=True, timeout=30,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30,
     )
     if result.returncode:
         raise RuntimeError(f"ffprobe failed for JianYing media {path}: {result.stderr.strip()}")
@@ -345,6 +345,8 @@ def _populate_tracks(ctx: _DraftBuilder, timeline: dict, base_dir: Path | None, 
                 cur += piece
         else:
             place_us = min(want_us, max(0, int(mat_dur_us) - src_in_us))
+            if place_us <= 0:
+                continue
             if want_us > place_us:
                 ctx.notes.append(f"BGM 素材({mat_dur_us/1e6:.1f}s) 短于目标区间({want_us/1e6:.1f}s)，未循环铺满")
             b_kfs = _windowed_keyframes(kfs.get("bgm"), at, at + place_us / 1e6, gain, ctx.new_id)

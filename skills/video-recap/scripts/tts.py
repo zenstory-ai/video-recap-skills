@@ -175,14 +175,14 @@ def _synth_local(text: str, out_wav: Path, *, voice: str | None, speed: float) -
         if has_tool("say"):
             aiff = tmp_dir / "say.aiff"
             cmd = ["say", "-o", str(aiff), "-r", str(max(90, int(round(190 * speed))))] + (["-v", voice] if voice else [])
-            run_cmd([*cmd, text], check=True)
+            run_cmd([*cmd, "--", text], check=True)
             _ensure_pcm16_wav(aiff, out_wav)
             return "local:say"
         exe = has_tool("espeak-ng") or has_tool("espeak")
         if exe:
             raw = tmp_dir / "espeak.wav"
             cmd = [exe, "-s", str(max(80, int(round(160 * speed)))), "-w", str(raw)] + (["-v", voice] if voice else [])
-            run_cmd([*cmd, text], check=True)
+            run_cmd([*cmd, "--", text], check=True)
             _ensure_pcm16_wav(raw, out_wav)
             return f"local:{Path(exe).name}"
     raise RuntimeError("No strictly offline local TTS CLI found on PATH (tried say, espeak-ng, espeak)")
@@ -389,7 +389,7 @@ def synthesize_segments(
         seg_id = str(seg.get("id") or f"n{idx + 1}")
         display = clean_tts_text(str(seg.get("text") or ""), keep_tags=False)
         spoken = clean_tts_text(str(seg.get("spoken_text") or seg.get("text") or ""), keep_tags=(chosen == "fish"))
-        if not spoken:
+        if not spoken and not measure_only:
             raise ValueError(f"Segment {seg_id} has empty text")
         key_obj, digest = _cache_key(chosen, eff_voice, speed, spoken, fish_model, temperature, top_p)
         prepared.append({"seg": seg, "id": seg_id, "display": display or clean_tts_text(spoken, keep_tags=False), "spoken": spoken, "key_obj": key_obj, "digest": digest})

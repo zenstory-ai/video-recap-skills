@@ -72,18 +72,30 @@ def test_cache_save_restore_is_mtime_independent_and_redacts_secrets(tmp_path: P
     work1 = tmp_path / "run1"
     work1.mkdir()
     (work1 / "probe.json").write_text(
-        json.dumps({"duration_s": 12.0, "api_key": "sk-secret1234567890abcdef", "note": "key tp-abc123456789"}),
+        json.dumps({
+            "duration_s": 12.0, "api_key": "sk-secret1234567890abcdef",
+            "fish_api_key": "9a8b7c6d5e4f3210deadbeef", "openai_api_key": "sk-proj-9999999999999999",
+            "note": "key tp-abc123456789",
+        }),
         encoding="utf-8",
     )
-    (work1 / "notes.md").write_text("MIMO_API_KEY=tp-topsecret999\nGood scene at 4s.\n", encoding="utf-8")
+    (work1 / "notes.md").write_text(
+        "MIMO_API_KEY=tp-topsecret999\nFISH_API_KEY=9a8b7c6d5e4f3210deadbeef\n"
+        "GROQ_API_KEY=gsk_supersecret999\nGood scene at 4s.\n",
+        encoding="utf-8",
+    )
 
     saved = library.cache_save(lib_dir, src_vid, work1)
     assert "probe.json" in saved["files"]
     cached_probe = json.loads((Path(saved["dir"]) / "probe.json").read_text(encoding="utf-8"))
     assert cached_probe["api_key"] == "[redacted]"
+    assert cached_probe["fish_api_key"] == "[redacted]"
+    assert cached_probe["openai_api_key"] == "[redacted]"
     assert "[redacted-token]" in cached_probe["note"]
     cached_notes = (Path(saved["dir"]) / "notes.md").read_text(encoding="utf-8")
     assert "tp-topsecret999" not in cached_notes
+    assert "9a8b7c6d5e4f3210deadbeef" not in cached_notes
+    assert "gsk_supersecret999" not in cached_notes
 
     # Mutate mtime_ns on source video (simulating cross-machine copy): restore still hits!
     os.utime(src_vid, (1700000000, 1700000000))

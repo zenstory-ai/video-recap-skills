@@ -22,7 +22,7 @@ python3 scripts/dashboard.py serve --root <projects_or_library_dir> [--port 0] [
 以单一扁平可扩展的 `catalog.json` 管理 BGM、SFX、音色、字体、主题与参考样片，并在 `<lib>/materials/<slug>-<bytes>/` 缓存分析笔记与转写（按文件名与字节数索引，跨机移动不失效，自动脱敏密钥）：
 
 ```bash
-python3 scripts/library.py list <lib_dir> [--kind bgm|sfx|voice|font|theme|material]
+python3 scripts/library.py list <lib_dir> [--kind bgm|sfx|voice|font|image|theme]
 python3 scripts/library.py find <lib_dir> <query>
 python3 scripts/library.py cache-save <lib_dir> --source <video> --from-dir <work_dir>
 python3 scripts/library.py cache-restore <lib_dir> --source <video> --to-dir <work_dir>

@@ -144,7 +144,7 @@ def ducking_keyframes(timeline: dict[str, Any], *, base_dir: Path | None = None)
     bgm_idle = float(bgm_tracks[0].get("gain", 0.25)) if bgm_tracks else 0.25
     return {
         "original": ducking_keyframes_for_span([(s, e, orig_under) for s, e in narr_spans], 1.0, fade_s, 0.0, total_dur, bridge_s),
-        "bgm": ducking_keyframes_for_span([(s, e, bgm_under) for s, e in narr_spans], bgm_idle, fade_s, 0.0, total_dur, bridge_s),
+        "bgm": ducking_keyframes_for_span([(s, e, min(bgm_idle, bgm_under)) for s, e in narr_spans], bgm_idle, fade_s, 0.0, total_dur, bridge_s),
     }
 
 
