@@ -1,16 +1,15 @@
-"""Every env var the skills read is a tuning knob, except the provider ``*_API_KEY`` reads."""
+"""Every env var the skills read is strictly bounded and non-credential except ``*_API_KEY``."""
 
 import ast
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
-
+MAX_ENV_VARS_TOTAL = 25
 CREDENTIAL_MARKERS = ("KEY", "SECRET", "PASSWORD")
 ENV_READERS = {"env_bool", "_env_bool", "env_int", "env_float", "env_str"}
 
 
 def _skill_script_trees():
-    """Every installed skill's scripts directory, so a new skill cannot escape the audit."""
     return sorted(
         path / "scripts"
         for path in (REPO / "skills").iterdir()
@@ -55,16 +54,21 @@ def _credential_shaped(name):
     return any(marker in name for marker in CREDENTIAL_MARKERS) or name.endswith("_TOKEN")
 
 
-def test_literal_env_reads_are_not_credential_shaped_except_api_keys():
+def test_literal_env_reads_are_bounded_and_safe():
     trees = _skill_script_trees()
     assert len(trees) == 2
     reads = set()
     for tree in trees:
         reads |= _literal_env_reads(tree)
-    # The scanner must still see real reads, including names that only look token-like.
-    assert {"MIMO_TOKEN_PLAN_CLUSTER", "VLM_MAX_TOKENS", "MIMO_API_KEY"} <= reads
+
+    assert any(name.endswith("_API_KEY") for name in reads), (
+        f"Expected at least one optional *_API_KEY read so the AST scanner stays live; found {sorted(reads)}"
+    )
+    assert len(reads) <= MAX_ENV_VARS_TOTAL, (
+        f"Env var surface ({len(reads)}) exceeds budget ({MAX_ENV_VARS_TOTAL}): {sorted(reads)}"
+    )
     credential_reads = {
         name for name in reads
         if _credential_shaped(name) and not name.endswith("_API_KEY")
     }
-    assert credential_reads == set()
+    assert credential_reads == set(), f"Unexpected credential-shaped env reads: {sorted(credential_reads)}"

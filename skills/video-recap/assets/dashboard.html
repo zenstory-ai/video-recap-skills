@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Video Recap Studio</title>
+<style>
+:root {
+  --bg: #faf5ea; --surface: #fdfbf5; --surface-2: #f2ebdc; --line: #e2d8c5;
+  --ink: #081431; --ink-2: #4b5468; --accent: #0891b2; --accent-bg: rgba(8,145,178,.11);
+  --ok: #2e7a4c; --ok-bg: rgba(46,122,76,.11); --warn: #9a6410; --warn-bg: rgba(190,128,20,.14);
+  --fail: #b3302a; --fail-bg: rgba(179,48,42,.10);
+  --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1326; --surface: #111c36; --surface-2: #172444; --line: #26365e;
+    --ink: #f3ecdc; --ink-2: #a9b6d0; --accent: #22d3ee; --accent-bg: rgba(34,211,238,.14);
+    --ok: #4ade80; --ok-bg: rgba(74,222,128,.14); --warn: #fbbf24; --warn-bg: rgba(251,191,36,.16);
+    --fail: #f87171; --fail-bg: rgba(248,113,113,.15);
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--sans); background: var(--bg); color: var(--ink); font-size: 13.5px; line-height: 1.5; }
+header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 18px; border-bottom: 1px solid var(--line); background: var(--surface); position: sticky; top: 0; z-index: 10; }
+header h1 { margin: 0; font-size: 15px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+.nav { display: flex; gap: 6px; }
+.btn { border: 1px solid var(--line); background: var(--surface); color: var(--ink); padding: 5px 11px; border-radius: 7px; cursor: pointer; font: inherit; font-size: 12.5px; }
+.btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.layout { display: grid; grid-template-columns: 230px 1fr; min-height: calc(100vh - 48px); }
+.layout.single { grid-template-columns: 1fr; }
+aside { border-right: 1px solid var(--line); padding: 12px; background: var(--surface); overflow-y: auto; }
+aside h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-2); margin: 12px 0 6px; }
+aside h2:first-child { margin-top: 0; }
+.rail-item { display: block; width: 100%; text-align: left; border: 1px solid transparent; background: transparent; color: var(--ink); padding: 7px 9px; border-radius: 7px; cursor: pointer; margin-bottom: 4px; font: inherit; }
+.rail-item:hover { background: var(--surface-2); }
+.rail-item.active { background: var(--accent-bg); border-color: var(--accent); font-weight: 600; }
+.rail-sub { display: block; font-size: 11px; color: var(--ink-2); font-family: var(--mono); }
+main { padding: 16px 20px; overflow-y: auto; }
+.stage-grid { display: grid; grid-template-columns: minmax(320px, 1.15fr) minmax(300px, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 960px) { .layout { grid-template-columns: 1fr; } .stage-grid { grid-template-columns: 1fr; } }
+.card { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 14px; margin-bottom: 14px; }
+.card h3 { margin: 0 0 10px; font-size: 13.5px; display: flex; justify-content: space-between; align-items: center; }
+video { width: 100%; max-height: 62vh; background: #000; border-radius: 8px; display: block; }
+.meta-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; font-size: 12px; color: var(--ink-2); font-family: var(--mono); }
+.badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 600; }
+.badge.pass, .badge.ok, .badge.owned, .badge.cc0, .badge.licensed { background: var(--ok-bg); color: var(--ok); }
+.badge.warn, .badge.skip, .badge.unknown { background: var(--warn-bg); color: var(--warn); }
+.badge.fail, .badge.restricted, .badge.denied { background: var(--fail-bg); color: var(--fail); }
+.tabs { display: flex; gap: 6px; margin-bottom: 10px; flex-wrap: wrap; }
+.row-list { max-height: 58vh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.cue { border: 1px solid var(--line); border-radius: 7px; padding: 7px 10px; cursor: pointer; transition: border-color .12s, background .12s; }
+.cue:hover { border-color: var(--accent); }
+.cue.now { background: var(--accent-bg); border-color: var(--accent); }
+.cue .tc { font-family: var(--mono); font-size: 11.5px; color: var(--accent); margin-right: 8px; }
+.lane { margin-bottom: 8px; }
+.lane-label { font-size: 11px; font-family: var(--mono); color: var(--ink-2); margin-bottom: 3px; }
+.lane-bar { position: relative; height: 22px; background: var(--surface-2); border-radius: 5px; overflow: hidden; }
+.lane-seg { position: absolute; top: 2px; bottom: 2px; background: var(--accent); opacity: .75; border-radius: 3px; cursor: pointer; min-width: 2px; }
+.lane-seg.sfx { background: #d97706; }
+.lane-seg.bgm { background: #2e7a4c; opacity: .5; }
+.lane-seg.ovl { background: #7c3aed; }
+.check-row { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.check-row:last-child { border-bottom: 0; }
+pre.md { white-space: pre-wrap; font-family: var(--sans); font-size: 12.5px; background: var(--surface-2); padding: 10px; border-radius: 7px; margin: 0; max-height: 52vh; overflow-y: auto; }
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+.asset-card { background: var(--surface); border: 1px solid var(--line); border-radius: 9px; padding: 12px; }
+.asset-card audio { width: 100%; height: 32px; margin-top: 8px; }
+.asset-card img { width: 100%; max-height: 140px; object-fit: contain; background: #000; border-radius: 6px; margin-top: 8px; }
+.search { width: 100%; padding: 6px 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; margin-bottom: 10px; }
+.empty { color: var(--ink-2); font-style: italic; padding: 12px 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Video Recap Studio <span id="modeBadge" class="badge ok"></span></h1>
+  <div id="topNav" class="nav"></div>
+</header>
+<div id="layout" class="layout">
+  <aside id="rail"></aside>
+  <main id="main"><div class="empty">Loading…</div></main>
+</div>
+<script id="reviewData" type="application/json">__EMBEDDED_DATA__</script>
+<script>
+const $ = (s, r = document) => r.querySelector(s);
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = (s) => {
+  const n = Math.max(0, Number(s) || 0);
+  const m = Math.floor(n / 60), sec = (n % 60).toFixed(2).padStart(5, "0");
+  return `${String(m).padStart(2, "0")}:${sec}`;
+};
+const state = { mode: "serve", view: "runs", overview: null, run: null, library: null, tab: "script", filter: "" };
+
+function parseEmbedded() {
+  const raw = ($("#reviewData")?.textContent || "").trim();
+  if (!raw || raw === "__" + "EMBEDDED_DATA__") return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
+function mediaUrl(path) {
+  if (!path) return "";
+  return state.mode === "static" ? path : `/api/media?path=${encodeURIComponent(path)}`;
+}
+
+function renderRun(run) {
+  state.run = run;
+  const tl = run.timeline || {};
+  const clips = run.clips || [];
+  const subs = run.subtitles || [];
+  const narr = run.narration || [];
+  const chk = run.check || null;
+  const dur = Number(run.duration_s || 0) || (clips.length ? clips[clips.length - 1].end : 0);
+  const statusBadge = chk ? `<span class="badge ${chk.ok ? "pass" : "fail"}">${chk.ok ? "CHECK PASS" : "CHECK FAIL"}</span>` : `<span class="badge warn">NO CHECK</span>`;
+  const videoHtml = run.video_url
+    ? `<video id="player" controls preload="metadata" src="${esc(mediaUrl(run.video_url))}"></video>`
+    : `<div class="empty">No rendered MP4 found in this directory.</div>`;
+  const canvas = tl.canvas ? `${tl.canvas.width}×${tl.canvas.height} @ ${tl.canvas.fps || 30}` : "—";
+  const lanes = [
+    ["VIDEO", clips.map((c) => ({ s: c.start, e: c.end, label: `${c.id || ""} (${c.source})`, cls: "" }))],
+    ["NARR", narr.map((n) => ({ s: n.at, e: n.at + (n.duration || 1), label: n.text || n.id, cls: "" }))],
+    ["BGM", (tl.audio?.bgm || []).map((b) => ({ s: b.at || 0, e: b.out || dur, label: b.source || "bgm", cls: "bgm" }))],
+    ["SFX", (tl.audio?.sfx || []).map((x) => ({ s: x.at || 0, e: (x.at || 0) + 0.5, label: x.source || x.id, cls: "sfx" }))],
+    ["OVL", (tl.overlays || []).map((o) => ({ s: o.start || 0, e: o.end || dur, label: o.id || o.source, cls: "ovl" }))],
+  ].filter(([, items]) => items.length);
+
+  const laneHtml = lanes.map(([name, items]) => {
+    const segs = items.map((it) => {
+      const left = dur > 0 ? Math.min(100, (it.s / dur) * 100) : 0;
+      const width = dur > 0 ? Math.max(0.6, ((Math.max(it.e, it.s) - it.s) / dur) * 100) : 0;
+      return `<div class="lane-seg ${it.cls}" data-seek="${it.s}" title="${esc(it.label)} (${fmt(it.s)}-${fmt(it.e)})" style="left:${left.toFixed(2)}%;width:${width.toFixed(2)}%"></div>`;
+    }).join("");
+    return `<div class="lane"><div class="lane-label">${name} (${items.length})</div><div class="lane-bar">${segs}</div></div>`;
+  }).join("");
+
+  const tabs = [["script", `Script (${subs.length || narr.length})`], ["clips", `Clips (${clips.length})`], ["checks", "Checks"], ["plan", "Plan / Notes"]];
+  const tabBtns = tabs.map(([k, l]) => `<button class="btn ${state.tab === k ? "active" : ""}" data-tab="${k}">${esc(l)}</button>`).join("");
+
+  let panel = "";
+  if (state.tab === "script") {
+    const rows = subs.length ? subs.map((s) => ({ start: s.start, end: s.end, text: s.text, tag: s.style || "sub" }))
+      : narr.map((n) => ({ start: n.at, end: n.at + (n.duration || 0), text: n.text || n.file, tag: "narr" }));
+    panel = rows.length ? `<div class="row-list">${rows.map((r) =>
+      `<div class="cue" data-start="${r.start}" data-end="${r.end}" data-seek="${r.start}"><span class="tc">${fmt(r.start)}–${fmt(r.end)}</span><span class="badge warn">${esc(r.tag)}</span> ${esc(r.text)}</div>`
+    ).join("")}</div>` : `<div class="empty">No subtitles or narration segments.</div>`;
+  } else if (state.tab === "clips") {
+    panel = clips.length ? `<div class="row-list">${clips.map((c) =>
+      `<div class="cue" data-start="${c.start}" data-end="${c.end}" data-seek="${c.start}"><span class="tc">${fmt(c.start)}–${fmt(c.end)}</span><strong>${esc(c.id || c.source)}</strong> <span class="rail-sub">src ${esc(c.source)} [${fmt(c.src_in)}–${fmt(c.src_out)}]</span></div>`
+    ).join("")}</div>` : `<div class="empty">No video clips.</div>`;
+  } else if (state.tab === "checks") {
+    if (!chk) {
+      panel = `<div class="empty">No check.json found. Run check.py to populate physical checks.</div>`;
+    } else {
+      const checks = Object.entries(chk.checks || {}).map(([k, v]) =>
+        `<div class="check-row"><div><strong>${esc(k)}</strong><div class="rail-sub">${esc(v.detail || "")}</div></div><span class="badge ${esc(v.status)}">${esc(v.status)}</span></div>`
+      ).join("");
+      const lim = (chk.limitations || []).map((x) => `<div class="rail-sub">• ${esc(x)}</div>`).join("");
+      panel = `<div>${checks}</div><div style="margin-top:10px">${lim}</div>`;
+    }
+  } else {
+    const docs = Object.entries(run.notes || {});
+    panel = docs.length ? docs.map(([name, text]) => `<h4>${esc(name)}</h4><pre class="md">${esc(text)}</pre>`).join("") : `<div class="empty">No PLAN.md or PROMO.md in workspace.</div>`;
+  }
+
+  $("#main").innerHTML = `
+    <div class="stage-grid">
+      <div>
+        <div class="card">
+          <h3><span>${esc(run.title || run.path || "Run")}</span>${statusBadge}</h3>
+          ${videoHtml}
+          <div class="meta-row"><span>Duration: ${fmt(dur)}</span><span>Canvas: ${esc(canvas)}</span><span>Clips: ${clips.length}</span></div>
+        </div>
+        <div class="card"><h3>Timeline Lanes</h3>${laneHtml || '<div class="empty">No timeline tracks.</div>'}</div>
+      </div>
+      <div class="card"><div class="tabs">${tabBtns}</div>${panel}</div>
+    </div>`;
+
+  const video = $("#player");
+  $("#main").querySelectorAll("[data-seek]").forEach((el) => {
+    el.addEventListener("click", () => {
+      if (!video) return;
+      video.currentTime = Number(el.dataset.seek) || 0;
+      video.play().catch(() => {});
+    });
+  });
+  $("#main").querySelectorAll("[data-tab]").forEach((el) => {
+    el.addEventListener("click", () => { state.tab = el.dataset.tab; renderRun(run); });
+  });
+  if (video) {
+    video.addEventListener("timeupdate", () => {
+      const t = video.currentTime;
+      $("#main").querySelectorAll(".cue[data-start]").forEach((el) => {
+        const s = Number(el.dataset.start), e = Number(el.dataset.end);
+        el.classList.toggle("now", t >= s && (e <= s || t <= e));
+      });
+    });
+  }
+}
+
+function renderLibrary(lib) {
+  state.library = lib;
+  const q = state.filter.trim().toLowerCase();
+  const items = (lib.assets || []).filter((a) => !q || JSON.stringify(a).toLowerCase().includes(q));
+  const mats = (lib.materials || []).filter((m) => !q || JSON.stringify(m).toLowerCase().includes(q));
+  const cards = items.map((a) => {
+    const media = a.media_url ? (a.media_kind === "audio" ? `<audio controls preload="none" src="${esc(mediaUrl(a.media_url))}"></audio>`
+      : a.media_kind === "image" ? `<img src="${esc(mediaUrl(a.media_url))}" alt="${esc(a.id)}">` : "") : "";
+    const tags = (a.tags || []).map((t) => `<span class="badge warn">${esc(t)}</span>`).join(" ");
+    return `<div class="asset-card"><div><strong>${esc(a.id)}</strong> <span class="badge ok">${esc(a.kind)}</span> <span class="badge ${esc(a.license || "unknown")}">${esc(a.license || "unknown")}</span></div><div class="rail-sub">${esc(a.path || "")}</div><div style="margin-top:6px">${tags}</div>${media}</div>`;
+  }).join("");
+  const matRows = mats.map((m) => `<div class="check-row"><div><strong>${esc(m.id)}</strong><div class="rail-sub">${esc((m.files || []).join(", "))}</div></div></div>`).join("");
+  $("#main").innerHTML = `
+    <div class="card">
+      <h3><span>Library: ${esc(lib.name || lib.path)}</span><span class="badge ok">${items.length} assets · ${mats.length} materials</span></h3>
+      <input id="libSearch" class="search" placeholder="Filter by id, kind, tag, license…" value="${esc(state.filter)}">
+      <div class="asset-grid">${cards || '<div class="empty">No catalog assets.</div>'}</div>
+    </div>
+    <div class="card"><h3>Cached Materials</h3>${matRows || '<div class="empty">No cached materials.</div>'}</div>`;
+  $("#libSearch")?.addEventListener("input", (e) => { state.filter = e.target.value; renderLibrary(lib); });
+}
+
+async function api(url) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
+function renderRail() {
+  const ov = state.overview || { runs: [], libraries: [] };
+  const runItems = ov.runs.map((r) => `<button class="rail-item ${state.view === "runs" && state.run?.path === r.path ? "active" : ""}" data-run="${esc(r.path)}">${esc(r.title)}<span class="rail-sub">${esc(r.path)}</span></button>`).join("");
+  const libItems = ov.libraries.map((l) => `<button class="rail-item ${state.view === "library" && state.library?.path === l.path ? "active" : ""}" data-lib="${esc(l.path)}">${esc(l.name)}<span class="rail-sub">${esc(l.path)}</span></button>`).join("");
+  $("#rail").innerHTML = `<h2>Runs (${ov.runs.length})</h2>${runItems || '<div class="empty">None</div>'}<h2>Libraries (${ov.libraries.length})</h2>${libItems || '<div class="empty">None</div>'}`;
+  $("#rail").querySelectorAll("[data-run]").forEach((el) => el.addEventListener("click", async () => {
+    state.view = "runs";
+    renderRun(await api(`/api/run?path=${encodeURIComponent(el.dataset.run)}`));
+    renderRail();
+  }));
+  $("#rail").querySelectorAll("[data-lib]").forEach((el) => el.addEventListener("click", async () => {
+    state.view = "library";
+    renderLibrary(await api(`/api/library?path=${encodeURIComponent(el.dataset.lib)}`));
+    renderRail();
+  }));
+}
+
+async function boot() {
+  const embedded = parseEmbedded();
+  if (embedded) {
+    state.mode = "static";
+    $("#modeBadge").textContent = "STATIC REVIEW";
+    $("#layout").classList.add("single");
+    $("#rail").style.display = "none";
+    renderRun(embedded);
+    return;
+  }
+  state.mode = "serve";
+  $("#modeBadge").textContent = "READ-ONLY SERVER";
+  state.overview = await api("/api/overview");
+  renderRail();
+  if (state.overview.runs.length) {
+    renderRun(await api(`/api/run?path=${encodeURIComponent(state.overview.runs[0].path)}`));
+    renderRail();
+  } else if (state.overview.libraries.length) {
+    state.view = "library";
+    renderLibrary(await api(`/api/library?path=${encodeURIComponent(state.overview.libraries[0].path)}`));
+    renderRail();
+  } else {
+    $("#main").innerHTML = `<div class="card"><div class="empty">No timeline.json runs or catalog.json libraries discovered under --root.</div></div>`;
+  }
+}
+boot().catch((err) => { $("#main").innerHTML = `<div class="card"><span class="badge fail">ERROR</span> ${esc(err.message)}</div>`; });
+</script>
+</body>
+</html>

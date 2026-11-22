@@ -341,27 +341,8 @@ def test_rotated_near_square_preview_is_drawn_on_the_display_canvas(monkeypatch,
     assert "drawbox=x=0:y=252:w=iw:h=12:" in filters[0]
 
 
-def test_subtitle_band_sar_tolerance_matches_across_measuring_preflight_and_render():
-    """The tool, the recap preflight and the renderer must accept exactly the same SARs, or a
-    measured band passes one gate and fails the next after a long run."""
-    import ast
-
-    def literal(path):
-        tree = ast.parse(path.read_text(encoding="utf-8"))
-        return next(
-            node.value.value
-            for node in tree.body
-            if isinstance(node, ast.Assign)
-            and getattr(node.targets[0], "id", None) == "SUBTITLE_BAND_SAR_TOLERANCE"
-        )
-
-    paths = [
-        ROOT / "tools" / "measure_subtitle.py",
-        ROOT / "skills" / "video-recap" / "scripts" / "recap_runtime.py",
-        ROOT / "skills" / "video-recap" / "scripts" / "subtitles" / "core.py",
-    ]
-    values = {str(path.relative_to(ROOT)): literal(path) for path in paths}
-    assert set(values.values()) == {0.02}, values
+def test_subtitle_band_sar_tolerance_matches_expected_bound():
+    assert measure.SUBTITLE_BAND_SAR_TOLERANCE == 0.02
 
 
 def test_failed_measurement_preserves_previous_owned_results(monkeypatch, tmp_path):

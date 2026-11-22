@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 GROUPS = [
-    "understanding", "cut", "voiceover", "assemble", "script", "orchestrator", "reference",
+    "core", "companions", "reference", "orchestrator",
 ]
 
 

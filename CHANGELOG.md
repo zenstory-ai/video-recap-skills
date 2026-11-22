@@ -10,6 +10,25 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Added
+
+- **重构为 6 支核心原子 CLI + 4 支单向配套叶工具，围绕单一 `timeline.json` v3 总线协作。** 核心原语包括 `probe.py`、`frames.py`、`transcribe.py`、`tts.py`（实测真实时长且绝不变速挤压；Fish Audio 默认 `s2.1-pro-free` 与 `temperature=0.9`/`top_p=0.9`，支持 `--whole-article` 整篇一次合成与停顿 DP 切段、内联 `[chuckle]`/`[sigh]` 情绪标签保留、`spoken_text` 读音与字幕原文分离及 `--sync-subtitles` 自动同步字幕）、`render.py`（CFR 帧精确裁切、`canvas.viewport.fit` `contain|cover` 防竖屏黑边、支持 `.mov` ProRes 4444 / `.webm` VP9 透明通道动态叠加、闪帧保护、闪避混音、语义均衡双行字幕换行 + 默认去行尾标点 + 轻微 `\fad(90,70)` 淡入与 `-14 LUFS`/`-1.5 dBTP` 响度闭环；非致命时序重叠默认软警告，`--strict` 才阻断）与 `check.py`（硬/软门禁分离：仅 100% 确定性物理损坏判 `fail`，黑屏/定格/死寂/切边音频/重叠一律输出 `warn` + 顶层 `review_hints[]` 提醒 Agent 复核）；配套叶工具包括支持 Remotion 现代杂志风双层动效排版（`remotion-init` / `remotion-render`）与离线 PNG 主题/防撞音效的 `packaging.py`、支持动态视频叠加轨的剪映草稿导出（`export_jianying.py`）、离线 `review.html` + 只读回环审片台（`dashboard.py`）与跨项目素材库及授权审计（`library.py`）。
+- **新增 CI 防膨胀守卫。** 在 `tests/orchestrator/` 中锁死 `SKILL.md <= 4,000` 字符、单份 reference `<= 2,500` 字符、全仓 `skills/**/*.md <= 22,000` 字符、单文件 Python `<= 550` 行、全仓运行时 Python 总量 `<= 5,000` 行、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个，以及核心模块到配套叶工具的单向导入隔离。
+
+### Fixed
+
+- **实测打磨修复**：修正 `_common.py::parse_fps("24")` 误吸附到 `24000/1001` 的帧率偏差；将 `probe.py` 默认切点阈值 `--scene-threshold` 调优至 `0.15`；使 `packaging.py apply` 按 `id` 幂等覆盖并补齐无 Pillow/ImageMagick 时的 `ffmpeg drawtext` 渲染回退；在 `check.py` 补齐纯旁白漏音与切边台词截断的物理提醒，并在 `editorial-craft.md` 固化“块状聚拢、克制切换（禁乒乓插话）”旁白与原声节奏原则。
+
+### Changed
+
+- **定位升级为通用、本地优先的 AI 视频剪辑与解说技能包。** 解除中文短剧与单一云端厂商硬编码：默认优先使用本机字幕/Whisper、本机 TTS 与宿主多模态看图，远程 ASR/TTS 均改为按需显式启用；创作计划改为纯 Markdown（`BRIEF.md`、`MEDIA_NOTES.md`、`EDIT_PLAN.md`、`PROMO.md`），消除 `packaging_plan.json` 冲突。
+- **精简 `video-reference` 技能。** 收敛为单支本地分析脚本 `analyze_reference.py`（镜头切点、时长分布、响度密度与拼图）与精简 `SKILL.md`，引导 Agent 输出脱敏 Markdown `REFERENCE_NOTES.md`。
+- **重组测试分组。** `scripts/test.py::GROUPS` 收敛为 `("core", "companions", "reference", "orchestrator")`。
+
+### Removed
+
+- **移除旧版单体编排流水线与主观启发式门禁。** 删除 `recap.py`、`understand.py`、`cut.py`、`validate.py`、`voiceover.py`、`assemble.py`、`vlm.py`、`doctor.py`、`final_qc.py`、`lib.py`（149 键 `CONFIG`）、`{size, mtime_ns}` 清单锁、手写 PCM 音效波形与 `video-reference` 的 R1–R8 JSON 校验链（需兼容旧流水线请固定使用 `v0.7.0`）。
+
 ## [0.7.0] - 2026-11-11
 
 六个生产技能合并为单一自包含技能 `video-recap`（搭配按需拆片技能 `video-reference` 形成 `1 + 1` 结构），新增声明式精装包装引擎、录音室级混音链路、五维分类素材库与极简只读审片台，并落地五道成片底线质量硬门禁。升级前请清理已移除的 `dub`、`adopted-packet-copy`、`--mimo-video-overview`、`--review-narration` 与 `EDIT_MODE` / `TARGET_DURATION` 环境变量（详见 Changed 与 Removed）。

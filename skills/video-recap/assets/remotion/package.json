@@ -1,0 +1,20 @@
+{
+  "name": "video-recap-packaging-overlay",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "render:prores": "remotion render PackagingOverlay out/remotion_overlay.mov --codec=prores --prores-profile=4444 --image-format=png --pixel-format=yuva444p10le --overwrite",
+    "render:vp9": "remotion render PackagingOverlay out/remotion_overlay.webm --codec=vp9 --image-format=png --pixel-format=yuva420p --overwrite",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.418",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "remotion": "^4.0.418"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "typescript": "^5.7.0"
+  }
+}
