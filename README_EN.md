@@ -6,13 +6,13 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>Turn your coding agent into a seasoned video editor and storyteller: real editorial craft, frame-grounded cutting, coherent voiceover mixing, kinetic packaging, and JianYing/CapCut draft export for Claude Code, Codex CLI, OpenCode, and OpenClaw.</b>
+  <b>Video editing and narration skill pack for coding agents: footage review, story cutting, voiceover mixing, subtitle & motion packaging, physical QC, and JianYing/CapCut draft export for Claude Code, Codex CLI, OpenCode, and OpenClaw.</b>
 </p>
 
 <p align="center">
   <a href="https://zenstory.ai/video-recap"><b>Project page</b></a>
   &nbsp;·&nbsp;
-  <a href="#why-the-edits-actually-hold-up"><b>Editorial Craft</b></a>
+  <a href="#editorial--post-production-craft"><b>Editorial Craft</b></a>
   &nbsp;·&nbsp;
   <a href="#install"><b>Install</b></a>
   &nbsp;·&nbsp;
@@ -36,58 +36,51 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 > Sanitized planning artifacts and post-mortem notes for the 59-second showcase above (*Guohuo*) are published in [examples/guohuo-60s/](examples/guohuo-60s/).
 
-## Why the edits actually hold up
+## Editorial & Post-Production Craft
 
-Most AI-edited recap videos fail for editorial reasons, not model limitations—hallucinated plot details, ping-ponging between voiceover and original audio every three seconds, clipped mid-sentence dialogue, sped-up robotic TTS, widescreen shots awkwardly cropped onto empty tables, and boxy template callouts.
+Most issues in automated video editing stem from missing editorial and post-production discipline rather than model capability. We encode real-world editing and narration practices directly into the skills and tooling—the multimodal Agent handles footage review, story structure, and visual framing, while local scripts handle exact cutting, voiceover timing, mixing, and QC:
 
-We distilled hard-won **video production know-how** directly into the skills and tooling around one principle: **editorial judgment belongs to the multimodal Agent; mechanical execution belongs to minimal local scripts.**
+### 1. Footage Review & Story Structure
+- **Frame-grounded planning**: The Agent inspects timestamped contact sheets (and zoomed crops when needed) alongside transcripts to verify characters, expressions, actions, and dialogue before outlining the cut.
+- **Single-spine narrative & audio-visual division**: Open with the core conflict in the first 3 seconds and follow one complete storyline. Narration supplies context and character motivation without repeating what is already shown or spoken; emotional beats land on original performances and key lines.
 
-### 1. Look at the actual frames before telling the story
-Instead of summarizing blind transcripts, the host Agent inspects timestamped contact sheets (and zoomed crops when needed) so character expressions, actions, and dialogue always line up:
-- **One complete story spine per video**: Open in the first 3 seconds with the sharpest conflict or hook—no throat-clearing, no cast roll-call, at most 1–2 core character names.
-- **Tell it like a friend, let the scene deliver the payoff**: Voiceover carries setup and motivation without narrating what the viewer already sees or hears; the emotional turn lands on an original line of dialogue and a reaction shot.
+### 2. Narration & Original Audio Pacing
+- **Block-based progression, fewer abrupt switches**: Advance the story in coherent narration blocks (10–25s) and hand back intact original-audio scenes (5–15s) at key exchanges—roughly 2–4 switches per minute—without clipping dialogue mid-sentence.
+- **Shot matching & track isolation**: Cover narration with reaction shots, gestures, or cutaways rather than talking faces; mute narration-bed clips so source speech never bleeds through ducking release; use instrumental BGM when narration and dialogue coexist.
 
-### 2. Block-cohesive pacing—curing AI's "ping-pong narration" habit
-Alternating 3 seconds of narration with 2 seconds of source audio shatters immersion. Our editing craft enforces calm, cinematic rhythm:
-- **Narrate in blocks, return full scenes**: Across a 60-second cut, switch between narration and original audio only **2–4 times**—group setup and fast cuts into coherent **10–25s narration blocks**, then hand back **5–15s of intact original performance** at the climax without ever chopping a sentence in half.
-- **No "moving lips with no sound" or leaked dialogue**: Cover narration with listener reactions, gestures, or cutaways rather than talking faces; mute narration-bed clips cleanly so background dialogue never bleeds through ducking release; stick to instrumental BGM whenever narration and source dialogue share the mix.
+### 3. Voiceover Continuity & Timing Alignment
+- **Whole-article synthesis & pronunciation control**: With Fish Audio (default `s2.1-pro-free`), whole-article synthesis keeps vocal tone consistent across paragraphs and preserves subtle cues such as `[chuckle]` or `[sigh]`. `spoken_text` handles tricky pronunciations (years, acronyms, heteronyms) without altering clean on-screen captions.
+- **Measured duration first**: Measure actual voiceover length before locking picture timing; shorten copy or extend shots when lines run long instead of speeding up audio. Align cuts to natural sentence pauses and wrap 2-line subtitles at semantic breaks without trailing punctuation.
 
-### 3. Whole-article voiceover—never speed-crushed to fit
-Synthesizing isolated lines breaks vocal continuity, and squeezing long lines with `atempo` instantly sounds synthetic:
-- **Natural tone and pronunciation control**: With Fish Audio (default free-tier `s2.1-pro-free`), `--whole-article` keeps one consistent vocal arc across the script with inline cues like `[chuckle]` / `[sigh]`, while `spoken_text` separates tricky pronunciations (years, acronyms, heteronyms) from clean on-screen subtitles.
-- **Rewrite or extend, never speed up**: Every line is measured for true duration before final assembly; cuts snap to natural sentence pauses with breathing room; 2-line captions wrap at semantic pauses without cluttered trailing punctuation.
+### 4. Aspect Ratio Framing & Shot Selection
+- **Confirm aspect ratio upfront**: Align on target aspect ratio (`3:4`, `9:16`, or `16:9`) and framing mode (`cover` vs. `contain`) before cutting.
+- **Per-shot framing for vertical full-bleed**: When adapting widescreen footage to `3:4` full-bleed, set per-shot focal coordinates from visual review; split shot/reverse-shot dialogue at source cuts so each frame stays centered on the speaker, dropping out-of-focus turns and filler transitions.
 
-### 4. Confirm aspect ratio upfront & frame every shot by eye
-- **Framing agreed before editing starts**: Before cutting or rendering, the Agent confirms your target ratio (`3:4` full-bleed / `9:16` vertical / `16:9` landscape) and framing (`cover` vs. `contain`).
-- **3:4 full-bleed drama framing**: Rather than marooning widescreen footage inside thick black bars, each shot gets an eye-checked `focus` point; shot/reverse-shot conversations split cleanly at source cuts so every frame locks onto faces and expressions—not empty desks or blurry turns.
+### 5. Motion Packaging & Sound Effects
+- **Customizable Remotion transparent overlays**: Includes clean editorial starting points (such as `drama-recap` frameless two-line callouts and subtle top/bottom scrims) whose typography, palette, and motion timing can be tailored to each video while staying clear of faces and subtitle safe zones.
+- **Real SFX assets & offline fallback**: Sound effects use real audio assets placed clear of narration and dialogue windows. Without Node.js, packaging falls back cleanly to local static PNG overlays.
 
-### 5. Editorial kinetic packaging—tasteful, adaptive, never cookie-cutter
-- **Remotion transparent overlay as a creative canvas**: Ships with a modern editorial magazine starting point (`drama-recap`: frameless stacked kinetic typography, warm ivory-gold accent, subtle top/bottom scrims) meant to be tuned to each film's mood rather than stamped from a rigid template.
-- **Subtext-only callouts & real SFX**: Short 4–8 word callouts highlight subtext without covering faces or subtitles; sound effects use real audio assets placed safely away from narration and source dialogue. No Node.js installed? Fall back seamlessly to offline PNG themes.
-
-### 6. Hard gates for physics, soft hints for taste
-Rigid word-rate cutoffs and keyword regexes routinely reject great artistic moments. Quality control is split cleanly into two tiers:
-- **Hard gate (`fail`)**: Only 100% deterministic physical breakage—corrupt streams, missing video/audio, invalid dimensions.
-- **Soft gate (`warn` + `review_hints`)**: Context-dependent flags like dark transitions, freeze holds, low loudness, edge audio, or possible overlaps surface as a concise checklist for the Agent to inspect visually instead of blocking good shots.
+### 6. Physical QC & Editorial Review
+- **Hard errors vs. review hints**: Deterministic physical breakage (corrupt streams, missing video/audio, invalid dimensions) fails outright. Context-dependent items—dark transitions, freeze holds, low loudness, edge audio, or possible overlaps—surface as non-blocking `review_hints` for visual inspection rather than failing on rigid word-rate or regex rules.
 
 ## How it works
 
-The pack ships two self-contained skills: **`video-recap`** (general-purpose editing and narration) and **`video-reference`** (on-demand local analysis of reference videos into reusable, sanitized `REFERENCE_NOTES.md`).
+The pack ships two self-contained skills: **`video-recap`** (general-purpose video editing and narration) and **`video-reference`** (on-demand local analysis of reference videos into reusable, sanitized `REFERENCE_NOTES.md`).
 
-- **Zero third-party Python dependencies, 100% local by default**: Runs on Python 3.10+ stdlib and `ffmpeg` / `ffprobe`—no `pip install`, no mandatory API keys. Remote calls happen only when you explicitly opt into cloud ASR or cloud TTS (see [Remote Services](skills/video-recap/references/remote-services.md)).
-- **Markdown for humans, `timeline.json` for machines**: Creative artifacts (`BRIEF.md`, `MEDIA_NOTES.md`, `EDIT_PLAN.md`, `PROMO.md`) stay readable Markdown. Cutting, voiceover, mixing, packaging, subtitles, QC, and export all share one canonical `timeline.json` with zero manifest locks—tweaking one shot or line re-runs only that step.
+- **Zero third-party Python dependencies, local by default**: Core tools require only Python 3.10+ stdlib and `ffmpeg` / `ffprobe`—no `pip install`, no mandatory API keys. External requests occur only when you explicitly enable remote ASR or cloud TTS (see [Remote Services](skills/video-recap/references/remote-services.md)).
+- **Markdown for planning, `timeline.json` for execution**: Briefs (`BRIEF.md`), footage notes (`MEDIA_NOTES.md`), edit plans (`EDIT_PLAN.md`), and promo copy (`PROMO.md`) live in readable Markdown. Cutting, voiceover, mixing, packaging, subtitles, QC, and JianYing export share one canonical `timeline.json`, allowing targeted re-runs after single-shot or single-line edits.
 
 ```mermaid
 flowchart LR
-    src(["Source Media"]) --> inspect["Inspect & Transcribe<br/>probe · frames · transcribe"]
-    inspect --> plan["Agent Editorial Plan<br/>MEDIA_NOTES.md · EDIT_PLAN.md"]
+    src(["Source Media"]) --> inspect["Review & Transcribe<br/>probe · frames · transcribe"]
+    inspect --> plan["Agent Edit Plan<br/>MEDIA_NOTES.md · EDIT_PLAN.md"]
     plan --> tl["timeline.json"]
-    tts["Measured Voiceover<br/>tts.py"] -.-> tl
-    pkg["Kinetic Packaging & SFX<br/>packaging.py"] -.-> tl
+    tts["Voiceover Timing<br/>tts.py"] -.-> tl
+    pkg["Packaging & SFX<br/>packaging.py"] -.-> tl
     tl --> render["Final Render (-14 LUFS)<br/>render.py → final.mp4"]
-    tl --> check["Hard/Soft QC<br/>check.py → check.json"]
+    tl --> check["Physical QC & Hints<br/>check.py → check.json"]
     tl --> jy["JianYing Multi-Track Draft<br/>export_jianying.py"]
-    tl --> dash["Review Dashboard & Library<br/>dashboard.py · library.py"]
+    tl --> dash["Dashboard & Asset Library<br/>dashboard.py · library.py"]
 ```
 
 | Skill | Components | Core Deliverables |
@@ -149,28 +142,28 @@ ClawHub packages are tracked in [.clawhub/publish.json](.clawhub/publish.json); 
 
 ## Quick start
 
-No CLI flags to memorize—describe your footage and creative goal in plain language:
+Describe your footage paths and editing goals in plain language:
 
 ```text
-# 1. Multi-source story recap (contact-sheet grounded, block narration + intact dialogue)
+# 1. Multi-source story recap (contact-sheet review, block narration + intact dialogue)
 Use /path/to/ep1.mp4 and /path/to/ep2.mp4 to make a 3-minute narrated recap with a single story spine, preserving key original dialogue and reactions.
 
-# 2. Pure original-audio highlight cut / podcast clip (100% local, no voiceover)
+# 2. Original-audio highlight cut / podcast clip (local only, no voiceover)
 Cut /path/to/interview.mp4 into a 90-second 9:16 vertical highlight with blurred backdrop and safe-zone captions, no narration.
 
-# 3. 3:4 full-bleed drama packaging (Remotion editorial callouts + JianYing/CapCut draft)
-Edit /path/to/clip.mp4 as a 3:4 full-bleed recap with Remotion frameless stacked callouts and real transition SFX, render the final video, and export a JianYing draft.
+# 3. 3:4 full-bleed drama packaging (Remotion motion callouts + JianYing/CapCut draft)
+Edit /path/to/clip.mp4 as a 3:4 full-bleed recap with Remotion frameless stacked callouts and transition SFX, render the final video, and export a JianYing draft.
 
-# 4. Local screening & iteration
-Build an offline review.html or launch the read-only local dashboard to review the cut, synced subtitles, and review hints.
+# 4. Local screening & review
+Build an offline review.html or launch the read-only local dashboard to inspect the cut, synced subtitles, and review hints.
 
-# 5. Study a reference video locally (video-reference)
+# 5. Reference video breakdown (video-reference)
 Analyze /path/to/reference.mp4 for shot pacing, dialogue balance, and visual layout, and distill reusable notes into REFERENCE_NOTES.md.
 ```
 
 ## Screening dashboard & JianYing export preview
 
-Beyond rendering the final MP4, export a clean multi-track JianYing/CapCut draft for fine-tuning or open the zero-server screening dashboard in your browser:
+Beyond rendering the final MP4, export a multi-track JianYing/CapCut draft for fine-tuning or open the zero-server screening dashboard in your browser:
 
 <img alt="Exported JianYing multi-track draft: source clips, narration, BGM, SFX, and captions on separate tracks" src="docs/jianying-export.jpg" width="100%">
 
@@ -198,6 +191,6 @@ Beyond rendering the final MP4, export a clean multi-track JianYing/CapCut draft
 | [oh-story-claudecode](https://github.com/zenstory-ai/oh-story-claudecode) | Web-fiction writing skill pack: chart scanning, deconstruction, drafting, de-AI-flavor polish, and cover design |
 | [drama-skills](https://github.com/zenstory-ai/drama-skills) | AI short-drama / motion-comic suite: scripts, character assets, storyboards, prompts, and independent review |
 | [novel-to-game](https://github.com/zenstory-ai/novel-to-game) | Agent skills for source-grounded novel adaptation, runtime builds, and blind-playtest QA |
-| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | General-purpose AI video editing & recap skill pack with editorial craft, atomic CLIs, kinetic packaging, and JianYing export (this repo) |
+| [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills) | General-purpose AI video editing & recap skill pack with editorial craft, local execution tools, motion packaging, and JianYing export (this repo) |
 | [oh-story-dsh](https://github.com/zenstory-ai/oh-story-dsh) | Community DeepSeek Harness plugin integrating novel, short-drama, game, and video-recap workbenches |
 | [zenstory](https://github.com/zenstory-ai/zenstory) | Chat-to-create AI novel-writing workbench ([app.zenstory.ai](https://app.zenstory.ai)) |
