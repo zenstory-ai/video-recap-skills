@@ -229,6 +229,14 @@ def color_tag_args(tags: dict[str, Any]) -> list[str]:
     return [*args, "-color_range", str(tags.get("color_range", "tv"))]
 
 
+def _pos_float(val: Any) -> float | None:
+    try:
+        flt = float(val)
+        return flt if math.isfinite(flt) and flt > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 def probe_media(path: str | Path) -> dict[str, Any]:
     media_path = Path(path)
     if not media_path.is_file():
@@ -247,15 +255,10 @@ def probe_media(path: str | Path) -> dict[str, Any]:
         {"index": s.get("index"), "codec_name": s.get("codec_name"), "language": (s.get("tags") or {}).get("language")}
         for s in streams if s.get("codec_type") == "subtitle"
     ]
-    duration_s = 0.0
-    for cand in (fmt.get("duration"), (v_stream or {}).get("duration"), (a_stream or {}).get("duration")):
-        try:
-            val = float(cand)
-            if math.isfinite(val) and val > 0:
-                duration_s = val
-                break
-        except (TypeError, ValueError):
-            continue
+    duration_s = next(
+        (v for cand in (fmt.get("duration"), (v_stream or {}).get("duration"), (a_stream or {}).get("duration")) if (v := _pos_float(cand)) is not None),
+        0.0,
+    )
 
     info: dict[str, Any] = {
         "path": str(media_path), "format_name": fmt.get("format_name"),
@@ -271,8 +274,9 @@ def probe_media(path: str | Path) -> dict[str, Any]:
         disp_h = float(coded_h)
         if rot in {90, 270}:
             disp_w, disp_h = disp_h, disp_w
-        w, h = max(2, int(round(disp_w)) - int(round(disp_w)) % 2), max(2, int(round(disp_h)) - int(round(disp_h)) % 2)
-        fps_frac = parse_fps(v_stream.get("avg_frame_rate") or v_stream.get("r_frame_rate"))
+        w, h = max(1, int(round(disp_w))), max(1, int(round(disp_h)))
+        avg_r = v_stream.get("avg_frame_rate")
+        fps_frac = parse_fps(avg_r if avg_r not in (None, "", "0/0", "0/1") else v_stream.get("r_frame_rate"))
         info.update({
             "width": w, "height": h, "coded_width": coded_w, "coded_height": coded_h,
             "rotation": rot, "sar": sar_str, "dar": dar_str or f"{w}:{h}",
@@ -285,6 +289,6 @@ def probe_media(path: str | Path) -> dict[str, Any]:
             "audio_codec": a_stream.get("codec_name"),
             "sample_rate": int(a_stream.get("sample_rate") or 0),
             "channels": int(a_stream.get("channels") or 0),
-            "audio_duration_s": round(float(a_stream.get("duration") or duration_s), 4),
+            "audio_duration_s": round(_pos_float(a_stream.get("duration")) or duration_s, 4),
         })
     return info

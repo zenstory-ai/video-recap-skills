@@ -119,3 +119,9 @@ def test_subtitles_srt_and_ass_generation(tmp_path: Path) -> None:
     assert not wrapped_num.endswith("。")
     kept_punct = _subtitles.wrap_subtitle_text("他犯满离场。", max_chars=12, strip_trailing_punct=False)
     assert kept_punct == "他犯满离场。"
+
+    vtt_p = tmp_path / "short.vtt"
+    vtt_p.write_text("WEBVTT\n\n00:01.250 --> 00:03.500\nHour-omitted VTT cue\n", encoding="utf-8")
+    vtt_cues = _subtitles.parse_srt(vtt_p)
+    assert len(vtt_cues) == 1
+    assert vtt_cues[0] == {"start": 1.25, "end": 3.5, "text": "Hour-omitted VTT cue"}

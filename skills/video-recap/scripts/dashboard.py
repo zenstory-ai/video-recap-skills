@@ -178,7 +178,7 @@ def build_review_html(
     if not wdir.is_dir():
         raise FileNotFoundError(f"work_dir not found: {wdir}")
     payload = _run_payload(wdir, explicit_video=Path(video_path) if video_path else None)
-    safe_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/")
+    safe_json = json.dumps(payload, ensure_ascii=False).replace("</", "<\\/").replace("<!--", "<\\!--")
     html = _ASSET_HTML.read_text(encoding="utf-8").replace("__EMBEDDED_DATA__", safe_json, 1)
     target = Path(out_path).expanduser().resolve() if out_path else (wdir / "review.html")
     target.parent.mkdir(parents=True, exist_ok=True)

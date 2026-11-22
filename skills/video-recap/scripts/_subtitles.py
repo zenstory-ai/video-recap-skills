@@ -20,7 +20,7 @@ __all__ = [
 
 _HEX_COLOR_RE = re.compile(r"^#([0-9a-fA-F]{6})([0-9a-fA-F]{2})?$")
 _ASS_COLOR_RE = re.compile(r"^&H([0-9a-fA-F]{6}|[0-9a-fA-F]{8})&?$", re.IGNORECASE)
-_SRT_TIME_RE = re.compile(r"(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})")
+_SRT_TIME_RE = re.compile(r"(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(?:(\d{1,2}):)?(\d{2}):(\d{2})[,.](\d{3})")
 _TRAILING_PUNCT = "。，、；：,.;:"
 _CLAUSE_PUNCT = set("，、；：,;！？!?。")
 _SOFT_BREAK_HEAD = set("但却而在把被让用从到和与又就才也")
@@ -132,8 +132,8 @@ def wrap_subtitle_text(
     return "\n".join(line for line in lines if line)
 
 
-def _parse_ts(h: str, m: str, s: str, ms: str) -> float:
-    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+def _parse_ts(h: str | None, m: str, s: str, ms: str) -> float:
+    return int(h or 0) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
 
 
 def parse_srt(path: str | Path) -> list[dict[str, Any]]:

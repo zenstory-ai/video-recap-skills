@@ -131,3 +131,9 @@ def test_export_video_overlay_mov_as_video_material(sample_timeline, tmp_path: P
     assert len(mov_mats) == 1 and mov_mats[0]["type"] == "video"
     ovl_tracks = [t for t in content["tracks"] if t["name"].startswith("overlay")]
     assert len(ovl_tracks) >= 1
+
+
+def test_build_draft_skips_zero_duration_out_of_range_bgm(sample_timeline):
+    sample_timeline["audio"]["bgm"] = [{"id": "b1", "source": "bgm1", "in": 9.0, "at": 0.0, "out": 10.0, "loop": False, "gain": 0.2}]
+    content, _, _ = jy.build_draft(sample_timeline, new_id=_seq_id(), probe=_fake_probe)
+    assert not any(t["name"] == "bgm" for t in content["tracks"])

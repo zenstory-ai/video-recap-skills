@@ -215,7 +215,7 @@ def check_media(media_path: str | Path, *, timeline: dict[str, Any] | None = Non
         checks["subtitle_and_timing"] = _entry("skip", "No --timeline provided")
     else:
         subs = sorted([s for s in (timeline.get("subtitles") or ()) if str(s.get("text") or "").strip()], key=lambda s: float(s["start"]))
-        narrs = sorted(timeline.get("audio", {}).get("narration") or (), key=lambda n: float(n.get("at", 0.0)))
+        narrs = sorted((timeline.get("audio") or {}).get("narration") or (), key=lambda n: float(n.get("at", 0.0)))
         if not subs and not narrs:
             checks["subtitle_and_timing"] = _entry("skip", "Timeline has no subtitles or narration")
         else:

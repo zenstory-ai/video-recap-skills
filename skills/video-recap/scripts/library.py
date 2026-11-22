@@ -32,12 +32,18 @@ _SECRET_VALUE_RES = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b"),
 )
 _SECRET_ASSIGN_RE = re.compile(
-    r"(?i)(\b(?:mimo(?:_\w+)?_api_key|api_key|secret_key|access_token|refresh_token|authorization|password|bearer)\b\s*[:=]\s*)(\"?)([^\s\"',;]+)(\"?)"
+    r"(?i)(\b(?:\w*_(?:api_key|token|secret)|api_key|secret_key|access_token|refresh_token|authorization|password|bearer)\b\s*[:=]\s*)(\"?)([^\s\"',;]+)(\"?)"
 )
 _SECRET_KEYS = frozenset({
-    "api_key", "mimo_api_key", "mimo_asr_api_key", "mimo_tts_api_key",
+    "api_key", "fish_api_key", "fish_audio_api_key", "openai_api_key", "groq_api_key",
+    "asr_api_key", "mimo_api_key", "mimo_asr_api_key", "mimo_tts_api_key",
     "secret_key", "access_token", "refresh_token", "authorization", "password",
 })
+
+
+def _is_secret_key(key: str) -> bool:
+    low = key.strip().lower()
+    return low in _SECRET_KEYS or low.endswith(("_api_key", "_token", "_secret"))
 
 
 def _now_iso() -> str:
@@ -58,7 +64,7 @@ def _redact_text(text: str) -> str:
 
 def _redact_json(value):
     if isinstance(value, dict):
-        return {k: ("[redacted]" if k.strip().lower() in _SECRET_KEYS else _redact_json(v)) for k, v in value.items()}
+        return {k: ("[redacted]" if _is_secret_key(k) else _redact_json(v)) for k, v in value.items()}
     if isinstance(value, list):
         return [_redact_json(v) for v in value]
     return _redact_text(value) if isinstance(value, str) else value
@@ -208,9 +214,13 @@ def audit_timeline(timeline: dict, *, library_dir: str | Path | None = None, bas
     audio = timeline.get("audio") or {}
     for role in ("bgm", "sfx"):
         for seg in audio.get(role) or []:
-            _add(role, _resolve_tl_path(timeline, seg["source"], base_dir), {"source": seg["source"]})
+            ref = seg.get("source") or seg.get("file")
+            if ref:
+                _add(role, _resolve_tl_path(timeline, ref, base_dir), {"source": ref})
     for ovl in timeline.get("overlays") or []:
-        _add("overlay", _resolve_tl_path(timeline, ovl["source"], base_dir), {"id": ovl.get("id")})
+        ref = ovl.get("source") or ovl.get("file")
+        if ref:
+            _add("overlay", _resolve_tl_path(timeline, ref, base_dir), {"id": ovl.get("id")})
     font_file = (timeline.get("subtitle_style") or {}).get("font_file")
     if isinstance(font_file, str) and font_file:
         _add("font", _resolve_tl_path(timeline, font_file, base_dir))

@@ -158,6 +158,8 @@ def test_remotion_init_and_mocked_render(tmp_path: Path, sample_timeline, monkey
     out_mov = tmp_path / "plates" / "remotion_overlay.mov"
     updated, report = packaging.remotion_render(rem_dir, sample_timeline, out_video=out_mov, codec="prores", runner=fake_run)
     assert report["codec"] == "prores"
+    assert calls[0][0][0] == "/usr/bin/npx"
+    assert calls[0][1].get("encoding") == "utf-8"
     assert "--prores-profile=4444" in calls[0][0]
     assert "--pixel-format=yuva444p10le" in calls[0][0]
     assert updated["sources"]["remotion_packaging"] == str(out_mov.resolve())

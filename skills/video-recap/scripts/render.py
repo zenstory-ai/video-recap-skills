@@ -47,7 +47,7 @@ def _even(val: float) -> int:
 
 
 def _esc_path(path: Path) -> str:
-    return str(path).replace("\\", "/").replace(":", "\\:").replace("'", "\\'")
+    return str(path).replace("\\", "/").replace(":", "\\:").replace("'", "'\\\\\\''")
 
 
 def _color_conv(tags: dict[str, Any]) -> str:
@@ -128,7 +128,8 @@ def _clip_vfilter(label_in: str, label_out: str, span: dict[str, Any], sinfo: di
                   viewport: dict[str, Any] | None) -> str:
     src_fps = float(parse_fps(sinfo.get("fps_rational") or sinfo.get("fps", 30.0)))
     half = 0.5 / src_fps if src_fps > 0 else 0.0
-    t_in, t_out = max(0.0, span["in"] - half), max(span["in"] - half + 0.001, span["out"] - half)
+    t_in = max(0.0, span["in"] - half)
+    t_out = max(t_in + 0.001, span["out"] - half)
     crop = span["clip"].get("crop")
     crop_f = f"crop={int(crop['w'])}:{int(crop['h'])}:{int(crop['x'])}:{int(crop['y'])}," if crop else ""
     cf = _color_conv(sinfo.get("color_tags") or {})
@@ -381,10 +382,11 @@ def render_timeline(
                 return {"output": str(out), "audio_only": True, "duration_s": total_dur, "loudness_plan": ln_plan, "warnings": pre["warnings"]}
             enc = ["-c:v", "libx264", "-preset", "ultrafast" if preview else "medium",
                    "-crf", "28" if preview else "18", "-pix_fmt", "yuv420p", *color_tag_args(_BT709)]
+            dur_args = [] if time_range else ["-t", f"{total_dur:.4f}"]
             run_cmd([
                 "ffmpeg", "-y", "-hide_banner", *inputs, *f_args, "-map", cur_v, "-map", "[aout]", *range_args,
                 *enc, "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
-                "-movflags", "+faststart", "-t", f"{total_dur:.4f}", str(out),
+                "-movflags", "+faststart", *dur_args, str(out),
             ], check=True)
         finally:
             if f_script is not None:
