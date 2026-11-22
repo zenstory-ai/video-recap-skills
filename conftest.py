@@ -1,9 +1,9 @@
 """Root pytest guard for this self-contained skill bundle.
 
-Each skill intentionally has its own top-level modules (notably `lib.py`). The
-canonical test command runs one isolated pytest process per skill group, so a
-plain root-level `pytest` run would otherwise collect incompatible groups in one
-interpreter and report misleading import collisions.
+`video-recap` and `video-reference` each define their own top-level `lib.py`. The
+canonical test command runs one isolated pytest process per test group so a plain
+root-level `pytest` run cannot collect both skills in one interpreter and collide
+on module names.
 """
 
 from pathlib import Path

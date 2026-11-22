@@ -2,7 +2,7 @@
 
 Status: implemented
 
-接 [[2026-10-02-video-reference-skill]]：那篇里的 `scdet=threshold=10` 固定阈值被本篇取代。
+接 [[2026-10-02-video-reference-skill]]：那篇里的 `scdet=threshold=10` 固定阈值被本篇取代。后续调整见 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]（与 `source_facts` 连续 8 字重合由阻断错误降级为非阻断警告）。
 
 ## Problem
 

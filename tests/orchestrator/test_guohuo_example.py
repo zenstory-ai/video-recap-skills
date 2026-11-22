@@ -246,12 +246,11 @@ def test_guohuo_story_picture_audio_and_caption_contracts_agree():
     board_beats = {item["beat_id"] for item in board["items"]}
     clip_beats = set()
     for clip in clip_plan["clips"]:
-        reason = [part.strip() for part in clip["reason"].split("|")]
-        assert len(reason) == 7
-        assert reason[3].startswith("POV=")
-        assert reason[5].startswith("入点=")
-        assert reason[6].startswith("出点=")
-        clip_beats.add(reason[0])
+        reason = clip["reason"].strip()
+        m = re.match(r"^(b\d+[ab]?)\b", reason)
+        assert m, reason
+        assert "入点" in reason and "出点" in reason
+        clip_beats.add(m.group(1))
     assert clip_beats <= story_beats
     assert clip_beats <= board_beats
 

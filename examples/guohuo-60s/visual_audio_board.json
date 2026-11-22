@@ -183,7 +183,7 @@
           "output_start": 47.354,
           "output_end": 51.52,
           "playback_speed": 1.516949153,
-          "reason": "keep the restored corridor movement continuous through the narration window"
+          "reason": "在旁白窗口内保持补回的长廊奔跑动作连续不断"
         },
         {
           "source_start": 2010.32,
@@ -193,11 +193,11 @@
           "output_end": 58.96,
           "playback_speed": 1.2,
           "tail_hold_frames": 47,
-          "reason": "inherit the approved source-dialogue tail and ending cadence"
+          "reason": "沿用已验收通过的原声尾段与收束节奏"
         }
       ]
     }
   ],
-  "revision": "Final picture conform is recorded in edit-map.json and picture-conform.json; reproduction generates a fresh Skill-native clip_plan_validated.json.",
+  "revision": "终审画面微调记录在 edit-map.json 与 picture-conform.json；本地复现时会重新生成原生的 clip_plan_validated.json。",
   "control_mode": "REVISION"
 }

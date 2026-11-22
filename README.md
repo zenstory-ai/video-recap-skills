@@ -17,7 +17,7 @@
   &nbsp;·&nbsp;
   <a href="#架构与原子工具"><b>架构与原子工具</b></a>
   &nbsp;·&nbsp;
-  <a href="README.en.md"><b>English</b></a>
+  <a href="README_EN.md"><b>English</b></a>
 </p>
 
 <p align="center">

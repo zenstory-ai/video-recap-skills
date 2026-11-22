@@ -15,7 +15,7 @@
   "changelog": "CHANGELOG.md",
   "requiredPaths": [
     "README.md",
-    "README.en.md",
+    "README_EN.md",
     "skills/video-recap/SKILL.md",
     "skills/video-reference/SKILL.md",
     "VERSION",
