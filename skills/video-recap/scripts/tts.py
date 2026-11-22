@@ -79,6 +79,12 @@ def _validate_wav_bytes(audio: bytes, label: str) -> None:
 
 def _ensure_pcm16_wav(src: Path, dst: Path) -> None:
     if not has_tool("ffmpeg"):
+        with contextlib.suppress(EOFError, wave.Error):
+            with wave.open(str(src), "rb") as wf:
+                if wf.getsampwidth() == 2 and wf.getnframes() > 0:
+                    if src != dst:
+                        shutil.copy2(src, dst)
+                    return
         raise RuntimeError("ffmpeg is required to transcode TTS audio to 16-bit PCM WAV")
     tmp = dst.with_name(f".{dst.name}.part.wav")
     try:

@@ -197,6 +197,8 @@ def test_tts_fish_s21_default_cache_tags_and_spoken_text(monkeypatch: pytest.Mon
 
 
 def test_tts_whole_article_dp_split_and_fallback(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    if not tts.has_tool("ffmpeg"):
+        pytest.skip("ffmpeg unavailable")
     import array
     import math
     import wave
@@ -265,9 +267,10 @@ def test_tts_streaming_wav_headers_accepted_and_transcoded(tmp_path: Path) -> No
         streamed[4:8] = riff_sz.to_bytes(4, "little")
         streamed[data_pos + 4 : data_pos + 8] = data_sz.to_bytes(4, "little")
         tts._validate_wav_bytes(bytes(streamed), "Fish Audio")
-        out_wav = tmp_path / f"fixed_{riff_sz}_{data_sz}.wav"
-        tts._write_raw_as_pcm16(bytes(streamed), out_wav)
-        assert tts._wav_duration(out_wav) == pytest.approx(0.4, abs=0.02)
+        if tts.has_tool("ffmpeg"):
+            out_wav = tmp_path / f"fixed_{riff_sz}_{data_sz}.wav"
+            tts._write_raw_as_pcm16(bytes(streamed), out_wav)
+            assert tts._wav_duration(out_wav) == pytest.approx(0.4, abs=0.02)
 
     # Genuinely truncated non-streaming WAV must still be rejected.
     truncated = bytes(base[:-400])
