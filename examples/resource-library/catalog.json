@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "name": "Synthetic Demo Library",
+  "assets": [
+    {
+      "id": "pulse-demo",
+      "kind": "bgm",
+      "path": "resources/bgm/pulse-demo/pulse-demo.wav",
+      "tags": ["synthetic", "pulse", "demo"],
+      "license": "cc0"
+    },
+    {
+      "id": "click-demo",
+      "kind": "sfx",
+      "path": "resources/sfx/click-demo/click-demo.wav",
+      "tags": ["synthetic", "click", "transition"],
+      "license": "cc0"
+    },
+    {
+      "id": "frame-demo",
+      "kind": "image",
+      "path": "resources/image/frame-demo/frame-demo.png",
+      "tags": ["synthetic", "overlay", "demo"],
+      "license": "cc0"
+    },
+    {
+      "id": "narrator-demo",
+      "kind": "voice",
+      "path": null,
+      "tags": ["synthetic", "demo"],
+      "license": "unknown",
+      "consent": "unknown",
+      "voice_id": "narrator-demo"
+    }
+  ]
+}

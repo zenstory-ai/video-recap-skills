@@ -38,10 +38,10 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 `video-recap-skills` ships two self-contained skills: `video-recap` (general-purpose video editing & narration production) and `video-reference` (on-demand local reference-video analysis). Its core design principle is **"judgment belongs to the Agent; mechanics belong to atomic CLIs"**:
 
-- **General-purpose, local-first, zero third-party Python dependencies** — Runs on Python 3.10+ stdlib and `ffmpeg` / `ffprobe`. Prefers sidecar/embedded subtitles, local Whisper, offline local TTS, and the host Agent's native multimodal vision; optional HTTP ASR and cloud/self-hosted TTS (OpenAI, Fish Audio, IndexTTS) are opt-in and explicitly disclosed in [Remote Services](skills/video-recap/references/remote-services.md).
+- **General-purpose, local-first, zero third-party Python dependencies** — Runs on Python 3.10+ stdlib and `ffmpeg` / `ffprobe`. Confirms target aspect ratio & framing upfront (`3:4` full-bleed / `9:16` / `16:9`, `cover` vs `contain`); prefers sidecar/embedded subtitles, local Whisper, offline local TTS, and the host Agent's native multimodal vision; optional HTTP ASR and Fish Audio (default free-tier `s2.1-pro-free` with `--whole-article` synthesis & `spoken_text` separation) / OpenAI / self-hosted IndexTTS are opt-in and disclosed in [Remote Services](skills/video-recap/references/remote-services.md).
 - **Single canonical `timeline.json` v3 bus, zero manifest locks** — Creative briefs and scripts live in plain Markdown (`BRIEF.md`, `MEDIA_NOTES.md`, `EDIT_PLAN.md`, `PROMO.md`). Cutting, voiceover, mixing, packaging, subtitles, physical QC, and JianYing export all share one `timeline.json`, so tweaking a cut or caption re-runs only the affected command.
-- **Built-in mechanical correctness, zero voice speed-warping** — `tts.py` hashes audio caches and reports real measured durations (`overflow_s`) without `atempo` squeezing; `render.py` applies frame-exact CFR cutting, flash-frame guarding, canonical ducking, `-14 LUFS` / `-1.5 dBTP` loudness closing, and safe-zone subtitle wrapping; `check.py` runs 7 physical-only checks with zero subjective regex blocking.
-- **Four cleanly decoupled companion tools** — Data-driven JSON-theme packaging & speech-safe SFX (`packaging.py`), portable multi-track JianYing/CapCut draft export (`export_jianying.py`), zero-server `review.html` + read-only `127.0.0.1` screening dashboard (`dashboard.py`), and cross-project material cache + license/consent audit (`library.py`).
+- **Hard vs. Soft Gate QC and built-in mechanical correctness** — `tts.py` hashes audio caches and reports real measured durations (`overflow_s`) without `atempo` squeezing; `render.py` applies frame-exact CFR cutting, `viewport.fit`, flash-frame guarding, canonical ducking, `-14 LUFS` / `-1.5 dBTP` loudness closing, and semantic balanced 2-line captions; `check.py` hard-fails **only** on 100% deterministic physical breakage and emits non-blocking `warn` + `review_hints` for Agent review on black/freeze/dead-air/edge-audio/overlap anomalies.
+- **Four cleanly decoupled companion tools** — **Remotion modern editorial stacked typography** (`drama-recap` 3:4 full-bleed transparent `.mov`/`.webm` overlays) + offline PNG themes & speech-safe SFX (`packaging.py`), portable multi-track JianYing/CapCut draft export (`export_jianying.py`), zero-server `review.html` + read-only `127.0.0.1` screening dashboard (`dashboard.py`), and cross-project material cache + license/consent audit (`library.py`).
 
 ## Install
 
@@ -106,8 +106,8 @@ Use /path/to/ep1.mp4 and /path/to/ep2.mp4 to make a 3-minute narrated recap with
 # 2. Pure original-audio highlight cut / podcast clip (100% local, no voiceover)
 Cut /path/to/interview.mp4 into a 90-second 9:16 vertical highlight with blurred backdrop and safe-zone captions, no narration.
 
-# 3. Data-driven vertical packaging + editable JianYing/CapCut draft
-Apply the portrait-stage theme with a top title plate and transition SFX to /path/to/clip.mp4, render 9:16, and export a JianYing draft.
+# 3. Remotion editorial animated packaging (3:4 full-bleed drama) + JianYing/CapCut draft
+Apply the drama-recap theme with Remotion stacked kinetic typography and transition SFX to /path/to/clip.mp4, render 3:4 full-bleed, and export a JianYing draft.
 
 # 4. Build an offline review page or open the read-only local dashboard
 Build review.html for this workspace, or launch the read-only local dashboard to inspect the film, synced subtitles, and asset catalog.

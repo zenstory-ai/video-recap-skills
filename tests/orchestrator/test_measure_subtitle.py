@@ -67,7 +67,7 @@ def test_detect_subtitle_band_rejects_continuous_high_contrast_scenery():
     assert measure._detect_subtitle_band(width, height, bytes(pixels)) is None
 
 
-def test_write_positions_json_is_recap_cli_compatible(tmp_path):
+def test_write_positions_json_emits_canvas_and_band(tmp_path):
     out = tmp_path / "subtitle_positions.json"
     measure._write_positions(out, 1280, 720, 610, 660)
 
@@ -241,6 +241,8 @@ def test_interactive_prompt_points_to_current_staging_preview_then_final_path(
     output = capsys.readouterr().out
     assert len(prompts) == 2
     assert f"最终预览: {out / 'preview'}" in output
+    assert '"subtitle_style": {"safe_y": [0.7, 0.8]}' in output
+    assert "recap.py" not in output
     assert [p.read_bytes() for p in (out / "preview").iterdir()] == [b"current"]
 
 

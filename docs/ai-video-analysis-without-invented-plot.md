@@ -74,7 +74,7 @@
 
 ## 用本仓库的 Skill 怎么跑？
 
-装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），可以直接对 Agent 说：“用 `/video-recap` 处理这段视频，只跑视频理解与分析，生成理解产物和创作简报后就停下”（Codex 中写作 `$video-recap`）。技能会调用 `understand.py` 把画面观察、分段语音转写、有据可查的推断和未知项分开写进产物里；遇到某段没有转写出文字，也只会标记为静音或待确认，不会替空白片段编造台词。
+装好本仓库的技能后（见 [`video-recap`](../skills/video-recap/SKILL.md)），可以直接对 Agent 说：“用 `/video-recap` 分析这段视频，先看拼图和转写写出 `MEDIA_NOTES.md`，确认后再剪”（Codex 中写作 `$video-recap`）。技能会调用本地原子工具 `probe.py`、`frames.py`（生成带时间戳的抽帧拼图与局部特写裁切）和 `transcribe.py`（本地优先读取字幕/Whisper 转写），由宿主多模态 Agent 亲眼对照画面与转写记录事实、有限解读与未知项，遇到静音或听不清的片段如实留空，绝不替空白画面编造台词。
 
 ## 常见问题
 
@@ -85,7 +85,7 @@
 ## 延伸链接
 
 - 在线指南原文：https://zenstory.ai/zh/video-recap/stop-ai-video-analysis-from-inventing-the-story
-- 编排主流程、理解边界与创作暂停点：[`skills/video-recap/SKILL.md`](../skills/video-recap/SKILL.md)
-- VLM 画面观察与深层解读提示词模板：[`skills/video-recap/references/prompt-templates.md`](../skills/video-recap/references/prompt-templates.md)
-- 数据结构规范：[`skills/video-recap/references/data-schema.md`](../skills/video-recap/references/data-schema.md)
+- 技能主流程、工作区约定与原子工具：[`skills/video-recap/SKILL.md`](../skills/video-recap/SKILL.md)
+- 通用剪辑与声画创作原则：[`skills/video-recap/references/editorial-craft.md`](../skills/video-recap/references/editorial-craft.md)
+- `timeline.json` v3 与 `check.json` v1 契约：[`skills/video-recap/references/timeline-schema.md`](../skills/video-recap/references/timeline-schema.md)
 - 代码仓库：https://github.com/zenstory-ai/video-recap-skills

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Cross-platform test runner: one isolated pytest process per test group.
 
-`video-recap` and `video-reference` each ship their own `lib.py` (with no shared
-package), so a single `pytest tests/` run would import both skills into one
-process and collide on `lib`. Run one group per subprocess instead.
+`video-recap` and `video-reference` are self-contained skills with independent
+`scripts/` modules, so each test group runs in its own subprocess instead of
+collecting across groups in one process.
 
 Works on macOS, Linux, and Windows (the bash equivalent is scripts/test.sh).
 
 Usage: python scripts/test.py            # run every skill group
-       python scripts/test.py script     # run one or more named groups
+       python scripts/test.py core       # run one or more named groups
 """
 import os
 import re
@@ -60,7 +60,7 @@ def _require_pytest():
     """Fail with the actual problem instead of reporting every group as a test failure.
 
     Without this, a missing pytest prints "No module named pytest" once per group and then
-    "FAILED groups: understanding, cut, ..." — indistinguishable from real failures.
+    "FAILED groups: core, companions, ..." — indistinguishable from real failures.
     """
     import importlib.util
 

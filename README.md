@@ -37,10 +37,10 @@ https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
 `video-recap-skills` 包含两个自包含技能（通用剪辑与解说生产技能 `video-recap` + 按需成片拆解技能 `video-reference`）。我们坚持**“判断归 Agent，机械归原子 CLI”**：
 
-- **通用多题材、本地优先、零第三方 Python 依赖** — 仅需 Python 3.10+ 标准库与 `ffmpeg` / `ffprobe`。优先使用外挂/内封字幕、本机 Whisper、本机离线 TTS 与宿主 Agent 原生多模态看图；按需接入 OpenAI 兼容 ASR 或 OpenAI / Fish Audio / 自托管 IndexTTS（详见[远程调用披露](skills/video-recap/references/remote-services.md)）。
+- **通用多题材、本地优先、零第三方 Python 依赖** — 仅需 Python 3.10+ 标准库与 `ffmpeg` / `ffprobe`。开工前先确认目标画幅与构图（`3:4` 满屏 / `9:16` / `16:9`、`cover` vs `contain`）；优先使用外挂/内封字幕、本机 Whisper、本机离线 TTS 与宿主 Agent 原生多模态看图；按需接入 OpenAI 兼容 ASR 或 Fish Audio（默认免费可用模型 `s2.1-pro-free`，支持 `--whole-article` 整篇连贯合成与 `spoken_text` 读音分离）/ OpenAI / 自托管 IndexTTS（详见[远程调用披露](skills/video-recap/references/remote-services.md)）。
 - **单一 `timeline.json` v3 总线，无清单锁、可随时局部重跑** — 创意与计划留在人类可读的 Markdown（`BRIEF.md`、`MEDIA_NOTES.md`、`EDIT_PLAN.md`、`PROMO.md`）；剪辑、配音、混音、包装、字幕、体检与剪映导出全部围绕同一份 `timeline.json` 协作，改一个镜头或一句台词只需重跑对应叶命令。
-- **机械正确性内建，绝不变速挤压旁白** — `tts.py` 实测真实时长并按内容哈希缓存；`render.py` 内建 CFR 帧精确裁切、闪帧防护、同源闪避曲线、`-14 LUFS` / `-1.5 dBTP` 响度闭环与画布安全区字幕换行；`check.py` 只做 7 项物理健康检查，不做僵硬的主观正则拦稿。
-- **四大配套工具按需即用** — 数据驱动 JSON 主题竖横屏包装与防撞音效（`packaging.py`）、跨机可开剪映/CapCut 多轨草稿导出（`export_jianying.py`）、静态 `review.html` 与只读 `127.0.0.1` 审片台（`dashboard.py`）、跨项目素材缓存与授权/音色同意审计（`library.py`）。
+- **硬/软双层体检与内建机械正确性，绝不变速挤压旁白** — `tts.py` 实测真实时长并按内容哈希缓存；`render.py` 内建 CFR 帧精确裁切、`viewport.fit`、闪帧防护、同源闪避曲线、`-14 LUFS` / `-1.5 dBTP` 响度闭环与语义均衡双行字幕；`check.py` 严格区分**硬门禁**（仅 100% 确定性物理损坏判 `fail`）与**软门禁**（黑屏/定格/死寂/切边音频/重叠输出 `warn` + 顶层 `review_hints` 提醒 Agent 复核）。
+- **四大配套工具按需即用** — 支持 **Remotion 现代杂志风无底框双层动效排版**（`drama-recap` `3:4` 满屏透明 `.mov`/`.webm` 叠加）与离线 PNG 主题/防撞音效（`packaging.py`）、跨机可开剪映/CapCut 多轨草稿导出（`export_jianying.py`）、静态 `review.html` 与只读 `127.0.0.1` 审片台（`dashboard.py`）、跨项目素材缓存与授权/音色同意审计（`library.py`）。
 
 ## 安装
 
@@ -105,8 +105,8 @@ ClawHub 分发由[显式发布清单](.clawhub/publish.json)管理；历次变�
 # 2. 纯原声高光剪辑 / 访谈播客切片（完全本地，不配旁白）
 把 /path/to/interview.mp4 剪成 90 秒竖屏金句切片，配安全区双语字幕和模糊背景，不加旁白。
 
-# 3. 数据驱动竖横屏包装 + 导出可编辑剪映草稿
-用 portrait-stage 主题给 /path/to/clip.mp4 加上顶部标题条与转场音效，渲染 9:16 成片并导出剪映草稿。
+# 3. Remotion 现代杂志风动效包装（3:4 剧集满屏）+ 导出可编辑剪映草稿
+用 drama-recap 主题和 Remotion 给 /path/to/clip.mp4 加上无底框双层动效花字与转场音效，渲染 3:4 满屏成片并导出剪映草稿。
 
 # 4. 打开本地审片台或生成离线 review.html
 为当前工作目录生成离线审片页，或启动本机只读审片台查看成片、字幕时间轴与素材库。
