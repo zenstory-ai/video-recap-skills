@@ -81,10 +81,14 @@ def _narration_spans(timeline: dict[str, Any], base_dir: Path | None) -> list[di
 
 def validate_timeline_physical(timeline: dict[str, Any], *, base_dir: Path | None = None, strict: bool = False) -> dict[str, Any]:
     """Fail-fast on deterministic physical impossibilities; soft-warn on timing overlaps unless strict=True."""
-    spans, total_dur = timeline_video_spans(timeline)
-    if not spans:
+    video = timeline.get("video") or ()
+    if not video:
         raise ValueError("timeline.json has empty 'video' track")
     source_info: dict[str, dict[str, Any]] = {}
+    first_path = resolve_source(timeline, video[0]["source"], base_dir)
+    source_info[str(first_path)] = probe_media(first_path)
+    fps_frac = parse_fps((timeline.get("canvas") or {}).get("fps"), default=parse_fps(source_info[str(first_path)].get("fps_rational")))
+    spans, total_dur = timeline_video_spans(timeline, default_fps=fps_frac)
     for span in spans:
         src_path = resolve_source(timeline, span["source"], base_dir)
         key = str(src_path)
@@ -153,8 +157,9 @@ def _clip_vfilter(label_in: str, label_out: str, span: dict[str, Any], sinfo: di
                 f"[{tag}_bg][{tag}_fg]overlay={vx}:{vy}:shortest=1,{_BT709_SETPARAMS}{label_out}"
             )
         col = str(backdrop.get("color") or "#000000")
+        qd = n_frames / float(parse_fps(fps_str))
         return (
-            f"color=c={col}:s={cw}x{ch}:r={fps_str}:d={span['duration']:.6f},format=yuv420p[{tag}_bg];"
+            f"color=c={col}:s={cw}x{ch}:r={fps_str}:d={qd:.6f},format=yuv420p[{tag}_bg];"
             f"{label_in}{core},{fg}[{tag}_fg];"
             f"[{tag}_bg][{tag}_fg]overlay={vx}:{vy}:shortest=1,{_BT709_SETPARAMS}{label_out}"
         )
@@ -202,6 +207,25 @@ def _delay_bus(in_i: int, at_s: float, gain: float, total_dur: float, lbl: str) 
     return f"[{in_i}:a:0]aformat=sample_rates=48000:channel_layouts=stereo,volume={gain:.4f},adelay={ms}|{ms},apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}{lbl}"
 
 
+def _clip_afilter(in_ref: str, out_lbl: str, spans: Sequence[dict[str, Any]], idx: int,
+                  start_s: float, qd: float, sinfo: dict[str, Any]) -> tuple[str, bool]:
+    span = spans[idx]
+    gain = float(span["clip"].get("audio_gain", 1.0))
+    if str(span["clip"].get("audio", "keep")) != "mute" and bool(sinfo.get("has_audio")) and gain > 0:
+        fi = 0.0 if (idx > 0 and _continuous_join(spans[idx - 1], span)) else min(_EDGE_FADE_S, qd / 2)
+        fo = 0.0 if (idx + 1 < len(spans) and _continuous_join(span, spans[idx + 1])) else min(_EDGE_FADE_S, qd / 2)
+        ch = [f"{in_ref}atrim=start={start_s:.6f}:end={start_s + qd:.6f}", "asetpts=PTS-STARTPTS",
+              "aformat=sample_rates=48000:channel_layouts=stereo", f"apad=whole_dur={qd:.6f}"]
+        if fi > 0:
+            ch.append(f"afade=t=in:st=0:d={fi:.4f}")
+        if fo > 0:
+            ch.append(f"afade=t=out:st={max(0.0, qd - fo):.4f}:d={fo:.4f}")
+        if abs(gain - 1.0) > 1e-4:
+            ch.append(f"volume={gain:.4f}")
+        return ",".join(ch) + out_lbl, True
+    return f"anullsrc=r=48000:cl=stereo:d={qd:.6f}{out_lbl}", False
+
+
 def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequence[dict[str, Any]],
                        source_info: dict[str, dict[str, Any]], src_to_idx: dict[str, int],
                        narrs: Sequence[dict[str, Any]], total_dur: float, inputs: list[str]) -> tuple[list[str], bool]:
@@ -212,23 +236,9 @@ def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequenc
         in_i, sinfo = src_to_idx[spath], source_info[spath]
         albl = f"[aseg_{idx}]"
         qd = span["timeline_end"] - span["timeline_start"]  # 与画面同为整帧时长，音画不随段数漂移
-        keep = str(span["clip"].get("audio", "keep")) != "mute" and bool(sinfo.get("has_audio"))
-        gain = float(span["clip"].get("audio_gain", 1.0))
-        if keep and gain > 0:
-            has_audio = True
-            fi = 0.0 if (idx > 0 and _continuous_join(spans[idx - 1], span)) else min(_EDGE_FADE_S, qd / 2)
-            fo = 0.0 if (idx + 1 < len(spans) and _continuous_join(span, spans[idx + 1])) else min(_EDGE_FADE_S, qd / 2)
-            ch = [f"[{in_i}:a:0]atrim=start={span['in']:.6f}:end={span['in'] + qd:.6f}", "asetpts=PTS-STARTPTS", "aformat=sample_rates=48000:channel_layouts=stereo",
-                  f"apad=whole_dur={qd:.6f}"]
-            if fi > 0:
-                ch.append(f"afade=t=in:st=0:d={fi:.4f}")
-            if fo > 0:
-                ch.append(f"afade=t=out:st={max(0.0, qd - fo):.4f}:d={fo:.4f}")
-            if abs(gain - 1.0) > 1e-4:
-                ch.append(f"volume={gain:.4f}")
-            a_parts.append(",".join(ch) + albl)
-        else:
-            a_parts.append(f"anullsrc=r=48000:cl=stereo:d={qd:.6f}{albl}")
+        af, kept = _clip_afilter(f"[{in_i}:a:0]", albl, spans, idx, span["in"], qd, sinfo)
+        has_audio = has_audio or kept
+        a_parts.append(af)
         a_concat.append(albl)
 
     duck = (tl.get("mix") or {}).get("duck") or {}
@@ -310,13 +320,14 @@ _CHUNK_CLIPS = 48  # longer timelines render in seeked batches: one graph over w
 
 def _render_chunked(timeline: dict[str, Any], out: Path, spans: Sequence[dict[str, Any]], source_info: dict[str, dict[str, Any]],
                     base_dir: Path | None, canvas: dict[str, Any], size: tuple[int, int], fps_frac: Fraction, tmp: Path,
-                    **kw: Any) -> dict[str, Any]:
+                    warnings: Sequence[str] = (), **kw: Any) -> dict[str, Any]:
     """Render clips in batches of `_CHUNK_CLIPS` (each clip its own input-seeked input), concat them losslessly into one
     picture+original-audio intermediate, then hand that single clip back to `render_timeline` for narration, ducking,
     overlays, subtitles and loudness."""
     cw, ch = size
     fps_str = f"{fps_frac.numerator}/{fps_frac.denominator}"
     parts: list[Path] = []
+    any_orig_audio = False
     for ci in range(0, len(spans), _CHUNK_CLIPS):
         inputs, vp, ap = [], [], []
         for k, sp in enumerate(spans[ci:ci + _CHUNK_CLIPS]):
@@ -327,13 +338,9 @@ def _render_chunked(timeline: dict[str, Any], out: Path, spans: Sequence[dict[st
             local = {**sp, "in": sp["in"] - s0, "out": sp["out"] - s0}
             vp.append(_clip_vfilter(f"[{k}:v:0]", f"[v{k}]", local, sinfo, cw, ch, fps_str, frame_count(sp["duration"], fps_frac),
                                     canvas.get("backdrop") or {}, canvas.get("viewport")))
-            gain = float(sp["clip"].get("audio_gain", 1.0))
-            if str(sp["clip"].get("audio", "keep")) != "mute" and sinfo.get("has_audio") and gain > 0:
-                ap.append(f"[{k}:a:0]atrim=start={local['in']:.6f}:end={local['in'] + qd:.6f},asetpts=PTS-STARTPTS,"
-                          f"aformat=sample_rates=48000:channel_layouts=stereo,apad=whole_dur={qd:.6f},"
-                          f"afade=t=in:d={_EDGE_FADE_S},afade=t=out:st={max(0.0, qd - _EDGE_FADE_S):.4f}:d={_EDGE_FADE_S},volume={gain:.4f}[a{k}]")
-            else:
-                ap.append(f"anullsrc=r=48000:cl=stereo:d={qd:.6f}[a{k}]")
+            af, kept = _clip_afilter(f"[{k}:a:0]", f"[a{k}]", spans, ci + k, local["in"], qd, sinfo)
+            any_orig_audio = any_orig_audio or kept
+            ap.append(af)
         n = len(vp)
         fc = ";".join([*vp, *ap, "".join(f"[v{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0[vc]",
                        "".join(f"[a{k}]" for k in range(n)) + f"concat=n={n}:v=0:a=1[ac]"])
@@ -345,14 +352,16 @@ def _render_chunked(timeline: dict[str, Any], out: Path, spans: Sequence[dict[st
         finally:
             if f_script is not None:
                 f_script.unlink(missing_ok=True)
-    (tmp / "chunks.txt").write_text("".join(f"file '{_esc_path(p)}'\n" for p in parts), encoding="utf-8")
+    (tmp / "chunks.txt").write_text("".join(f"file '{p.name}'\n" for p in parts), encoding="utf-8")
     cat = tmp / "chunks.mkv"
     run_cmd(["ffmpeg", "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(tmp / "chunks.txt"), "-c", "copy", str(cat)], check=True)
     total = spans[-1]["timeline_end"]
     flat = {**timeline, "sources": {**(timeline.get("sources") or {}), "__chunks": str(cat)},
-            "canvas": {k: v for k, v in canvas.items() if k not in {"backdrop", "viewport"}},
-            "video": [{"id": "chunks", "source": "__chunks", "in": 0.0, "out": total, "audio": "keep"}]}
-    return render_timeline(flat, out, base_dir=base_dir, work_dir=tmp, **kw)
+            "canvas": {**{k: v for k, v in canvas.items() if k not in {"backdrop", "viewport"}}, "fps": fps_str},
+            "video": [{"id": "chunks", "source": "__chunks", "in": 0.0, "out": total, "audio": "keep" if any_orig_audio else "mute"}]}
+    res = render_timeline(flat, out, base_dir=base_dir, work_dir=tmp, **kw)
+    res["warnings"] = list(dict.fromkeys([*warnings, *(res.get("warnings") or ())]))
+    return res
 
 
 def render_timeline(
@@ -379,7 +388,7 @@ def render_timeline(
     if preview and max(cw, ch) > 640:
         scale = 640.0 / max(cw, ch)
         cw, ch = _even(cw * scale), _even(ch * scale)
-    fps_frac = parse_fps(canvas.get("fps") or first.get("fps_rational") or 30)
+    fps_frac = parse_fps(canvas.get("fps"), default=parse_fps(first.get("fps_rational")))
     fps_str = f"{fps_frac.numerator}/{fps_frac.denominator}"
 
     out = Path(out_path)
@@ -388,8 +397,8 @@ def render_timeline(
         tmp = Path(work_dir) if work_dir else Path(tmp_s)
         tmp.mkdir(parents=True, exist_ok=True)
         if len(spans) > _CHUNK_CLIPS and not audio_only:
-            return _render_chunked(timeline, out, spans, source_info, base_dir, canvas, (cw, ch), fps_frac, tmp, preview=preview,
-                                   time_range=time_range, out_srt=out_srt, strict=strict)
+            return _render_chunked(timeline, out, spans, source_info, base_dir, canvas, (cw, ch), fps_frac, tmp,
+                                   warnings=pre["warnings"], preview=preview, time_range=time_range, out_srt=out_srt, strict=strict)
 
         inputs: list[str] = []
         src_to_idx: dict[str, int] = {}

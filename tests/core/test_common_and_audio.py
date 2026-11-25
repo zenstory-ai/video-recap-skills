@@ -138,3 +138,44 @@ def test_ducking_filters_split_long_timelines_and_keep_the_same_curve(has_ffmpeg
         res = subprocess.run(["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "anullsrc=d=2", "-af", ",".join(filters), "-f", "null", "-"],
                              capture_output=True, text=True)
         assert res.returncode == 0, res.stderr[-300:]
+
+
+def test_common_timeline_video_spans_default_fps() -> None:
+    tl = {"sources": {"a": "a.mp4"}, "video": [{"id": "c1", "source": "a", "in": 0.0, "out": 0.13}]}
+    _, total_30 = _common.timeline_video_spans(tl)
+    _, total_25 = _common.timeline_video_spans(tl, default_fps="25/1")
+    assert total_30 == pytest.approx(4 / 30, abs=1e-6)
+    assert total_25 == pytest.approx(3 / 25, abs=1e-6)
+
+    tl_explicit = {**tl, "canvas": {"fps": "24"}}
+    _, total_24 = _common.timeline_video_spans(tl_explicit, default_fps="25/1")
+    assert total_24 == pytest.approx(3 / 24, abs=1e-6)
+
+
+def test_ffmpeg_reads_option_files_uses_run_cmd(monkeypatch) -> None:
+    import subprocess
+
+    calls: list[tuple[list[str], float | None]] = []
+    stderr_box = ["Unrecognized option '/filter_complex'."]
+
+    def fake_run_cmd(cmd, *, timeout=None, check=False):
+        calls.append((list(cmd), timeout))
+        return subprocess.CompletedProcess(cmd, 1, "", stderr_box[0])
+
+    def fail_raw_run(*_a, **_kw):
+        raise AssertionError("ffmpeg_reads_option_files must use run_cmd")
+
+    monkeypatch.setattr(_common, "_OPTION_FILES", [])
+    monkeypatch.setattr(_common.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(_common, "run_cmd", fake_run_cmd)
+    monkeypatch.setattr(_common.subprocess, "run", fail_raw_run)
+
+    assert _common.ffmpeg_reads_option_files() is False
+    assert len(calls) == 1 and calls[0][1] == 30
+    opt_path = Path(calls[0][0][calls[0][0].index("-/filter_complex") + 1])
+    assert not opt_path.exists()
+
+    monkeypatch.setattr(_common, "_OPTION_FILES", [])
+    stderr_box[0] = ""
+    assert _common.ffmpeg_reads_option_files() is True
+    assert len(calls) == 2 and calls[1][1] == 30

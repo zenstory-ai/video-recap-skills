@@ -326,3 +326,96 @@ def test_render_does_not_inherit_source_title_comment_or_chapters(synthetic_medi
     tags = {k.lower(): v for k, v in (probe.get("format", {}).get("tags") or {}).items()}
     assert "title" not in tags and "comment" not in tags
     assert probe.get("chapters") == []
+
+
+def test_render_chunked_special_work_dir_and_all_mute_parity(
+    synthetic_media: dict[str, Path], tmp_path: Path, monkeypatch
+) -> None:
+    import os
+
+    monkeypatch.setattr(render, "_CHUNK_CLIPS", 2)
+    monkeypatch.setattr(
+        render, "measure_loudness",
+        lambda **_kw: (_ for _ in ()).throw(AssertionError("all-muted chunked render must not run loudnorm")),
+    )
+    work_dir = tmp_path / ("Alice's:chunk" if os.name != "nt" else "Alice's chunk")
+    tl = {
+        "schema_version": 3,
+        "canvas": {"width": 320, "height": 240, "fps": "25"},
+        "sources": {"v1": str(synthetic_media["v1"])},
+        "video": [{"id": f"m{i}", "source": "v1", "in": 0.1 * i, "out": 0.1 * i + 0.24, "audio": "mute"} for i in range(5)],
+    }
+    out = tmp_path / "chunked_muted.mp4"
+    res = render.render_timeline(tl, out, work_dir=work_dir)
+    assert out.is_file() and res["aac_true_peak"] == {}
+    chunks_txt = (work_dir / "chunks.txt").read_text(encoding="utf-8")
+    assert chunks_txt.splitlines() == ["file 'chunk_0000.mkv'", "file 'chunk_0001.mkv'", "file 'chunk_0002.mkv'"]
+    assert render.probe_media(out)["duration_s"] == pytest.approx(res["duration_s"], abs=0.05)
+
+
+def test_render_chunked_continuous_join_fade_clamp_and_warnings_parity(
+    synthetic_media: dict[str, Path], tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(render, "_CHUNK_CLIPS", 2)
+    orig_fsa = render.filter_script_args
+    captured_fc: list[str] = []
+
+    def spy_fsa(flag: str, expr: str, work_dir: Path, threshold: int = 4096):
+        captured_fc.append(expr)
+        return orig_fsa(flag, expr, work_dir, threshold)
+
+    monkeypatch.setattr(render, "filter_script_args", spy_fsa)
+    tl = {
+        "schema_version": 3,
+        "canvas": {"width": 320, "height": 240, "fps": "60"},
+        "sources": {"v1": str(synthetic_media["v1"]), "narr": str(synthetic_media["narr"])},
+        "video": [
+            {"id": "short", "source": "v1", "in": 0.0, "out": 0.015},
+            {"id": "join_a", "source": "v1", "in": 0.2, "out": 0.5, "keep_windows": [[0.25, 0.45]]},
+            {"id": "join_b", "source": "v1", "in": 0.5, "out": 0.8},
+        ],
+        "audio": {"narration": [{"id": "n1", "at": 0.05, "file": "narr", "duration": 0.3}]},
+    }
+    out = tmp_path / "chunked_parity.mp4"
+    res = render.render_timeline(tl, out, preview=True)
+    assert out.is_file()
+    assert any("collides with keep_window" in w for w in res["warnings"])
+
+    chunk0_audio = {part.rsplit("[", 1)[1].rstrip("]"): part for part in captured_fc[0].split(";") if "[a" in part and "concat=" not in part}
+    chunk1_audio = {part.rsplit("[", 1)[1].rstrip("]"): part for part in captured_fc[1].split(";") if "[a" in part and "concat=" not in part}
+    assert "afade=t=in:st=0:d=0.0083" in chunk0_audio["a0"] and "afade=t=out:st=0.0083:d=0.0083" in chunk0_audio["a0"]
+    assert "afade=t=in:" in chunk0_audio["a1"] and "afade=t=out:" not in chunk0_audio["a1"]
+    assert "afade=t=in:" not in chunk1_audio["a0"] and "afade=t=out:" in chunk1_audio["a0"]
+
+
+def test_render_omitted_canvas_fps_and_color_backdrop_quantized_duration(
+    synthetic_media: dict[str, Path], tmp_path: Path
+) -> None:
+    tl = {
+        "schema_version": 3,
+        "canvas": {
+            "width": 320, "height": 240,
+            "backdrop": {"kind": "color", "color": "#112233"},
+            "viewport": {"x": 0.0, "y": 0.1, "w": 1.0, "h": 0.8},
+        },
+        "sources": {"v1": str(synthetic_media["v1"])},
+        "video": [{"id": f"c{i}", "source": "v1", "in": 0.1 * i, "out": 0.1 * i + 0.13} for i in range(10)],
+    }
+    pre = render.validate_timeline_physical(tl)
+    assert pre["duration_s"] == pytest.approx(1.2, abs=1e-6)
+
+    out = tmp_path / "no_canvas_fps.mp4"
+    res = render.render_timeline(tl, out, preview=True)
+    assert res["canvas"]["fps"] == "25/1"
+    assert res["duration_s"] == pytest.approx(1.2, abs=1e-6)
+    info = render.probe_media(out)
+    assert info["duration_s"] == pytest.approx(1.2, abs=0.05)
+    assert abs(info["duration_s"] - info["audio_duration_s"]) <= 0.06
+
+    # Color backdrop uses quantized duration n_frames / fps (0.08s), not raw span['duration'] (0.06s).
+    vf = render._clip_vfilter(
+        "[0:v:0]", "[v0]", {"in": 0.0, "out": 0.06, "duration": 0.06, "clip": {}},
+        {"fps_rational": "25/1"}, 320, 240, "25/1", 2,
+        {"kind": "color", "color": "#112233"}, {"x": 0.0, "y": 0.1, "w": 1.0, "h": 0.8},
+    )
+    assert ":d=0.080000," in vf and ":d=0.060000," not in vf

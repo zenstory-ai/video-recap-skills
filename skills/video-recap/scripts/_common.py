@@ -149,8 +149,7 @@ def ffmpeg_reads_option_files() -> bool:
             with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
                 fh.write("anullsrc")
             try:
-                res = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", fh.name, "-t", "0.01", "-f", "null", "-"],
-                                     capture_output=True, text=True, timeout=30)
+                res = run_cmd(["ffmpeg", "-hide_banner", "-/filter_complex", fh.name, "-t", "0.01", "-f", "null", "-"], timeout=30)
                 ok = "Unrecognized option" not in (res.stderr or "")
             except (OSError, subprocess.SubprocessError):
                 ok = False
@@ -177,10 +176,10 @@ def resolve_source(timeline: dict[str, Any], ref: str, base_dir: str | Path | No
     return candidate if (candidate.is_absolute() or base_dir is None) else (Path(base_dir) / candidate).resolve()
 
 
-def timeline_video_spans(timeline: dict[str, Any]) -> tuple[list[dict[str, Any]], float]:
+def timeline_video_spans(timeline: dict[str, Any], *, default_fps: Any = None) -> tuple[list[dict[str, Any]], float]:
     spans: list[dict[str, Any]] = []
     cursor = 0.0
-    fps = parse_fps((timeline.get("canvas") or {}).get("fps"))
+    fps = parse_fps((timeline.get("canvas") or {}).get("fps"), default=parse_fps(default_fps))
     for idx, clip in enumerate(timeline.get("video") or ()):
         src_in, src_out = float(clip["in"]), float(clip["out"])
         dur = src_out - src_in
