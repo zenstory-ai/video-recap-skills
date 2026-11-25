@@ -10,10 +10,13 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-25
+
 ### Added
 
 - **短片与长篇两种模式**：`SKILL.md` 与 `editorial-craft.md` 写明 30–240 秒短片（切换次数按每分钟 2–4 次、人名上限随片长放宽），多集几十分钟的长篇走新参考 `long-form.md`。
 - **长篇连续解说**（多集、几十分钟「一口气看完」）：新增参考 `references/long-form.md`（素材笔记、大纲、钩子、写稿与 `recap` 段写法）与配套工具 `plan.py`。Agent 在 `timeline.json` 的 `recap` 段写旁白（每个逗号小句一个源画面区间）和原声段范围；`plan.py voice` 同步旁白给 `tts.py`，`plan.py build` 量每个小句的实测时长、按整帧排镜头与旁白 `at`、出小句字幕，原声段剪掉超过 1.2 秒的停顿、入出点先吸附到附近最安静处再贴原片切点、帧数向下取整，剪后超过 30 秒的原声段给提示。镜头不够长、取到的画面跨切点只报错不改写（退出码 3），源时间倒退、画面复用记为提示。旁白可写 `window`（这句讲的事在原片里的时段）：挑画面用 `frames.py --shots --window` 只看这一段的候选，画面出了窗口、原声前一句的窗口伸进紧接的原声段（先说破）也记为提示。
+- **Google Antigravity (AGY) 宿主适配**：双语 README 新增 `agy plugin install https://github.com/zenstory-ai/video-recap-skills` 一键安装及工作区 `.agents/skills/`、全局 `~/.gemini/config/skills/` 手动放置说明（支持 `/video-recap` 与 `/video-reference` 调用），通过 `agy plugin validate --strict` 校验并补充文档契约测试。
 - `render.py` 超过 48 段镜头时分批渲染：每段独立定位输入、按批出中间件再拼接，最后交回原流程混音与包装（几百段的长篇不再卡死在单张滤镜图里）。
 - `frames.py --shots probe.json --window a:b`：按切点给时段内每个镜头（长镜头拆段）出头尾两帧候选图，标编号、时长与源时间。
 

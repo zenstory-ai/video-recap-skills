@@ -1,6 +1,6 @@
 {
   "name": "video-recap-skills",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "General-purpose, local-first AI video editing and narration skill pack built on minimal atomic CLIs (Python stdlib + ffmpeg/ffprobe) and a single timeline.json v3 bus—supporting multi-source cutting, multimodal frame viewing, local/Fish/OpenAI/IndexTTS voiceover, Remotion animated packaging, Hard/Soft Gate QC, and JianYing/CapCut draft export. 通用本地优先 AI 视频剪辑与解说技能包：极简原子 CLI + 单一 timeline.json 总线，支持多源剪辑、看图选镜、配音混音、Remotion 动效包装与剪映草稿导出。",
   "author": {
     "name": "PiteChen"
