@@ -12,39 +12,36 @@ All notable changes to this project are documented here.
 
 ## [0.9.0] - 2026-11-25
 
+**长篇连续解说、百段级长片渲染加固与 Google Antigravity (AGY) 宿主适配版本**：`video-recap` 正式覆盖从 30–240 秒短片到多集几十分钟「一口气看完」长篇解说的全场景生产。新增第 5 支配套叶工具 `plan.py`、`references/long-form.md` 长篇工艺参考与 `frames.py --shots` 按切点镜头候选图；全面打通百段级长片在 FFmpeg 9.x 下的分批渲染、分段闪避与整帧音画对位，降低低反差切镜漏检；同时新增 **Google Antigravity (AGY)** 宿主安装与校验支持，并彻底清理 v0.7 历史残留与死代码、校准文档与代码实情。
+
 ### Added
 
-- **短片与长篇两种模式**：`SKILL.md` 与 `editorial-craft.md` 写明 30–240 秒短片（切换次数按每分钟 2–4 次、人名上限随片长放宽），多集几十分钟的长篇走新参考 `long-form.md`。
-- **长篇连续解说**（多集、几十分钟「一口气看完」）：新增参考 `references/long-form.md`（素材笔记、大纲、钩子、写稿与 `recap` 段写法）与配套工具 `plan.py`。Agent 在 `timeline.json` 的 `recap` 段写旁白（每个逗号小句一个源画面区间）和原声段范围；`plan.py voice` 同步旁白给 `tts.py`，`plan.py build` 量每个小句的实测时长、按整帧排镜头与旁白 `at`、出小句字幕，原声段剪掉超过 1.2 秒的停顿、入出点先吸附到附近最安静处再贴原片切点、帧数向下取整，剪后超过 30 秒的原声段给提示。镜头不够长、取到的画面跨切点只报错不改写（退出码 3），源时间倒退、画面复用记为提示。旁白可写 `window`（这句讲的事在原片里的时段）：挑画面用 `frames.py --shots --window` 只看这一段的候选，画面出了窗口、原声前一句的窗口伸进紧接的原声段（先说破）也记为提示。
-- **Google Antigravity (AGY) 宿主适配**：双语 README 新增 `agy plugin install https://github.com/zenstory-ai/video-recap-skills` 一键安装及工作区 `.agents/skills/`、全局 `~/.gemini/config/skills/` 手动放置说明（支持 `/video-recap` 与 `/video-reference` 调用），通过 `agy plugin validate --strict` 校验并补充文档契约测试。
-- `render.py` 超过 48 段镜头时分批渲染：每段独立定位输入、按批出中间件再拼接，最后交回原流程混音与包装（几百段的长篇不再卡死在单张滤镜图里）。
-- `frames.py --shots probe.json --window a:b`：按切点给时段内每个镜头（长镜头拆段）出头尾两帧候选图，标编号、时长与源时间。
+- **短片与长篇双模式生产**：`SKILL.md` 与 `references/editorial-craft.md` 明确区分 30–240 秒短片（切换频率按每分钟 2–4 次、人名上限随片长放宽）与多集长篇解说，长篇流程收敛至新增参考 `references/long-form.md`。
+- **长篇连续解说与第 5 支配套叶工具 `plan.py`**：新增 `references/long-form.md`（素材笔记、大纲、钩子、写稿与 `recap` 段写法）与 `plan.py`。Agent 在 `timeline.json` 的 `recap` 段写旁白（每个逗号小句对应源画面区间）与原声段范围：`plan.py voice` 同步旁白给 `tts.py`，`plan.py build` 按实测配音时长切分小句、按整帧编排镜头、旁白 `at` 与小句字幕，原声段自动裁剪超 1.2 秒静音停顿并将入出点先吸附至附近最安静处再贴源片切点（帧数向下取整，剪后超 30 秒记为提示）。镜头不够长或画面跨切点严格报错不静默改写（退出码 3）；支持为旁白声明 `window` 剧情时段，跨窗选镜、源时间倒退、画面复用与原声前剧透伸窗均记为非阻断提示。
+- **按切点镜头候选图（`frames.py --shots`）**：新增 `frames.py --shots probe.json --window a:b`（支持 `--width`、`--split`、`--no-labels`），按切点将时段内每个镜头（长镜头自动拆段）拼成头尾两帧候选接触表并标注编号、时长与源时间。
+- **长篇自动分批渲染（`render.py`）**：超过 48 段镜头时自动按批独立定位输入、渲染无损中间分片再拼接，最后交回原流程混音、字幕与包装，避免几百段长片在单张滤镜图中卡死或爆内存。
+- **Google Antigravity (AGY) 宿主支持**：双语 `README.md` / `README_EN.md` 新增 `agy plugin install https://github.com/zenstory-ai/video-recap-skills` 一键安装及工作区 `.agents/skills/`、全局 `~/.gemini/config/skills/` 放置指引（支持 `/video-recap` 与 `/video-reference` 调用），通过 `agy plugin validate --strict` 校验并补充文档契约测试。
 
 ### Changed
 
-- `probe.py --scenes` 改为逐帧场景分数（裁掉底部 10% 防烧录字幕误判）加局部中位数判决；`--scene-threshold` 改为逐帧分数下限，缺省 0.15 → 0.08，低反差切镜漏检明显减少。
-- 预算：`SKILL.md` 4,000 → 4,300 字符、运行时 Python 总行数 5,000 → 5,600（理由见 `.agents/notes/implemented/feature/2026-11-25-long-form-recap.md`）。
-- `render.py` 导出 `--out-srt` 时默认去掉行尾标点，与 `subtitle_style.strip_trailing_punct` 文档默认值 `true` 一致（此前 SRT 默认保留标点、烧录字幕默认去掉）。
-- `packaging.py` 的 `--callouts` 未写 `motion` 时默认 `none`（此前写成从未实现的 `zoom_in`，渲染时等同 `none`）；动效只有 `none|slide_up`。
-- 文档按代码实情改写：剪映导出不换算 `crop` / `focus` / `viewport`、不导出图层淡入淡出与动效、字幕只取 `safe_y` 且不折行不去标点、按真实路径去重（MD5 只记录）；`tts.py` 只发送音色 ID，不上传参考音频；`--preview` 是长边 640px 而非 480p；渲染不做静图推镜；配套工具计数改为 5 支（含 `plan.py`）；`references/remote-services.md` 补齐所有读取的环境变量（含 `--engine auto` 选 openai 需要的 `TTS_API_URL`），`VIDEO_RECAP_LIBRARY_DIR` 写进素材库参考。
-- `examples/guohuo-60s/` 只留成片链接与归档说明（v0.7 展示成片），README 链接同步改为归档案例。
+- **自适应场景切镜检测（`probe.py --scenes`）**：改为逐帧场景分数（裁掉底部 10% 防烧录字幕误判）配合局部中位数判决；`--scene-threshold` 语义改为逐帧分数下限，默认值由 `0.15` 调整为 `0.08`，显著减少低反差切镜漏检。
+- **防膨胀预算校准**：`SKILL.md` 字符上限 `4,000 → 4,300`、全仓运行时 Python 总行数上限 `5,000 → 5,600`（实测理由记录于 `.agents/notes/implemented/feature/2026-11-25-long-form-recap.md`）。
+- **字幕去标点与花字默认动效对齐**：`render.py --out-srt` 默认去掉行尾标点，与烧录字幕及 `subtitle_style.strip_trailing_punct` 文档默认值 `true` 一致；`packaging.py --callouts` 未写 `motion` 时默认 `none`（替代此前未实现的 `zoom_in`，有效值为 `none|slide_up`）。
+- **文档与代码实情全面对齐**：校对剪映导出（不换算 `crop`/`focus`/`viewport`、不导出图层淡入淡出与动效、字幕只取 `safe_y` 且不折行不去标点、按真实路径去重）、`tts.py`（仅发送音色 ID、不上传参考音频）、`--preview`（长边 640px）、渲染不做静图推镜、配套叶工具更新为 5 支（含 `plan.py`）；`SKILL.md` 与 `references/remote-services.md` 补齐 `plan.py` 严格离线声明与全部读取环境变量（含 `--engine auto` 选 `openai` 所需 `TTS_API_URL`），素材库参考补充 `VIDEO_RECAP_LIBRARY_DIR`。
+- **归档 v0.7 展示案例**：`examples/guohuo-60s/` 精简为成片链接与归档说明，双语 README 同步改为归档案例链接。
 
 ### Removed
 
-- 文档与 schema 里从未被代码读取的字段：`mix.flash_guard`（及“闪帧保护”说法，实际是 `check.py` 的 `flash_sliver` 提示加 `plan.py` 原声块贴源切点）、`mix.voice_over_bgm_db`、`meta.assets[]`。
-- v0.7 残留文件：`examples/demo-project/`、`examples/resource-library/templates/` 与 `samples/`、`examples/guohuo-60s/` 下的规划 JSON / QC / runbook / Remotion 工程、`tools/measure_subtitle.py`（已由 `frames.py --crop` 看图 + `recap.crop` 取代）及其测试、`.gitignore` 里的 v0.7 产物条目。
-- 死代码：`export_jianying.py` 里永远走不到的本地闪避兜底（改为直接 `from _audio import ducking_keyframes`）及未用字段；`_common.color_tag_filter`、`sanitize_error` 别名；`_subtitles.write_srt(max_chars=…)`；`frames.py` 恒为假的 `labeled_ok`；`library.py` 被后缀规则覆盖的密钥键名；各模块 `__all__` 中无人导入的条目；只测已删内容或重复的测试（`test_mimo_client_safety.py`、`test_guohuo_example.py`、v0.7 夹具与退役名字断言）。
+- **未读取字段与失实表述**：清理文档与 schema 中从未被代码读取的 `mix.flash_guard`（及“闪帧保护”表述，实际为 `check.py` `flash_sliver` 提示与 `plan.py` 原声贴切点）、`mix.voice_over_bgm_db`、`meta.assets[]`。
+- **v0.7 历史残留**：移除 `examples/demo-project/`、`examples/resource-library/templates/` 与 `samples/`、`examples/guohuo-60s/` 下旧版规划 JSON / QC / runbook / Remotion 工程、`tools/measure_subtitle.py`（已由 `frames.py --crop` 与 `recap.crop` 取代）及其测试，以及 `.gitignore` 中的 v0.7 产物条目。
+- **死代码与重复测试**：清理 `export_jianying.py` 不可达的本地闪避兜底（统一复用 `_audio.ducking_keyframes`）与未用字段、`_common.color_tag_filter` / `sanitize_error` 别名、`_subtitles.write_srt(max_chars=…)`、`frames.py` 恒假 `labeled_ok`、`library.py` 冗余密钥键名、各模块无引用 `__all__` 项，以及失效/重复测试（`test_mimo_client_safety.py`、`test_guohuo_example.py`、v0.7 夹具与退役名字断言）。
 
 ### Fixed
 
-- `render.py` 的成片、纯音频与响度重编码输出重新加上 `-map_metadata -1 -map_chapters -1`：0.8.0 重构时丢失，成片会继承源视频的标题、注释（常是下载网址）与章节。
-- 长滤镜图（超过 4096 字节，如几百段镜头）在 FFmpeg 9.x 上渲染失败：0.8.0 写死了已删除的 `-filter_complex_script`，现恢复按行为探测，支持时用 `-/filter_complex 文件`。
-- 旁白很多时（约 100 段以上）压低原声/背景音乐的 `volume` 表达式超出 ffmpeg 表达式解析上限、渲染失败：`_audio.ducking_filters` 把窗口按 40 个一组拆成串联的 `volume` 滤镜，增益曲线不变。
-- 时间游标按整帧累加，原声音频按同一整帧时长裁切：几百段的长片不再出现音画、旁白对位逐段漂移。
-- `subtitle_style.font_file` 此前只被素材库审计读到，烧录字幕并不使用：`render.py` 现把字体文件所在目录作为 libass `fontsdir` 传入（`font_name` 须与该字体的字体族名一致）。
-- 剪映导出解析相对路径的旁白文件时按 `timeline.json` 所在目录找（此前闪避计算没传 `base_dir`，按当前工作目录找）。
-- `library.py cache-restore` 不再用缓存覆盖工作区里已有的 `MEDIA_NOTES.md`（此前只保护旧名 `PLAN.md` / `notes.md`）；缓存清单与 `dashboard.py` 去掉旧文件名 `PLAN.md` / `NOTES.md` / `output.mp4`。
-- `.gitattributes` 的 LF 规则指向真实文件 `assets/dashboard.html`（此前指向不存在的 `assets/dashboard/*`）。
+- **长片渲染与 FFmpeg 9.x 兼容**：恢复 `render.py` 成片、纯音频与响度重编码输出的 `-map_metadata -1 -map_chapters -1`（防止继承源视频标题/注释/章节）；恢复按行为探测 `-filter_complex` 文件选项，支持时自动使用 `-/filter_complex` 以兼容 FFmpeg 9.x 与超 4096 字节长滤镜图；`_audio.ducking_filters` 将超长人声闪避窗口按每 40 段串联拆分，避免 100+ 旁白时触发 FFmpeg 表达式解析上限。
+- **整帧时间游标与音画量化一致性**：时间游标按整帧累加且原声音频按同一整帧时长裁切，`timeline_video_spans` 与 `render.py` 在省略 `canvas.fps` 时统一继承首源帧率、纯色底板时长与量化帧数一致，消除长片音画/旁白逐段漂移与尾帧截断；分批渲染路径同步补齐跨批无缝衔接淡入淡出、全静音轨 `loudnorm` 判定、原路径相对文件名拼接与预检告警透传。
+- **字幕字体加载与路径解析**：`render.py` 现将 `subtitle_style.font_file` 所在目录作为 libass `fontsdir` 传入；`export_jianying.py` 按 `timeline.json` 所在目录解析相对路径旁白文件；`plan.py` 与 `frames.py` 修复相对路径 `probe.json` 匹配及小句时长单调性、静音负时间戳等边界问题。
+- **缓存保护与仓库配置**：`library.py cache-restore` 现保护工作区已有 `MEDIA_NOTES.md`，缓存清单与 `dashboard.py` 清理旧名 `PLAN.md` / `NOTES.md` / `output.mp4`；修正 `.gitattributes` 的 LF 规则指向 `assets/dashboard.html`。
 
 ## [0.8.0] - 2026-11-21
 
