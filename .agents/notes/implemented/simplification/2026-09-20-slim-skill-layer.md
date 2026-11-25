@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 六份 SKILL.md 每次调用都整体进入上下文，合计约 62K 字符，其中 video-recap 16.5K、video-script 14K。

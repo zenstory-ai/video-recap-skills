@@ -11,8 +11,7 @@ All top-level fields except `schema_version`, `canvas`, `sources`, and `video` a
   "schema_version": 3,
   "meta": {
     "title": "Demo Edit",
-    "voice": {"engine": "fish", "voice_id": "voice-id", "consent": "licensed"},
-    "assets": [{"source_id": "bgm1", "license": "CC-BY", "credit": "Artist"}]
+    "voice": {"engine": "fish", "voice_id": "voice-id", "consent": "licensed"}
   },
   "canvas": {
     "width": 1080, "height": 1440, "fps": "25",
@@ -61,18 +60,17 @@ All top-level fields except `schema_version`, `canvas`, `sources`, and `video` a
     "safe_y": [0.72, 0.82], "strip_trailing_punct": true
   },
   "mix": {
-    "target_lufs": -14.0, "true_peak_dbtp": -1.5, "voice_over_bgm_db": 4.0,
-    "duck": {"under_narration": 0.18, "bgm_under_narration": 0.12, "fade_s": 0.25, "bridge_s": 0.5},
-    "flash_guard": true
+    "target_lufs": -14.0, "true_peak_dbtp": -1.5,
+    "duck": {"under_narration": 0.18, "bgm_under_narration": 0.12, "fade_s": 0.25, "bridge_s": 0.5}
   }
 }
 ```
 
-- **`video[]`** — sequential source clips (`in` / `out` and `keep_windows` in source seconds). `video[].crop` uses source pixels; `canvas.viewport`, `overlays[].rect`, `video[].focus`, and `subtitle_style.safe_y` use normalized `[0.0, 1.0]` top-left canvas coordinates (`export_jianying.py` converts to JianYing's center-origin Y-up coordinates).
+- **`video[]`** — sequential source clips (`in` / `out` and `keep_windows` in source seconds). `video[].crop` uses source pixels; `canvas.viewport`, `overlays[].rect`, `video[].focus`, and `subtitle_style.safe_y` use normalized `[0.0, 1.0]` top-left canvas coordinates. `export_jianying.py` converts only `overlays[].rect` to JianYing's center-origin Y-up coordinates and uses `safe_y` for the subtitle track's vertical position; `crop`, `focus`, and `viewport` are not converted (base clips fill the canvas unframed in the draft). There are no `flash_guard` or `voice_over_bgm_db` fields: `check.py` flags clips shorter than 0.1 s as a `flash_sliver` review hint, and `plan.py` aligns original-dialogue edges to nearby source cuts so no stray frames of the neighbouring shot slip in.
 - **`audio.narration[]`** — synthesized TTS clips with measured `duration` (no speed-warping). Optional `spoken_text` feeds TTS while clean `text` feeds subtitles.
-- **`audio.bgm[]` & `audio.sfx[]`** — optional looped BGM and real-audio SFX tracks. Both `render.py` and `export_jianying.py` compute original-audio and BGM ducking automation from the exact same helper (`_audio.py::ducking_keyframes`).
-- **`overlays[]`** — static RGBA PNG plates (from `packaging.py apply`) or transparent animated video overlays (`.mov` ProRes 4444 / `.webm` VP9 from `packaging.py remotion-render`).
-- **`subtitles[]` & `subtitle_style`** — display-ready narration and original-dialogue subtitles with semantic balanced wrapping and `strip_trailing_punct` (default `true`).
+- **`audio.bgm[]` & `audio.sfx[]`** — optional looped BGM and real-audio SFX tracks. `render.py` builds ffmpeg `volume=` filters with `_audio.py::ducking_filters` and `export_jianying.py` emits volume keyframes with `_audio.py::ducking_keyframes`; both derive from the same coalesced narration windows, so the curve is identical.
+- **`overlays[]`** — static RGBA PNG plates (from `packaging.py apply`) or transparent animated video overlays (`.mov` ProRes 4444 / `.webm` VP9 from `packaging.py remotion-render`). `motion` is `none` or `slide_up`; there is no zoom/pan.
+- **`subtitles[]` & `subtitle_style`** — display-ready narration and original-dialogue subtitles with semantic balanced wrapping and `strip_trailing_punct` (default `true`). `font_file` makes `render.py` pass its directory to libass as `fontsdir`; `font_name` must match that file's font family name.
 
 ## Standalone 剪映 / JianYing export (`export_jianying.py`)
 
@@ -88,13 +86,14 @@ python3 skills/video-recap/scripts/export_jianying.py timeline.json --out-dir ou
 - all segment times converted to integer microseconds at one boundary;
 - narration, BGM, and SFX exported as separate audio tracks; base video clips and image/animated-video overlays exported as video tracks; subtitles exported as `type: subtitle` text tracks with UTF-16 character ranges;
 - native `KFTypeVolume` keyframes (from `_audio.py::ducking_keyframes`) and split BGM loops remain editable;
+- not exported: `video[].crop` / `focus` and `canvas.viewport` (base clips get an identity transform), overlay `fade_in` / `fade_out` / `motion`, and every `subtitle_style` field except `safe_y` (subtitles are plain white text with no line wrapping or trailing-punctuation stripping);
 - half-open interval allocation: adjacent segments reuse a track, while overlapping video/overlay/text material moves to a numbered sibling track (`flag: 0` on first track of each type, `flag: 2` on additional tracks).
 
 The upstream README's “verified with 剪映 v10.1.0” is an application smoke-test claim; embedded `5.9.5-beta1` is the upstream JSON template profile, not a claim that this project installs or emulates 剪映 5.9.5.
 
 ### Portable media bundle
 
-Bundling is on by default so a moved or cloned draft opens cleanly without machine-specific absolute paths. Files are copied and MD5-deduplicated into:
+Bundling is on by default so a moved or cloned draft opens cleanly without machine-specific absolute paths. Files are copied once per real path (`os.path.realpath`) into:
 
 ```text
 Resources/local/video/
@@ -102,7 +101,7 @@ Resources/local/audio/
 Resources/local/image/
 ```
 
-Material paths in `draft_content.json` use JianYing's `##_draftpath_placeholder_…_##/Resources/local/...` form, indexed in `draft_meta_info.json` with `file_Path`, `metetype` (`video` / `music` / `photo`), ID, MD5, duration, dimensions, and timestamps. Missing media is reported honestly as external references rather than falsely marked bundled. `--no-bundle-media` skips copying when JianYing can directly access local paths. Existing non-empty draft folders are never overwritten (a numbered sibling is created instead), and staging + atomic rename prevents publishing half-written drafts.
+Material paths in `draft_content.json` use JianYing's `##_draftpath_placeholder_…_##/Resources/local/...` form, indexed in `draft_meta_info.json` with `file_Path`, `metetype` (`video` / `music` / `photo`), ID, the copied file's MD5 (recorded only, not used for dedup), duration, dimensions, and timestamps. Missing media is reported honestly as external references rather than falsely marked bundled. `--no-bundle-media` skips copying when JianYing can directly access local paths. Existing non-empty draft folders are never overwritten (a numbered sibling is created instead), and staging + atomic rename prevents publishing half-written drafts.
 
 ### Duo-video protocol mapping
 
@@ -112,8 +111,8 @@ The adapter deep-copies the pinned MIT templates (`duo-video@ef4eb46`) before po
 | --- | --- |
 | `video[]` clips + original-audio ducking | `materials.videos` + base video track segments with `KFTypeVolume` keyframes |
 | `audio.narration[]`, `audio.bgm[]`, `audio.sfx[]` | Separate `materials.audios` tracks; looped BGM split into windowed pieces with ducking keyframes |
-| `overlays[]` (PNG or `.mov`/`.webm` video) | `type: photo` (images) or `type: video` (animated overlays) bundled into `Resources/local/{image,video}/` on overlay track(s) with normalized center-origin transforms |
-| `subtitles[]` + `subtitle_style` | `type: subtitle` text materials with UTF-16 rich-text styling |
+| `overlays[]` (PNG or `.mov`/`.webm` video) | `type: photo` (images) or `type: video` (animated overlays) bundled into `Resources/local/{image,video}/` on overlay track(s) with `rect` converted to center-origin transforms (fades and motion dropped) |
+| `subtitles[]` + `subtitle_style.safe_y` | `type: subtitle` white text materials with UTF-16 ranges, placed vertically from `safe_y` |
 
 ## Isolation and failure behavior
 
@@ -124,7 +123,7 @@ The adapter deep-copies the pinned MIT templates (`duo-video@ef4eb46`) before po
 
 ## Verification boundary and manual smoke checklist
 
-Automated tests verify `timeline.json` v3 export structure, MD5 bundling, UTF-16 subtitle ranges, `audio.sfx` tracks, animated `.mov`/`.webm` overlay bundling, and shared `_audio.py` ducking keyframes. On macOS, JianYing Pro `10.8.7-beta1` detected and registered a generated bundled smoke draft (`copy_draft_external`, `errno: 0`) with online video/narration/BGM/subtitle/overlay tracks that survived save-close-reopen.
+Automated tests verify `timeline.json` v3 export structure, media bundling, UTF-16 subtitle ranges, `audio.sfx` tracks, animated `.mov`/`.webm` overlay bundling, and shared `_audio.py` ducking keyframes. On macOS, JianYing Pro `10.8.7-beta1` detected and registered a generated bundled smoke draft (`copy_draft_external`, `errno: 0`) with online video/narration/BGM/subtitle/overlay tracks that survived save-close-reopen.
 
 AutoJY is a separate desktop-automation pipeline in the duo-video ecosystem and is not shipped or claimed here. With a desktop 剪映 install, verify:
 

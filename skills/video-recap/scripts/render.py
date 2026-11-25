@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import tempfile
+from fractions import Fraction
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -16,7 +17,7 @@ from _audio import (
     build_loudnorm_filter,
     correct_aac_true_peak,
     default_bridge,
-    ducking_expression,
+    ducking_filters,
     measure_loudness,
 )
 from _common import (
@@ -80,10 +81,14 @@ def _narration_spans(timeline: dict[str, Any], base_dir: Path | None) -> list[di
 
 def validate_timeline_physical(timeline: dict[str, Any], *, base_dir: Path | None = None, strict: bool = False) -> dict[str, Any]:
     """Fail-fast on deterministic physical impossibilities; soft-warn on timing overlaps unless strict=True."""
-    spans, total_dur = timeline_video_spans(timeline)
-    if not spans:
+    video = timeline.get("video") or ()
+    if not video:
         raise ValueError("timeline.json has empty 'video' track")
     source_info: dict[str, dict[str, Any]] = {}
+    first_path = resolve_source(timeline, video[0]["source"], base_dir)
+    source_info[str(first_path)] = probe_media(first_path)
+    fps_frac = parse_fps((timeline.get("canvas") or {}).get("fps"), default=parse_fps(source_info[str(first_path)].get("fps_rational")))
+    spans, total_dur = timeline_video_spans(timeline, default_fps=fps_frac)
     for span in spans:
         src_path = resolve_source(timeline, span["source"], base_dir)
         key = str(src_path)
@@ -152,8 +157,9 @@ def _clip_vfilter(label_in: str, label_out: str, span: dict[str, Any], sinfo: di
                 f"[{tag}_bg][{tag}_fg]overlay={vx}:{vy}:shortest=1,{_BT709_SETPARAMS}{label_out}"
             )
         col = str(backdrop.get("color") or "#000000")
+        qd = n_frames / float(parse_fps(fps_str))
         return (
-            f"color=c={col}:s={cw}x{ch}:r={fps_str}:d={span['duration']:.6f},format=yuv420p[{tag}_bg];"
+            f"color=c={col}:s={cw}x{ch}:r={fps_str}:d={qd:.6f},format=yuv420p[{tag}_bg];"
             f"{label_in}{core},{fg}[{tag}_fg];"
             f"[{tag}_bg][{tag}_fg]overlay={vx}:{vy}:shortest=1,{_BT709_SETPARAMS}{label_out}"
         )
@@ -201,6 +207,25 @@ def _delay_bus(in_i: int, at_s: float, gain: float, total_dur: float, lbl: str) 
     return f"[{in_i}:a:0]aformat=sample_rates=48000:channel_layouts=stereo,volume={gain:.4f},adelay={ms}|{ms},apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}{lbl}"
 
 
+def _clip_afilter(in_ref: str, out_lbl: str, spans: Sequence[dict[str, Any]], idx: int,
+                  start_s: float, qd: float, sinfo: dict[str, Any]) -> tuple[str, bool]:
+    span = spans[idx]
+    gain = float(span["clip"].get("audio_gain", 1.0))
+    if str(span["clip"].get("audio", "keep")) != "mute" and bool(sinfo.get("has_audio")) and gain > 0:
+        fi = 0.0 if (idx > 0 and _continuous_join(spans[idx - 1], span)) else min(_EDGE_FADE_S, qd / 2)
+        fo = 0.0 if (idx + 1 < len(spans) and _continuous_join(span, spans[idx + 1])) else min(_EDGE_FADE_S, qd / 2)
+        ch = [f"{in_ref}atrim=start={start_s:.6f}:end={start_s + qd:.6f}", "asetpts=PTS-STARTPTS",
+              "aformat=sample_rates=48000:channel_layouts=stereo", f"apad=whole_dur={qd:.6f}"]
+        if fi > 0:
+            ch.append(f"afade=t=in:st=0:d={fi:.4f}")
+        if fo > 0:
+            ch.append(f"afade=t=out:st={max(0.0, qd - fo):.4f}:d={fo:.4f}")
+        if abs(gain - 1.0) > 1e-4:
+            ch.append(f"volume={gain:.4f}")
+        return ",".join(ch) + out_lbl, True
+    return f"anullsrc=r=48000:cl=stereo:d={qd:.6f}{out_lbl}", False
+
+
 def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequence[dict[str, Any]],
                        source_info: dict[str, dict[str, Any]], src_to_idx: dict[str, int],
                        narrs: Sequence[dict[str, Any]], total_dur: float, inputs: list[str]) -> tuple[list[str], bool]:
@@ -210,22 +235,10 @@ def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequenc
         spath = str(resolve_source(tl, span["source"], base_dir))
         in_i, sinfo = src_to_idx[spath], source_info[spath]
         albl = f"[aseg_{idx}]"
-        keep = str(span["clip"].get("audio", "keep")) != "mute" and bool(sinfo.get("has_audio"))
-        gain = float(span["clip"].get("audio_gain", 1.0))
-        if keep and gain > 0:
-            has_audio = True
-            fi = 0.0 if (idx > 0 and _continuous_join(spans[idx - 1], span)) else min(_EDGE_FADE_S, span["duration"] / 2)
-            fo = 0.0 if (idx + 1 < len(spans) and _continuous_join(span, spans[idx + 1])) else min(_EDGE_FADE_S, span["duration"] / 2)
-            ch = [f"[{in_i}:a:0]atrim=start={span['in']:.6f}:end={span['out']:.6f}", "asetpts=PTS-STARTPTS", "aformat=sample_rates=48000:channel_layouts=stereo"]
-            if fi > 0:
-                ch.append(f"afade=t=in:st=0:d={fi:.4f}")
-            if fo > 0:
-                ch.append(f"afade=t=out:st={max(0.0, span['duration'] - fo):.4f}:d={fo:.4f}")
-            if abs(gain - 1.0) > 1e-4:
-                ch.append(f"volume={gain:.4f}")
-            a_parts.append(",".join(ch) + albl)
-        else:
-            a_parts.append(f"anullsrc=r=48000:cl=stereo:d={span['duration']:.6f}{albl}")
+        qd = span["timeline_end"] - span["timeline_start"]  # 与画面同为整帧时长，音画不随段数漂移
+        af, kept = _clip_afilter(f"[{in_i}:a:0]", albl, spans, idx, span["in"], qd, sinfo)
+        has_audio = has_audio or kept
+        a_parts.append(af)
         a_concat.append(albl)
 
     duck = (tl.get("mix") or {}).get("duck") or {}
@@ -237,7 +250,7 @@ def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequenc
             a_parts.append(f"{''.join(a_concat)}concat=n={len(a_concat)}:v=0:a=1[orig_cat]")
         if narrs:
             dw = [(n["at"], n["end"], float(duck.get("under_narration", 0.18))) for n in narrs]
-            a_parts.append(f"{orig_lbl}volume='{ducking_expression(dw, 1.0, fade_s, bridge_s)}':eval=frame[orig_duck]")
+            a_parts.append(f"{orig_lbl}{','.join(ducking_filters(dw, 1.0, fade_s, bridge_s))}[orig_duck]")
             buses.append("[orig_duck]")
         else:
             buses.append(orig_lbl)
@@ -273,7 +286,7 @@ def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequenc
             ch.append(f"adelay={ms}|{ms}")
         if narrs:
             bw = [(n["at"], n["end"], min(b_gain, float(duck.get("bgm_under_narration", 0.12)))) for n in narrs]
-            ch.append(f"volume='{ducking_expression(bw, b_gain, fade_s, bridge_s)}':eval=frame")
+            ch.extend(ducking_filters(bw, b_gain, fade_s, bridge_s))
         else:
             ch.append(f"volume={b_gain:.4f}")
         ch.append(f"apad=whole_dur={total_dur:.4f},atrim=0:{total_dur:.4f}")
@@ -301,6 +314,56 @@ def _build_audio_graph(tl: dict[str, Any], base_dir: Path | None, spans: Sequenc
     return a_parts, has_audio
 
 
+_NO_META = ("-map_metadata", "-1", "-map_chapters", "-1")  # deliverables never inherit a source's title/comment/URL/chapters
+_CHUNK_CLIPS = 48  # longer timelines render in seeked batches: one graph over whole sources buffers every frame between clips
+
+
+def _render_chunked(timeline: dict[str, Any], out: Path, spans: Sequence[dict[str, Any]], source_info: dict[str, dict[str, Any]],
+                    base_dir: Path | None, canvas: dict[str, Any], size: tuple[int, int], fps_frac: Fraction, tmp: Path,
+                    warnings: Sequence[str] = (), **kw: Any) -> dict[str, Any]:
+    """Render clips in batches of `_CHUNK_CLIPS` (each clip its own input-seeked input), concat them losslessly into one
+    picture+original-audio intermediate, then hand that single clip back to `render_timeline` for narration, ducking,
+    overlays, subtitles and loudness."""
+    cw, ch = size
+    fps_str = f"{fps_frac.numerator}/{fps_frac.denominator}"
+    parts: list[Path] = []
+    any_orig_audio = False
+    for ci in range(0, len(spans), _CHUNK_CLIPS):
+        inputs, vp, ap = [], [], []
+        for k, sp in enumerate(spans[ci:ci + _CHUNK_CLIPS]):
+            path = str(resolve_source(timeline, sp["source"], base_dir))
+            sinfo, qd = source_info[path], sp["timeline_end"] - sp["timeline_start"]
+            s0 = max(0.0, sp["in"] - 1.0)
+            inputs += ["-ss", f"{s0:.4f}", "-t", f"{sp['in'] - s0 + qd + 0.5:.4f}", "-i", path]
+            local = {**sp, "in": sp["in"] - s0, "out": sp["out"] - s0}
+            vp.append(_clip_vfilter(f"[{k}:v:0]", f"[v{k}]", local, sinfo, cw, ch, fps_str, frame_count(sp["duration"], fps_frac),
+                                    canvas.get("backdrop") or {}, canvas.get("viewport")))
+            af, kept = _clip_afilter(f"[{k}:a:0]", f"[a{k}]", spans, ci + k, local["in"], qd, sinfo)
+            any_orig_audio = any_orig_audio or kept
+            ap.append(af)
+        n = len(vp)
+        fc = ";".join([*vp, *ap, "".join(f"[v{k}]" for k in range(n)) + f"concat=n={n}:v=1:a=0[vc]",
+                       "".join(f"[a{k}]" for k in range(n)) + f"concat=n={n}:v=0:a=1[ac]"])
+        f_args, f_script = filter_script_args("filter_complex", fc, tmp)
+        parts.append(tmp / f"chunk_{len(parts):04d}.mkv")
+        try:
+            run_cmd(["ffmpeg", "-y", "-hide_banner", *inputs, *f_args, "-map", "[vc]", "-map", "[ac]", "-c:v", "libx264", "-preset", "veryfast",
+                     "-crf", "10", "-pix_fmt", "yuv420p", *color_tag_args(_BT709), "-c:a", "pcm_s16le", str(parts[-1])], check=True)
+        finally:
+            if f_script is not None:
+                f_script.unlink(missing_ok=True)
+    (tmp / "chunks.txt").write_text("".join(f"file '{p.name}'\n" for p in parts), encoding="utf-8")
+    cat = tmp / "chunks.mkv"
+    run_cmd(["ffmpeg", "-y", "-hide_banner", "-f", "concat", "-safe", "0", "-i", str(tmp / "chunks.txt"), "-c", "copy", str(cat)], check=True)
+    total = spans[-1]["timeline_end"]
+    flat = {**timeline, "sources": {**(timeline.get("sources") or {}), "__chunks": str(cat)},
+            "canvas": {**{k: v for k, v in canvas.items() if k not in {"backdrop", "viewport"}}, "fps": fps_str},
+            "video": [{"id": "chunks", "source": "__chunks", "in": 0.0, "out": total, "audio": "keep" if any_orig_audio else "mute"}]}
+    res = render_timeline(flat, out, base_dir=base_dir, work_dir=tmp, **kw)
+    res["warnings"] = list(dict.fromkeys([*warnings, *(res.get("warnings") or ())]))
+    return res
+
+
 def render_timeline(
     timeline: dict[str, Any],
     out_path: str | Path,
@@ -325,7 +388,7 @@ def render_timeline(
     if preview and max(cw, ch) > 640:
         scale = 640.0 / max(cw, ch)
         cw, ch = _even(cw * scale), _even(ch * scale)
-    fps_frac = parse_fps(canvas.get("fps") or first.get("fps_rational") or 30)
+    fps_frac = parse_fps(canvas.get("fps"), default=parse_fps(first.get("fps_rational")))
     fps_str = f"{fps_frac.numerator}/{fps_frac.denominator}"
 
     out = Path(out_path)
@@ -333,6 +396,9 @@ def render_timeline(
     with tempfile.TemporaryDirectory(prefix="vr_render_") as tmp_s:
         tmp = Path(work_dir) if work_dir else Path(tmp_s)
         tmp.mkdir(parents=True, exist_ok=True)
+        if len(spans) > _CHUNK_CLIPS and not audio_only:
+            return _render_chunked(timeline, out, spans, source_info, base_dir, canvas, (cw, ch), fps_frac, tmp,
+                                   warnings=pre["warnings"], preview=preview, time_range=time_range, out_srt=out_srt, strict=strict)
 
         inputs: list[str] = []
         src_to_idx: dict[str, int] = {}
@@ -361,8 +427,10 @@ def render_timeline(
                 st = timeline.get("subtitle_style") or {}
                 ass_p = write_ass(subs, {"width": cw, "height": ch}, tmp / "subtitles.ass", style=st, safe_y=st.get("safe_y"))
                 if out_srt:
-                    write_srt(subs, out_srt, strip_trailing_punct=bool(st.get("strip_trailing_punct")))
-                v_parts.append(f"{cur_v}ass='{_esc_path(ass_p)}'[vsub]")
+                    write_srt(subs, out_srt, strip_trailing_punct=bool(st.get("strip_trailing_punct", True)))
+                ff = st.get("font_file")  # libass 按 font_name 在该目录里找字体，font_name 要与字体文件的 family 一致
+                fdir = f":fontsdir='{_esc_path(resolve_source(timeline, str(ff), base_dir).parent)}'" if ff else ""
+                v_parts.append(f"{cur_v}ass='{_esc_path(ass_p)}'{fdir}[vsub]")
                 cur_v = "[vsub]"
 
         a_parts, has_audio = _build_audio_graph(timeline, base_dir, spans, source_info, src_to_idx, narrs, total_dur, inputs)
@@ -378,14 +446,14 @@ def render_timeline(
 
         try:
             if audio_only:
-                run_cmd(["ffmpeg", "-y", "-hide_banner", *inputs, *f_args, "-map", "[aout]", *range_args, "-ar", "48000", "-ac", "2", str(out)], check=True)
+                run_cmd(["ffmpeg", "-y", "-hide_banner", *inputs, *f_args, "-map", "[aout]", *range_args, *_NO_META, "-ar", "48000", "-ac", "2", str(out)], check=True)
                 return {"output": str(out), "audio_only": True, "duration_s": total_dur, "loudness_plan": ln_plan, "warnings": pre["warnings"]}
             enc = ["-c:v", "libx264", "-preset", "ultrafast" if preview else "medium",
                    "-crf", "28" if preview else "18", "-pix_fmt", "yuv420p", *color_tag_args(_BT709)]
             dur_args = [] if time_range else ["-t", f"{total_dur:.4f}"]
             run_cmd([
                 "ffmpeg", "-y", "-hide_banner", *inputs, *f_args, "-map", cur_v, "-map", "[aout]", *range_args,
-                *enc, "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                *enc, "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", *_NO_META,
                 "-movflags", "+faststart", *dur_args, str(out),
             ], check=True)
         finally:
@@ -403,7 +471,7 @@ def render_timeline(
                     run_cmd([
                         "ffmpeg", "-y", "-hide_banner", *inputs, "-i", str(out), *re_args,
                         "-map", f"{vid_idx}:v:0", "-map", "[aout]", "-c:v", "copy",
-                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2",
+                        "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", *_NO_META,
                         "-movflags", "+faststart", "-t", f"{total_dur:.4f}", str(cand),
                     ], check=True)
                     os.replace(cand, out)

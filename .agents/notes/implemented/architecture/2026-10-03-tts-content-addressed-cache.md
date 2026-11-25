@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；内容寻址缓存现在 `skills/video-recap/scripts/tts.py` 的 `_cache_key`。
+
 后续决定：其中的旧版本迁移已移除，见 [[2026-11-06-remove-old-migrations-and-unreached-seams]]。
 
 ## Problem

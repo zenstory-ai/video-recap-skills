@@ -1,2 +1,2 @@
-# Dashboard assets are served byte-for-byte; tokens.css must match the shared ZenStory copy on every OS.
-skills/video-recap/assets/dashboard/* text eol=lf
+# The dashboard page is served byte-for-byte; keep LF line endings on every OS.
+skills/video-recap/assets/dashboard.html text eol=lf

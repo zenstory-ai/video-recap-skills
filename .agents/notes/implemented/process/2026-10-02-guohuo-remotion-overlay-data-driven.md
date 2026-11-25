@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：本文涉及的 guohuo-60s 快照与 Remotion 工程已在 2026-11-25 清理中删除，目录只留成片链接，见 [[2026-11-25-remove-v07-leftovers]]。
+
 ## Problem
 
 [[2026-10-02-guohuo-example-snapshots-follow-current-schema]] 在端到端复现中发现：Remotion 透明层的总帧数（`index.tsx` 的 `durationInFrames={1474}`）、四条花字（`flowerCues`）、片名首段与复现窗口（0.18–9.75 秒、42.2–50.3 秒）和片名文字都写死在 TSX 里，只换 `captions.json` 会得到偏短、错位的透明层。当时因为没有能跑无头 Chrome 的环境，只在 runbook 里写明要手改哪几个常量，否决了“改成 JSON props / `calculateMetadata`”。

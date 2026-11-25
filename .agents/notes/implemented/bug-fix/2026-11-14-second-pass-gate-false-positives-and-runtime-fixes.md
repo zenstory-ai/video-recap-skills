@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 关联笔记：[[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]]、[[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]、[[2026-10-02-video-reference-skill]]。
 
 ## Problem

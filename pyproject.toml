@@ -14,6 +14,6 @@ preview = true
 explicit-preview-rules = true
 
 [tool.ruff.lint.per-file-ignores]
-# Each skill ships its own lib.py, so tests prepend their skill's scripts dir to
+# Skill scripts are plain modules, so tests prepend their skill's scripts dir to
 # sys.path before importing — that legitimately puts imports after a statement (E402).
 "tests/**" = ["E402"]

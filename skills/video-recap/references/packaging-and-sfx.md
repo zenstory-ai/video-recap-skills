@@ -34,7 +34,7 @@ python3 scripts/packaging.py apply timeline.json --theme portrait-stage \
 ```
 
 - `--cards`：`[{"title": "...", "subtitle": "...", "kind": "huazi|reaction|chapter|quote|scene", "side": "left|right", "start": 1.0, "end": 4.0}]`
-- `--callouts`：`[{"slot": "top|bottom", "text": "...", "start": 5.0, "end": 7.5}]`
+- `--callouts`：`[{"slot": "callout_upper|callout_lower", "text": "...", "start": 5.0, "end": 7.5, "motion": "none|slide_up"}]`（`slot` 省略时上下交替，`motion` 默认 `none`）
 
 ## 3. 真实素材音效与防撞人声
 

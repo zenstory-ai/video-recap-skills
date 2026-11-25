@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 video-script SKILL.md 要求 cut 第二阶段“先查看 `edited_source.mp4` 与剪后故事板”再写 `narration.json`。单视频第二阶段，recap 调 `understand.py --brief-only` 重建 brief，video-understanding 看到 `clip_plan_validated.json` 就顺手写 `storyboard/edited_storyboard.*` 并在 brief 顶部加指引。多视频第二阶段由 recap 自己写 `agent_narration_brief.md`（`_write_multi_source_output_brief`），不调 understanding，所以从来没有剪后故事板，Agent 只能逐个打开帧。

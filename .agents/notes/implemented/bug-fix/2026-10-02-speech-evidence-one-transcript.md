@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `asr_clean.json` 优先的部分已被 [[2026-11-06-remove-asr-clean-transcript]] 取代：各处只读 `asr_result.json`；空白文本行的规则不变。
 
 ## Problem

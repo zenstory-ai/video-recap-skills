@@ -4,17 +4,17 @@
 
 通用 AI 视频剪辑与解说制作 skill 包。`skills/` 下两个自包含技能（`1 + 1` 结构）：
 
-- `video-recap`：通用视频剪辑与解说生产技能。创作判断（看拼图选镜、定主线、写旁白、安排原声与包装）归宿主多模态 Agent 并记录在纯 Markdown 工作区；机械执行收敛为 6 支无状态核心原子 CLI（`probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py`）与 4 支单向配套叶工具（`packaging.py`、`export_jianying.py`、`dashboard.py`、`library.py`），统一通过单一规范 `timeline.json` v3 协作。
+- `video-recap`：通用视频剪辑与解说生产技能。创作判断（看拼图选镜、定主线、写旁白、安排原声与包装）归宿主多模态 Agent 并记录在纯 Markdown 工作区；机械执行收敛为 6 支无状态核心原子 CLI（`probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py`）与 5 支单向配套叶工具（`packaging.py`、`export_jianying.py`、`dashboard.py`、`library.py`、`plan.py`），统一通过单一规范 `timeline.json` v3 协作。
 - `video-reference`：不在默认生产路径上，按需本地实测优秀成片的镜头节奏、响度密度并抽帧拼图（`analyze_reference.py`），辅助 Agent 写出脱敏 Markdown 参考笔记 `REFERENCE_NOTES.md`。
 - 架构与模块划分见 `docs/architecture.md`；能力边界与验收原则见 `docs/production-boundaries.md`。
 - 分发渠道：Claude 插件（`.claude-plugin/`，OpenClaw 的 `plugins install` 也读它）、源码 Release（`.release/policy.json`）和 ClawHub（`.clawhub/`）。
 
 ## 改动前必须知道的规矩
 
-- **每个 skill 自包含**：`skills/<name>/scripts/` 只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；`video-recap` 内核心模块严禁反向导入 4 支配套叶工具，叶工具之间互不导入，统一以 `timeline.json` 与工作区文件交接。
+- **每个 skill 自包含**：`skills/<name>/scripts/` 只 import 本技能的模块，源码与 markdown 不出现兄弟 skill 的路径；`video-recap` 内核心模块严禁反向导入 5 支配套叶工具，叶工具之间互不导入，统一以 `timeline.json` 与工作区文件交接。
 - **硬性防膨胀预算（`tests/orchestrator/test_test_suite_architecture.py` 守）**：
-  - 技能散文按字符计：单份 `SKILL.md <= 4,000` 字符、单份 `references/*.md <= 2,500` 字符、全仓 `skills/**/*.md <= 22,000` 字符。
-  - 运行时 Python 预算：单文件 `<= 550` 行、全仓 `skills/*/scripts/**/*.py <= 5,000` 行、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个、skill 内 import 图无环。
+  - 技能散文按字符计：单份 `SKILL.md <= 4,300` 字符、单份 `references/*.md <= 2,500` 字符、全仓 `skills/**/*.md <= 22,000` 字符。
+  - 运行时 Python 预算：单文件 `<= 550` 行、全仓 `skills/*/scripts/**/*.py <= 5,600` 行、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个、skill 内 import 图无环。
   - **禁止静默膨胀**：超过预算必须先删等量内容，或在同次提交中显式提高预算常量并附 `.agents/notes/` 实测失败证据说明理由。
 - **运行时只用 Python 标准库和 `ffmpeg` / `ffprobe`**，README 承诺不需要 `pip install`；最低 Python 3.10，CI 用 3.12；所有文本 I/O 必须显式指定 `encoding="utf-8"`。
 - **判断归 Agent，物理体检归脚本**：创意、题材、节奏与文案审美由 Agent 把关；`check.py` 只检验 7 项物理健康指标，严禁引入主观品味/字速/关键词正则阻断门禁或 `{size, mtime_ns}` 清单锁。

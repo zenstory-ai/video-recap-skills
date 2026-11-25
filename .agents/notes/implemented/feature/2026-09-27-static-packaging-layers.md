@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；静态图层现写进 `timeline.json` 的 `overlays[]`，由 `packaging.py apply` 生成、`render.py` 叠加。
+
 ## Problem
 
 `packaging` 模板（[[2026-09-27-resource-library-format]]）描述的是整片不动的包框、标题条、角标：几张图片各放在画布的一个矩形里。

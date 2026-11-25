@@ -44,7 +44,6 @@ def test_common_color_tags_and_timeline_spans(tmp_path: Path) -> None:
     rgb_tags = _common.output_color_tags({"pix_fmt": "rgb24", "color_space": "gbr"})
     assert rgb_tags["colorspace"] == "bt709"
     assert rgb_tags["from_rgb"] is True
-    assert "out_color_matrix=bt709" in _common.color_tag_filter(rgb_tags)
     assert "-colorspace" in _common.color_tag_args(rgb_tags)
 
     tl = {
@@ -94,7 +93,7 @@ def test_subtitles_srt_and_ass_generation(tmp_path: Path) -> None:
         {"start": 0.25, "end": 2.5, "text": "这是一句测试旁白，用来验证自动换行。", "style": "narration"},
         {"start": 2.7, "end": 4.0, "text": "Hello world dialogue.", "style": "dialogue"},
     ]
-    srt_p = _subtitles.write_srt(cues, tmp_path / "out.srt", max_chars=10, strip_trailing_punct=True)
+    srt_p = _subtitles.write_srt(cues, tmp_path / "out.srt", strip_trailing_punct=True)
     parsed = _subtitles.parse_srt(srt_p)
     assert len(parsed) == 2
     assert not parsed[0]["text"].endswith("。")
@@ -125,3 +124,58 @@ def test_subtitles_srt_and_ass_generation(tmp_path: Path) -> None:
     vtt_cues = _subtitles.parse_srt(vtt_p)
     assert len(vtt_cues) == 1
     assert vtt_cues[0] == {"start": 1.25, "end": 3.5, "text": "Hour-omitted VTT cue"}
+
+
+def test_ducking_filters_split_long_timelines_and_keep_the_same_curve(has_ffmpeg: bool) -> None:
+    import subprocess
+
+    windows = [(10.0 * i, 10.0 * i + 4.0, 0.18) for i in range(120)]
+    filters = _audio.ducking_filters(windows, 1.0, 0.25, 0.5)
+    assert len(filters) == 3 and len(_audio.ducking_filters(windows[:10], 1.0, 0.25, 0.5)) == 1
+    bgm = _audio.ducking_filters([(s, e, 0.12) for s, e, _ in windows], 0.3, 0.25, 0.5)
+    assert len(bgm) == 3 and "0.3000" in bgm[0] and "0.3000" not in bgm[1]
+    if has_ffmpeg:
+        res = subprocess.run(["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "anullsrc=d=2", "-af", ",".join(filters), "-f", "null", "-"],
+                             capture_output=True, text=True)
+        assert res.returncode == 0, res.stderr[-300:]
+
+
+def test_common_timeline_video_spans_default_fps() -> None:
+    tl = {"sources": {"a": "a.mp4"}, "video": [{"id": "c1", "source": "a", "in": 0.0, "out": 0.13}]}
+    _, total_30 = _common.timeline_video_spans(tl)
+    _, total_25 = _common.timeline_video_spans(tl, default_fps="25/1")
+    assert total_30 == pytest.approx(4 / 30, abs=1e-6)
+    assert total_25 == pytest.approx(3 / 25, abs=1e-6)
+
+    tl_explicit = {**tl, "canvas": {"fps": "24"}}
+    _, total_24 = _common.timeline_video_spans(tl_explicit, default_fps="25/1")
+    assert total_24 == pytest.approx(3 / 24, abs=1e-6)
+
+
+def test_ffmpeg_reads_option_files_uses_run_cmd(monkeypatch) -> None:
+    import subprocess
+
+    calls: list[tuple[list[str], float | None]] = []
+    stderr_box = ["Unrecognized option '/filter_complex'."]
+
+    def fake_run_cmd(cmd, *, timeout=None, check=False):
+        calls.append((list(cmd), timeout))
+        return subprocess.CompletedProcess(cmd, 1, "", stderr_box[0])
+
+    def fail_raw_run(*_a, **_kw):
+        raise AssertionError("ffmpeg_reads_option_files must use run_cmd")
+
+    monkeypatch.setattr(_common, "_OPTION_FILES", [])
+    monkeypatch.setattr(_common.shutil, "which", lambda _name: "/usr/bin/ffmpeg")
+    monkeypatch.setattr(_common, "run_cmd", fake_run_cmd)
+    monkeypatch.setattr(_common.subprocess, "run", fail_raw_run)
+
+    assert _common.ffmpeg_reads_option_files() is False
+    assert len(calls) == 1 and calls[0][1] == 30
+    opt_path = Path(calls[0][0][calls[0][0].index("-/filter_complex") + 1])
+    assert not opt_path.exists()
+
+    monkeypatch.setattr(_common, "_OPTION_FILES", [])
+    stderr_box[0] = ""
+    assert _common.ffmpeg_reads_option_files() is True
+    assert len(calls) == 2 and calls[1][1] == 30

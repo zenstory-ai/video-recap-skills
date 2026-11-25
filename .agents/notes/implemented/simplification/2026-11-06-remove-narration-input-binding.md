@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 翻转 [移除声音定稿交付路线](2026-11-06-remove-delivery-family.md) 里“`narration_input_binding.json` 与 `assembly_qc` 的同名字段保留、内容不变”的决定。
 
 ## Problem

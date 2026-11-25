@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `validate.py` 遇到写进文档的普通 lint 失败（`over_budget`、`interrupts_source_sentence` 等），`narration_lint.validate_narration_or_raise` 抛 `ValueError`，`main` 不接，Agent 看到的是一整段 Python traceback，最后一行只有 `narration.json 预检失败: #1: over_budget; 详见 narration_lint.json`。能用来改稿的信息（时间窗、预算、硬上限、实际字数、建议入点）只在 `narration_lint.json` 里，还得再开一次文件。而且 `#1` 是从 0 数的下标，指的是 narration.json 的第 2 块。

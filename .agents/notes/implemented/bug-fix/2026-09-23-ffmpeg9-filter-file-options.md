@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；长滤镜脚本传参现在 `_common.py` 的 `filter_script_args` / `ffmpeg_reads_option_files`，见 [[2026-11-25-restore-ffmpeg-option-file-probe]]。
+
 ## Problem
 
 长 filtergraph 写进文件再交给 ffmpeg，是为了不让命令行超过 Windows 的 32K 上限（375 段遮罩即可触发）。四处调用都写死了旧选项：`assemble.py` 的 `-filter_complex_script` 与 `-filter_script:v:0`、`audio_mix.py` 的 loudnorm 首遍测量、`cut_render.py` 的剪辑渲染。FFmpeg 7.0 引入 `-/option 文件` 通用写法并弃用旧选项，8.0 仍保留，9.0 删除（`fftools/ffmpeg_opt.c` 在 n9.0 已无 `filter_complex_script`）。Homebrew 现装 9.x，于是：

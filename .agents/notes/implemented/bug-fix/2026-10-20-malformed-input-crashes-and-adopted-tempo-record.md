@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 采用配音的 tempo 记录随 [移除声音定稿交付路线](../simplification/2026-11-06-remove-delivery-family.md) 一起消失；其余畸形输入修复仍然有效。
 
 ## Problem

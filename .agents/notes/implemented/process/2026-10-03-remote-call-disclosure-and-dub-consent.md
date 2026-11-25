@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；dub 模式已不存在，逐路径远程调用披露延续在 `skills/video-recap/references/remote-services.md`。
+
 后续决定：dub 模式已移除，见 `.agents/notes/implemented/simplification/2026-11-06-remove-dub-mode.md`。`review.py` 也已移除，见 [[2026-11-06-remove-narration-review-chain]]，video-script 的脚本现在不联网，§2 改写成这一事实。远程调用逐路径披露的规则仍然有效。
 
 关联：[ClawHub 分发](2026-10-03-clawhub-distribution.md)。

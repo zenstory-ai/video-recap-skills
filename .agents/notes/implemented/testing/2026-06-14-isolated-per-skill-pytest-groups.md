@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；分组独立进程延续为 `scripts/test.py` 的 `core` / `companions` / `reference` / `orchestrator` 四组。
+
 ## Problem
 
 每个 skill 自带同名顶层模块（`lib.py`、`narration.py` 等，见 [自包含 skill](../architecture/2026-06-14-self-contained-skills-duplicated-libs.md)）。单进程 `pytest tests/` 会把多个 skill 的同名模块装进同一个 `sys.modules`，报出误导性的 import 冲突。此外曾有测试组只登记在 `scripts/test.sh` 而 CI 跑的是 `scripts/test.py`，22 个 inspect 测试从未在 CI 执行过。

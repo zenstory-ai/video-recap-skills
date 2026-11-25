@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；“创作归 Agent、脚本只做机械步骤”延续为 AGENTS.md 的“判断归 Agent，物理体检归脚本”。
+
 dub 译稿与 dub lint 随 dub 模式移除，见 [[2026-11-06-remove-dub-mode]]。
 
 ## Problem

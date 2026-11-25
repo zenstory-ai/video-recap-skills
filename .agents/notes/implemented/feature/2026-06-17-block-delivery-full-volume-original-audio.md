@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；旁白之外原声满音量现由 `_audio.py` 的 `ducking_filters` / `ducking_keyframes`（原声 idle 增益 1.0）实现。
+
 ## Problem
 
 0.2.0 把原声做成一条连续低音床：`duck_bridge_seconds=12` 把相邻解说间的间隔全部并入压低区，原声只在开头结尾回满；解说又逐句合成、一句一停，两行字幕黑带压掉画面。用户反馈明确："解说成块，原声也要成块，7:3，原声不要被压低"——密集解说听起来像字幕配音，原声精彩处也听不见。

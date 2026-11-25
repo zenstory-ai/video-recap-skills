@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `EDIT_MODE`、`TARGET_DURATION`、`SUBTITLE_Y_TOP/BOT` 后来不再读取，`_ENV_FILLED` 缩到两项，见 [[2026-11-06-remove-env-twins-of-run-flags]]；回显 argv 的决定不变。
 
 ## Problem

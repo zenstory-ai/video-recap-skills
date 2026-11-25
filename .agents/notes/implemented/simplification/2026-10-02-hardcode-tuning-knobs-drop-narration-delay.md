@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 第二轮精简清单（`.omc/plans/2026-10-02-slim-candidates-round2.md` 第 21、24、29、34、35 条，PR-B1a）在 video-assemble 和 video-voiceover 里找到一批只有作者自己会碰、却要一直维护的旋钮和状态：

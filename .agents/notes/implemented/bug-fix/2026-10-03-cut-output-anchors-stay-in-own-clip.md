@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 cut 第二遍把原片句末锚点映射到 `edited_source.mp4` 的输出时间，写进 `speech_boundary_anchors_output.json`，供 video-script 的 cut_output lint（旁白入点必须在句末停顿内）和 assemble 的原声闪避使用。映射时片段的原片区间放宽 ±0.05 秒（帧对齐会把出点移到停顿结束前几毫秒），但输出时间按 `output_start + (time − source_start)` 直接算：

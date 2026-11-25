@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；`dashboard.py` 已重写为静态 `review.html` + `127.0.0.1` 只读服务。
+
 ## Problem
 
 总体方案 [[2026-09-27-resource-template-library-and-dashboard]] 第 4 期：项目、运行、QC 与资源库只能靠

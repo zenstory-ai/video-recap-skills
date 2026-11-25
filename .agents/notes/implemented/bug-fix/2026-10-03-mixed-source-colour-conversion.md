@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；多来源逐段色彩转换现在 `render.py` 的 `_color_conv`，RGB 识别在 `_common.py` 的 `output_color_tags`。
+
 接续并部分推翻 [[2026-10-02-delivery-yuv420p-and-color-tags]] 里"多来源标记不一致时只改标记"的决定。
 
 ## Problem

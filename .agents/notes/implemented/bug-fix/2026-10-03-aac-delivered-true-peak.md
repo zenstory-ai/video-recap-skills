@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；交付 AAC 真峰值校正现在 `_audio.py` 的 `correct_aac_true_peak` 与 `CODEC_PEAK_HEADROOM_DB`，由 `render.py` 调用。
+
 接续 [[2026-10-03-loudnorm-true-peak-limiter]]：限幅与线性 loudnorm 的算法不变，只是它们瞄准的真峰值从 TP 改为"编码前目标"，并在渲染后按交付文件核对。
 
 ## Problem

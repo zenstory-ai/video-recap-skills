@@ -19,8 +19,7 @@ def _setup_workspace(root: Path, sample_timeline: dict) -> tuple[Path, Path]:
                     "checks": {"container_valid": {"status": "pass", "detail": "ok"}}, "limitations": []}),
         encoding="utf-8",
     )
-    (run_dir / "PLAN.md").write_text("# Plan\n</script><script>alert(1)</script>\n", encoding="utf-8")
-    (run_dir / "EDIT_PLAN.md").write_text("# Edit Plan\n", encoding="utf-8")
+    (run_dir / "EDIT_PLAN.md").write_text("# Edit Plan\n</script><script>alert(1)</script>\n", encoding="utf-8")
     (run_dir / "BRIEF.md").write_text("# Brief\n", encoding="utf-8")
     (run_dir / "MEDIA_NOTES.md").write_text("# Media Notes\n", encoding="utf-8")
 

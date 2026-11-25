@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；`--project` 绑定已不存在；字体文件经 `fontsdir` 烧录字幕由 `render.py` 读 `subtitle_style.font_file` 恢复，见 [[2026-11-25-remove-v07-leftovers]]。
+
 ## Problem
 
 第 1、2 期（[[2026-09-27-resource-library-format]]、[[2026-09-27-resource-lock]]）让资源与模板可以登记、让每次运行留下资源记录，

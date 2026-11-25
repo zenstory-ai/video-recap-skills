@@ -16,14 +16,13 @@ from _common import filter_script_args, has_tool, resolve_source, run_cmd, timel
 
 __all__ = [
     "CODEC_PEAK_HEADROOM_DB",
-    "LIMITER_HEADROOM_DB",
     "build_loudnorm_filter",
     "coalesce_duck_windows",
     "correct_aac_true_peak",
     "default_bridge",
     "ducking_expression",
+    "ducking_filters",
     "ducking_keyframes",
-    "ducking_keyframes_for_span",
     "measure_loudness",
     "normalize_wav_rms",
 ]
@@ -76,6 +75,23 @@ def ducking_expression(
         for start, end, level in merged
     ]
     return f"max(0,min(1,{idle:.4f}{''.join(terms)}))"
+
+
+def ducking_filters(
+    windows: Sequence[tuple[float, float, float]], idle_gain: float, fade_s: float, bridge_s: float | None = None, chunk: int = 40
+) -> list[str]:
+    """`volume=` filters equal to `ducking_expression`, split so no single expression exceeds ffmpeg's parser limits.
+
+    Coalesced windows (fades included) never overlap, so a chain of per-group gains multiplies to the same curve."""
+    fade = max(0.0, float(fade_s))
+    merged = coalesce_duck_windows(windows, default_bridge(fade) if bridge_s is None else float(bridge_s))
+    idle = float(idle_gain)
+    if len(merged) <= chunk or idle <= 0:
+        return [f"volume='{ducking_expression(windows, idle, fade, bridge_s)}':eval=frame"]
+    groups = [merged[i:i + chunk] for i in range(0, len(merged), chunk)]
+    out = [f"volume='{ducking_expression([tuple(w) for w in groups[0]], idle, fade, 0.0)}':eval=frame"]
+    out += [f"volume='{ducking_expression([(s, e, lv / idle) for s, e, lv in g], 1.0, fade, 0.0)}':eval=frame" for g in groups[1:]]
+    return out
 
 
 def ducking_keyframes_for_span(

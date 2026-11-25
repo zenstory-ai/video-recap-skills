@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 PR #126 把 `speech_boundary_anchors_output.json` 的新鲜度判断从内容哈希改成 `clip_plan_identity`（`clip_plan_validated.json` 的 `{size, mtime_ns}`，见 [[2026-09-20-no-content-hashing]]），video-script 的 `speech_ownership._output_payload_is_current` 直接按这个键取值。复核 2026-10-02 架构审计时确认了三处问题：

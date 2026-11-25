@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 video-recap SKILL.md §4.1 让 Agent 把调研写进 `work_dir/background_research.json`，guohuo-60s 样例也把它放在项目级。可多视频 cut 的理解阶段对每个来源单独调用 `understand.py --work-dir sources/<source_id>/`，video-understanding 只从自己的 work_dir 读这个文件（`lib.load_background_research`）。结果项目级调研从未进入 VLM 上下文、ASR 人名纠错和 consolidate；替身复现时只能手工把文件复制到每个 `sources/<id>/` 才生效。没有任何文档说明这一点。

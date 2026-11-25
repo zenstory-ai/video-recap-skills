@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `validate.py --mode cut` 校验的那种旁白已经不存在了。[[2026-06-16-cut-first-narrate-second]] 之后，cut 模式的旁白写在成片 OUTPUT 时间轴上，编排器只传 `--mode full` 和 `--mode cut_output`，`video-script/SKILL.md` 也只写这两种。只有测试还在走 `mode="cut"`。

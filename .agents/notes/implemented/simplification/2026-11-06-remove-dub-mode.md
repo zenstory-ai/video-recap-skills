@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代这两篇里关于 dub 的决定：[远程调用披露与 dub 确认](../process/2026-10-03-remote-call-disclosure-and-dub-consent.md)、[删除 dub 的手动侧 CLI](2026-10-02-trim-dub-side-cli.md)。前者“任何外发路径都要在 `SKILL.md` 写明”的规则继续有效，只有 dub 的确认门禁随功能消失。
 
 ## Problem

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 前置：[[2026-10-02-video-reference-skill]]（已落地）。资源库、项目绑定与运行记录见
 [[2026-09-27-resource-library-format]]、[[2026-09-27-project-binding-and-font-files]]、[[2026-09-27-resource-lock]]。
 

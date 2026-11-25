@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `SOURCE_SUBTITLE_MASK_POLICY` 是为了当年 `MASK_SOURCE_SUBTITLES` 默认打开时加的：一个环境里继承来的默认值不应该悄悄盖掉画面，所以遮罩要有显式策略，只设 `MASK_SOURCE_SUBTITLES` 记成 `legacy_implicit` 并让视觉 QC 失败。

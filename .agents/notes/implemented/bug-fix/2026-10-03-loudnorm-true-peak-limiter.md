@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；真峰值预限幅现在 `_audio.py` 的 `build_loudnorm_filter`（`LIMITER_HEADROOM_DB` + 过采样 `alimiter`）。
+
 后续 [[2026-10-03-aac-delivered-true-peak]]：真峰值目标改为针对交付的 AAC 文件，各级目标随编码前目标下移，下文的 -2 / -1 dBTP 是当时（编码前目标 = TP）的数值。
 
 接续并部分推翻 [[2026-10-03-loudnorm-linear-gain-cap]] 里"峰值余量不足就下调目标响度、不用 limiter"的决定。那篇的线性条件、`loudnorm_final_pass` 记录和下调目标的算法仍在，只在限幅器削到上限后才用。

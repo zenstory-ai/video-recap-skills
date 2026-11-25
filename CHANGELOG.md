@@ -10,6 +10,39 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-25
+
+**长篇连续解说、百段级长片渲染加固与 Google Antigravity (AGY) 宿主适配版本**：`video-recap` 正式覆盖从 30–240 秒短片到多集几十分钟「一口气看完」长篇解说的全场景生产。新增第 5 支配套叶工具 `plan.py`、`references/long-form.md` 长篇工艺参考与 `frames.py --shots` 按切点镜头候选图；全面打通百段级长片在 FFmpeg 9.x 下的分批渲染、分段闪避与整帧音画对位，降低低反差切镜漏检；同时新增 **Google Antigravity (AGY)** 宿主安装与校验支持，并彻底清理 v0.7 历史残留与死代码、校准文档与代码实情。
+
+### Added
+
+- **短片与长篇双模式生产**：`SKILL.md` 与 `references/editorial-craft.md` 明确区分 30–240 秒短片（切换频率按每分钟 2–4 次、人名上限随片长放宽）与多集长篇解说，长篇流程收敛至新增参考 `references/long-form.md`。
+- **长篇连续解说与第 5 支配套叶工具 `plan.py`**：新增 `references/long-form.md`（素材笔记、大纲、钩子、写稿与 `recap` 段写法）与 `plan.py`。Agent 在 `timeline.json` 的 `recap` 段写旁白（每个逗号小句对应源画面区间）与原声段范围：`plan.py voice` 同步旁白给 `tts.py`，`plan.py build` 按实测配音时长切分小句、按整帧编排镜头、旁白 `at` 与小句字幕，原声段自动裁剪超 1.2 秒静音停顿并将入出点先吸附至附近最安静处再贴源片切点（帧数向下取整，剪后超 30 秒记为提示）。镜头不够长或画面跨切点严格报错不静默改写（退出码 3）；支持为旁白声明 `window` 剧情时段，跨窗选镜、源时间倒退、画面复用与原声前剧透伸窗均记为非阻断提示。
+- **按切点镜头候选图（`frames.py --shots`）**：新增 `frames.py --shots probe.json --window a:b`（支持 `--width`、`--split`、`--no-labels`），按切点将时段内每个镜头（长镜头自动拆段）拼成头尾两帧候选接触表并标注编号、时长与源时间。
+- **长篇自动分批渲染（`render.py`）**：超过 48 段镜头时自动按批独立定位输入、渲染无损中间分片再拼接，最后交回原流程混音、字幕与包装，避免几百段长片在单张滤镜图中卡死或爆内存。
+- **Google Antigravity (AGY) 宿主支持**：双语 `README.md` / `README_EN.md` 新增 `agy plugin install https://github.com/zenstory-ai/video-recap-skills` 一键安装及工作区 `.agents/skills/`、全局 `~/.gemini/config/skills/` 放置指引（支持 `/video-recap` 与 `/video-reference` 调用），通过 `agy plugin validate --strict` 校验并补充文档契约测试。
+
+### Changed
+
+- **自适应场景切镜检测（`probe.py --scenes`）**：改为逐帧场景分数（裁掉底部 10% 防烧录字幕误判）配合局部中位数判决；`--scene-threshold` 语义改为逐帧分数下限，默认值由 `0.15` 调整为 `0.08`，显著减少低反差切镜漏检。
+- **防膨胀预算校准**：`SKILL.md` 字符上限 `4,000 → 4,300`、全仓运行时 Python 总行数上限 `5,000 → 5,600`（实测理由记录于 `.agents/notes/implemented/feature/2026-11-25-long-form-recap.md`）。
+- **字幕去标点与花字默认动效对齐**：`render.py --out-srt` 默认去掉行尾标点，与烧录字幕及 `subtitle_style.strip_trailing_punct` 文档默认值 `true` 一致；`packaging.py --callouts` 未写 `motion` 时默认 `none`（替代此前未实现的 `zoom_in`，有效值为 `none|slide_up`）。
+- **文档与代码实情全面对齐**：校对剪映导出（不换算 `crop`/`focus`/`viewport`、不导出图层淡入淡出与动效、字幕只取 `safe_y` 且不折行不去标点、按真实路径去重）、`tts.py`（仅发送音色 ID、不上传参考音频）、`--preview`（长边 640px）、渲染不做静图推镜、配套叶工具更新为 5 支（含 `plan.py`）；`SKILL.md` 与 `references/remote-services.md` 补齐 `plan.py` 严格离线声明与全部读取环境变量（含 `--engine auto` 选 `openai` 所需 `TTS_API_URL`），素材库参考补充 `VIDEO_RECAP_LIBRARY_DIR`。
+- **归档 v0.7 展示案例**：`examples/guohuo-60s/` 精简为成片链接与归档说明，双语 README 同步改为归档案例链接。
+
+### Removed
+
+- **未读取字段与失实表述**：清理文档与 schema 中从未被代码读取的 `mix.flash_guard`（及“闪帧保护”表述，实际为 `check.py` `flash_sliver` 提示与 `plan.py` 原声贴切点）、`mix.voice_over_bgm_db`、`meta.assets[]`。
+- **v0.7 历史残留**：移除 `examples/demo-project/`、`examples/resource-library/templates/` 与 `samples/`、`examples/guohuo-60s/` 下旧版规划 JSON / QC / runbook / Remotion 工程、`tools/measure_subtitle.py`（已由 `frames.py --crop` 与 `recap.crop` 取代）及其测试，以及 `.gitignore` 中的 v0.7 产物条目。
+- **死代码与重复测试**：清理 `export_jianying.py` 不可达的本地闪避兜底（统一复用 `_audio.ducking_keyframes`）与未用字段、`_common.color_tag_filter` / `sanitize_error` 别名、`_subtitles.write_srt(max_chars=…)`、`frames.py` 恒假 `labeled_ok`、`library.py` 冗余密钥键名、各模块无引用 `__all__` 项，以及失效/重复测试（`test_mimo_client_safety.py`、`test_guohuo_example.py`、v0.7 夹具与退役名字断言）。
+
+### Fixed
+
+- **长片渲染与 FFmpeg 9.x 兼容**：恢复 `render.py` 成片、纯音频与响度重编码输出的 `-map_metadata -1 -map_chapters -1`（防止继承源视频标题/注释/章节）；恢复按行为探测 `-filter_complex` 文件选项，支持时自动使用 `-/filter_complex` 以兼容 FFmpeg 9.x 与超 4096 字节长滤镜图；`_audio.ducking_filters` 将超长人声闪避窗口按每 40 段串联拆分，避免 100+ 旁白时触发 FFmpeg 表达式解析上限。
+- **整帧时间游标与音画量化一致性**：时间游标按整帧累加且原声音频按同一整帧时长裁切，`timeline_video_spans` 与 `render.py` 在省略 `canvas.fps` 时统一继承首源帧率、纯色底板时长与量化帧数一致，消除长片音画/旁白逐段漂移与尾帧截断；分批渲染路径同步补齐跨批无缝衔接淡入淡出、全静音轨 `loudnorm` 判定、原路径相对文件名拼接与预检告警透传。
+- **字幕字体加载与路径解析**：`render.py` 现将 `subtitle_style.font_file` 所在目录作为 libass `fontsdir` 传入；`export_jianying.py` 按 `timeline.json` 所在目录解析相对路径旁白文件；`plan.py` 与 `frames.py` 修复相对路径 `probe.json` 匹配及小句时长单调性、静音负时间戳等边界问题。
+- **缓存保护与仓库配置**：`library.py cache-restore` 现保护工作区已有 `MEDIA_NOTES.md`，缓存清单与 `dashboard.py` 清理旧名 `PLAN.md` / `NOTES.md` / `output.mp4`；修正 `.gitattributes` 的 LF 规则指向 `assets/dashboard.html`。
+
 ## [0.8.0] - 2026-11-21
 
 **架构级瘦身与通用化重构版本**：`video-recap-skills` 从 24,207 行 / 99 文件的重型中文短剧垂直流水线框架，彻底重构为 **4,978 行 / 14 文件（-79.4%）的通用、本地优先 AI 视频剪辑与解说技能包**。核心理念回归“**判断归宿主多模态 Agent，机械执行归极简无状态原子 CLI**”，围绕单一规范 `timeline.json` v3 总线协作，并引入 Remotion 现代电影杂志风透明动态包装、Fish Audio `s2.1-pro-free` 整篇连贯配音、硬/软门禁分离质检与 CI 防膨胀预算守卫。

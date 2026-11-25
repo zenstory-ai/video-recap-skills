@@ -23,6 +23,8 @@ from fractions import Fraction
 from functools import lru_cache
 from pathlib import Path
 
+from _audio import ducking_keyframes
+
 __all__ = ["us", "build_draft", "export_timeline_to_jianying", "main"]
 
 _TEMPLATE_DIR = Path(__file__).resolve().parent.parent / "references" / "jianying"
@@ -46,7 +48,7 @@ _MATERIAL_KEYS = (
 _SEGMENT_RENDER_INDEX = 2
 _TRACK_BANDS = {
     "audio": ("audio", 20_000), "video": ("video", 40_000), "image": ("video", 50_000),
-    "subtitle": ("text", 90_000), "text": ("text", 100_000),
+    "subtitle": ("text", 90_000),
 }
 _DRAFT_PATH_PLACEHOLDER = "##_draftpath_placeholder_0E685133-18CE-45ED-8CB8-2904A212EC80_##"
 
@@ -100,55 +102,6 @@ def _resolve_ref(timeline: dict, ref: str, base_dir: Path | None) -> str:
     if not p.is_absolute() and base_dir is not None:
         p = (base_dir / p).resolve()
     return str(p)
-
-
-def _envelope_keyframes(
-    windows: list[tuple[float, float]], idle: float, duck: float, fade: float, total_s: float
-) -> list[dict]:
-    if not windows or abs(idle - duck) < 1e-4:
-        return []
-    pts: list[tuple[float, float]] = [(0.0, idle)]
-    for s, e in windows:
-        pts.extend([(max(0.0, s - fade), idle), (s, duck), (e, duck), (min(total_s, e + fade), idle)])
-    pts.append((total_s, idle))
-    dedup: list[dict] = []
-    for t, g in pts:
-        t_r, g_r = round(max(0.0, min(total_s, t)), 4), round(float(g), 4)
-        if dedup and abs(dedup[-1]["t"] - t_r) < 1e-4:
-            dedup[-1]["gain"] = g_r
-        else:
-            dedup.append({"t": t_r, "gain": g_r})
-    return dedup
-
-
-def _ducking_keyframes(timeline: dict, total_s: float) -> dict[str, list[dict]]:
-    """Compute volume keyframes via `_audio.ducking_keyframes` when present, else locally."""
-    try:
-        import _audio  # type: ignore[import-not-found]
-        if hasattr(_audio, "ducking_keyframes"):
-            return _audio.ducking_keyframes(timeline)
-    except Exception:  # noqa: BLE001
-        pass
-    narr = (timeline.get("audio") or {}).get("narration") or []
-    duck_cfg = (timeline.get("mix") or {}).get("duck") or {}
-    fade, bridge = float(duck_cfg.get("fade_s", 0.25)), float(duck_cfg.get("bridge_s", 0.5))
-    orig_duck = float(duck_cfg.get("under_narration", 0.18))
-    bgm_duck = float(duck_cfg.get("bgm_under_narration", 0.12))
-    raw = sorted((float(s.get("at", 0.0)), float(s.get("at", 0.0)) + float(s.get("duration") or 0.0))
-                 for s in narr if float(s.get("duration") or 0.0) > 0)
-    wins: list[list[float]] = []
-    for s, e in raw:
-        if wins and s - wins[-1][1] <= bridge:
-            wins[-1][1] = max(wins[-1][1], e)
-        else:
-            wins.append([s, e])
-    merged = [(s, e) for s, e in wins]
-    bgm_list = (timeline.get("audio") or {}).get("bgm") or []
-    bgm_idle = float(bgm_list[0].get("gain", 0.25)) if bgm_list else 0.25
-    return {
-        "original": _envelope_keyframes(merged, 1.0, orig_duck, fade, total_s),
-        "bgm": _envelope_keyframes(merged, bgm_idle, min(bgm_idle, bgm_duck), fade, total_s),
-    }
 
 
 def _volume_keyframes(keyframes: list[dict] | None, seg_start_s: float, new_id) -> list[dict]:
@@ -222,7 +175,6 @@ def _text_payload(text: str) -> dict:
 
 @dataclass
 class _TrackBucket:
-    kind: str
     name: str
     track_type: str
     order: int
@@ -230,8 +182,8 @@ class _TrackBucket:
 
 
 class _DraftBuilder:
-    def __init__(self, width: int, height: int, fps: float, new_id, probe):
-        self.width, self.height, self.fps = width, height, fps
+    def __init__(self, width: int, height: int, new_id, probe):
+        self.width, self.height = width, height
         self.new_id, self.probe = new_id, probe
         self.materials: dict[str, list[dict]] = {"videos": [], "audios": [], "texts": []}
         self.notes: list[str] = []
@@ -260,7 +212,7 @@ class _DraftBuilder:
                 occ.append((int(start_us), end_us))
                 break
             suffix += 1
-        bucket = self._buckets.setdefault((kind, name), _TrackBucket(kind, name, track_type, band_order + suffix, []))
+        bucket = self._buckets.setdefault((kind, name), _TrackBucket(name, track_type, band_order + suffix, []))
         bucket.segments.append(seg)
         self.total_us = max(self.total_us, end_us)
 
@@ -396,9 +348,8 @@ def build_draft(timeline: dict, new_id=None, probe=None, *, base_dir: Path | Non
     canvas = timeline["canvas"]
     width, height, fps = int(canvas["width"]), int(canvas["height"]), _parse_fps(canvas.get("fps", 30))
     new_id, probe = new_id or _default_id, probe or _probe_media
-    est_total = sum(max(0.0, float(c["out"]) - float(c["in"])) for c in timeline.get("video") or [])
-    ctx = _DraftBuilder(width, height, fps, new_id, probe)
-    _populate_tracks(ctx, timeline, base_dir, _ducking_keyframes(timeline, est_total))
+    ctx = _DraftBuilder(width, height, new_id, probe)
+    _populate_tracks(ctx, timeline, base_dir, ducking_keyframes(timeline, base_dir=base_dir))
 
     draft_id = new_id()
     content = _template("project")

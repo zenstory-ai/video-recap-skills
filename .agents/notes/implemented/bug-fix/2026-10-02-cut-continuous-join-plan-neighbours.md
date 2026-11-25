@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `sentence_boundaries._continuous_source_join` 判断两段是否"同源、原片首尾相接、输出首尾相接"。多源 cut 按来源分组吸附，每组是一个只含本来源片段的子计划，吸附后按组内顺序重算输出时间轴。计划 `a:0–2, b:0–2, a:2–4` 里，子计划把 `a:0–2` 和 `a:2–4` 排成输出上相邻，于是 `a` 在 2.0 秒（ASR 讲话 1.0–3.0 之内）的两个边界都被判成 `continuous_source_join` 放行，而成片里两者之间实际插着 `b` 的片段，原声句子被切断。

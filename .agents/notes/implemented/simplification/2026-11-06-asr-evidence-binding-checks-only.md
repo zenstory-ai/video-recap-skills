@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `validate_asr_timing_evidence` 有 81 行，加 24 行辅助函数，用来核对一份只有同模块写入的 sidecar：顶层键集合、每个窗口的键集合、状态和转写内容的关系、重读 `audio.wav.meta.json`、逐窗口对比 `start`、`end`、`post_glossary_text`。真正回答“这份转写还能不能复用”的是身份绑定，转写一变 `asr_result` 的 `{size, mtime_ns}` 就对不上（[[2026-09-20-no-content-hashing]]）。窗口里的 `start`、`end`、`text_availability`、`post_glossary_text` 只是抄 `asr_result.json`，模块外没有读取方。

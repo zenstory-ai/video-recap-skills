@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定：`REQUIRE_NARRATION_REVIEW=1` 现在报错一个版本，翻转了下面留给负责人判断的选择，见 [[2026-11-06-refuse-require-narration-review]]。
 
 ## Problem

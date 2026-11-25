@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 架构审计（`.omc/plans/2026-10-02-skill-architecture-audit.md`，subtraction S2 / boundaries B12）在 [[2026-10-02-skill-ownership-function-parity-and-budgets]] 的 Phase 1 里列出三处"只写不读"的契约，复核后确认没有任何读者：

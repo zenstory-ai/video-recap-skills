@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；`1 + 1` 技能结构延续，合并进来的编排代码已移除。
+
 ## Problem
 
 仓库此前将一条连续的视频解说制作链路拆成了六个生产 skill（`video-recap`、`video-understanding`、`video-script`、`video-cut`、`video-voiceover`、`video-assemble`）加一个按需参考 skill（`video-reference`）。为了维持 [[2026-06-14-self-contained-skills-duplicated-libs]] 的“每个 skill 自包含”，这种拆分带来了三层结构性负担：

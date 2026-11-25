@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 翻转了这些笔记里的迁移决定：[[2026-10-02-storyboard-relative-paths]]、[[2026-10-02-understanding-offline-cache-safety]]、[[2026-10-03-tts-content-addressed-cache]]。
 
 ## Problem

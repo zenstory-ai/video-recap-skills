@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 MiMo ASR 的时间只到窗口级（最短 5 秒，实际多为 15 秒）。`detect.py` 的 `detect_speech_boundary_anchors` 按标点在窗口文本里的字符位置算一个"期望时间"（`seg_start + W * match.end()/len(text)`），吸附到最近的短停顿，再用"停顿中点到期望时间的距离"定 `confidence`。这个距离只说明吸附得准不准，不说明句末真在这里：期望时间本身就是按字数比例猜的。盘龙片段（`reuse_e2e/pl`）里 7 个锚点有 4 个的 `expected_time` 恰好等于窗口末端（105.0 / 165.0 / 210.0 / 225.0），4 个被标成 `high`（132.30、177.22、181.42、210.19）。

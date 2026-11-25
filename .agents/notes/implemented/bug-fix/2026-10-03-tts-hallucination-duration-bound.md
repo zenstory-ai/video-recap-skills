@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 0.6.1 候选的真实回归（single-full，Homebrew ffmpeg 那一轮）里，MiMo TTS 对 35 字的「范闲替丫鬟出了这口气，一巴掌把管家扇倒在地，脸上还落下一片古怪的红斑。」返回了 18.08 秒音频；同一句在另一轮是 8.64 秒，重新生成是 8.2 秒。MiMo ASR 听回来是原句后面又接了一段编出来的话。

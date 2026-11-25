@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 video-recap 带着一个可选的 MiMo 多模态 QC：`--mimo-qc pre-assemble|post-render|both` 在合成前 / 成片后各发一次 MiMo 请求，把语义 / 审美观察写进 `mimo_qc.json`。它默认关闭，按契约永远不能阻断、不能自动修复，所有异常都被吞成 `failed` / `unavailable` 状态。代价却是 recap 里成本最高的建议型功能：

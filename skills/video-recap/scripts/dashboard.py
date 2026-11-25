@@ -5,8 +5,8 @@ Subcommands:
     dashboard.py build <work_dir> [--video <mp4>] [--out <work_dir>/review.html]
     dashboard.py serve --root <dir> [--port 0] [--open]
 
-Reads only canonical `timeline.json`, optional `check.json`, `PLAN.md`/`PROMO.md`,
-and `catalog.json`/`materials/`. Never modifies project data in `serve` mode.
+Reads only canonical `timeline.json`, optional `check.json`, the workspace Markdown
+(`BRIEF.md`/`MEDIA_NOTES.md`/`EDIT_PLAN.md`/`PROMO.md`/`REFERENCE_NOTES.md`), and `catalog.json`/`materials/`. Never modifies project data in `serve` mode.
 """
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def _pick_video(work_dir: Path, explicit: Path | None, check: dict | None) -> Pa
             cand = work_dir / cand
         if cand.is_file():
             return cand.resolve()
-    for rel_cand in ("out/final.mp4", "output.mp4", "out/preview.mp4"):
+    for rel_cand in ("out/final.mp4", "out/preview.mp4"):
         cand = work_dir / rel_cand
         if cand.is_file():
             return cand.resolve()
@@ -140,7 +140,7 @@ def _run_payload(work_dir: Path, *, root: Path | None = None, explicit_video: Pa
         cursor += dur
 
     notes: dict[str, str] = {}
-    for fname in ("EDIT_PLAN.md", "BRIEF.md", "MEDIA_NOTES.md", "PLAN.md", "PROMO.md", "NOTES.md", "REFERENCE_NOTES.md"):
+    for fname in ("EDIT_PLAN.md", "BRIEF.md", "MEDIA_NOTES.md", "PROMO.md", "REFERENCE_NOTES.md"):
         p = work_dir / fname
         if p.is_file() and not _unreadable_reason(p):
             notes[fname] = p.read_text(encoding="utf-8", errors="replace")[:20000]
@@ -419,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
 
     p_build = sub.add_parser("build", help="Generate self-contained review.html for one work_dir.")
     p_build.add_argument("work_dir", help="directory containing timeline.json")
-    p_build.add_argument("--video", default=None, help="explicit MP4 path (default: output.mp4 or newest *.mp4)")
+    p_build.add_argument("--video", default=None, help="explicit MP4 path (default: check.json media, out/final.mp4, out/preview.mp4, or newest *.mp4)")
     p_build.add_argument("--out", default=None, help="output HTML path (default: <work_dir>/review.html)")
 
     p_serve = sub.add_parser("serve", help="Run strictly read-only loopback server over --root.")

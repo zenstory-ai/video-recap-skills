@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `index_normalize.parse_plot_time` 原先把序数词"第"直接去掉再读（见 `2026-10-02-understanding-index-normalization.md`），`第3分钟` 读成 `03:00`。"第3分钟"说的是第三分钟这一段，也就是 `02:00`–`03:00`；读成 `03:00` 落在这一段的末尾之后，写稿 Agent 按它找画面会晚整整一分钟，`第1分钟` 更会被读成已经过了开头的 `01:00`。

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 ffmpeg 默认把第一个输入的全局元数据、各流元数据和章节抄进输出。下载器（yt-dlp 等）给原片写的 `title`、`comment`（常是来源网址）、`purl`、`description`，以及原音轨的 `language=eng`、原片章节，因此会出现在 `edited_source.mp4`、最终 recap 和 dub 成片里。实测 ffmpeg 8.0：重编码加 `-filter_complex` 时 `title`/`comment` 照样被抄过去；流复制时连视频流的 `handler_name` 也原样保留；章节时间是原片的，剪辑后对不上画面。`final_qc` 早已不再把容器标签写进报告，但成片本身仍带着它们。
@@ -26,3 +28,4 @@ ffmpeg 默认把第一个输入的全局元数据、各流元数据和章节抄�
 - **收益**：成片不再暴露来源网址与原片标题，也没有错位的章节。
 - **代价**：原片里有意义的标签（如真实的音轨语言、版权说明）也一并去掉；需要时由使用者在成片上另行写入。旋转只在 ffmpeg 8.0 上验证过；更早的 ffmpeg 还把旋转同时导出为 `rotate` 标签，流复制旋转过的手机原片时是否保留未验证（cut 模式的 `edited_source.mp4` 是重编码后的已转正画面，不受影响）。
 - 测试：`tests/cut/test_edited_source_picture.py`（命令与真 ffmpeg：标题、注释、章节、语言都不在 `edited_source.mp4` 里），`tests/assemble/test_render_delivery.py`（narration 命令；source-mix 与 adopted-packet-copy 在流复制和重编码下的真渲染），`tests/voiceover/test_dub.py`（dub 命令）。
+- 2026-11-25：0.8.0 收敛为原子 CLI（#211）时 `render.py` 丢了这两项，成片又会继承第一个源的标题、注释与章节；现由 `render.py` 的 `_NO_META` 统一加在成片、纯音频与 AAC 重编码三处输出上，上面列的旧测试文件已不存在，现测试为 `tests/core/test_render_and_check.py::test_render_does_not_inherit_source_title_comment_or_chapters`（真 ffmpeg：带标题、注释、章节的源渲染后三者都不在）。

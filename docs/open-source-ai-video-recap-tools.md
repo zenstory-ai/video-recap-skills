@@ -18,7 +18,7 @@
 | [video-recap-skills](https://github.com/zenstory-ai/video-recap-skills)（本项目） | Agent Skill，直接装进 Claude Code、Codex、OpenCode、OpenClaw | MIT | 598 / 2026-10-30 | 本机 FFmpeg 探测与抽帧拼图（`frames.py`），由宿主多模态 Agent 直接看片 + 本地优先字幕/Whisper 转写 | 统一 `timeline.json` v3 时间线；本机 FFmpeg 渲染、可选 Remotion 透明动效包装；TTS 本地离线优先，可选 Fish Audio（`s2.1-pro-free`）/ OpenAI / IndexTTS | 支持（配套工具 `export_jianying.py`） | 默认本地运行零额外 API 费用；看片写稿直接用宿主 Agent，云端 ASR/TTS 按需选用 |
 
 此外还有三个常被搜到的相关仓库：
-- [video-recap-skills-plus](https://github.com/ops120/video-recap-skills-plus)：基于本仓库早期版本派生的扩展分支，加入了原片字幕位置检测、音色克隆与旁白期间静音原声（本仓库现已吸收并重写了字幕带位置检测能力）。
+- [video-recap-skills-plus](https://github.com/ops120/video-recap-skills-plus)：基于本仓库早期版本派生的扩展分支，加入了原片字幕位置检测、音色克隆与旁白期间静音原声（本仓库不做字幕带自动检测，由 Agent 看 `frames.py --crop` 局部裁切图判断硬字幕位置后用 `recap.crop` 裁掉；TTS 只发送音色 ID，不做参考音频克隆）。
 - [Narrator-AI-Master-Coze](https://github.com/Narrator-AI/Narrator-AI-Master-Coze)：面向扣子（Coze）工作流的商业转售模板仓库，内含 SQL 脚本与图文教程，不含本地可运行的剪辑代码。
 - [OpenMontage](https://github.com/calesthio/OpenMontage)（AGPL-3.0）：面向通用视频制作的 Agent 编排工具，没有专门针对中文影视解说做原声让位或防切词处理。
 

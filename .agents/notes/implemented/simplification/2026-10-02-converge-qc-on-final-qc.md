@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 0.6.0（PR #58）的 shift-left QC 设计了一套通用 QC 契约 `qc_contract.py`：6 个 stage、4 种 severity、4 种 confidence、5 种 sample policy、语义/审美这类非确定性类别、每条 finding 18 个必填字段，外加递归的密钥与 URL 脱敏。它要同时服务 4 个生产者：`final_qc.json`、`golden_eval.json`、MiMo 建议型 QC 和逐阶段账本 `preflight_qc.json`。[[2026-10-02-delete-mimo-qc]] 和 [[2026-10-02-fold-golden-eval-into-final-qc]] 落地后，剩下的两个生产者都撑不起这套契约：

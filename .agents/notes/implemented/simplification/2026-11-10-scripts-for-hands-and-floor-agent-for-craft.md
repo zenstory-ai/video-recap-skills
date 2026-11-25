@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；“脚本只做手和底线体检”延续为 `check.py` 的 7 项物理体检。
+
 后续补充见 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]（将 `narration_lint.py` 残余的开场/留白时长与外貌泛称阻断降级为警告，拆分 `promo_copy.json` 并统一中文化动态简报与参考文档）。
 
 ## Problem

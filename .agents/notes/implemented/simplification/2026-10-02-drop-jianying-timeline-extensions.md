@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 [[2026-06-14-timeline-json-canonical-jianying-optional]] 让剪映导出成为可选 sidecar，同时在 `timeline.json` 上叠了一层"剪映专有附加字段"：恒定变速、倒放（含导出时用 ffmpeg 自动生成倒放素材）、opacity / rotation / flip、转场、蒙版、LUT（含肤色校正）、绿幕复合草稿、富文本 `style` / `words` / `style_presets`，以及 `sound` / `sticker` / `text_template` / `video_effect` / `face_effect` 资源轨和 `resource_packages` / `resource_config` 离线资源包（含 zip 解压与路径改写）。导出边界还会把 v1 时间线静默迁移到 v2。

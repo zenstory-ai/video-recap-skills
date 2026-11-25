@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 一条成片用了哪首 BGM、哪个音色、哪个字体，信息散在 `recap_run_manifest.json`、`tts_meta.json`、`assembly_manifest.json` 和

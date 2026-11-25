@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定：解说评审已整体移除，见 [[2026-11-06-remove-narration-review-chain]]。下文描述的是当时的评审产物；其中不再写 `grounding_qc.json` 和 `deslop_qc.json` 的决定仍然有效。
 
 ## Problem

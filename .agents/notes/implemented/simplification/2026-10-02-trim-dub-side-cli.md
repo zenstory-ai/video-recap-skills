@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定：dub 模式已移除，见 `.agents/notes/implemented/simplification/2026-11-06-remove-dub-mode.md`。
 
 ## Problem

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；`tts.py` 现按 SHA-256 内容键缓存旁白（`_cache_key`），素材缓存键为 `<slug>-<bytes>`（`library.py`）。
+
 ## Problem
 
 审计（2026-09-20）统计到六个 skill 里约 4,000 行代码、约 270 个测试函数的存在理由是内容哈希：

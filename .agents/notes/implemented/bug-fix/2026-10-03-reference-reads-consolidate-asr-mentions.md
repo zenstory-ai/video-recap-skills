@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `_apply_deterministic_asr_research_fallback` 后来移除，新索引的 `asr_mentions` 只有模型写的字符串，见 [[2026-11-06-index-drops-deterministic-asr-fallback]]；`_mention_names` 的字典分支保留，因为已缓存的索引里还有字典。
 
 ## Problem

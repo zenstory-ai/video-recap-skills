@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续关联：放宽 [[2026-10-02-video-reference-skill]] 与 [[2026-10-02-reference-cut-detection]] 中 `R6`（`source_facts` 短语重合）与 `R7`（五维强制覆盖）的阻断口径；延续 [[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]] 将残余品味阻断降级为提示，并恢复 [[2026-10-02-coarse-asr-anchor-honesty]] 在粗粒度 ASR 窗口下的 `bounded_release` 非阻断原声回升；更新 [[2026-11-06-recap-reference-docs-one-home]] 中 `audio-routing.md` 与 `audio-modes.md` 的分拆事实。
 
 ## Problem

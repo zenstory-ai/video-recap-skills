@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 - `tests/orchestrator/env-inventory-v1.json`（0.6.0 引入，[[2026-09-20-slim-skill-layer]] 把它挪进测试目录）给每个环境变量包一层
