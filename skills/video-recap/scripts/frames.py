@@ -241,6 +241,8 @@ def build_contact_sheet(
 
 def shot_pieces(cuts: Sequence[float], duration: float, window: tuple[float, float], split_s: float = 3.0) -> list[dict[str, Any]]:
     """Shots between probe cuts that overlap `window`, inset 0.08s; shots longer than 2*split_s are split into equal pieces."""
+    if split_s <= 0:
+        raise ValueError("--split must be positive")
     edges = [0.0, *[float(c) for c in cuts if 0 < float(c) < duration], duration]
     pieces: list[dict[str, Any]] = []
     for a, b in zip(edges, edges[1:]):
@@ -255,31 +257,55 @@ def shot_pieces(cuts: Sequence[float], duration: float, window: tuple[float, flo
 
 
 def build_shot_sheet(video_path: str | Path, cuts: Sequence[float], out_image: str | Path, *, window: tuple[float, float],
-                     width: int = 240, crop: tuple[int, int, int, int] | None = None, split_s: float = 3.0) -> dict[str, Any]:
+                     width: int = 240, crop: tuple[int, int, int, int] | None = None, split_s: float = 3.0,
+                     labels: bool = True) -> dict[str, Any]:
     """One head+tail tile pair per shot piece inside `window`, labelled `#n len` / source time, 3 pieces per row."""
     video = Path(video_path)
     duration = float(probe_media(video).get("duration_s") or 0.0)
     pieces = shot_pieces(cuts, duration, window, split_s)
     if not pieces:
         raise RuntimeError(f"No shot of at least 0.6s inside window {window}")
-    font, out = _probe_font(), Path(out_image)
+    font, out = (_probe_font() if labels else None), Path(out_image)
     out.parent.mkdir(parents=True, exist_ok=True)
+    any_labeled = False
     with tempfile.TemporaryDirectory(prefix="frames_shots_") as tmp_dir:
         tmp, idx = Path(tmp_dir), 0
         for pc in pieces:
             for t_s, lbl in ((pc["in"] + 0.1, f"#{pc['n']} {pc['len']:.1f}s"), (pc["out"] - 0.1, _fmt_mmss(pc["in"]))):
-                _extract_single_frame(video, t_s, tmp / f"tile_{idx:04d}.jpg", width=width, crop=crop, label=lbl, font_path=font)
+                was_labeled = _extract_single_frame(
+                    video, t_s, tmp / f"tile_{idx:04d}.jpg", width=width, crop=crop,
+                    label=(lbl if labels else None), font_path=font,
+                )
+                any_labeled = any_labeled or was_labeled
                 idx += 1
         run_cmd(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-framerate", "1", "-i", str(tmp / "tile_%04d.jpg"),
                  "-vf", f"tile=6x{(idx + 5) // 6}:padding=2:margin=2:color=black", "-frames:v", "1", "-q:v", "3", str(out)], check=True)
-    return {"video": str(video), "sheet": str(out), "window": [round(window[0], 3), round(window[1], 3)], "pieces": pieces}
+    return {
+        "video": str(video), "sheet": str(out), "window": [round(window[0], 3), round(window[1], 3)],
+        "labels_burned": any_labeled, "pieces": pieces,
+    }
 
 
 def _probe_cuts(probe_json: str, video: str) -> list[float]:
-    rows = (json.loads(Path(probe_json).read_text(encoding="utf-8")).get("sources") or [])
+    probe_path = Path(probe_json).resolve()
+    rows = json.loads(probe_path.read_text(encoding="utf-8")).get("sources") or []
     want = Path(video).resolve()
-    row = next((r for r in rows if Path(str(r.get("path") or "")).resolve() == want), rows[0] if len(rows) == 1 else None)
-    if row is None or "cuts" not in row:
+    row = None
+    for root in (probe_path.parent, probe_path.parent.parent, Path.cwd()):
+        for r in rows:
+            raw = str(r.get("path") or "")
+            if not raw:
+                continue
+            p = Path(raw)
+            if (p.resolve() if p.is_absolute() else (root / p).resolve()) == want:
+                row = r
+                break
+        if row is not None:
+            break
+    if row is None:
+        by_name = [r for r in rows if r.get("path") and Path(str(r["path"])).name == want.name]
+        row = by_name[0] if len(by_name) == 1 else None
+    if row is None or "cuts" not in row or not isinstance(row["cuts"], list):
         raise ValueError(f"{probe_json} has no cuts for {video}; run probe.py --scenes on it")
     return [float(c) for c in row["cuts"]]
 
@@ -295,9 +321,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--split", type=float, default=3.0, help="With --shots, split shots longer than 2x this many seconds.")
     parser.add_argument("--window", help="Optional time window START:END in seconds.")
     parser.add_argument("--crop", help="Optional source pixel crop x,y,w,h.")
-    parser.add_argument("--width", type=int, default=320, help="Target frame/tile width in px.")
+    parser.add_argument("--width", type=int, default=None, help="Target frame/tile width in px (default 240 for --shots, 320 otherwise).")
     parser.add_argument("--no-labels", action="store_true", help="Do not burn timestamp labels.")
-    parser.add_argument("--out", required=True, help="Output image path (grid/single) or directory.")
+    parser.add_argument("--out", required=True, help="Output image path (grid/shots/single) or directory.")
     parser.add_argument("--out-json", help="Optional JSON metadata path.")
     args = parser.parse_args(argv)
 
@@ -306,19 +332,22 @@ def main(argv: Sequence[str] | None = None) -> int:
     win = _parse_window(args.window, duration) if args.window else None
     crop = _parse_crop(args.crop)
     labels = not args.no_labels
+    width = args.width if args.width is not None else (240 if args.shots else 320)
 
     if args.shots:
         if not win:
             raise ValueError("--shots needs --window START:END")
+        if args.split <= 0:
+            raise ValueError("--split must be positive")
         meta = build_shot_sheet(args.video, _probe_cuts(args.shots, args.video), args.out, window=win,
-                                width=min(args.width, 240), crop=crop, split_s=args.split)
+                                width=width, crop=crop, split_s=args.split, labels=labels)
     elif args.grid:
         cols_s, sep, rows_s = args.grid.lower().partition("x")
         if not sep:
             raise ValueError(f"Invalid --grid '{args.grid}'; expected CxR")
         meta = build_contact_sheet(
             args.video, int(cols_s), int(rows_s), args.out,
-            window=win, width=args.width, crop=crop, labels=labels,
+            window=win, width=width, crop=crop, labels=labels,
         )
     else:
         if args.at:
@@ -333,7 +362,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             while cur < s1:
                 ts.append(round(cur, 4))
                 cur += step
-        meta = extract_frames(args.video, ts, args.out, width=args.width, crop=crop, labels=labels)
+        meta = extract_frames(args.video, ts, args.out, width=width, crop=crop, labels=labels)
 
     if args.out_json:
         save_json(args.out_json, meta)

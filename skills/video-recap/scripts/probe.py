@@ -14,8 +14,8 @@ from _common import has_tool, probe_media, run_cmd, save_json
 
 __all__ = ["detect_scenes", "detect_silences", "main", "probe_sources"]
 
-_PTS_RE = re.compile(r"pts_time:(\d+(?:\.\d+)?)")
-_SCORE_RE = re.compile(r"lavfi\.scene_score=(\d+(?:\.\d+)?)")
+_PTS_RE = re.compile(r"pts_time:(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")
+_SCORE_RE = re.compile(r"lavfi\.scene_score=(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)")
 _SILENCE_START_RE = re.compile(r"silence_start:\s*(-?\d+(?:\.\d+)?)")
 _SILENCE_END_RE = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
 
@@ -32,10 +32,19 @@ def detect_scenes(video_path: str | Path, *, threshold: float = 0.08) -> list[fl
         "ffmpeg", "-hide_banner", "-i", str(video_path), "-an",
         "-vf", r"crop=iw:ih*0.9:0:0,scale=96:54,select=gte(scene\,0),metadata=print:file=-", "-f", "null", "-",
     ], check=True)
-    pts = [float(x) for x in _PTS_RE.findall(res.stdout or "")]
-    score = [float(x) for x in _SCORE_RE.findall(res.stdout or "")]
+    pts: list[float] = []
+    score: list[float] = []
+    cur_pts: float | None = None
+    for line in (res.stdout or "").splitlines():
+        if line.startswith("frame:"):
+            m_pts = _PTS_RE.search(line)
+            cur_pts = float(m_pts.group(1)) if m_pts else None
+        elif cur_pts is not None and (m_score := _SCORE_RE.search(line)):
+            pts.append(cur_pts)
+            score.append(float(m_score.group(1)))
+            cur_pts = None
     cuts: list[float] = []
-    for i, val in enumerate(score[:len(pts)]):
+    for i, val in enumerate(score):
         if val < threshold:
             continue
         near = sorted(score[max(0, i - 15):i] + score[i + 1:i + 16])
