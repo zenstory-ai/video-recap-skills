@@ -1,4 +1,4 @@
-<!-- Last synced with README.md: 2026-11-21 -->
+<!-- Last synced with README.md: 2026-11-25 -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/zenstory-ai/zenstory/main/apps/web/public/brand/zenstory-ai-mark.svg" alt="ZenStory AI" width="76" height="76">
 </p>
@@ -6,7 +6,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>Video editing and narration skill pack for coding agents: footage review, story cutting, voiceover mixing, subtitle & motion packaging, physical QC, and JianYing/CapCut draft export for Claude Code, Codex CLI, OpenCode, and OpenClaw.</b>
+  <b>Video editing and narration skill pack for coding agents: footage review, story cutting, voiceover mixing, subtitle & motion packaging, physical QC, and JianYing/CapCut draft export for Claude Code, Google Antigravity (AGY), Codex CLI, OpenCode, and OpenClaw.</b>
 </p>
 
 <p align="center">
@@ -110,7 +110,16 @@ In **Claude Code**:
 ```
 
 <details>
-<summary><strong>Codex CLI · OpenCode · OpenClaw installation</strong></summary>
+<summary><strong>Google Antigravity (AGY) · Codex CLI · OpenCode · OpenClaw installation</strong></summary>
+
+**Google Antigravity (AGY)**: install via the `agy` CLI (imports `.claude-plugin/plugin.json` into `~/.gemini/config/plugins/`, syncs across Antigravity CLI and Antigravity App, and exposes `/video-recap` and `/video-reference`; see the [official Agent Skills docs](https://antigravity.google/docs/skills)):
+
+```bash
+agy plugin install https://github.com/zenstory-ai/video-recap-skills
+agy plugin list
+```
+
+Alternatively, place `skills/video-recap` and `skills/video-reference` in `<workspace>/.agents/skills/` (workspace-scoped) or `~/.gemini/config/skills/` (global across Antigravity App, CLI, and IDE).
 
 **Codex CLI**
 
@@ -175,7 +184,7 @@ Beyond rendering the final MP4, export a multi-track JianYing/CapCut draft for f
 
 | Category | Links |
 |---|---|
-| **Editorial Craft & Skill Specs** | [Editorial Craft](skills/video-recap/references/editorial-craft.md) · [Packaging & SFX](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 Contract](skills/video-recap/references/timeline-schema.md) · [JianYing Export](skills/video-recap/references/jianying-export.md) · [Dashboard & Library](skills/video-recap/references/material-library.md) · [Remote Services](skills/video-recap/references/remote-services.md) |
+| **Editorial Craft & Skill Specs** | [Editorial Craft](skills/video-recap/references/editorial-craft.md) · [Long-Form Recap & plan.py](skills/video-recap/references/long-form.md) · [Packaging & SFX](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 Contract](skills/video-recap/references/timeline-schema.md) · [JianYing Export](skills/video-recap/references/jianying-export.md) · [Dashboard & Library](skills/video-recap/references/material-library.md) · [Remote Services](skills/video-recap/references/remote-services.md) |
 | **Architecture & Boundaries** | [Architecture Overview (ZH)](docs/architecture.md) · [Production Boundaries (ZH)](docs/production-boundaries.md) · [Multi-track Timeline & JianYing Protocol](docs/timeline-and-jianying.md) · [Test Suite (ZH)](tests/README.md) |
 | **Case Study & Guides** | [*Guohuo* Archived Showcase](examples/guohuo-60s/) · [Recap Script Writing (ZH)](docs/video-recap-script-writing.md) · [Grounding Analysis Without Invented Plot (ZH)](docs/ai-video-analysis-without-invented-plot.md) |
 

@@ -12,7 +12,7 @@
 
 ## 严格离线（绝不联网）的脚本
 
-`probe.py`、`frames.py`、`render.py`、`check.py`、`export_jianying.py`、`dashboard.py`（仅监听 `127.0.0.1` 只读回环）与 `library.py` 全程离线，绝不上传任何素材、帧图或文稿。
+`probe.py`、`frames.py`、`render.py`、`check.py`、`plan.py`、`export_jianying.py`、`dashboard.py`（仅监听 `127.0.0.1` 只读回环）与 `library.py` 全程离线，绝不上传任何素材、帧图或文稿。
 
 ## 密钥与授权安全约定
 

@@ -26,7 +26,7 @@ description: General-purpose AI video editing and narration recap skill for 30�
 | 工具 | 职责与典型用法 |
 |---|---|
 | `probe.py` | 探测分辨率、旋转、CFR 帧率、色域、音轨、切点与静音：`probe.py <media>... [--scenes] [--silence] --out media/probe.json` |
-| `frames.py` | 生成带时间戳的拼图与局部裁切图供你直接看片：`frames.py <video> (--grid 4x4 \| --at t1,t2 \| --interval 5 \| --shots probe.json --window a:b) [--crop x,y,w,h] --out media/frames/` |
+| `frames.py` | 生成带时间戳的拼图与局部裁切图供你直接看片：`frames.py <video> (--grid 4x4 \| --at t1,t2 \| --interval 5 \| --shots probe.json --window a:b) [--crop x,y,w,h] --out media/frames/`（`--grid`/`--shots` 传图片路径如 `media/shots.jpg`） |
 | `transcribe.py` | 本地优先提取字幕/语音时间戳（外挂/内封字幕 → 本机 Whisper → 可选远程 ASR）：`transcribe.py <media> --provider auto --out media/transcript.json` |
 | `tts.py` | 合成旁白并实测时长（绝不变速；Fish 默认 `s2.1-pro-free`，支持 `--whole-article`、内联 `[chuckle]` 标签与 `spoken_text`）：`tts.py --timeline timeline.json --out-dir media/vo [--engine fish --whole-article] --update-timeline --sync-subtitles --out media/measure.json` |
 | `render.py` | 编译成片（CFR 裁切、`viewport.fit`、`overlays[]` 静图/透明视频、闪避、`-14 LUFS`/`-1.5 dBTP`、字幕；时序重叠默认软警告，`--strict` 才阻断）：`render.py timeline.json --out out/final.mp4 [--preview]` |
@@ -50,7 +50,7 @@ description: General-purpose AI video editing and narration recap skill for 30�
 
 ## 4. 远程调用披露与本地模式
 
-核心链路默认**完全本地运行**：`probe.py`、`frames.py`、`render.py`、`check.py`、`export_jianying.py`、`dashboard.py` 与 `library.py` 绝不联网。仅在显式配置或指定云端引擎时才会联网，完整清单与关闭方式见 `references/remote-services.md`：
+核心链路默认**完全本地运行**：`probe.py`、`frames.py`、`render.py`、`check.py`、`plan.py`、`export_jianying.py`、`dashboard.py` 与 `library.py` 绝不联网。仅在显式配置或指定云端引擎时才会联网，完整清单与关闭方式见 `references/remote-services.md`：
 
 - `transcribe.py`：仅当本机无字幕且无本地 Whisper、并显式配置 `ASR_API_URL` + `ASR_API_KEY`（或 `--provider api`）时，将提取的音频发往用户指定的 ASR 接口；传 `--provider srt` / `embedded` / `whisper` 可彻底禁止联网。
 - `tts.py`：仅当选用云端引擎（`fish` / `openai` / 自托管 `indextts`）时，将旁白文本与音色 ID 发往对应端点；传 `--engine local`（严格离线）或省略云端密钥即保持纯本地合成。

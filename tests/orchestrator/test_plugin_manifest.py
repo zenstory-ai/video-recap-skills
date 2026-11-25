@@ -104,10 +104,13 @@ def test_public_readmes_are_skill_first_and_document_verified_hosts():
     }
 
     for language, text in readmes.items():
+        assert "agy plugin install https://github.com/zenstory-ai/video-recap-skills" in text, language
+        assert "https://antigravity.google/docs/skills" in text, language
         assert "codex plugin marketplace add zenstory-ai/video-recap-skills" in text, language
         assert "codex plugin add video-recap-skills@video-recap" in text, language
         assert "https://opencode.ai/docs/skills/" in text, language
         assert "opencode debug skill" in text, language
+        assert "skills/video-recap/references/long-form.md" in text, language
 
     assert "用 /path/to/ep1.mp4 和 /path/to/ep2.mp4" in readmes["zh"]
     assert "Use /path/to/ep1.mp4 and /path/to/ep2.mp4" in readmes["en"]

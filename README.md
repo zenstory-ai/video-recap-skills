@@ -5,7 +5,7 @@
 <h1 align="center">Video Recap Skills</h1>
 
 <p align="center">
-  <b>面向编程 Agent 的视频剪辑与解说技能包：覆盖拉片看图、叙事剪辑、配音混音、字幕包装、成片质检与剪映草稿导出，支持 Claude Code、Codex CLI、OpenCode 与 OpenClaw。</b>
+  <b>面向编程 Agent 的视频剪辑与解说技能包：覆盖拉片看图、叙事剪辑、配音混音、字幕包装、成片质检与剪映草稿导出，支持 Claude Code、Google Antigravity (AGY)、Codex CLI、OpenCode 与 OpenClaw。</b>
 </p>
 
 <p align="center">
@@ -109,7 +109,16 @@ brew install ffmpeg          # macOS（如需烧录硬字幕，建议 brew insta
 ```
 
 <details>
-<summary><strong>Codex CLI · OpenCode · OpenClaw 安装方式</strong></summary>
+<summary><strong>Google Antigravity (AGY) · Codex CLI · OpenCode · OpenClaw 安装方式</strong></summary>
+
+**Google Antigravity (AGY)**：通过 `agy` CLI 一键安装（会导入 `.claude-plugin/plugin.json` 至 `~/.gemini/config/plugins/`，在 Antigravity CLI 与 Antigravity App 中自动同步，可用 `/video-recap` 与 `/video-reference` 调用；详见[官方 Skills 文档](https://antigravity.google/docs/skills)）：
+
+```bash
+agy plugin install https://github.com/zenstory-ai/video-recap-skills
+agy plugin list
+```
+
+也可按需将 `skills/video-recap` 与 `skills/video-reference` 放入工作区 `.agents/skills/`（项目级）或 `~/.gemini/config/skills/`（全局，App / CLI / IDE 通用）。
 
 **Codex CLI**
 
@@ -174,7 +183,7 @@ ClawHub 分发由[显式发布清单](.clawhub/publish.json)管理；历次版�
 
 | 类别 | 文档链接 |
 |---|---|
-| **剪辑工艺与技能规范** | [通用剪辑与声画原则](skills/video-recap/references/editorial-craft.md) · [竖横屏包装与音效](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 契约](skills/video-recap/references/timeline-schema.md) · [剪映草稿导出](skills/video-recap/references/jianying-export.md) · [审片台与素材库](skills/video-recap/references/material-library.md) · [远程调用披露](skills/video-recap/references/remote-services.md) |
+| **剪辑工艺与技能规范** | [通用剪辑与声画原则](skills/video-recap/references/editorial-craft.md) · [长篇连续解说与 plan.py](skills/video-recap/references/long-form.md) · [竖横屏包装与音效](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 契约](skills/video-recap/references/timeline-schema.md) · [剪映草稿导出](skills/video-recap/references/jianying-export.md) · [审片台与素材库](skills/video-recap/references/material-library.md) · [远程调用披露](skills/video-recap/references/remote-services.md) |
 | **仓库架构与边界** | [仓库架构说明](docs/architecture.md) · [生产能力边界与验收原则](docs/production-boundaries.md) · [多轨时间线与剪映协议](docs/timeline-and-jianying.md) · [单测体系](tests/README.md) |
 | **案例与写作参考** | [《这一秒过火》归档案例](examples/guohuo-60s/) · [影视解说文案指南](docs/video-recap-script-writing.md) · [AI 视频分析防编造指南](docs/ai-video-analysis-without-invented-plot.md) |
 
