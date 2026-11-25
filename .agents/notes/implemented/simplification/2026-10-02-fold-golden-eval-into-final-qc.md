@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 0.6.0 的 shift-left QC 在渲染后写两份报告：`final_qc.json`（成片探测、上游 assembly/visual QC 汇总）和 `golden_eval.json`。后者的设计是拿一份 golden fixture（期望时长区间、codec、必需产物）对照成片，但编排入口从不传 fixture（`recap_stage_qc._write_final_qc_reports` 只调 `final_qc.run(work_dir, final_output=...)`）。没有 fixture 时它唯一的检查是 `expected_final_qc_ok=True`，也就是把 `final_qc.ok` 原样再说一遍：

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 遮罩策略机后来收成一个开关，`SOURCE_SUBTITLE_MASK_POLICY` 与 `opt_in` / `safe` 不再存在，见 [[2026-11-06-source-subtitle-mask-one-flag]]；下文说的是当时的代码。
 
 ## Problem

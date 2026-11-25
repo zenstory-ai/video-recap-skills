@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 `narration_audio._build_timed_narration` 把段落内（与上一块作者留白不超过 `narration_run_gap_seconds = 1.6` 秒）的后续块放到上一块实际结尾 + 0.35 秒处，最多比写的 `start` 提前 `narration_max_pull_seconds = 1.2` 秒。`narration_lint` 的 `_source_sentence_entry_issue` 只检查写的 `start` 是否落在句末停顿或安静处，提前后的实际起点从没被检查过：

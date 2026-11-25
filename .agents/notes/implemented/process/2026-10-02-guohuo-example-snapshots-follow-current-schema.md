@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：本文涉及的 guohuo-60s 快照与 Remotion 工程已在 2026-11-25 清理中删除，目录只留成片链接，见 [[2026-11-25-remove-v07-leftovers]]。
+
 ## Problem
 
 [[2026-10-02-drop-unreachable-ducking-modes-and-tts-dynamic-switch]] 与 [[2026-10-02-assemble-drop-qc-mirrors-dead-env-version-stamps]] 都决定 `examples/guohuo-60s/assembly_manifest.json` / `assembly_qc.json` 是历史运行产物、保留旧形状、不改。精简合并后，对这个样例做了一次静态契约核对和一次替身素材的端到端复现（原片与 Fish 音色不在本机），发现这个决定和样例文档互相矛盾：

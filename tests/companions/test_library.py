@@ -79,7 +79,7 @@ def test_cache_save_restore_is_mtime_independent_and_redacts_secrets(tmp_path: P
         }),
         encoding="utf-8",
     )
-    (work1 / "notes.md").write_text(
+    (work1 / "MEDIA_NOTES.md").write_text(
         "MIMO_API_KEY=tp-topsecret999\nFISH_API_KEY=9a8b7c6d5e4f3210deadbeef\n"
         "GROQ_API_KEY=gsk_supersecret999\nGood scene at 4s.\n",
         encoding="utf-8",
@@ -92,7 +92,7 @@ def test_cache_save_restore_is_mtime_independent_and_redacts_secrets(tmp_path: P
     assert cached_probe["fish_api_key"] == "[redacted]"
     assert cached_probe["openai_api_key"] == "[redacted]"
     assert "[redacted-token]" in cached_probe["note"]
-    cached_notes = (Path(saved["dir"]) / "notes.md").read_text(encoding="utf-8")
+    cached_notes = (Path(saved["dir"]) / "MEDIA_NOTES.md").read_text(encoding="utf-8")
     assert "tp-topsecret999" not in cached_notes
     assert "9a8b7c6d5e4f3210deadbeef" not in cached_notes
     assert "gsk_supersecret999" not in cached_notes
@@ -101,8 +101,9 @@ def test_cache_save_restore_is_mtime_independent_and_redacts_secrets(tmp_path: P
     os.utime(src_vid, (1700000000, 1700000000))
     work2 = tmp_path / "run2"
     work2.mkdir()
-    (work2 / "PLAN.md").write_text("# My local plan\n", encoding="utf-8")
+    (work2 / "MEDIA_NOTES.md").write_text("# Newer local notes\n", encoding="utf-8")
     restored = library.cache_restore(lib_dir, src_vid, work2)
     assert restored["restored"] is True
     assert (work2 / "probe.json").is_file()
-    assert (work2 / "PLAN.md").read_text(encoding="utf-8") == "# My local plan\n"
+    assert (work2 / "MEDIA_NOTES.md").read_text(encoding="utf-8") == "# Newer local notes\n"
+    assert "MEDIA_NOTES.md" not in restored["files"]

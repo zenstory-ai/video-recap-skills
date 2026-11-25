@@ -34,7 +34,7 @@
 
 https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
-> Sanitized planning artifacts and post-mortem notes for the 59-second showcase above (*Guohuo*) are published in [examples/guohuo-60s/](examples/guohuo-60s/).
+> The 59-second showcase above (*Guohuo*) was made with v0.7; see the archive note in [examples/guohuo-60s/](examples/guohuo-60s/).
 
 ## Editorial & Post-Production Craft
 
@@ -85,7 +85,7 @@ flowchart LR
 
 | Skill | Components | Core Deliverables |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | 6 core atomic CLIs (`probe.py`, `frames.py`, `transcribe.py`, `tts.py`, `render.py`, `check.py`) + 4 optional companion tools (`packaging.py`, `export_jianying.py`, `dashboard.py`, `library.py`) | `out/final.mp4`, `timeline.json`, `check.json`, `out/review.html`, `out/jianying_draft/` |
+| [`video-recap`](skills/video-recap/) | 6 core atomic CLIs (`probe.py`, `frames.py`, `transcribe.py`, `tts.py`, `render.py`, `check.py`) + 5 optional companion tools (`packaging.py`, `export_jianying.py`, `dashboard.py`, `library.py`, `plan.py`) | `out/final.mp4`, `timeline.json`, `check.json`, `out/review.html`, `out/jianying_draft/` |
 | [`video-reference`](skills/video-reference/) | 1 local-only analyzer CLI (`analyze_reference.py`): measures cuts, shot-length stats, loudness/audio density, and renders a contact sheet | `reference_metrics.json`, `contact_sheet.jpg`, `REFERENCE_NOTES.md` |
 
 ## Install
@@ -177,7 +177,7 @@ Beyond rendering the final MP4, export a multi-track JianYing/CapCut draft for f
 |---|---|
 | **Editorial Craft & Skill Specs** | [Editorial Craft](skills/video-recap/references/editorial-craft.md) · [Packaging & SFX](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 Contract](skills/video-recap/references/timeline-schema.md) · [JianYing Export](skills/video-recap/references/jianying-export.md) · [Dashboard & Library](skills/video-recap/references/material-library.md) · [Remote Services](skills/video-recap/references/remote-services.md) |
 | **Architecture & Boundaries** | [Architecture Overview (ZH)](docs/architecture.md) · [Production Boundaries (ZH)](docs/production-boundaries.md) · [Multi-track Timeline & JianYing Protocol](docs/timeline-and-jianying.md) · [Test Suite (ZH)](tests/README.md) |
-| **Case Study & Guides** | [*Guohuo* Artifact Directory](examples/guohuo-60s/) · [Recap Script Writing (ZH)](docs/video-recap-script-writing.md) · [Grounding Analysis Without Invented Plot (ZH)](docs/ai-video-analysis-without-invented-plot.md) |
+| **Case Study & Guides** | [*Guohuo* Archived Showcase](examples/guohuo-60s/) · [Recap Script Writing (ZH)](docs/video-recap-script-writing.md) · [Grounding Analysis Without Invented Plot (ZH)](docs/ai-video-analysis-without-invented-plot.md) |
 
 ## Acknowledgements & License
 

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 翻转 [移除 --audio-stream-index](2026-11-06-remove-audio-stream-index.md) 里“`timeline.json` 的 `selected_stream` 保留为常量 0”这一项；同一篇里其他落盘字段的决定不变。
 
 ## Problem

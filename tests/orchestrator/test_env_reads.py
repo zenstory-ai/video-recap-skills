@@ -6,7 +6,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[2]
 MAX_ENV_VARS_TOTAL = 25
 CREDENTIAL_MARKERS = ("KEY", "SECRET", "PASSWORD")
-ENV_READERS = {"env_bool", "_env_bool", "env_int", "env_float", "env_str"}
 
 
 def _skill_script_trees():
@@ -41,7 +40,7 @@ def _literal_env_reads(tree):
                         or isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
                     )
                 )
-                if name in ENV_READERS or direct_environment:
+                if direct_environment:
                     reads.add(node.args[0].value)
             if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
                 value = node.value

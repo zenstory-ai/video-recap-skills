@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `recap.py --doctor` 后来移除，自检入口只剩 `doctor.py`，见 [[2026-11-06-one-entry-per-capability]]；下文的 `recap.py --doctor --json` 现在写作 `doctor.py --json`。
 
 ## Problem

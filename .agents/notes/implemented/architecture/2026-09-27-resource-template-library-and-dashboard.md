@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 专业剪辑要反复复用同一批资源和包装，但仓库目前没有任何地方登记它们：

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 2026-09-20 一天合并了约 20 个 feature PR 后，skill 层出现三类"看得见但没人用"的东西：

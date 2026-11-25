@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定：`review.py` 已移除，见 [[2026-11-06-remove-narration-review-chain]]。原片时间的 `validate.py --mode cut` 也已删除，见 [[2026-11-06-remove-validate-cut-lint-mode]]。cut 优先、旁白在后的决定不变。
 
 ## Problem

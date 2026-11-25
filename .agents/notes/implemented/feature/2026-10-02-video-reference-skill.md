@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；`video-reference` 保留，收敛为 `analyze_reference.py` 加 Agent 写的 `REFERENCE_NOTES.md`。
+
 后续集成（资源库登记、`--project` 绑定）见 [[2026-10-02-production-reference-binding]]，已落地；`R6`（`source_facts` 重合）与 `R7`（五维覆盖）的阻断口径放宽见 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]。
 
 ## Problem

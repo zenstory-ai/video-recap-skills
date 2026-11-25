@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代 [删除走不到的 ducking 模式](2026-10-02-drop-unreachable-ducking-modes-and-tts-dynamic-switch.md) 里“没有放置信息时恒定 `ducking_orig_volume`”这一分支。
 
 ## Problem

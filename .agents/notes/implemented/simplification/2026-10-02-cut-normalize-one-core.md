@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 video-cut 的计划标准化和边界吸附各有两份几乎相同的实现，外加几个没人用的旋钮：

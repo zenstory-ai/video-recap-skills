@@ -15,7 +15,6 @@ from typing import Any, Sequence
 
 __all__ = [
     "color_tag_args",
-    "color_tag_filter",
     "filter_script_args",
     "frame_count",
     "has_tool",
@@ -26,7 +25,6 @@ __all__ = [
     "resolve_source",
     "run_cmd",
     "sanitize_api_error",
-    "sanitize_error",
     "save_json",
     "timeline_video_spans",
 ]
@@ -98,8 +96,6 @@ def sanitize_api_error(text: Any, extra_secrets: Sequence[str] = ()) -> str:
     return cleaned.strip()[:400]
 
 
-sanitize_error = sanitize_api_error
-
 
 def parse_fps(value: Any, default: Fraction = Fraction(30, 1)) -> Fraction:
     if isinstance(value, Fraction):
@@ -142,10 +138,33 @@ def frame_count(duration_s: float, fps: Fraction) -> int:
     return 0 if dur <= 0 else max(1, int(round(dur * float(fps))))
 
 
+_OPTION_FILES: list[bool] = []
+
+
+def ffmpeg_reads_option_files() -> bool:
+    """True when PATH ffmpeg accepts `-/option file` (7.0+; 9.0 removed `-filter_complex_script`). Probed once by behaviour."""
+    if not _OPTION_FILES:
+        ok = False
+        if shutil.which("ffmpeg"):
+            with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as fh:
+                fh.write("anullsrc")
+            try:
+                res = subprocess.run(["ffmpeg", "-hide_banner", "-/filter_complex", fh.name, "-t", "0.01", "-f", "null", "-"],
+                                     capture_output=True, text=True, timeout=30)
+                ok = "Unrecognized option" not in (res.stderr or "")
+            except (OSError, subprocess.SubprocessError):
+                ok = False
+            finally:
+                os.unlink(fh.name)
+        _OPTION_FILES.append(ok)
+    return _OPTION_FILES[0]
+
+
 def filter_script_args(flag: str, expr: str, work_dir: Path, threshold: int = 4096) -> tuple[list[str], Path | None]:
     if len(expr.encode("utf-8")) <= threshold:
         return [f"-{flag}", expr], None
-    script_flag = {"filter_complex": "-filter_complex_script", "vf": "-filter_script:v", "af": "-filter_script:a"}.get(flag, f"-/{flag}")
+    legacy = {"filter_complex": "-filter_complex_script", "vf": "-filter_script:v", "af": "-filter_script:a"}
+    script_flag = f"-/{flag}" if ffmpeg_reads_option_files() or flag not in legacy else legacy[flag]
     work_dir.mkdir(parents=True, exist_ok=True)
     path = work_dir / f".filter_{flag}_{os.getpid()}.txt"
     path.write_text(expr, encoding="utf-8")
@@ -161,17 +180,19 @@ def resolve_source(timeline: dict[str, Any], ref: str, base_dir: str | Path | No
 def timeline_video_spans(timeline: dict[str, Any]) -> tuple[list[dict[str, Any]], float]:
     spans: list[dict[str, Any]] = []
     cursor = 0.0
+    fps = parse_fps((timeline.get("canvas") or {}).get("fps"))
     for idx, clip in enumerate(timeline.get("video") or ()):
         src_in, src_out = float(clip["in"]), float(clip["out"])
         dur = src_out - src_in
         if dur <= 0:
             raise ValueError(f"Video clip {clip.get('id', idx)} has non-positive duration")
+        out_dur = frame_count(dur, fps) / float(fps)  # 画面按整帧出，游标同口径累加，几百段不漂移
         spans.append({
             "index": idx, "id": clip.get("id", f"v{idx + 1}"), "source": clip["source"],
             "in": src_in, "out": src_out, "duration": dur,
-            "timeline_start": round(cursor, 6), "timeline_end": round(cursor + dur, 6), "clip": clip,
+            "timeline_start": round(cursor, 6), "timeline_end": round(cursor + out_dur, 6), "clip": clip,
         })
-        cursor += dur
+        cursor += out_dur
     return spans, round(cursor, 6)
 
 
@@ -209,15 +230,6 @@ def output_color_tags(stream: dict[str, Any]) -> dict[str, Any]:
     if from_rgb:
         tags["from_rgb"] = True
     return tags
-
-
-def color_tag_filter(tags: dict[str, Any]) -> str:
-    parts = [f"{opt}={tags[opt]}" for _, opt in _COLOR_FIELDS if opt in tags]
-    parts.append(f"range={tags.get('color_range', 'tv')}")
-    setparams = "setparams=" + ":".join(parts)
-    if tags.get("from_rgb"):
-        return f"scale=out_color_matrix=bt709:out_range={tags.get('color_range', 'tv')},format=yuv420p,{setparams}"
-    return setparams
 
 
 def color_tag_args(tags: dict[str, Any]) -> list[str]:

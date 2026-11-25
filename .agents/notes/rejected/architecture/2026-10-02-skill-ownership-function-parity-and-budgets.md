@@ -1,6 +1,8 @@
 # Agent Note: 按产物归属切 skill、函数级 parity、给 skill 表面定预算
 
-Status: proposed
+Status: rejected
+
+后续决定：剩余阶段不再执行。v0.8.0 把六个阶段 skill、parity 测试和文中各模块整体换成 6 支原子 CLI + 5 支叶工具 + 单一 `timeline.json` v3，本文要切分的归属和要守的函数级 parity 已无对象；“给 skill 表面定预算”以另一种形式落地为 `tests/orchestrator/test_test_suite_architecture.py` 的字符与行数预算，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。已落地的 Phase 1 部分见文中链接的 implemented 笔记。
 
 ## Problem
 

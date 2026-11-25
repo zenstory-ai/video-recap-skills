@@ -25,7 +25,7 @@ __all__ = [
 _ASSET_KINDS = ("bgm", "sfx", "voice", "font", "image", "theme")
 _LICENSE_STATUSES = ("owned", "licensed", "cc0", "unknown", "restricted")
 _CONSENT_STATUSES = ("granted", "self", "licensed", "synthetic", "unknown", "denied")
-_CACHE_GLOBS = ("probe.json", "transcript.json", "*.srt", "MEDIA_NOTES.md", "notes.md", "PLAN.md", "contact_sheet*.jpg", "frames*.jpg")
+_CACHE_GLOBS = ("probe.json", "transcript.json", "*.srt", "MEDIA_NOTES.md", "contact_sheet*.jpg", "frames*.jpg")
 _SECRET_VALUE_RES = (
     re.compile(r"\btp-[A-Za-z0-9_-]{8,}\b"), re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"), re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
@@ -34,11 +34,7 @@ _SECRET_VALUE_RES = (
 _SECRET_ASSIGN_RE = re.compile(
     r"(?i)(\b(?:\w*_(?:api_key|token|secret)|api_key|secret_key|access_token|refresh_token|authorization|password|bearer)\b\s*[:=]\s*)(\"?)([^\s\"',;]+)(\"?)"
 )
-_SECRET_KEYS = frozenset({
-    "api_key", "fish_api_key", "fish_audio_api_key", "openai_api_key", "groq_api_key",
-    "asr_api_key", "mimo_api_key", "mimo_asr_api_key", "mimo_tts_api_key",
-    "secret_key", "access_token", "refresh_token", "authorization", "password",
-})
+_SECRET_KEYS = frozenset({"api_key", "secret_key", "authorization", "password"})  # *_api_key/*_token/*_secret 走后缀规则
 
 
 def _is_secret_key(key: str) -> bool:
@@ -305,7 +301,7 @@ def cache_restore(lib_dir: str | Path, source_video: str | Path, to_dir: str | P
     restored = []
     for fp in sorted(p for p in src_dir.iterdir() if p.is_file() and p.name != "material.md"):
         target = dst / fp.name
-        if fp.name in {"PLAN.md", "notes.md"} and target.exists():
+        if fp.suffix.lower() == ".md" and target.exists():  # 工作区里已有的笔记更新，不拿缓存覆盖
             continue
         shutil.copy2(fp, target)
         restored.append(fp.name)

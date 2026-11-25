@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代 [已采用声音家族留在 adoption/ 子包](../architecture/2026-09-21-adoption-family-stays-in-skill-as-subpackage.md) 关于保留这一族的决定，以及 [删除 pair_media / compose_foreground](2026-10-02-drop-pair-media-compose-foreground.md) 里关于 `adoption/av_clock.py` 和“换画面走 `adopted-packet-copy`”的部分。
 
 其中保留 `narration_input_binding.json` 的决定已被 [移除 narration_input_binding 产物](2026-11-06-remove-narration-input-binding.md) 翻转。

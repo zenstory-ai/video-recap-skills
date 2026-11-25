@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定翻转见 [[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]]（`consolidate.py` 与 `understanding_index.*` 已整体移除）。
 翻转了 [[2026-10-03-reference-reads-consolidate-asr-mentions]] 备选方案里“`evidence_id` 与命中别名要留着让 ASR 贡献可追溯”的判断；那篇的消费方修复仍然成立。
 

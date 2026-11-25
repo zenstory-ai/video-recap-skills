@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 沿用 [[2026-10-02-hardcode-tuning-knobs-drop-narration-delay]] 的标准复查：`CLIP_JOIN_AUDIO_FADE_MS`、`MIMO_ASR_BASE64_MAX_MB`、`MIMO_MEDIA_RESOLUTION`、`SPEECH_SAFETY_MARGIN`、`MIMO_DISABLE_THINKING` 在任何文档、CHANGELOG 和测试里都没有以环境变量形式出现。测试改这些值用的是 `monkeypatch.setitem(CONFIG, ...)`。

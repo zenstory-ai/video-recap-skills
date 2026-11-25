@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代 [[2026-10-02-mimo-moderation-refusal-not-content]] 里关于宽判定的部分，[[2026-10-02-understanding-offline-cache-safety]] 与 [[2026-10-02-understanding-internal-dedupe]] 里 overview 相关的事实已就地改。`MIMO_MEDIA_RESOLUTION` 后来硬编码，见 [[2026-11-06-hardcode-five-unpublished-env-knobs]]。
 
 ## Problem

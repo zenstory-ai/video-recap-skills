@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 翻转了 [[2026-11-06-remove-narration-review-chain]] 里“这个变量设了也不报错”的处理，那篇把这个选择留给了负责人判断。事实已在那篇和 [[2026-11-06-remove-env-twins-of-run-flags]] 里更新。
 
 ## Problem

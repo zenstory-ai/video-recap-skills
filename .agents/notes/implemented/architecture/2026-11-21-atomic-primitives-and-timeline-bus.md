@@ -18,11 +18,11 @@ v0.7.0 的 `skills/` 膨胀到 99 个 Python 文件（24,207 行）、149 个 `C
 
 - **6 支核心原子 CLI（`skills/video-recap/scripts/`）**：`probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py`，共用 `_common.py`、`_audio.py`、`_subtitles.py`（纯 Python 3.10+ 标准库 + `ffmpeg`/`ffprobe`）。
   - 宿主优先：优先使用本机字幕/Whisper、本机 TTS 与宿主 Agent 原生看图，仅在显式配置或指定云端引擎时联网；`tts.py` 按内容哈希缓存并实测真实时长，绝不对人声变速挤压。
-  - 机械正确性内建于 `render.py`（CFR 帧精确裁切、背景画布、闪帧防护、统一闪避混音、`-14 LUFS` / `-1.5 dBTP` 响度闭环、安全区字幕换行）；`check.py` 只执行 7 项物理健康检查并原子覆写 `check.json` v1，彻底取消主观审美阻断门禁。
-- **4 支单向叶工具**：`export_jianying.py`、`dashboard.py`（静态 `review.html` + 只读 `127.0.0.1` 服务）、`packaging.py`（数据驱动 JSON 主题 + 宿主机渲染 + 防撞原声音效校对）与 `library.py`（扁平 `catalog.json` + 跨机安全素材缓存 + 授权/音色同意审计）。所有叶工具只消费 `timeline.json` / 工作区文件，核心模块永不反向导入叶工具。
+  - 机械正确性内建于 `render.py`（CFR 帧精确裁切、背景画布、统一闪避混音、`-14 LUFS` / `-1.5 dBTP` 响度闭环、安全区字幕换行）；`check.py` 只执行 7 项物理健康检查并原子覆写 `check.json` v1，彻底取消主观审美阻断门禁。
+- **5 支单向叶工具**：`export_jianying.py`、`dashboard.py`（静态 `review.html` + 只读 `127.0.0.1` 服务）、`packaging.py`（数据驱动 JSON 主题 + 宿主机渲染 + 防撞原声音效校对）、`library.py`（扁平 `catalog.json` + 跨机安全素材缓存 + 授权/音色同意审计）与后加的 `plan.py`（旁白逐句配镜、把 `recap` 段展开成镜头，见 [[2026-11-25-long-form-recap]]）。所有叶工具只消费 `timeline.json` / 工作区文件，核心模块永不反向导入叶工具。
 - **单文档单归属工作区**：`BRIEF.md`、`MEDIA_NOTES.md`、`EDIT_PLAN.md`、`PROMO.md`（消除 `packaging_plan.json` 冲突）、`timeline.json`、`check.json`，删除全部 `{size, mtime_ns}` 清单锁。
 - **精简 `video-reference`**：收敛为单一本地 CLI `analyze_reference.py`（切点/节奏/响度/拼图）+ `SKILL.md`，引导 Agent 产出脱敏 Markdown `REFERENCE_NOTES.md`，移除 R1–R8 JSON 校验链。
-- **CI 防膨胀硬护栏（`tests/orchestrator/`）**：在测试中锁死 `SKILL.md <= 4,000` 字符、单份 reference `<= 2,500` 字符、全部 `skills/**/*.md <= 22,000` 字符、单文件 Python `<= 550` 行、全仓运行时 Python 总量 `<= 5,000` 行、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个，以及核心 → 配套单向导入隔离。
+- **CI 防膨胀硬护栏（`tests/orchestrator/`）**：在测试中锁死 `SKILL.md <= 4,300` 字符、单份 reference `<= 2,500` 字符、全部 `skills/**/*.md <= 22,000` 字符、单文件 Python `<= 550` 行、全仓运行时 Python 总量 `<= 5,600` 行（两项均于 2026-11-25 为长篇解说上调，理由见 [[2026-11-25-long-form-recap]]）、单技能 `<= 20` 个 `.py` 文件、环境变量总数 `<= 25` 个，以及核心 → 配套单向导入隔离。
 
 ## Alternatives considered
 
@@ -32,8 +32,12 @@ v0.7.0 的 `skills/` 膨胀到 99 个 Python 文件（24,207 行）、149 个 `C
 
 ## Consequences
 
-- **收益**：运行时 Python 代码从 24,207 行收敛到 5,000 行预算内（约降 80%+），技能散文从 82K+ 字符收敛到 ~14.5K 字符；适用面从中文短剧解说扩展为通用多语种/多题材视频剪辑与解说；任意环节可局部重跑，同时完整保留审片台、剪映草稿、竖横屏包装与素材库四大能力。
+- **收益**：运行时 Python 代码从 24,207 行收敛到 5,600 行预算内（约降 80%+），技能散文从 82K+ 字符收敛到 ~14.5K 字符；适用面从中文短剧解说扩展为通用多语种/多题材视频剪辑与解说；任意环节可局部重跑，同时完整保留审片台、剪映草稿、竖横屏包装与素材库四大能力。
 - **代价**：不兼容旧版 `recap.py` / `understand.py` / `cut.py` / `validate.py` / `voiceover.py` / `assemble.py` CLI 与旧 `clip_plan.json` / `narration.json` 中间产物（历史工作流仍可在 `v0.7.0` 标签下使用）；旧 `tests/{understanding,script,cut,voiceover,assemble}` 替换为 `tests/{core,companions,reference,orchestrator}`；ClawHub 条目需同步升版本并重锁 `packageDigest`。
+
+## Supersedes
+
+本次重构取代了 `.agents/notes/implemented/` 下 v0.8.0 之前描述旧编排器、阶段 skill、MiMo、dub、`validate` / `review` / `assemble` / `final_qc` / `doctor` 等代码的笔记；这些笔记保留作历史，开头各加了一行“后续决定”指向本文，逻辑仍在的（响度、AAC 真峰值、色彩转换、yuv420p、ffmpeg 选项文件、`timeline.json` 权威、skill 自包含等）写明现在落在哪个函数。`proposed/architecture/2026-10-02-skill-ownership-function-parity-and-budgets.md` 因此作废，已移到 `rejected/`。v0.7 残留文件与死代码的收尾清理见 [[2026-11-25-remove-v07-leftovers]]。
 
 ## Verification
 

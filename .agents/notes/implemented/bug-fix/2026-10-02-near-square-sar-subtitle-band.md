@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 测得的原片字幕带（`--subtitle-y-top/--subtitle-y-bot`、`SUBTITLE_Y_*`）由三处把关：`tools/measure_subtitle.py` 测量、recap 的 `_probe_display_size_or_raise(require_square_pixels=True)` 预检、assemble 的 `subtitles.core._measured_subtitle_band`。三处都要求 SAR 与 1:1 的差小于 `1e-9`。真实片源常见 `64:63`、`101:100` 这类近方形 SAR，于是工具直接报错、recap 拒绝坐标，用户只能关掉字幕带：遮罩无法贴合原字幕，`「」` 原声字幕也因遮罩不覆盖空隙而被跳过。

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代本篇关于“已采用声音”家族留在 `scripts/adoption/`的决定：[移除声音定稿交付路线](../simplification/2026-11-06-remove-delivery-family.md)。`briefing/` 的归组仍然有效。
 
 ## Problem

@@ -1,8 +1,8 @@
 """Canonical audio policy single-source guard.
 
 Audio ducking, RMS normalization, and loudness helpers live exclusively in
-`skills/video-recap/scripts/_audio.py` and are consumed directly by both
-`render.py` and `export_jianying.py`, avoiding duplicated `lib.py` CONFIG copies.
+`skills/video-recap/scripts/_audio.py`: `render.py` uses `ducking_filters` and
+`export_jianying.py` uses `ducking_keyframes`, so both follow one curve with no local copy.
 """
 import ast
 import importlib.util

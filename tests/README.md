@@ -7,7 +7,7 @@
 | 组名 | 覆盖范围 |
 |---|---|
 | `core` | `skills/video-recap/scripts/` 核心模块（`_common`、`_audio`、`_subtitles`、`probe`、`frames`、`transcribe`、`tts`、`render`、`check`）的行为单测与真实 `ffmpeg` 合成体检 |
-| `companions` | 4 支配套工具（`export_jianying`、`dashboard`、`packaging`、`library`）的行为、安全边界与 `timeline.json` v3 契约测试 |
+| `companions` | 5 支配套工具（`export_jianying`、`dashboard`、`packaging`、`library`、`plan`）的行为、安全边界与 `timeline.json` v3 契约测试 |
 | `reference` | `skills/video-reference/scripts/analyze_reference.py` 的解析单测与真实视频分析测试 |
 | `orchestrator` | 全仓架构与预算检查：技能字符预算、Python 行数/文件数上限、核心→配套单向隔离、无环导入、隔离 `python -I` 导入、UTF-8 编码、插件清单与环境变量审计 |
 

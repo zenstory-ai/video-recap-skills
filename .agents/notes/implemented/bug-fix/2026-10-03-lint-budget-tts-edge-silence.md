@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 video-script 的 lint 用 brief 同一个公式给每块算字数预算：`_recommended_char_budget(start, end) = int((end - start - 0.1) × speech_rate × speech_safety_margin × narration_speed)`。这只按字数折算朗读时长，没算每块作为一次 TTS 合成自带的首尾静音。voiceover 不裁这段静音，assemble 判断能否放进时间窗时用的是整段音频时长。

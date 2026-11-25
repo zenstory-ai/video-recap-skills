@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：2026-11-25 清理后 `examples/guohuo-60s/` 只留成片链接与归档说明，本文提到的 JSON 产物节选来源已不在仓库，README 也不再引用它们，见 [[2026-11-25-remove-v07-leftovers]]。
+
 后续更新：[[2026-11-19-slim-readme-and-unify-en-filename]]。
 
 ## Problem

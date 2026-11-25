@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 [[2026-10-02-coarse-asr-anchor-honesty]] 让 cut 门禁不再把只有语气词的 ASR 窗口（"啊！"、"Hi."）当作对白，但旁白入口判定没有跟着改，当时把"统一对白定义"列为被否方案，等真实重跑再定。真实重跑出现了：冷开场桥段 output 16.0–21.8（source 16–22）落在一个只有"啊！"的窗口里，cut 门禁允许在这里下刀，`narration_lint` 却把入口当作打断原声句子，用 `interrupts_source_sentence` 硬阻断。只改 script 不改 assemble 的话，阻断只会挪到 TTS 之后：assemble 的 `_entry_speech_owned` 同样把这段窗口算作讲话，会以 `unsafe_entry`（`unsafe_source_handoff`）阻断，白花一次 TTS。

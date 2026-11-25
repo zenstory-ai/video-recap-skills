@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 翻转了 [[2026-10-02-resume-command-echoes-argv]] 里 `EDIT_MODE` / `TARGET_DURATION` / 字幕坐标由续跑命令钉住的做法。
 
 后续决定：解说评审已整体移除，见 [[2026-11-06-remove-narration-review-chain]]，`--review-narration` 系列 flag 不再存在。

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `--preserve-approved-text` 及其严格策略后来移除，见 [[2026-11-06-remove-preserve-approved-text]]；默认路径的决定不变。
 
 ## Problem

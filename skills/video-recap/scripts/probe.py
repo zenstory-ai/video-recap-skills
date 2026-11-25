@@ -14,25 +14,34 @@ from _common import has_tool, probe_media, run_cmd, save_json
 
 __all__ = ["detect_scenes", "detect_silences", "main", "probe_sources"]
 
-_SCD_TIME_RE = re.compile(r"lavfi\.scd\.time[:=]\s*(\d+(?:\.\d+)?)")
+_PTS_RE = re.compile(r"pts_time:(\d+(?:\.\d+)?)")
+_SCORE_RE = re.compile(r"lavfi\.scene_score=(\d+(?:\.\d+)?)")
 _SILENCE_START_RE = re.compile(r"silence_start:\s*(-?\d+(?:\.\d+)?)")
 _SILENCE_END_RE = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
 
 
-def detect_scenes(video_path: str | Path, *, threshold: float = 0.15) -> list[float]:
-    """Return sorted scene-cut timestamps (seconds) detected via ffmpeg `scdet`."""
+def detect_scenes(video_path: str | Path, *, threshold: float = 0.08) -> list[float]:
+    """Return sorted hard-cut timestamps (seconds).
+
+    Per-frame scene scores come from ffmpeg (bottom 10% cropped so burned-in subtitles do not count, downscaled); a frame is a
+    cut when its score is at least `threshold` and above 3x the median of the 15 frames on either side plus 0.02. The local
+    median keeps fast motion from reading as cuts while catching low-contrast cuts a single global threshold misses."""
     if not has_tool("ffmpeg"):
         raise RuntimeError("ffmpeg not found on PATH")
-    scdet_th = max(1, min(100, int(round(float(threshold) * 100))))
     res = run_cmd([
-        "ffmpeg", "-hide_banner", "-i", str(video_path),
-        "-vf", f"scdet=threshold={scdet_th}", "-f", "null", "-",
+        "ffmpeg", "-hide_banner", "-i", str(video_path), "-an",
+        "-vf", r"crop=iw:ih*0.9:0:0,scale=96:54,select=gte(scene\,0),metadata=print:file=-", "-f", "null", "-",
     ], check=True)
+    pts = [float(x) for x in _PTS_RE.findall(res.stdout or "")]
+    score = [float(x) for x in _SCORE_RE.findall(res.stdout or "")]
     cuts: list[float] = []
-    for match in _SCD_TIME_RE.finditer(res.stderr or ""):
-        t_s = round(float(match.group(1)), 4)
-        if t_s > 0 and (not cuts or t_s > cuts[-1]):
-            cuts.append(t_s)
+    for i, val in enumerate(score[:len(pts)]):
+        if val < threshold:
+            continue
+        near = sorted(score[max(0, i - 15):i] + score[i + 1:i + 16])
+        med = near[len(near) // 2] if near else 0.0
+        if val > 3 * med + 0.02 and pts[i] > 0 and (not cuts or pts[i] - cuts[-1] > 0.12):
+            cuts.append(round(pts[i], 4))
     return cuts
 
 
@@ -80,7 +89,7 @@ def probe_sources(
     paths: Sequence[str | Path],
     *,
     scenes: bool = False,
-    scene_threshold: float = 0.15,
+    scene_threshold: float = 0.08,
     silence: bool = False,
     silence_db: float = -45.0,
     silence_min: float = 0.4,
@@ -106,8 +115,8 @@ def probe_sources(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Probe media metadata, scene cuts, and silences.")
     parser.add_argument("media", nargs="+", help="One or more input media file paths.")
-    parser.add_argument("--scenes", action="store_true", help="Detect scene cut timestamps via scdet.")
-    parser.add_argument("--scene-threshold", type=float, default=0.15, help="scdet threshold (0..1).")
+    parser.add_argument("--scenes", action="store_true", help="Detect hard-cut timestamps (per-frame scene score vs local median).")
+    parser.add_argument("--scene-threshold", type=float, default=0.08, help="Minimum per-frame scene score for a cut (0..1).")
     parser.add_argument("--silence", action="store_true", help="Detect silence intervals.")
     parser.add_argument("--silence-db", type=float, default=-45.0, help="Silence threshold in dB.")
     parser.add_argument("--silence-min", type=float, default=0.4, help="Minimum silence duration (s).")

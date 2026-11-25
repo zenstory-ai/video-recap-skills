@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代本篇关于帧钟 helper 进 `adoption/av_clock.py`、换画面走 `adopted-packet-copy`的决定：[移除声音定稿交付路线](../simplification/2026-11-06-remove-delivery-family.md)。`pair_media` / `compose_foreground` 的删除仍然有效。
 
 ## Problem

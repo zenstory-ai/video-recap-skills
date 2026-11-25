@@ -8,9 +8,9 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Hard anti-bloat guardrails (raise explicitly with an .agents/notes/ rationale if needed).
 MAX_SCRIPT_MODULE_LINES = 550
-SKILL_TOTAL_PY_LOC_BUDGET = 5000
+SKILL_TOTAL_PY_LOC_BUDGET = 5600  # 2026-11-25 raised for plan.py + frames --shots, see .agents/notes/implemented/feature/2026-11-25-long-form-recap.md
 MAX_PY_FILES_PER_SKILL = 20
-SKILL_MD_CHAR_BUDGET = 4000
+SKILL_MD_CHAR_BUDGET = 4300  # 2026-11-25 raised for the long-form entry points, same note
 REFERENCE_CHAR_BUDGET = 2500
 SKILL_TOTAL_CHAR_BUDGET = 22000
 
@@ -19,7 +19,7 @@ CORE_MODULES = frozenset({
     "_common", "_audio", "_subtitles",
 })
 CORE_CLI_MODULES = frozenset({"probe", "frames", "transcribe", "tts", "render", "check"})
-COMPANION_MODULES = frozenset({"export_jianying", "dashboard", "packaging", "library"})
+COMPANION_MODULES = frozenset({"export_jianying", "dashboard", "packaging", "library", "plan"})
 
 PUBLIC_ENTRYPOINTS = (
     "skills/video-recap/scripts/probe.py",
@@ -32,6 +32,7 @@ PUBLIC_ENTRYPOINTS = (
     "skills/video-recap/scripts/dashboard.py",
     "skills/video-recap/scripts/packaging.py",
     "skills/video-recap/scripts/library.py",
+    "skills/video-recap/scripts/plan.py",
     "skills/video-reference/scripts/analyze_reference.py",
 )
 

@@ -2,6 +2,8 @@
 
 Status: implemented（其中“按内容指纹判定”部分已被 [[2026-09-20-no-content-hashing]] 翻转：现改为 size/mtime_ns 与设置字典相等）
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 一轮 staleness / provenance 加固曾同时引入三层机制：assemble 的 render-identity（输出 `recap_<stem>_<hash>.mp4`，解说一变就冻结旧别名、再写一个新文件，并对 mp4 与全部输入做全量哈希、附 `.manifest.json` sidecar）；编排器的 32 键 CONFIG 快照 `phase_a_environment`；以及对 10 个 Phase-A 产物逐个指纹的校验层。结果是"改解说 → 重跑"的正常迭代冒出一堆副本，快照写了却从不比较，产物指纹层重复哈希且超出了"重跑同一命令即续跑"的文档契约。

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 “没有放置信息时恒定 `ducking_orig_volume`”这一分支已被 [合成阶段删掉门禁之后的兜底](2026-11-06-assemble-drop-unreachable-fallbacks.md) 删除。
 
 ## Problem

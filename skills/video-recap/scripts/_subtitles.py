@@ -8,11 +8,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 __all__ = [
-    "escape_ass_text",
-    "normalize_ass_color",
     "parse_srt",
-    "seconds_to_ass_time",
-    "seconds_to_srt_time",
     "wrap_subtitle_text",
     "write_ass",
     "write_srt",
@@ -159,7 +155,6 @@ def write_srt(
     cues: Sequence[dict[str, Any]],
     out_path: str | Path,
     *,
-    max_chars: int | None = None,
     strip_trailing_punct: bool = False,
 ) -> Path:
     """Write cues to UTF-8 SRT file."""
@@ -171,9 +166,7 @@ def write_srt(
         text, start, end = str(cue.get("text") or "").strip(), float(cue["start"]), float(cue["end"])
         if not text or end <= start:
             continue
-        if max_chars:
-            text = wrap_subtitle_text(text, max_chars, strip_trailing_punct=strip_trailing_punct)
-        elif strip_trailing_punct:
+        if strip_trailing_punct:
             text = text.rstrip(_TRAILING_PUNCT)
         idx += 1
         lines.extend([str(idx), f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}", text, ""])

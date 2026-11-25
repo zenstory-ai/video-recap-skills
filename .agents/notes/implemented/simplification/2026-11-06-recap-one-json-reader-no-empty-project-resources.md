@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 video-recap 已有 `lib.read_json_object`，`resources/lock.py`、`resources/project_binding.py`、`recap_source.py` 又各写了一个近似副本。

@@ -248,7 +248,7 @@ function renderRun(run) {
     const docs = Object.entries(run.notes || {});
     panelNode = docs.length
       ? h("div", null, docs.flatMap(([name, text]) => [h("h4", null, name), h("pre", { className: "md" }, text)]))
-      : h("div", { className: "empty" }, "No BRIEF.md, EDIT_PLAN.md, or PLAN.md in workspace.");
+      : h("div", { className: "empty" }, "No BRIEF.md, MEDIA_NOTES.md, or EDIT_PLAN.md in workspace.");
   }
 
   const stage = h("div", { className: "stage-grid" },

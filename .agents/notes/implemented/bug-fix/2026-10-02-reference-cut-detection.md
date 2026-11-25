@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；孤立峰切点检测现在 `skills/video-reference/scripts/analyze_reference.py` 的 `detect_cuts`（硬阈值 + 孤立软峰，可疑处记 `review_windows`）。
+
 接 [[2026-10-02-video-reference-skill]]：那篇里的 `scdet=threshold=10` 固定阈值被本篇取代。后续调整见 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]（与 `source_facts` 连续 8 字重合由阻断错误降级为非阻断警告）。
 
 ## Problem

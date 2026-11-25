@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定：文中涉及的六个生产技能已合并入 `skills/video-recap/`（见 [[2026-11-10-converge-production-skills-into-video-recap]]），`dub` 模式与 MiMo 解说评审链已移除（见 [[2026-11-06-remove-dub-mode]]、[[2026-11-06-remove-narration-review-chain]]），解说创作技法与案例润色成果保留在 `skills/video-recap/`、`docs/` 与 `examples/` 中。
 
 ## Problem

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；skill 自包含的规矩仍在（AGENTS.md，`test_skill_scripts_do_not_import_other_skill_scripts` 守），`video-reference` 现只剩单文件 `analyze_reference.py`，不再复制公共模块。
+
 ## Problem
 
 六个 skill 要能在 Claude Code、Codex、OpenCode、OpenClaw 里被各自发现并单独安装，而这些宿主只保证 `skills/<name>/` 目录存在。任何跨 skill 的 `import` 或相对路径引用，在只装一个 skill 的机器上都会断。反过来，直接复制代码又会悄悄漂移，五份 `lib.py` 曾各自携带所有人的配置并集（155–173 个键，95–132 个从不读取）。

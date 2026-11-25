@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；yuv420p 与 BT.709 标记现在 `render.py` 的 `_color_conv` 和 `_common.py` 的 `output_color_tags` / `color_tag_args`。
+
 ## Problem
 
 - assemble 的最终编码只在有滤镜（遮罩、叠加、烧录字幕、包装图层、缩放）或 `FORCE_VIDEO_REENCODE` 时重编码并加 `-pix_fmt yuv420p`；否则 `-c:v copy` 原样复制源画面。默认烧录开着时几乎总有滤镜，所以问题不显眼；不烧录（`--no-burn-subtitles`，以及缺 libass 降级后的默认运行）时，10-bit、4:2:2、HEVC 或奇数宽高的源会原样交付，微信、Safari 和很多手机放不了。`+faststart` 在四条输出路径（默认 narration、严格身份约束渲染、显式 adopted 混音、source-mix / adopted-packet-copy）上本来都有。

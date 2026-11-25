@@ -260,7 +260,7 @@ def apply_theme(
         _emit(f"plate_card_{i + 1}", slot, lines, float(card["start"]), float(card["end"]), str(card.get("motion") or "slide_up"), card.get("rect"))
     for i, item in enumerate(callouts or []):
         slot = str(item.get("slot") or ("callout_upper" if i % 2 == 0 else "callout_lower"))
-        _emit(f"plate_callout_{i + 1}", slot, [str(item.get("text") or "")], float(item["start"]), float(item["end"]), str(item.get("motion") or "zoom_in"), item.get("rect"))
+        _emit(f"plate_callout_{i + 1}", slot, [str(item.get("text") or "")], float(item["start"]), float(item["end"]), str(item.get("motion") or "none"), item.get("rect"))
 
     overlays = _upsert_overlays(existing_overlays, generated)
     safe_y = (updated.get("subtitle_style") or {}).get("safe_y")

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代 [[2026-10-02-voiceover-no-default-truncation]] 里“`--preserve-approved-text` 不变”的部分（默认路径的决定不变），[[2026-10-02-strict-full-mode-no-silent-rewrite]] 与 [[2026-10-03-tts-content-addressed-cache]] 的相关事实已就地改。
 
 ## Problem

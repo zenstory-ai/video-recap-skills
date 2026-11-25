@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -123,8 +124,6 @@ def test_check_fails_cleanly_on_missing_media(tmp_path: Path) -> None:
 def test_render_viewport_cover_and_prores4444_alpha_video_overlay(
     synthetic_media: dict[str, Path], tmp_path: Path
 ) -> None:
-    import subprocess
-
     alpha_mov = tmp_path / "remotion_overlay.mov"
     subprocess.run([
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
@@ -241,7 +240,7 @@ def test_render_all_mute_video_with_narration_bgm_sfx(synthetic_media: dict[str,
     assert chk["checks"]["audio_health"]["status"] == "pass"
 
 
-def test_render_range_exact_duration_and_single_quote_ass_dir(synthetic_media: dict[str, Path], tmp_path: Path) -> None:
+def test_render_range_exact_duration_and_single_quote_ass_and_fonts_dir(synthetic_media: dict[str, Path], tmp_path: Path) -> None:
     import _common
 
     work_dir = tmp_path / "Alice's render dir"
@@ -254,7 +253,9 @@ def test_render_range_exact_duration_and_single_quote_ass_dir(synthetic_media: d
             {"id": "c2", "source": "v1", "in": 0.0, "out": 1.5},
         ],
         "subtitles": [{"start": 0.5, "end": 1.4, "text": "Range slice subtitle"}],
+        "subtitle_style": {"font_file": str(tmp_path / "Bob's fonts" / "Custom.ttf")},  # 落到 ass 的 fontsdir
     }
+    (tmp_path / "Bob's fonts").mkdir()
     out_mp4 = tmp_path / "ranged.mp4"
     render.render_timeline(tl, out_mp4, preview=True, time_range=(0.5, 1.5), work_dir=work_dir)
     assert out_mp4.is_file()
@@ -276,3 +277,52 @@ def test_check_catches_odd_dimensions_and_handles_null_audio(synthetic_media: di
     assert report["ok"] is False
     assert "odd dimensions 321x240" in report["checks"]["geometry_and_cfr"]["detail"]
     assert report["checks"]["subtitle_and_timing"]["status"] == "pass"
+
+
+def test_filter_script_args_uses_the_option_file_syntax_ffmpeg_accepts(tmp_path: Path, monkeypatch) -> None:
+    import _common
+
+    long_expr = "anullsrc," * 600 + "anull"
+    monkeypatch.setattr(_common, "_OPTION_FILES", [True])
+    assert _common.filter_script_args("filter_complex", long_expr, tmp_path)[0][0] == "-/filter_complex"
+    monkeypatch.setattr(_common, "_OPTION_FILES", [False])
+    assert _common.filter_script_args("filter_complex", long_expr, tmp_path)[0][0] == "-filter_complex_script"
+    assert _common.filter_script_args("filter_complex", "anull", tmp_path)[0] == ["-filter_complex", "anull"]
+
+
+@pytest.mark.parametrize("chunk", [48, 8])
+def test_render_many_short_clips_stays_frame_exact(synthetic_media: dict[str, Path], tmp_path: Path, monkeypatch, chunk: int) -> None:
+    """40 clips: one graph over the inline limit (file option path), or seeked batches of 8 (long-timeline path); neither drifts."""
+    monkeypatch.setattr(render, "_CHUNK_CLIPS", chunk)
+    clips = [{"source": "v1", "in": round(0.05 * (i % 20), 3), "out": round(0.05 * (i % 20) + 0.13 + 0.01 * (i % 3), 3)} for i in range(40)]
+    tl = {"schema_version": 3, "canvas": {"width": 320, "height": 240, "fps": "25"}, "sources": {"v1": str(synthetic_media["v1"])}, "video": clips}
+    (tmp_path / "timeline.json").write_text(json.dumps(tl), encoding="utf-8")
+    out = tmp_path / "many.mp4"
+    assert render.main([str(tmp_path / "timeline.json"), "--out", str(out)]) == 0
+    spans, total = render.timeline_video_spans(tl)
+    assert abs(total * 25 - round(total * 25)) < 1e-6 and abs(spans[-1]["timeline_end"] - total) < 1e-9
+    info = render.probe_media(out)
+    assert abs(float(info["duration_s"]) - total) <= 0.05
+
+
+def test_render_does_not_inherit_source_title_comment_or_chapters(synthetic_media: dict[str, Path], tmp_path: Path) -> None:
+    import subprocess
+
+    meta = tmp_path / "chapters.txt"
+    meta.write_text(";FFMETADATA1\ntitle=Scraped Title\ncomment=https://example.invalid/watch\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=1000\ntitle=Intro\n", encoding="utf-8")
+    tagged = tmp_path / "tagged.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(synthetic_media["v1"]), "-i", str(meta), "-map", "0", "-map_metadata", "1",
+                    "-map_chapters", "1", "-c", "copy", str(tagged)], check=True)
+    tl = {
+        "schema_version": 3,
+        "canvas": {"width": 320, "height": 240, "fps": "25"},
+        "sources": {"v1": str(tagged)},
+        "video": [{"id": "c1", "source": "v1", "in": 0.0, "out": 1.2, "audio": "keep"}],
+    }
+    out = tmp_path / "out.mp4"
+    render.render_timeline(tl, out)
+    probe = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags", "-show_chapters", "-of", "json", str(out)],
+                                      capture_output=True, text=True, check=True).stdout)
+    tags = {k.lower(): v for k, v in (probe.get("format", {}).get("tags") or {}).items()}
+    assert "title" not in tags and "comment" not in tags
+    assert probe.get("chapters") == []

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 test-slim 1/6–6/6 瘦身之后，又有三批生产改动落地：去掉全部内容哈希与消费方重验（#126）、按功能族分包（#127）、

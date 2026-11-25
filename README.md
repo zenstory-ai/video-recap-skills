@@ -33,7 +33,7 @@
 
 https://github.com/user-attachments/assets/f3c2df0c-6869-4f5b-8f4c-cce70b58b667
 
-> 上方 59 秒横屏解说示例《这一秒过火》的公开脱敏产物与创作复盘见 [examples/guohuo-60s/](examples/guohuo-60s/)。
+> 上方 59 秒横屏解说示例《这一秒过火》是 v0.7 时期的展示成片，归档说明见 [examples/guohuo-60s/](examples/guohuo-60s/)。
 
 ## 核心剪辑与解说工艺
 
@@ -84,7 +84,7 @@ flowchart LR
 
 | 技能 | 组成 | 产出物 |
 |---|---|---|
-| [`video-recap`](skills/video-recap/) | 6 支核心原子 CLI（`probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py`）+ 4 支按需配套工具（Remotion/PNG 包装 `packaging.py`、剪映/CapCut 导出 `export_jianying.py`、只读审片台 `dashboard.py`、跨项目素材库 `library.py`） | `out/final.mp4`、`timeline.json`、`check.json`、`out/review.html`、`out/jianying_draft/` |
+| [`video-recap`](skills/video-recap/) | 6 支核心原子 CLI（`probe.py`、`frames.py`、`transcribe.py`、`tts.py`、`render.py`、`check.py`）+ 5 支按需配套工具（Remotion/PNG 包装 `packaging.py`、剪映/CapCut 导出 `export_jianying.py`、只读审片台 `dashboard.py`、跨项目素材库 `library.py`、旁白逐句配镜 `plan.py`） | `out/final.mp4`、`timeline.json`、`check.json`、`out/review.html`、`out/jianying_draft/` |
 | [`video-reference`](skills/video-reference/) | 1 支纯本地参考拆片 CLI（`analyze_reference.py`）：实测镜头切点、时长分布、响度密度并抽帧拼图 | `reference_metrics.json`、`contact_sheet.jpg`、`REFERENCE_NOTES.md` |
 
 ## 安装
@@ -176,7 +176,7 @@ ClawHub 分发由[显式发布清单](.clawhub/publish.json)管理；历次版�
 |---|---|
 | **剪辑工艺与技能规范** | [通用剪辑与声画原则](skills/video-recap/references/editorial-craft.md) · [竖横屏包装与音效](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 契约](skills/video-recap/references/timeline-schema.md) · [剪映草稿导出](skills/video-recap/references/jianying-export.md) · [审片台与素材库](skills/video-recap/references/material-library.md) · [远程调用披露](skills/video-recap/references/remote-services.md) |
 | **仓库架构与边界** | [仓库架构说明](docs/architecture.md) · [生产能力边界与验收原则](docs/production-boundaries.md) · [多轨时间线与剪映协议](docs/timeline-and-jianying.md) · [单测体系](tests/README.md) |
-| **案例与写作参考** | [《这一秒过火》案例目录](examples/guohuo-60s/) · [影视解说文案指南](docs/video-recap-script-writing.md) · [AI 视频分析防编造指南](docs/ai-video-analysis-without-invented-plot.md) |
+| **案例与写作参考** | [《这一秒过火》归档案例](examples/guohuo-60s/) · [影视解说文案指南](docs/video-recap-script-writing.md) · [AI 视频分析防编造指南](docs/ai-video-analysis-without-invented-plot.md) |
 
 ## 致谢与许可
 

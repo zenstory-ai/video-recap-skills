@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；两遍线性 loudnorm 现在 `_audio.py` 的 `build_loudnorm_filter`。
+
 后续由 [[2026-10-03-loudnorm-true-peak-limiter]] 部分推翻：峰值放不下增益时先过真峰值限幅器，本篇的下调目标只用于限幅器削到上限（`LOUDNESS_LIMITER_MAX_DB`）之后的余量，或限幅后的测量不可用时。
 
 ## Problem

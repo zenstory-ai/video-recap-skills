@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 from _common import has_tool, parse_fps, probe_media, run_cmd, save_json
 
-__all__ = ["build_contact_sheet", "extract_frames", "main"]
+__all__ = ["build_contact_sheet", "build_shot_sheet", "extract_frames", "main", "shot_pieces"]
 
 _FONT_CANDIDATES = (
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -95,8 +95,6 @@ def _extract_single_frame(
     if width and width > 0:
         filters.append(f"scale={int(width)}:-2")
 
-    base_vf = list(filters)
-    labeled_ok = False
     if label and font_path:
         esc_font = _escape_drawtext(font_path)
         esc_txt = _escape_drawtext(label)
@@ -104,7 +102,7 @@ def _extract_single_frame(
             f"drawtext=fontfile='{esc_font}':text='{esc_txt}':x=6:y=6:"
             "fontsize=16:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=4"
         )
-        vf = ",".join([*base_vf, dt])
+        vf = ",".join([*filters, dt])
         res = run_cmd([
             "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
             "-ss", f"{max(0.0, t_s):.4f}", "-i", str(video),
@@ -117,11 +115,11 @@ def _extract_single_frame(
         "ffmpeg", "-y", "-hide_banner", "-loglevel", "error",
         "-ss", f"{max(0.0, t_s):.4f}", "-i", str(video), "-frames:v", "1",
     ]
-    if base_vf:
-        cmd.extend(["-vf", ",".join(base_vf)])
+    if filters:
+        cmd.extend(["-vf", ",".join(filters)])
     cmd.extend(["-q:v", "3", str(out_img)])
     run_cmd(cmd, check=True)
-    return labeled_ok
+    return False
 
 
 def extract_frames(
@@ -241,6 +239,51 @@ def build_contact_sheet(
     }
 
 
+def shot_pieces(cuts: Sequence[float], duration: float, window: tuple[float, float], split_s: float = 3.0) -> list[dict[str, Any]]:
+    """Shots between probe cuts that overlap `window`, inset 0.08s; shots longer than 2*split_s are split into equal pieces."""
+    edges = [0.0, *[float(c) for c in cuts if 0 < float(c) < duration], duration]
+    pieces: list[dict[str, Any]] = []
+    for a, b in zip(edges, edges[1:]):
+        x, y = a + 0.08, b - 0.08
+        if y < window[0] or x > window[1] or y - x < 0.6:
+            continue
+        k = max(1, int((y - x) // split_s)) if y - x > 2 * split_s else 1
+        for i in range(k):
+            px, py = x + (y - x) * i / k, x + (y - x) * (i + 1) / k
+            pieces.append({"n": len(pieces), "in": round(px, 3), "out": round(py, 3), "len": round(py - px, 2), "shot": [round(x, 3), round(y, 3)]})
+    return pieces
+
+
+def build_shot_sheet(video_path: str | Path, cuts: Sequence[float], out_image: str | Path, *, window: tuple[float, float],
+                     width: int = 240, crop: tuple[int, int, int, int] | None = None, split_s: float = 3.0) -> dict[str, Any]:
+    """One head+tail tile pair per shot piece inside `window`, labelled `#n len` / source time, 3 pieces per row."""
+    video = Path(video_path)
+    duration = float(probe_media(video).get("duration_s") or 0.0)
+    pieces = shot_pieces(cuts, duration, window, split_s)
+    if not pieces:
+        raise RuntimeError(f"No shot of at least 0.6s inside window {window}")
+    font, out = _probe_font(), Path(out_image)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="frames_shots_") as tmp_dir:
+        tmp, idx = Path(tmp_dir), 0
+        for pc in pieces:
+            for t_s, lbl in ((pc["in"] + 0.1, f"#{pc['n']} {pc['len']:.1f}s"), (pc["out"] - 0.1, _fmt_mmss(pc["in"]))):
+                _extract_single_frame(video, t_s, tmp / f"tile_{idx:04d}.jpg", width=width, crop=crop, label=lbl, font_path=font)
+                idx += 1
+        run_cmd(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-framerate", "1", "-i", str(tmp / "tile_%04d.jpg"),
+                 "-vf", f"tile=6x{(idx + 5) // 6}:padding=2:margin=2:color=black", "-frames:v", "1", "-q:v", "3", str(out)], check=True)
+    return {"video": str(video), "sheet": str(out), "window": [round(window[0], 3), round(window[1], 3)], "pieces": pieces}
+
+
+def _probe_cuts(probe_json: str, video: str) -> list[float]:
+    rows = (json.loads(Path(probe_json).read_text(encoding="utf-8")).get("sources") or [])
+    want = Path(video).resolve()
+    row = next((r for r in rows if Path(str(r.get("path") or "")).resolve() == want), rows[0] if len(rows) == 1 else None)
+    if row is None or "cuts" not in row:
+        raise ValueError(f"{probe_json} has no cuts for {video}; run probe.py --scenes on it")
+    return [float(c) for c in row["cuts"]]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Extract timestamped frames or tiled contact sheets.")
     parser.add_argument("video", help="Source video path.")
@@ -248,6 +291,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--grid", help="Contact sheet layout CxR, e.g. 4x4.")
     mode.add_argument("--at", help="Comma-separated timestamps in seconds, e.g. 1.5,4.2,9.0.")
     mode.add_argument("--interval", type=float, help="Extract one frame every N seconds.")
+    mode.add_argument("--shots", help="probe.json with --scenes cuts: one head/tail pair per shot inside --window (candidate sheet).")
+    parser.add_argument("--split", type=float, default=3.0, help="With --shots, split shots longer than 2x this many seconds.")
     parser.add_argument("--window", help="Optional time window START:END in seconds.")
     parser.add_argument("--crop", help="Optional source pixel crop x,y,w,h.")
     parser.add_argument("--width", type=int, default=320, help="Target frame/tile width in px.")
@@ -262,7 +307,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     crop = _parse_crop(args.crop)
     labels = not args.no_labels
 
-    if args.grid:
+    if args.shots:
+        if not win:
+            raise ValueError("--shots needs --window START:END")
+        meta = build_shot_sheet(args.video, _probe_cuts(args.shots, args.video), args.out, window=win,
+                                width=min(args.width, 240), crop=crop, split_s=args.split)
+    elif args.grid:
         cols_s, sep, rows_s = args.grid.lower().partition("x")
         if not sep:
             raise ValueError(f"Invalid --grid '{args.grid}'; expected CxR")

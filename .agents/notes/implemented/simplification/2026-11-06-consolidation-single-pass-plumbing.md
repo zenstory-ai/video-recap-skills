@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续决定翻转见 [[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]]（`consolidate.py`、`understanding_index.*` 与 `consolidation.status.json` 已整体移除）。
 相关事实更新：[[2026-11-06-remove-asr-clean-transcript]]（`do_index` 不再保留）、[[2026-10-02-understanding-internal-dedupe]]、[[2026-10-02-consolidate-truncated-reply]]、[[2026-10-02-understanding-offline-cache-safety]]、[[2026-10-02-understanding-index-normalization]]、[[2026-11-06-one-entry-per-capability]]。
 

@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 cut 门禁阻断 `unsafe_clip_sentence_boundary` 时只写出边界时间、`status` 和 `reason`。Agent 要自己翻 `speech_boundary_anchors.json`、`silence_periods.json` 和 ASR 去找能放边界的位置，再按门禁的 50 ms 容差、未验证锚点规则自己判断能不能过，常常要重跑几次才猜中。

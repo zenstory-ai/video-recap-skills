@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；权威时间线现为 `timeline.json` v3，剪映导出是单向叶工具 `skills/video-recap/scripts/export_jianying.py`。
+
 ## Problem
 
 用户要能在剪映里继续精修（原片、解说、BGM、字幕分轨可编辑），但剪映草稿协议是私有 JSON、随版本变化、依赖桌面应用；把它做进核心渲染路径会让整个项目绑死在剪映上，也无法在 CI 里验证。

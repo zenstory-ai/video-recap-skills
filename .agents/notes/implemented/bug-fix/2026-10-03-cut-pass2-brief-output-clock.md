@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 cut 第二轮（`edited_source.mp4` 已渲染）的 brief 要求按输出时间写 `narration.json`，但有三处仍在用原片时钟或给出错误数字：

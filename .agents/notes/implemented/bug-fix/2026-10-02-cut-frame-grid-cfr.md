@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的旧代码已随原子 CLI 重构移除（[[2026-11-21-atomic-primitives-and-timeline-bus]]）；帧网格与恒定帧率现由 `render.py`（逐段 `fps` + `frame_count`）与 `_common.timeline_video_spans` 负责。
+
 ## Problem
 
 cut 把吸附后的原片秒（毫秒精度）直接写进 `trim` / `atrim`。边界落在两帧之间时，一段的视频帧数是 `[start, end)` 内的网格点数，音频却是 `end - start`；当网格点数取到下整（入点刚过一帧、出点刚过一帧之前）时音频比视频长不到一帧，concat 按较长的流推进，下一段就从网格外开始。mp4 按 VFR 写入，编码后每个这样的接点少一个帧位：25fps 下一帧停 80 ms。替身国货片的成片就是这样（`avg_frame_rate` 不再是 25/1），final_qc 只看容器与时长，看不出来。

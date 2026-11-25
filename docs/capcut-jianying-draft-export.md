@@ -20,16 +20,16 @@
 
 ## 剪映草稿包含哪些轨道？
 
-`export_jianying.py` 单向消费 `timeline.json` v3（核心渲染不依赖它），将时间线完整映射到剪映多轨：
+`export_jianying.py` 单向消费 `timeline.json` v3（核心渲染不依赖它），把时间线映射到剪映多轨：
 
 | 剪映轨道 | 轨道内容说明 |
 |---|---|
-| **视频主轨** | `video[]` 多源片段与裁切区间（保留完整源素材引用，进剪映后可随时拖拽入出点微调帧数），并附带与 `render.py` 同源的 `KFTypeVolume` 原声闪避关键帧 |
-| **叠加视频 / 图片轨** | `overlays[]` 声明的透明动态视频（`packaging.py remotion-render` 产出的 ProRes 4444 `.mov` / VP9 `.webm`）或静态 `@2x` PNG 标题与卡片图层，自动换算为剪映中心原点坐标 |
+| **视频主轨** | `video[]` 多源片段的源入出点（保留完整源素材引用，进剪映后可随时拖拽入出点微调帧数），并附带与 `render.py` 同一条曲线的 `KFTypeVolume` 原声闪避关键帧；`crop` / `focus` / `viewport` 不换算，片段按原画面铺满画布，构图需在剪映里手调 |
+| **叠加视频 / 图片轨** | `overlays[]` 声明的透明动态视频（`packaging.py remotion-render` 产出的 ProRes 4444 `.mov` / VP9 `.webm`）或静态 `@2x` PNG 标题与卡片图层，按 `rect` 换算为剪映中心原点坐标；淡入淡出与 `slide_up` 动效不导出 |
 | **多路独立音频轨** | 旁白 `audio.narration[]`、循环背景音乐 `audio.bgm[]`（带同源闪避关键帧）与真实素材音效 `audio.sfx[]` 分别独立成轨 |
-| **可编辑字幕轨** | `subtitles[]` 与 `subtitle_style` 转为剪映原生文本轨（按 UTF-16 计算字符范围，默认语义折行、去掉行尾标点） |
+| **可编辑字幕轨** | `subtitles[]` 逐条转为剪映原生白色文本（按 UTF-16 计算字符范围）；`subtitle_style` 只取 `safe_y` 定垂直位置，不折行、不去行尾标点 |
 
-导出器默认将所有引用的音视频与图片按 MD5 去重拷贝到草稿目录的 `Resources/local/{video,audio,image}`，整个文件夹复制到另一台电脑也能直接打开；仅当确认本机素材路径固定不移动时，才显式传 `--no-bundle-media` 跳过拷贝。
+导出器默认将所有引用的音视频与图片按真实路径去重（同一文件只拷一次，MD5 只记入元数据）拷贝到草稿目录的 `Resources/local/{video,audio,image}`，整个文件夹复制到另一台电脑也能直接打开；仅当确认本机素材路径固定不移动时，才显式传 `--no-bundle-media` 跳过拷贝。
 
 使用边界说明：第一，剪映草稿引用的是未烧录字幕的源视频，源片画面自带的硬字幕仍会保留，可在剪映内按需加遮罩或通过 `3:4` 满画幅构图避让；第二，`render.py` 渲染出的 `out/final.mp4` 为标准成片，剪映草稿用于二次精修，在剪映内手动调整的内容不会自动回写到 `timeline.json`。
 
@@ -44,7 +44,7 @@
 
 - 支持的输入视频封装：`.mp4 / .mov / .mkv / .webm`。
 - 剪映草稿按需通过 `python3 skills/video-recap/scripts/export_jianying.py timeline.json --out-dir out/jianying_draft` 导出，与核心渲染解耦。
-- 导出重点覆盖视频、叠加层、多路音频、闪避关键帧与字幕基础轨道；转场特效、调色 LUT、贴纸等可在打开剪映后自由添加。
+- 导出重点覆盖视频、叠加层、多路音频、闪避关键帧与字幕基础轨道；裁切构图、图层淡入淡出与字幕样式（除垂直位置）需在剪映里重做；转场特效、调色 LUT、贴纸等可在打开剪映后自由添加。
 
 ## 延伸链接
 

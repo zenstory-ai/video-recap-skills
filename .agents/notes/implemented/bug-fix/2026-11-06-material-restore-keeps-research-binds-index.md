@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续事实更新：`background_research.json` 保留与恢复后刷新 brief 的行为继续生效；关于 `understanding_index.json` 与 `consolidation.status.json` 绑定的部分已随 [[2026-11-10-scripts-for-hands-and-floor-agent-for-craft]] 整体移除。
 
 ## Problem

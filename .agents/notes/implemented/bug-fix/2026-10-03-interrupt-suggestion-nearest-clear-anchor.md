@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 旁白入点落在原声句子中间时，`narration_lint._source_sentence_entry_issue` 报 `interrupts_source_sentence`，`suggested_start` 是入点之后的第一个锚点（`time > start + 0.08`）。它不看距离，也不看别的块：下一个锚点可能在 60 秒外（照着挪，旁白就离开了它写的画面），也可能正好是另一块的 `start`（照着挪就和那一块重叠，下一轮 lint 报 `time_overlap`）。摘要的改法写的是"把 start 挪到建议入点"，Agent 会照做。

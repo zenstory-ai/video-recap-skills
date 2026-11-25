@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `timeline.json` 的 `selected_stream` 后来被 [去掉 timeline 和 visual_qc 里恒定或可推导的键](2026-11-06-assemble-trim-derived-output-keys.md) 删除；`media._require_audio_stream` 并入 `_has_audio_stream`，见 [合成阶段删掉门禁之后的兜底](2026-11-06-assemble-drop-unreachable-fallbacks.md)。
 
 ## Problem

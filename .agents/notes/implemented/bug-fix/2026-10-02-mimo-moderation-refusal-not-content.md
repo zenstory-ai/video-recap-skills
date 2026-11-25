@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 `--mimo-video-overview` 和它的宽判定后来移除，见 [[2026-11-06-remove-mimo-video-overview]]；窄判定不变。
 
 ## Problem

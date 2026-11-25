@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 后续事实更新见 [[2026-11-10-converge-production-skills-into-video-recap]]（生产技能收敛为单一 `video-recap` 后，原本分处两边的 `data-schema.md` 与 `research-guide.md` 合并回同一技能目录）及 [[2026-11-14-de-jargon-relax-craft-gates-and-split-promo-copy]]（`audio-routing.md` 并入中文 `audio-modes.md`）。
 
 ## Problem

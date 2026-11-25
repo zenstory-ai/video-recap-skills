@@ -61,3 +61,9 @@ def test_transcribe_srt_and_graceful_unavailable(synthetic_media: dict[str, Path
     silent_res = transcribe.transcribe_media(synthetic_media["v2"], provider="auto")
     assert silent_res["status"] == "unavailable"
     assert silent_res["segments"] == []
+
+
+def test_frames_shot_pieces_inset_split_and_window() -> None:
+    pieces = frames.shot_pieces([2.0, 2.4, 12.0], duration=20.0, window=(1.0, 13.0), split_s=3.0)
+    assert [(p["in"], p["out"]) for p in pieces] == [(0.08, 1.92), (2.48, 5.627), (5.627, 8.773), (8.773, 11.92), (12.08, 16.0), (16.0, 19.92)]
+    assert pieces[1]["shot"] == [2.48, 11.92] and [p["n"] for p in pieces] == list(range(6))  # 0.4s shot at 2.0 dropped

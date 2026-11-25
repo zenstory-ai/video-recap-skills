@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 ## Problem
 
 [[2026-06-14-self-contained-skills-duplicated-libs]] 规定 skill 之间不共享代码、刻意复制的模块逐字节一致。[[2026-09-21-drop-script-brief-chain-and-orphan-references]] 删掉 video-script 的 brief 链后，parity 清单还剩 5 个整文件副本（`agent_text / narration_lint / speech_ownership / timeline_fusion / deslop_qc`，两边各 1,470 行）。按文件做 parity 带来两个问题：

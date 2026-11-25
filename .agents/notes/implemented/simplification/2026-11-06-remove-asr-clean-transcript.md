@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续决定：v0.8.0 起本文涉及的代码已随原子 CLI 重构移除，见 [[2026-11-21-atomic-primitives-and-timeline-bus]]。
+
 取代 [[2026-10-02-speech-evidence-one-transcript]] 里“有 `asr_clean.json` 就用它”的决定；[[2026-10-02-consolidate-truncated-reply]] 与 [[2026-10-02-interjection-entry-ownership]] 的相关事实已就地改。
 
 ## Problem
