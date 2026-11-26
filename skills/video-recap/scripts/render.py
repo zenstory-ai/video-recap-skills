@@ -94,6 +94,8 @@ def validate_timeline_physical(timeline: dict[str, Any], *, base_dir: Path | Non
         key = str(src_path)
         if key not in source_info:
             source_info[key] = probe_media(src_path)
+        if abs(span["speed"] - 1.0) > 1e-6 and str(span["clip"].get("audio") or "keep") != "mute":
+            raise ValueError(f"Clip {span['id']} sets speed {span['speed']}: only muted clips can change speed")
         if span["in"] < 0 or span["out"] > source_info[key]["duration_s"] + 0.15:
             raise ValueError(f"Clip {span['id']} [{span['in']}, {span['out']}] exceeds source duration {source_info[key]['duration_s']:.3f}s")
 
@@ -138,7 +140,8 @@ def _clip_vfilter(label_in: str, label_out: str, span: dict[str, Any], sinfo: di
     crop = span["clip"].get("crop")
     crop_f = f"crop={int(crop['w'])}:{int(crop['h'])}:{int(crop['x'])}:{int(crop['y'])}," if crop else ""
     cf = _color_conv(sinfo.get("color_tags") or {})
-    core = f"trim=start={t_in:.6f}:end={t_out:.6f},setpts=PTS-STARTPTS,fps={fps_str},tpad=stop_mode=clone:stop=-1,trim=end_frame={n_frames},setpts=PTS-STARTPTS"
+    slow = f"/{span['speed']:.6f}" if abs(span.get("speed", 1.0) - 1.0) > 1e-6 else ""
+    core = f"trim=start={t_in:.6f}:end={t_out:.6f},setpts=(PTS-STARTPTS){slow},fps={fps_str},tpad=stop_mode=clone:stop=-1,trim=end_frame={n_frames},setpts=PTS-STARTPTS"
     bkind = str((backdrop or {}).get("kind") or "none")
     fit_mode = str((viewport or {}).get("fit") or "contain")
     focus = span["clip"].get("focus")

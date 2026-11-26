@@ -12,7 +12,7 @@ from typing import Any, Sequence
 
 from _common import has_tool, parse_fps, probe_media, run_cmd, save_json
 
-__all__ = ["build_contact_sheet", "build_shot_sheet", "extract_frames", "main", "shot_pieces"]
+__all__ = ["build_contact_sheet", "build_shot_sheet", "extract_frames", "load_notes", "main", "shot_pieces"]
 
 _FONT_CANDIDATES = (
     "/System/Library/Fonts/Supplemental/Arial.ttf",
@@ -256,13 +256,35 @@ def shot_pieces(cuts: Sequence[float], duration: float, window: tuple[float, flo
     return pieces
 
 
+def load_notes(path: str | Path) -> list[dict[str, Any]]:
+    """Timed notes for candidate pieces: a JSON list (or {"segments": [...]}, e.g. a transcript) of {start[, end], text} or {t, text}."""
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    rows = raw.get("segments") if isinstance(raw, dict) else raw
+    out = []
+    for r in rows or []:
+        t0 = r.get("start", r.get("t"))
+        if t0 is None or not str(r.get("text") or "").strip():
+            continue
+        out.append({"start": float(t0), "end": float(r.get("end", t0)), "text": str(r["text"]).strip()})
+    return out
+
+
 def build_shot_sheet(video_path: str | Path, cuts: Sequence[float], out_image: str | Path, *, window: tuple[float, float],
                      width: int = 240, crop: tuple[int, int, int, int] | None = None, split_s: float = 3.0,
-                     labels: bool = True) -> dict[str, Any]:
-    """One head+tail tile pair per shot piece inside `window`, labelled `#n len` / source time, 3 pieces per row."""
+                     labels: bool = True, far: tuple[float, float] | None = None, marks: Sequence[float] = (),
+                     notes: Sequence[dict[str, Any]] = ()) -> dict[str, Any]:
+    """One head+tail tile pair per shot piece inside `window` (plus pieces of the wider `far` range, tagged `far`), labelled
+    `#n len` / source time, 3 pieces per row. A piece holding `marks[j]` is tagged `*j`; `notes` overlapping it become its `note`."""
     video = Path(video_path)
     duration = float(probe_media(video).get("duration_s") or 0.0)
-    pieces = shot_pieces(cuts, duration, window, split_s)
+    span = (min(window[0], far[0]), max(window[1], far[1])) if far else window
+    pieces = shot_pieces(cuts, duration, span, split_s)
+    for pc in pieces:
+        pc["far"] = pc["out"] < window[0] or pc["in"] > window[1]
+        pc["marks"] = [j for j, t in enumerate(marks) if pc["in"] - 0.1 <= float(t) <= pc["out"] + 0.1]
+        hit = [nt["text"] for nt in notes if nt["start"] <= pc["out"] and nt["end"] >= pc["in"]]
+        if hit:
+            pc["note"] = " / ".join(hit)[:160]
     if not pieces:
         raise RuntimeError(f"No shot of at least 0.6s inside window {window}")
     font, out = (_probe_font() if labels else None), Path(out_image)
@@ -271,7 +293,8 @@ def build_shot_sheet(video_path: str | Path, cuts: Sequence[float], out_image: s
     with tempfile.TemporaryDirectory(prefix="frames_shots_") as tmp_dir:
         tmp, idx = Path(tmp_dir), 0
         for pc in pieces:
-            for t_s, lbl in ((pc["in"] + 0.1, f"#{pc['n']} {pc['len']:.1f}s"), (pc["out"] - 0.1, _fmt_mmss(pc["in"]))):
+            tag = f"#{pc['n']} {pc['len']:.1f}s" + (" far" if pc["far"] else "") + ("".join(f" *{j}" for j in pc["marks"]))
+            for t_s, lbl in ((pc["in"] + 0.1, tag), (pc["out"] - 0.1, _fmt_mmss(pc["in"]))):
                 was_labeled = _extract_single_frame(
                     video, t_s, tmp / f"tile_{idx:04d}.jpg", width=width, crop=crop,
                     label=(lbl if labels else None), font_path=font,
@@ -319,6 +342,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     mode.add_argument("--interval", type=float, help="Extract one frame every N seconds.")
     mode.add_argument("--shots", help="probe.json with --scenes cuts: one head/tail pair per shot inside --window (candidate sheet).")
     parser.add_argument("--split", type=float, default=3.0, help="With --shots, split shots longer than 2x this many seconds.")
+    parser.add_argument("--far", help="With --shots, also show shots of this wider START:END range, tagged 'far'.")
+    parser.add_argument("--marks", help="With --shots, comma-separated intended picture times; holding pieces are tagged *index.")
+    parser.add_argument("--notes", help="With --shots, timed notes JSON ({start,end,text} list or a transcript) attached to each piece.")
     parser.add_argument("--window", help="Optional time window START:END in seconds.")
     parser.add_argument("--crop", help="Optional source pixel crop x,y,w,h.")
     parser.add_argument("--width", type=int, default=None, help="Target frame/tile width in px (default 240 for --shots, 320 otherwise).")
@@ -340,7 +366,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.split <= 0:
             raise ValueError("--split must be positive")
         meta = build_shot_sheet(args.video, _probe_cuts(args.shots, args.video), args.out, window=win,
-                                width=width, crop=crop, split_s=args.split, labels=labels)
+                                width=width, crop=crop, split_s=args.split, labels=labels,
+                                far=_parse_window(args.far, duration) if args.far else None,
+                                marks=[float(x) for x in (args.marks or "").split(",") if x.strip()],
+                                notes=load_notes(args.notes) if args.notes else ())
     elif args.grid:
         cols_s, sep, rows_s = args.grid.lower().partition("x")
         if not sep:

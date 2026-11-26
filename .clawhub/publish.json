@@ -20,7 +20,7 @@
         "**/*"
       ],
       "maintainer": "worldwonderer",
-      "packageDigest": "03f315f5fbe1b9a81b8a18663b5ce40eb7c413db308eda89424740f605a38175",
+      "packageDigest": "0a85c4f3d861714b6b97413f174f628f6f5dbdeaa9c10989376f18cdad7d7c3a",
       "path": "skills/video-recap",
       "publisher": "worldwonderer",
       "rebuildOn": [],
@@ -41,7 +41,7 @@
         "ffmpeg",
         "content-creation"
       ],
-      "version": "2.1.0"
+      "version": "2.2.0"
     },
     {
       "catalogMigration": true,
