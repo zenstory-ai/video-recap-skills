@@ -23,6 +23,10 @@ All notable changes to this project are documented here.
 
 - `plan.py build` 新增提示：同源原声段重叠（含钩子原声在正文重放）、旁白字数不在 8–40；原声段之间的重叠不再在画面复用里重复报；「画面出了窗口」放宽为离窗口超过 45 秒才提示（同场放宽的候选属正常选择）。
 
+### Fixed
+
+- `export_jianying.py` 按镜头 `speed` 和整帧时长排视频片段（与 `render.py` 同一套时间线），放慢的镜头写入剪映变速素材；此前放慢镜头在草稿里偏短，后面的画面整体前移，与旁白、字幕逐步错位。
+
 ## [0.9.0] - 2026-11-25
 
 **长篇连续解说、百段级长片渲染加固与 Google Antigravity (AGY) 宿主适配版本**：`video-recap` 正式覆盖从 30–240 秒短片到多集几十分钟「一口气看完」长篇解说的全场景生产。新增第 5 支配套叶工具 `plan.py`、`references/long-form.md` 长篇工艺参考与 `frames.py --shots` 按切点镜头候选图；全面打通百段级长片在 FFmpeg 9.x 下的分批渲染、分段闪避与整帧音画对位，降低低反差切镜漏检；同时新增 **Google Antigravity (AGY)** 宿主安装与校验支持，并彻底清理 v0.7 历史残留与死代码、校准文档与代码实情。

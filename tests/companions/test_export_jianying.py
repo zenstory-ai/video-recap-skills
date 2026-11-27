@@ -38,8 +38,8 @@ def test_build_draft_tracks_keyframes_utf16_and_sfx(sample_timeline):
 
     assert notes == []
     assert content["canvas_config"] == {"width": 1080, "height": 1920, "ratio": "original"}
-    assert content["duration"] == jy.us(10.0)
-    assert meta["tm_duration"] == jy.us(10.0)
+    assert content["duration"] == jy.us(10.01)  # 6s + 4s at 30000/1001 fps are 180 + 120 whole frames, as render.py cuts them
+    assert meta["tm_duration"] == jy.us(10.01)
     assert len(content["materials"]) == 46  # all JianYing parallel arrays preserved
     assert content["platform"]["device_id"] == ""
     assert content["last_modified_platform"]["mac_address"] == ""
@@ -137,3 +137,27 @@ def test_build_draft_skips_zero_duration_out_of_range_bgm(sample_timeline):
     sample_timeline["audio"]["bgm"] = [{"id": "b1", "source": "bgm1", "in": 9.0, "at": 0.0, "out": 10.0, "loop": False, "gain": 0.2}]
     content, _, _ = jy.build_draft(sample_timeline, new_id=_seq_id(), probe=_fake_probe)
     assert not any(t["name"] == "bgm" for t in content["tracks"])
+
+
+def test_build_draft_places_slowed_clips_on_the_render_timeline(sample_timeline):
+    from _common import timeline_video_spans
+
+    sample_timeline["canvas"]["fps"] = 25
+    sample_timeline["video"] = [
+        {"id": "v1", "source": "s1", "in": 0.0, "out": 0.6, "audio": "mute", "speed": 0.75},
+        {"id": "v2", "source": "s1", "in": 10.0, "out": 14.0, "audio": "mute"},
+    ]
+    content, _, _ = jy.build_draft(sample_timeline, new_id=_seq_id(), probe=_fake_probe)
+
+    segs = next(t for t in content["tracks"] if t["name"] == "video")["segments"]
+    spans, _ = timeline_video_spans(sample_timeline)
+    assert [s["target_timerange"] for s in segs] == [
+        {"start": jy.us(sp["timeline_start"]), "duration": jy.us(sp["timeline_end"] - sp["timeline_start"])} for sp in spans
+    ]
+    assert segs[0]["target_timerange"]["duration"] == jy.us(0.8)
+    assert segs[1]["target_timerange"]["start"] == jy.us(0.8)
+    assert segs[0]["source_timerange"] == {"start": 0, "duration": jy.us(0.6)}
+    speed = content["materials"]["speeds"]
+    assert [m["speed"] for m in speed] == [0.75]
+    assert segs[0]["speed"] == 0.75 and segs[0]["extra_material_refs"] == [speed[0]["id"]]
+    assert segs[1]["speed"] == 1.0 and segs[1]["extra_material_refs"] == []

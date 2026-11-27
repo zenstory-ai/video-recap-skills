@@ -24,6 +24,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from _audio import ducking_keyframes
+from _common import timeline_video_spans
 
 __all__ = ["us", "build_draft", "export_timeline_to_jianying", "main"]
 
@@ -231,12 +232,11 @@ class _DraftBuilder:
 
 
 def _populate_tracks(ctx: _DraftBuilder, timeline: dict, base_dir: Path | None, kfs: dict[str, list[dict]]) -> None:
-    cursor = 0.0
-    for clip in timeline.get("video") or []:
-        s_in, s_out = float(clip["in"]), float(clip["out"])
-        dur = max(0.0, s_out - s_in)
-        if dur <= 0:
-            continue
+    # 与 render.py 同一套镜头时间：整帧、按 speed 变速，旁白和字幕才对得上画面
+    spans, video_end = timeline_video_spans(timeline)
+    for span in spans:
+        clip, s_in, speed = span["clip"], span["in"], span["speed"]
+        start, dur = span["timeline_start"], span["timeline_end"] - span["timeline_start"]
         path = _resolve_ref(timeline, clip["source"], base_dir)
         src_dur_us, w, h = ctx.probe(path)
         if src_dur_us <= 0:
@@ -248,12 +248,15 @@ def _populate_tracks(ctx: _DraftBuilder, timeline: dict, base_dir: Path | None, 
         ctx.materials["videos"].append(mat)
         muted = str(clip.get("audio", "keep")).lower() == "mute"
         gain = 0.0 if muted else float(clip.get("audio_gain", 1.0))
-        v_kfs = [] if muted else _windowed_keyframes(kfs.get("original"), cursor, cursor + dur, gain, ctx.new_id)
-        seg = ctx.base_seg(mat_id, us(cursor), us(dur), 1.0 if v_kfs else gain, v_kfs)
-        seg["source_timerange"] = {"start": us(s_in), "duration": us(dur)}
+        v_kfs = [] if muted else _windowed_keyframes(kfs.get("original"), start, start + dur, gain, ctx.new_id)
+        seg = ctx.base_seg(mat_id, us(start), us(dur), 1.0 if v_kfs else gain, v_kfs)
+        seg["source_timerange"] = {"start": us(s_in), "duration": us(dur * speed)}
         seg["clip"] = _rect_to_jy_clip(None, ctx.width, ctx.height, w or ctx.width, h or ctx.height)
-        ctx.add_seg("video", "video", us(cursor), us(dur), seg)
-        cursor += dur
+        if speed != 1.0:
+            speed_id = ctx.new_id()
+            ctx.materials.setdefault("speeds", []).append({"curve_speed": None, "id": speed_id, "mode": 0, "speed": speed, "type": "speed"})
+            seg.update({"speed": speed, "extra_material_refs": [speed_id]})
+        ctx.add_seg("video", "video", us(start), us(dur), seg)
 
     audio = timeline.get("audio") or {}
     for role, default_gain in (("narration", 1.0), ("sfx", 0.7)):
@@ -278,7 +281,7 @@ def _populate_tracks(ctx: _DraftBuilder, timeline: dict, base_dir: Path | None, 
         if mat_dur_us <= 0:
             raise ValueError(f"JianYing BGM source has no probed duration: {path}")
         at, src_in_us = float(seg.get("at", 0.0)), us(float(seg.get("in", 0.0)))
-        out_s = float(seg["out"]) if seg.get("out") is not None else cursor
+        out_s = float(seg["out"]) if seg.get("out") is not None else video_end
         want_us = max(0, us(out_s - at))
         if want_us <= 0:
             continue

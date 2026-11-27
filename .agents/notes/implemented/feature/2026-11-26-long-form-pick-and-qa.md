@@ -15,7 +15,7 @@ Status: implemented
 
 ## Decision
 
-- **画面变速**：`video[]` 镜头新增 `speed`（0.5–2，只允许 `audio: mute`），成片时长 =（`out` − `in`）/ `speed`；`_common.timeline_video_spans` 和 `render.py` 的单图、分批两条路径都按它取帧。`plan.py build` 在镜头短于小句时长、但不短于 0.75 倍时，取整段镜头并写 `speed`，成片仍占满小句时长；再短才报 `ERROR`。
+- **画面变速**：`video[]` 镜头新增 `speed`（0.5–2，只允许 `audio: mute`），成片时长 =（`out` − `in`）/ `speed`；`_common.timeline_video_spans` 和 `render.py` 的单图、分批两条路径都按它取帧；`export_jianying.py` 也按这套整帧时间线排视频片段，放慢的镜头写剪映变速素材（`materials.speeds` + 片段 `speed`）。`plan.py build` 在镜头短于小句时长、但不短于 0.75 倍时，取整段镜头并写 `speed`，成片仍占满小句时长；再短才报 `ERROR`。
 - **候选图**：`frames.py --shots` 新增 `--marks`（写稿时各小句的画面时间，含它的候选标 `*小句号`）、`--notes`（带时间的笔记或转写 JSON，与候选重叠的条目写进该格的 `note`）、`--far`（放宽到更大的时段，窗口外的候选标 `far`）。
 - **`plan.py qa`**：在 `build` 之后均匀抽 40 个正文旁白小句（不抽钩子），每个小句一行头、中、尾三帧（带镜头裁切），10 行一张 `sample_<g>.jpg`，`sample.json` 记下对应的小句、整句和成片时点。判断由 Agent 看图做；`long-form.md` 写明达标线（40 个对上不少于 36 个，且无闪帧、画面重复）和必看片段。
 - **新增 HINT**（只按时间和字数，不阻断）：同源原声段重叠（钩子与正文重叠时注明）、旁白字数不在 8–40；原声段之间的重叠不再在「画面复用」里重复报；小句画面离 `window` 超过 45 秒才提示（此前 1 秒，有了 `--far` 后同场放宽属正常选择，只在像是另一件事时提醒）。
