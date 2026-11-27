@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 from pathlib import Path
+
+import pytest
 
 import plan
 
@@ -54,10 +57,10 @@ def test_build_plan_lays_out_frames_reports_and_never_rewrites(tmp_path: Path, m
               {"type": "narr", "id": "n1", "source": "s1", "text": "他刚丢了工作，只好去找旧同学", "shots": [[10.0, 13.0], [20.0, 23.0]]},
               {"type": "orig", "id": "o1", "source": "s1", "in": 50.0, "out": 52.3},
               {"type": "narr", "id": "n2", "source": "s1", "text": "后来他又回到小镇上", "shots": [[11.0, 13.5]]},
-              {"type": "narr", "id": "n3", "source": "s1", "text": "她终于见到了那个人", "shots": [[60.0, 61.0]]}]}}
+              {"type": "narr", "id": "n3", "source": "s1", "text": "她终于见到了那个人", "shots": [[60.0, 60.9]]}]}}
     monkeypatch.setattr(plan, "_pauses", lambda wav: [1.0])
     res = plan.build_plan(tl, tmp_path, {"s1": []})
-    assert [e.split(" ")[0] for e in res["errors"]] == ["n3"]  # 1.25s needed, 1.0s given: reported, not stretched
+    assert [e.split(" ")[0] for e in res["errors"]] == ["n3"]  # 1.25s needed, 0.9s given (< 0.75x): reported, not stretched
     assert any("goes back" in w for w in res["warnings"]) and any("reuse" in w for w in res["warnings"])
     clips = res["video"]
     assert [c["id"] for c in clips] == ["n1c0", "n1c1", "o1p0", "n2c0"]
@@ -109,7 +112,7 @@ def test_build_plan_hints_pictures_outside_the_window_and_lead_ins_that_give_the
                                   {"id": "n2", "text": "她在门口开口求他", "file": "n2.wav", "duration": 1.0}]},
           "recap": {"transcripts": {"s1": "t1.json"}, "items": [
               {"type": "narr", "id": "n2", "source": "s1", "text": "她在门口开口求他", "window": [20.0, 30.0], "shots": [[21.0, 24.0]]},
-              {"type": "narr", "id": "n1", "source": "s1", "text": "他想起当年帮过他的那个人，这一次终于松了口", "window": [30.0, 41.0], "shots": [[31.0, 34.0], [70.0, 73.0]]},
+              {"type": "narr", "id": "n1", "source": "s1", "text": "他想起当年帮过他的那个人，这一次终于松了口", "window": [30.0, 41.0], "shots": [[31.0, 34.0], [90.0, 93.0]]},
               {"type": "orig", "id": "o1", "source": "s1", "in": 40.0, "out": 42.3}]}}
     monkeypatch.setattr(plan, "_pauses", lambda wav: [1.0])
     res = plan.build_plan(tl, tmp_path, {"s1": []})
@@ -251,3 +254,63 @@ def test_plan_cli_probe_relative_paths_and_missing_cuts(tmp_path: Path, monkeypa
     ]}), encoding="utf-8")
     cuts_amb, errs_amb, warns_amb = plan._cuts_by_source(tl_data, proj, str(probe_path))
     assert cuts_amb["s1"] == [] and not errs_amb and any("s1:" in w for w in warns_amb)
+
+
+def _one_narr(tmp_path: Path, text: str, shots: list, **item) -> dict:
+    (tmp_path / "n1.wav").write_bytes(b"")
+    return {"canvas": {"fps": 25}, "sources": {"s1": "ep1.mp4"},
+            "audio": {"narration": [{"id": "n1", "text": text, "file": "n1.wav", "duration": 1.0}]},
+            "recap": {"crop": {"x": 0, "y": 0, "w": 100, "h": 80},
+                      "items": [{"type": "narr", "id": "n1", "source": "s1", "text": text, "shots": shots, **item}]}}
+
+
+def test_build_plan_slows_a_short_close_up_down_to_three_quarters_speed(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(plan, "_pauses", lambda wav: [])
+    tl = _one_narr(tmp_path, "她终于见到了那个人", [[10.0, 11.0]], crop={"x": 0, "y": 0, "w": 100, "h": 60})
+    res = plan.build_plan(tl, tmp_path, {"s1": []})
+    (clip,) = res["video"]
+    assert not res["errors"] and clip["in"] == 10.0 and clip["out"] == 11.0 and clip["crop"]["h"] == 60  # per-item crop wins
+    assert abs((clip["out"] - clip["in"]) / clip["speed"] - 1.24) < 1e-6  # timeline keeps the clause length (31 frames)
+    res = plan.build_plan(_one_narr(tmp_path, "她终于见到了那个人", [[10.0, 10.9]]), tmp_path, {"s1": []})
+    assert "at least 0.93s slowed" in res["errors"][0] and not res["video"]
+
+
+def test_build_plan_hints_sentence_length_and_overlapping_originals(tmp_path: Path, monkeypatch):
+    monkeypatch.setattr(plan, "_pauses", lambda wav: [])
+    tl = _one_narr(tmp_path, "他走了", [[10.0, 12.0]])
+    tl["recap"]["items"] += [{"type": "orig", "id": "o1", "seg": "hook", "source": "s1", "in": 40.0, "out": 45.0},
+                             {"type": "orig", "id": "o2", "source": "s1", "in": 44.0, "out": 48.0}]
+    hints = plan.build_plan(tl, tmp_path, {"s1": []})["warnings"]
+    assert any(h.startswith("n1: narration has 3 characters") for h in hints)
+    assert any("o1 and o2 play overlapping original audio (the hook reuses a body original)" in h for h in hints)
+    assert not any("reuse the same source picture" in h for h in hints)  # reported once, per block
+
+
+def test_plan_qa_samples_body_clauses_into_sheets(tmp_path: Path):
+    if not shutil.which("ffmpeg"):
+        pytest.skip("ffmpeg unavailable")
+    src = tmp_path / "ep1.mp4"
+    subprocess.run(["ffmpeg", "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=320x240:rate=25:duration=4", "-pix_fmt", "yuv420p", str(src)], check=True)
+    tl = {"canvas": {"fps": 25}, "sources": {"s1": str(src)},
+          "recap": {"items": [{"type": "narr", "id": "h1", "seg": "hook", "source": "s1", "text": "钩子这一句不抽"},
+                              {"type": "narr", "id": "n1", "source": "s1", "text": "他刚丢了工作，回老家却撞见当年的对头"}]},
+          "video": [{"id": "h1c0", "source": "s1", "in": 0.0, "out": 1.0, "audio": "mute"},
+                    {"id": "n1c0", "source": "s1", "in": 1.0, "out": 2.0, "audio": "mute", "crop": {"x": 0, "y": 0, "w": 320, "h": 200}},
+                    {"id": "o1p0", "source": "s1", "in": 2.0, "out": 3.0, "audio": "keep"},
+                    {"id": "n1c1", "source": "s1", "in": 3.0, "out": 3.9, "audio": "mute", "speed": 0.9}]}
+    meta = plan.qa_samples(tl, tmp_path, tmp_path / "qa", n=40)
+    assert [m["id"] for m in meta] == ["n1c0", "n1c1"] and meta[1]["clause"] == "回老家却撞见当年的对头"
+    assert meta[0]["at"] == 1.0 and (tmp_path / "qa" / "sample_0.jpg").is_file()
+    assert json.loads((tmp_path / "qa" / "sample.json").read_text(encoding="utf-8"))[1]["row"] == 1
+
+
+def test_plan_script_prints_narration_and_the_dialogue_inside_each_original(tmp_path: Path, capsys):
+    (tmp_path / "t.json").write_text(json.dumps({"segments": [
+        {"start": 1.0, "end": 2.0, "text": "before"}, {"start": 5.0, "end": 6.0, "text": "你来了", "speaker": "A"},
+        {"start": 6.5, "end": 7.5, "text": "嗯"}, {"start": 9.0, "end": 10.0, "text": "after"}]}), encoding="utf-8")
+    tl = {"recap": {"transcripts": {"s1": "t.json"}, "items": [
+        {"type": "narr", "id": "n1", "seg": "hook", "text": "她等了十年"},
+        {"type": "orig", "id": "o1", "source": "s1", "in": 4.9, "out": 7.7}]}}
+    (tmp_path / "timeline.json").write_text(json.dumps(tl), encoding="utf-8")
+    assert plan.main(["script", str(tmp_path / "timeline.json")]) == 0
+    assert capsys.readouterr().out.splitlines() == ["n1 [hook] N: 她等了十年", "o1 O s1 4.9-7.7: A: 你来了 / 嗯"]

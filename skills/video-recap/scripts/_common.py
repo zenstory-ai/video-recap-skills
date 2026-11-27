@@ -182,13 +182,16 @@ def timeline_video_spans(timeline: dict[str, Any], *, default_fps: Any = None) -
     fps = parse_fps((timeline.get("canvas") or {}).get("fps"), default=parse_fps(default_fps))
     for idx, clip in enumerate(timeline.get("video") or ()):
         src_in, src_out = float(clip["in"]), float(clip["out"])
-        dur = src_out - src_in
+        speed = float(clip.get("speed") or 1.0)  # <1 slows the picture down: timeline length = source length / speed
+        if not 0.5 <= speed <= 2.0:
+            raise ValueError(f"Video clip {clip.get('id', idx)} speed {speed} outside [0.5, 2.0]")
+        dur = (src_out - src_in) / speed
         if dur <= 0:
             raise ValueError(f"Video clip {clip.get('id', idx)} has non-positive duration")
         out_dur = frame_count(dur, fps) / float(fps)  # 画面按整帧出，游标同口径累加，几百段不漂移
         spans.append({
             "index": idx, "id": clip.get("id", f"v{idx + 1}"), "source": clip["source"],
-            "in": src_in, "out": src_out, "duration": dur,
+            "in": src_in, "out": src_out, "duration": dur, "speed": speed,
             "timeline_start": round(cursor, 6), "timeline_end": round(cursor + out_dur, 6), "clip": clip,
         })
         cursor += out_dur

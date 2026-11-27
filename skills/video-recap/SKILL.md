@@ -38,7 +38,7 @@ description: General-purpose AI video editing and narration recap skill for 30�
 - `export_jianying.py`：导出跨机可开的剪映/CapCut 多轨草稿（`references/jianying-export.md`）。
 - `dashboard.py`：生成零服务端 `review.html` 或启动 `127.0.0.1` 只读审片台（`references/material-library.md`）。
 - `library.py`：跨项目素材缓存、资源检索与授权/音色同意审计（`references/material-library.md`）。
-- `plan.py`：旁白逐句配镜（短片与长篇通用），把 `timeline.json` 的 `recap` 段展开成镜头、旁白时点与字幕（`voice` / `build`，写法见 `references/long-form.md` 第 3 节）。
+- `plan.py`：旁白逐句配镜（短片长篇通用），把 `timeline.json` 的 `recap` 段展开成镜头、旁白时点与字幕（`voice` / `build` / `qa` / `script`，见 `references/long-form.md` 第 3 节）。
 
 ## 3. 制作流程与迭代
 

@@ -419,3 +419,20 @@ def test_render_omitted_canvas_fps_and_color_backdrop_quantized_duration(
         {"kind": "color", "color": "#112233"}, {"x": 0.0, "y": 0.1, "w": 1.0, "h": 0.8},
     )
     assert ":d=0.080000," in vf and ":d=0.060000," not in vf
+
+
+@pytest.mark.parametrize("chunk", [48, 1])
+def test_render_slowed_clip_keeps_its_timeline_length(synthetic_media: dict[str, Path], tmp_path: Path, monkeypatch, chunk: int) -> None:
+    """A muted clip with speed 0.75 fills (out-in)/0.75 of the timeline in the single-graph and the batched paths."""
+    monkeypatch.setattr(render, "_CHUNK_CLIPS", chunk)
+    tl = {"schema_version": 3, "canvas": {"width": 320, "height": 240, "fps": "25"}, "sources": {"v1": str(synthetic_media["v1"])},
+          "video": [{"id": "a", "source": "v1", "in": 0.0, "out": 0.6, "audio": "mute", "speed": 0.75},
+                    {"id": "b", "source": "v1", "in": 1.0, "out": 1.4, "audio": "mute"}]}
+    spans, total = render.timeline_video_spans(tl)
+    assert abs(spans[0]["timeline_end"] - 0.8) < 1e-6 and abs(total - 1.2) < 1e-6
+    out = tmp_path / "slow.mp4"
+    render.render_timeline(tl, out)
+    assert abs(float(render.probe_media(out)["duration_s"]) - total) <= 0.05
+    loud = {**tl, "video": [{**tl["video"][0], "audio": "keep"}]}
+    with pytest.raises(ValueError, match="only muted clips can change speed"):
+        render.render_timeline(loud, tmp_path / "loud.mp4")

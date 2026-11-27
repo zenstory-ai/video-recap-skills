@@ -23,5 +23,5 @@
 
 ## 约定与 `check.json`
 
-- `in/out`、`keep_windows` 为源秒数，其余为成片秒数；`spoken_text` 送 TTS，字幕用 `text`；`strip_trailing_punct` 默认 `true`；`font_file` 所在目录交给 libass 找字体，`font_name` 须与该文件的字体族名一致；`overlays[].motion`：`none|slide_up`。`crop` 源像素，`viewport`/`rect`/`focus`/`safe_y` 归一化 `[0,1]`；`fit`：`contain|cover`；`overlays[]` 支持 PNG 与 `.mov`/`.webm` 透明视频。
+- `in/out`、`keep_windows` 为源秒数，其余为成片秒数；`spoken_text` 送 TTS、字幕用 `text`；`strip_trailing_punct` 默认 `true`；`font_file` 的目录交给 libass，`font_name` 须同其字体族名；`overlays[].motion`：`none|slide_up`；镜头 `speed` 0.5–2 仅静音段可用。`crop` 源像素，`viewport`/`rect`/`focus`/`safe_y` 归一化 `[0,1]`；`fit`：`contain|cover`；`overlays[]` 支持 PNG 与透明 `.mov`/`.webm`。
 - `check.json` v1 含 7 键（`container_valid`/`decode_integrity`/`geometry_and_cfr`/`av_sync`/`audio_health`/`visual_health`/`subtitle_and_timing`，`status`：`pass|warn|fail|skip`）与 `review_hints: []`、`telemetry`、`limitations`：仅 100% 确定性损坏判 `fail`（`ok: false`）；黑屏/定格/死寂/切边音频/重叠记 `warn` + `review_hints`。

@@ -183,7 +183,7 @@ ClawHub 分发由[显式发布清单](.clawhub/publish.json)管理；历次版�
 
 | 类别 | 文档链接 |
 |---|---|
-| **剪辑工艺与技能规范** | [通用剪辑与声画原则](skills/video-recap/references/editorial-craft.md) · [长篇连续解说与 plan.py](skills/video-recap/references/long-form.md) · [竖横屏包装与音效](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 契约](skills/video-recap/references/timeline-schema.md) · [剪映草稿导出](skills/video-recap/references/jianying-export.md) · [审片台与素材库](skills/video-recap/references/material-library.md) · [远程调用披露](skills/video-recap/references/remote-services.md) |
+| **剪辑工艺与技能规范** | [通用剪辑与声画原则](skills/video-recap/references/editorial-craft.md) · [长篇连续解说与 plan.py](skills/video-recap/references/long-form.md) · [长篇写稿与通读改稿](skills/video-recap/references/long-form-script.md) · [竖横屏包装与音效](skills/video-recap/references/packaging-and-sfx.md) · [timeline.json v3 契约](skills/video-recap/references/timeline-schema.md) · [剪映草稿导出](skills/video-recap/references/jianying-export.md) · [审片台与素材库](skills/video-recap/references/material-library.md) · [远程调用披露](skills/video-recap/references/remote-services.md) |
 | **仓库架构与边界** | [仓库架构说明](docs/architecture.md) · [生产能力边界与验收原则](docs/production-boundaries.md) · [多轨时间线与剪映协议](docs/timeline-and-jianying.md) · [单测体系](tests/README.md) |
 | **案例与写作参考** | [《这一秒过火》归档案例](examples/guohuo-60s/) · [影视解说文案指南](docs/video-recap-script-writing.md) · [AI 视频分析防编造指南](docs/ai-video-analysis-without-invented-plot.md) |
 

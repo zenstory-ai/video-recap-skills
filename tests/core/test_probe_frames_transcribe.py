@@ -142,7 +142,7 @@ def test_frames_shots_cli_width_labels_and_split_validation(synthetic_media: dic
     # Explicit --width is preserved (not clamped to 240), omitted --width defaults to 240, and --no-labels propagates
     captured: list[dict[str, object]] = []
 
-    def fake_shot_sheet(video_path, cuts, out_image, *, window, width=240, crop=None, split_s=3.0, labels=True):
+    def fake_shot_sheet(video_path, cuts, out_image, *, window, width=240, crop=None, split_s=3.0, labels=True, **_kw):
         captured.append({"width": width, "labels": labels, "split_s": split_s})
         return {"video": str(video_path), "sheet": str(out_image), "labels_burned": False, "pieces": []}
 
@@ -167,3 +167,13 @@ def test_frames_shots_cli_width_labels_and_split_validation(synthetic_media: dic
     meta = frames.build_shot_sheet(synthetic_media["v1"], [1.0], out_img, window=(0.0, 2.0), width=300, labels=False)
     assert out_img.is_file() and out_img.stat().st_size > 200
     assert meta["labels_burned"] is False
+
+
+def test_frames_shot_sheet_tags_far_pieces_marks_and_notes(synthetic_media: dict[str, Path], tmp_path: Path) -> None:
+    notes = tmp_path / "notes.json"
+    notes.write_text(json.dumps({"segments": [{"start": 0.2, "end": 0.5, "text": "她拿起手机"}, {"t": 1.5, "text": "门外有人"}, {"t": 1.6, "text": " "}]}), encoding="utf-8")
+    meta = frames.build_shot_sheet(synthetic_media["v1"], [1.0], tmp_path / "s.jpg", window=(0.0, 0.9), far=(0.0, 2.0),
+                                   marks=[0.3], notes=frames.load_notes(notes), labels=False)
+    near, far = meta["pieces"]
+    assert not near["far"] and near["marks"] == [0] and near["note"] == "她拿起手机"
+    assert far["far"] and far["marks"] == [] and far["note"] == "门外有人"

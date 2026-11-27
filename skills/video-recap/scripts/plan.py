@@ -6,6 +6,8 @@ original-dialogue block; this tool measures, quantises and lays them out, and re
 
   plan.py voice timeline.json                       # recap narration -> audio.narration[] (then run tts.py --update-timeline)
   plan.py build timeline.json --probe media/probe.json [--report media/plan.json]
+  plan.py qa timeline.json --out qa/ [--n 40]       # after build: sample sheets of narration clauses for the agent to judge
+  plan.py script timeline.json                      # the whole script as text: narration and the dialogue of every original block
 """
 
 from __future__ import annotations
@@ -19,14 +21,16 @@ from array import array
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from _common import load_json, parse_fps, resolve_source, run_cmd, save_json
+from _common import load_json, parse_fps, resolve_source, run_cmd, save_json, timeline_video_spans
 
-__all__ = ["align_cuts", "build_plan", "clause_durations", "clauses", "main", "orig_parts", "quiet_point", "sync_voice"]
+__all__ = ["align_cuts", "build_plan", "clause_durations", "clauses", "main", "orig_parts", "qa_samples", "quiet_point", "script_text", "sync_voice"]
 
 _SPLIT = re.compile(r"[，,；;：:]")
 _SILENCE_START = re.compile(r"silence_start:\s*(-?\d+(?:\.\d+)?)")
 _SILENCE_END = re.compile(r"silence_end:\s*(-?\d+(?:\.\d+)?)")
 _GAP, _KEEP, _HEAD, _TAIL = 1.2, 0.3, 0.1, 0.15
+_FAR = 45.0  # same-scene pictures a little outside the window are fine (frames.py --far); further away is likely another event
+_MIN_SPEED = 0.75  # a clause picture may run down to 0.75x speed so short close-ups stay usable
 
 
 def _units(text: str) -> int:
@@ -158,6 +162,11 @@ def _shot_pair(sh: Any) -> tuple[float, float] | None:
     return (a, b) if math.isfinite(a) and math.isfinite(b) else None
 
 
+def _crop(it: dict[str, Any], recap: dict[str, Any]) -> dict[str, Any]:
+    crop = it.get("crop") or recap.get("crop")  # per-item crop (e.g. a promo bar in a few shots) overrides recap.crop
+    return {"crop": crop} if crop else {}
+
+
 def _overlap(p: dict[str, Any], q: dict[str, Any]) -> float:
     return min(p["out"], q["out"]) - max(p["in"], q["in"]) if p["source"] == q["source"] else 0.0
 
@@ -206,15 +215,19 @@ def build_plan(tl: dict[str, Any], base: Path, cuts: dict[str, list[float]]) -> 
                 if a < 0:
                     errors.append(f"{iid} clause {j} 「{part}」 shot [{a}, {b}] has negative start")
                     continue
-                if b - a < need - 1e-3:
-                    errors.append(f"{iid} clause {j} 「{part}」 needs {need:.2f}s of picture, shot [{a}, {b}] has {b - a:.2f}s; pick a longer shot")
+                if b - a < _MIN_SPEED * need - 1e-3:
+                    errors.append(f"{iid} clause {j} 「{part}」 needs {need:.2f}s of picture (at least {_MIN_SPEED * need:.2f}s slowed), shot [{a}, {b}] has {b - a:.2f}s; pick a longer shot")
                     continue
-                x = max(0.0, min(max(a, (a + b) / 2 - need / 2), b - need))
-                cross = [c for c in cuts.get(src, []) if x + 0.04 < c < x + need - 0.04]
+                span = min(need, b - a)
+                x = max(0.0, min(max(a, (a + b) / 2 - span / 2), b - span))
+                cross = [c for c in cuts.get(src, []) if x + 0.04 < c < x + span - 0.04]
                 if cross:
-                    errors.append(f"{iid} clause {j} 「{part}」 picture [{x:.2f}, {x + need:.2f}] crosses a source cut at {cross[0]:.2f}; pick a range inside one shot")
+                    errors.append(f"{iid} clause {j} 「{part}」 picture [{x:.2f}, {x + span:.2f}] crosses a source cut at {cross[0]:.2f}; pick a range inside one shot")
                     continue
-                video.append({"id": f"{iid}c{j}", "source": src, "in": round(x, 4), "out": round(x + need, 4), "audio": "mute"})
+                clip = {"id": f"{iid}c{j}", "source": src, "in": round(x, 4), "out": round(x + span, 4), "audio": "mute", **_crop(it, recap)}
+                if span < need - 1e-3:  # slowed: timeline length stays `need`
+                    clip["speed"] = round((clip["out"] - clip["in"]) / need, 6)
+                video.append(clip)
                 subs.append({"start": round(spoken, 4), "end": round(spoken + d, 4), "text": part, "style": "narration"})
                 spoken += d
                 frames += k
@@ -238,7 +251,7 @@ def build_plan(tl: dict[str, Any], base: Path, cuts: dict[str, list[float]]) -> 
             for p_i, p in enumerate(parts):
                 start = frames / fps
                 video.append({"id": f"{iid}p{p_i}", "source": src, "in": p["in"], "out": p["out"], "audio": "keep",
-                              "keep_windows": [[s["start"], s["end"]] for s in p["segs"] if s.get("text")]})
+                              "keep_windows": [[s["start"], s["end"]] for s in p["segs"] if s.get("text")], **_crop(it, recap)})
                 for s in p["segs"]:
                     s0, s1 = max(s["start"], p["in"]), min(s["end"], p["out"] - 0.05)
                     if s.get("text") and s1 > s0:
@@ -246,18 +259,18 @@ def build_plan(tl: dict[str, Any], base: Path, cuts: dict[str, list[float]]) -> 
                 frames += p["frames"]
         else:
             errors.append(f"{iid}: type must be narr or orig")
-    for clip in video if recap.get("crop") else ():  # e.g. cut off subtitles burned into the source
-        clip["crop"] = recap["crop"]
     items = recap.get("items") or []
     cur = None  # soft structure hints: never block, never rewrite
     for i, it in enumerate(items):
+        if it.get("type") == "narr" and not 8 <= _units(str(it.get("text") or "")) <= 40:
+            warnings.append(f"{it.get('id')}: narration has {_units(str(it.get('text') or ''))} characters; keep one event per sentence (about 8–40)")
         win = it.get("window") if it.get("type") == "narr" else None
         if win:
             w0, w1 = float(win[0]), float(win[1])
             shots_raw = it.get("shots") if isinstance(it.get("shots"), (list, tuple)) else ()
-            out = [j for j, sh in enumerate(shots_raw) if (p := _shot_pair(sh)) and (p[0] < w0 - 1 or p[1] > w1 + 1)]
+            out = [j for j, sh in enumerate(shots_raw) if (p := _shot_pair(sh)) and (p[0] < w0 - _FAR or p[1] > w1 + _FAR)]
             if out:
-                warnings.append(f"{it.get('id')}: clause shots {out} lie outside its window [{w0}, {w1}]; pick inside the time it tells")
+                warnings.append(f"{it.get('id')}: clause shots {out} lie over {_FAR:.0f}s outside its window [{w0}, {w1}]; pick near the time it tells")
             nxt = items[i + 1] if i + 1 < len(items) else {}
             if nxt.get("type") == "orig" and nxt.get("source") == it.get("source") and nxt.get("in") is not None:
                 try:
@@ -278,11 +291,68 @@ def build_plan(tl: dict[str, Any], base: Path, cuts: dict[str, list[float]]) -> 
         if cur and key < cur:
             warnings.append(f"{it.get('id')}: goes back in source time (source order / time {key} < {cur})")
         cur = max(cur, key) if cur else key
+    origs = [it for it in items if it.get("type") == "orig" and _shot_pair([it.get("in"), it.get("out")])]
+    for i, p in enumerate(origs):
+        for q in origs[i + 1:]:
+            if p.get("source") == q.get("source") and min(float(p["out"]), float(q["out"])) - max(float(p["in"]), float(q["in"])) > 0.2:
+                why = " (the hook reuses a body original)" if "hook" in (p.get("seg"), q.get("seg")) else ""
+                warnings.append(f"{p.get('id')} and {q.get('id')} play overlapping original audio{why}")
     for i, p in enumerate(video):
         for q in video[i + 1:]:
+            if p["audio"] == q["audio"] == "keep":  # original vs original is reported per block above
+                continue
             if _overlap(p, q) > 0.2:
                 warnings.append(f"{p['id']} and {q['id']} reuse the same source picture ({_overlap(p, q):.1f}s)")
     return {"video": video, "subtitles": subs, "errors": errors, "warnings": warnings, "duration_s": round(frames / fps, 3)}
+
+
+def qa_samples(tl: dict[str, Any], base: Path, out_dir: Path, n: int = 40) -> list[dict[str, Any]]:
+    """Evenly sample `n` body narration clauses from the built timeline: one row of three frames (head, middle, tail of the
+    source picture) per clause, 10 rows per `sample_<g>.jpg`; `sample.json` maps sheet/row to the clause for the agent to judge."""
+    items = {str(it.get("id")): it for it in (tl.get("recap") or {}).get("items") or []}
+    spans, _ = timeline_video_spans(tl)
+    pool = [s for s in spans if s["clip"].get("audio") == "mute" and "c" in str(s["id"])
+            and items.get(str(s["id"]).rsplit("c", 1)[0], {}).get("seg") != "hook"]
+    pick = pool if len(pool) <= n else [pool[int(i * len(pool) / n)] for i in range(n)]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    meta: list[dict[str, Any]] = []
+    for k, sp in enumerate(pick):
+        nid, j = str(sp["id"]).rsplit("c", 1)
+        crop = sp["clip"].get("crop")
+        vf = (f"crop={int(crop['w'])}:{int(crop['h'])}:{int(crop['x'])}:{int(crop['y'])}," if crop else "") + "scale=256:-2"
+        ins: list[str] = []
+        for t in (sp["in"] + 0.1, (sp["in"] + sp["out"]) / 2, sp["out"] - 0.1):
+            ins += ["-ss", f"{max(0.0, t):.3f}", "-i", str(resolve_source(tl, sp["source"], base))]
+        run_cmd(["ffmpeg", "-y", "-v", "error", *ins, "-filter_complex", ";".join(f"[{i}:v]{vf}[f{i}]" for i in range(3)) + ";[f0][f1][f2]hstack=3",
+                 "-frames:v", "1", str(out_dir / f"row_{k:02d}.jpg")], check=True)
+        text = str(items.get(nid, {}).get("text") or "")
+        parts = clauses(text)
+        meta.append({"k": k, "sheet": f"sample_{k // 10}.jpg", "row": k % 10, "at": round(sp["timeline_start"], 1), "id": sp["id"],
+                     "clause": parts[int(j)] if int(j) < len(parts) else "", "sentence": text})
+    for g in range(0, len(pick), 10):
+        rows = sum((["-i", str(out_dir / f"row_{k:02d}.jpg")] for k in range(g, min(g + 10, len(pick)))), [])
+        m = len(rows) // 2
+        run_cmd(["ffmpeg", "-y", "-v", "error", *rows, *(["-filter_complex", f"vstack={m}"] if m > 1 else []),
+                 "-frames:v", "1", str(out_dir / f"sample_{g // 10}.jpg")], check=True)
+    save_json(out_dir / "sample.json", meta)
+    return meta
+
+
+def script_text(tl: dict[str, Any], base: Path) -> str:
+    """Narration and original blocks in play order, each block with its transcript lines, for the agent to read through."""
+    recap = tl["recap"]
+    trans = {k: load_json(base / v).get("segments") or [] for k, v in (recap.get("transcripts") or {}).items()}
+    out = []
+    for it in recap["items"]:
+        tag = "[hook] " if it.get("seg") == "hook" else ""
+        if it.get("type") != "orig":
+            out.append(f"{it.get('id', '')} {tag}N: {it.get('text', '')}")
+            continue
+        a, b = float(it["in"]), float(it["out"])
+        said = [(f"{s['speaker']}: " if s.get("speaker") else "") + str(s.get("text", "")).strip()
+                for s in trans.get(it["source"], []) if float(s["end"]) > a + 0.05 and float(s["start"]) < b - 0.05]
+        out.append(f"{it.get('id', '')} {tag}O {it['source']} {a:.1f}-{b:.1f}: " + " / ".join(said))
+    return "\n".join(out) + "\n"
 
 
 def _match_probe_row(rows: Sequence[dict[str, Any]], want: Path, roots: Sequence[Path]) -> dict[str, Any] | None:
@@ -325,15 +395,27 @@ def _cuts_by_source(tl: dict[str, Any], base: Path, probe: str | None) -> tuple[
 
 def main(argv: Sequence[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Expand the agent's recap section of timeline.json into clips, narration timing and subtitles.")
-    ap.add_argument("command", choices=["voice", "build"])
+    ap.add_argument("command", choices=["voice", "build", "qa", "script"])
     ap.add_argument("timeline")
     ap.add_argument("--probe", help="probe.json from probe.py --scenes (cuts for edge alignment).")
     ap.add_argument("--report", help="Write errors/warnings JSON here.")
+    ap.add_argument("--out", default="qa", help="qa: output directory for sample sheets and sample.json.")
+    ap.add_argument("--n", type=int, default=40, help="qa: number of narration clauses to sample.")
     args = ap.parse_args(argv)
     tl, base = load_json(args.timeline), Path(args.timeline).resolve().parent
     if not (tl.get("recap") or {}).get("items"):
         sys.stderr.write("timeline.json has no recap.items\n")
         return 2
+    if args.command == "script":
+        sys.stdout.write(script_text(tl, base))
+        return 0
+    if args.command == "qa":
+        if not tl.get("video"):
+            sys.stderr.write("timeline.json has no video; run plan.py build first\n")
+            return 2
+        meta = qa_samples(tl, base, Path(args.out), max(1, args.n))
+        sys.stdout.write(f"{len(meta)} samples -> {args.out}/sample_*.jpg, {args.out}/sample.json\n")
+        return 0
     if args.command == "voice":
         todo = sync_voice(tl)
         save_json(args.timeline, tl)
