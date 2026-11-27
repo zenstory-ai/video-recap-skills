@@ -139,6 +139,7 @@ def orig_parts(item: dict[str, Any], segs: Sequence[dict[str, Any]], cuts: Seque
 def sync_voice(tl: dict[str, Any]) -> int:
     """Mirror recap narration items into audio.narration[] (keeping measured file/duration when the text is unchanged)."""
     old = {str(n.get("id")): n for n in (tl.get("audio") or {}).get("narration") or []}
+    gain = (tl.get("recap") or {}).get("narration_gain")  # 整体调旁白响度，与原声对齐
     new = []
     for it in (tl.get("recap") or {}).get("items") or []:
         if it.get("type") != "narr":
@@ -147,7 +148,8 @@ def sync_voice(tl: dict[str, Any]) -> int:
         spoken = it.get("spoken_text") or it["text"]
         keep = prev.get("text") == it["text"] and (prev.get("spoken_text") or prev.get("text")) == spoken
         new.append({"id": it["id"], "text": it["text"], **({"spoken_text": it["spoken_text"]} if it.get("spoken_text") else {}),
-                    **({"file": prev["file"], "duration": prev["duration"]} if keep and prev.get("file") and prev.get("duration") else {})})
+                    **({"file": prev["file"], "duration": prev["duration"]} if keep and prev.get("file") and prev.get("duration") else {}),
+                    **({"gain": float(gain)} if gain is not None else {})})
     tl.setdefault("audio", {})["narration"] = new
     return sum(1 for n in new if "file" not in n)
 

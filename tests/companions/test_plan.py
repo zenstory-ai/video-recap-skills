@@ -314,3 +314,14 @@ def test_plan_script_prints_narration_and_the_dialogue_inside_each_original(tmp_
     (tmp_path / "timeline.json").write_text(json.dumps(tl), encoding="utf-8")
     assert plan.main(["script", str(tmp_path / "timeline.json")]) == 0
     assert capsys.readouterr().out.splitlines() == ["n1 [hook] N: 她等了十年", "o1 O s1 4.9-7.7: A: 你来了 / 嗯"]
+
+
+def test_sync_voice_carries_recap_narration_gain_to_every_line():
+    tl = {"recap": {"narration_gain": 1.6, "items": [
+        {"type": "narr", "id": "n1", "text": "她找上了老同学"}, {"type": "orig", "id": "o1", "source": "s1", "in": 1.0, "out": 3.0},
+        {"type": "narr", "id": "n2", "text": "他没有马上答应"}]}}
+    plan.sync_voice(tl)
+    assert [n.get("gain") for n in tl["audio"]["narration"]] == [1.6, 1.6]
+    del tl["recap"]["narration_gain"]
+    plan.sync_voice(tl)
+    assert all("gain" not in n for n in tl["audio"]["narration"])
