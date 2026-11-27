@@ -12,6 +12,9 @@ All notable changes to this project are documented here.
 
 ### Added
 
+- **长篇结尾钩子**：`long-form-script.md` 大纲新增只讲到中途（如前几集）时的结尾写法：先收住最后一场，再用 1–3 句抛出前文已埋下、未解决的具体悬念，不编后续剧情、不用套话。
+- **长篇配乐与响度**：`long-form.md` 新增第 5 节：原片自带配乐先用人声分离工具分出对白轨再作原声；解说与原声同响度；BGM 全片连续、原声段与旁白下都不压低，比人声低约 18 dB。
+- `recap.narration_gain`：`plan.py voice` 把它写进每句旁白的 `gain`，整体调旁白响度与原声对齐。
 - **短镜头放慢**：`video[]` 镜头新增 `speed`（0.5–2，仅静音镜头）；`plan.py build` 在候选镜头短于小句配音、但不短于 0.75 倍时自动放慢补足，成片仍占满小句时长，再短才报错。
 - **候选图带描述与标记**：`frames.py --shots` 新增 `--notes`（带时间的笔记或转写，写进每个候选的 `note`）、`--marks`（写稿时的画面意图，含它的候选标 `*小句号`）、`--far`（放宽到更大时段，窗口外候选标 `far`）。
 - **`plan.py qa` 抽查**：`build` 后均匀抽 40 个正文旁白小句出头、中、尾三帧抽查图与 `sample.json`，供 Agent 逐条判断；`long-form.md` 写明达标线与必看片段。
@@ -21,6 +24,7 @@ All notable changes to this project are documented here.
 
 ### Changed
 
+- 通读改稿清单补充：长定语开头改成先说人再说事、旁白开头不重复刚听完的原声词组；`plan.py qa` 达标判断补「画面是这个小句那一刻，不是下半句的画面」。
 - `plan.py build` 新增提示：同源原声段重叠（含钩子原声在正文重放）、旁白字数不在 8–40；原声段之间的重叠不再在画面复用里重复报；「画面出了窗口」放宽为离窗口超过 45 秒才提示（同场放宽的候选属正常选择）。
 
 ### Fixed
