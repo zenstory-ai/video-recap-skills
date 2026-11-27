@@ -76,12 +76,19 @@ def _require_pytest():
 
 
 def main(argv):
+    if any(arg in {"-h", "--help"} for arg in argv):
+        print(f"Usage: python scripts/test.py [{' | '.join(GROUPS)} ...]")
+        return 0
     if not _require_pytest():
         return 2
     if not _require_ffmpeg_if_requested():
         return 2
     root = Path(__file__).resolve().parent.parent
     groups = argv or GROUPS
+    unknown = [g for g in groups if g not in GROUPS]
+    if unknown:
+        print(f"Unknown test group(s): {', '.join(unknown)}. Expected one of: {', '.join(GROUPS)}", file=sys.stderr)
+        return 2
     failed = []
     for group in groups:
         print(f"== {group} ==", flush=True)

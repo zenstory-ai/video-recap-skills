@@ -1,6 +1,6 @@
 """Root pytest guard for this self-contained skill bundle.
 
-`video-recap` and `video-reference` each define their own top-level `lib.py`. The
+`video-recap` and `video-reference` each define self-contained `scripts/` modules. The
 canonical test command runs one isolated pytest process per test group so a plain
 root-level `pytest` run cannot collect both skills in one interpreter and collide
 on module names.
@@ -13,7 +13,7 @@ import pytest
 _CANONICAL_MESSAGE = (
     "This repository uses isolated per-skill pytest processes. "
     "Run `python3 scripts/test.py` for the full suite, or target one group such "
-    "as `python3 -m pytest tests/assemble -q`."
+    "as `python3 -m pytest tests/core -q`."
 )
 
 
@@ -40,7 +40,8 @@ def pytest_cmdline_main(config):
     root = Path(config.rootpath).resolve()
     groups = set()
     for raw in args:
-        path = (root / raw).resolve() if not Path(raw).is_absolute() else Path(raw).resolve()
+        file_part = raw.split("::", 1)[0]
+        path = (root / file_part).resolve() if not Path(file_part).is_absolute() else Path(file_part).resolve()
         if path == root or path == root / "tests":
             raise pytest.UsageError(_CANONICAL_MESSAGE)
         group = _test_group_for_path(root, path)

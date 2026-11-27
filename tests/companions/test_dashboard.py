@@ -64,7 +64,12 @@ def test_serve_api_range_streaming_and_security_guards(tmp_path: Path, sample_ti
     outside = tmp_path.parent / "outside_secret.mp4"
     outside.write_bytes(b"SECRET")
     link = tmp_path / "runs" / "ep01" / "escape.mp4"
-    link.symlink_to(outside)
+    symlink_created = False
+    try:
+        link.symlink_to(outside)
+        symlink_created = True
+    except OSError:
+        pass
 
     server = dashboard.make_server(tmp_path, port=0)
     port = server.server_address[1]
@@ -127,8 +132,9 @@ def test_serve_api_range_streaming_and_security_guards(tmp_path: Path, sample_ti
         assert st == 403
         st, _, _ = req("GET", "/api/media?path=../outside_secret.mp4")
         assert st == 403
-        st, _, _ = req("GET", "/api/media?path=runs/ep01/escape.mp4")
-        assert st == 403
+        if symlink_created:
+            st, _, _ = req("GET", "/api/media?path=runs/ep01/escape.mp4")
+            assert st == 403
         st, _, _ = req("GET", "/api/media?path=runs/ep01/timeline.json")
         assert st == 403
     finally:

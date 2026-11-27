@@ -127,6 +127,7 @@ def test_subtitles_srt_and_ass_generation(tmp_path: Path) -> None:
 
 
 def test_ducking_filters_split_long_timelines_and_keep_the_same_curve(has_ffmpeg: bool) -> None:
+    import os
     import subprocess
 
     windows = [(10.0 * i, 10.0 * i + 4.0, 0.18) for i in range(120)]
@@ -134,10 +135,15 @@ def test_ducking_filters_split_long_timelines_and_keep_the_same_curve(has_ffmpeg
     assert len(filters) == 3 and len(_audio.ducking_filters(windows[:10], 1.0, 0.25, 0.5)) == 1
     bgm = _audio.ducking_filters([(s, e, 0.12) for s, e, _ in windows], 0.3, 0.25, 0.5)
     assert len(bgm) == 3 and "0.3000" in bgm[0] and "0.3000" not in bgm[1]
-    if has_ffmpeg:
-        res = subprocess.run(["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "anullsrc=d=2", "-af", ",".join(filters), "-f", "null", "-"],
-                             capture_output=True, text=True)
-        assert res.returncode == 0, res.stderr[-300:]
+    if not has_ffmpeg:
+        if os.environ.get("RECAP_REQUIRE_FFMPEG", "").strip().lower() not in {"", "0", "false", "no"}:
+            pytest.fail("RECAP_REQUIRE_FFMPEG is set, but ffmpeg is unavailable")
+        return
+    res = subprocess.run(
+        ["ffmpeg", "-hide_banner", "-f", "lavfi", "-i", "anullsrc=d=2", "-af", ",".join(filters), "-f", "null", "-"],
+        capture_output=True, text=True, encoding="utf-8", errors="replace",
+    )
+    assert res.returncode == 0, res.stderr[-300:]
 
 
 def test_common_timeline_video_spans_default_fps() -> None:

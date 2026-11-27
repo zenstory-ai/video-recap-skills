@@ -15,7 +15,6 @@ SKILL_NAMES = tuple(
     for path in sorted(SKILLS_ROOT.iterdir())
     if path.is_dir() and (path / "SKILL.md").is_file()
 )
-STAGE_SKILL_NAMES = tuple(name for name in SKILL_NAMES if name != "video-recap")
 
 
 def _skill_path(skill_name: str) -> Path:
@@ -112,9 +111,9 @@ def test_stage_sources_never_point_to_a_sibling_skill_path():
 
 
 def test_stage_markdown_never_names_a_sibling_skill():
-    """On-demand sibling skills describe artifact contracts, never another skill implementation."""
+    """Sibling skills describe artifact contracts, never another skill implementation."""
     known_names = set(SKILL_NAMES)
-    for skill_name in STAGE_SKILL_NAMES:
+    for skill_name in SKILL_NAMES:
         skill_dir = SKILLS_ROOT / skill_name
         sibling_names = known_names - {skill_name}
         for markdown_path in skill_dir.rglob("*.md"):
@@ -163,6 +162,8 @@ print(json.dumps(names))
         [sys.executable, "-I", "-c", code],
         cwd=scripts_dir,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         capture_output=True,
         check=False,
     )

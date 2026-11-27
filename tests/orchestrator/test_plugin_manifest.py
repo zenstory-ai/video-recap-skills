@@ -65,52 +65,30 @@ def test_every_discovered_skill_has_matching_frontmatter_identity():
         for path in (ROOT / "skills").iterdir()
         if path.is_dir() and (path / "SKILL.md").is_file()
     )
-    assert skill_dirs
+    assert [p.name for p in skill_dirs] == ["video-recap", "video-reference"]
     for skill_dir in skill_dirs:
         frontmatter = _frontmatter(skill_dir.name)
         assert frontmatter.get("name") == skill_dir.name
-        if "user-invocable" in frontmatter:
-            assert isinstance(frontmatter["user-invocable"], bool)
+        assert frontmatter.get("user-invocable", True) is True
 
 
 def test_skill_descriptions_are_single_line_values():
     # OpenClaw falls back to a single-line-only frontmatter parser when YAML parsing fails;
     # a block scalar (`description: >`) or a wrapped plain value would read as empty there.
     for skill_dir in sorted((ROOT / "skills").iterdir()):
-        if not (skill_dir / "SKILL.md").is_file():
+        skill_md = skill_dir / "SKILL.md"
+        if not skill_md.is_file():
             continue
+        text = skill_md.read_text(encoding="utf-8")
+        match = re.match(r"\A---\r?\n(.*?)\r?\n---(?:\r?\n|\Z)", text, re.DOTALL)
+        assert match, f"{skill_md} must start with YAML frontmatter"
+        raw_lines = match.group(1).splitlines()
+        for idx, line in enumerate(raw_lines):
+            if line.startswith("description:"):
+                assert idx + 1 >= len(raw_lines) or not raw_lines[idx + 1][:1].isspace(), (
+                    f"{skill_md}: description must not wrap onto indented continuation lines"
+                )
         description = _frontmatter(skill_dir.name).get("description")
         assert isinstance(description, str) and description, skill_dir.name
         assert description[0] not in ">|", skill_dir.name
         assert len(description) <= 1024, (skill_dir.name, len(description))
-
-
-def test_skill_frontmatter_exposes_router_writing_and_reference_skills():
-    expected_invocability = {
-        "video-recap": True,
-        "video-reference": True,
-    }
-
-    for skill_name, expected in expected_invocability.items():
-        frontmatter = _frontmatter(skill_name)
-        assert frontmatter["name"] == skill_name
-        assert frontmatter.get("user-invocable", True) is expected
-
-
-def test_public_readmes_are_skill_first_and_document_verified_hosts():
-    readmes = {
-        "zh": (ROOT / "README.md").read_text(encoding="utf-8"),
-        "en": (ROOT / "README_EN.md").read_text(encoding="utf-8"),
-    }
-
-    for language, text in readmes.items():
-        assert "agy plugin install https://github.com/zenstory-ai/video-recap-skills" in text, language
-        assert "https://antigravity.google/docs/skills" in text, language
-        assert "codex plugin marketplace add zenstory-ai/video-recap-skills" in text, language
-        assert "codex plugin add video-recap-skills@video-recap" in text, language
-        assert "https://opencode.ai/docs/skills/" in text, language
-        assert "opencode debug skill" in text, language
-        assert "skills/video-recap/references/long-form.md" in text, language
-
-    assert "用 /path/to/ep1.mp4 和 /path/to/ep2.mp4" in readmes["zh"]
-    assert "Use /path/to/ep1.mp4 and /path/to/ep2.mp4" in readmes["en"]

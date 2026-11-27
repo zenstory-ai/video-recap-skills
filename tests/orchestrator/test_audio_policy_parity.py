@@ -50,6 +50,6 @@ def test_export_jianying_shares_ducking_keyframes_from_audio_helper():
             for alias in node.names:
                 if alias.name == "_audio":
                     imported_from_audio.add("_audio")
-    assert imported_from_audio, (
-        "export_jianying.py must share ducking automation from _audio.py rather than duplicating it"
+    assert "ducking_keyframes" in imported_from_audio or "_audio" in imported_from_audio, (
+        "export_jianying.py must share ducking_keyframes from _audio.py rather than duplicating it"
     )

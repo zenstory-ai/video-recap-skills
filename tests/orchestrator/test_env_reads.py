@@ -32,19 +32,28 @@ def _literal_env_reads(tree):
                 func = node.func
                 name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", None)
                 direct_environment = (
-                    isinstance(func, ast.Attribute)
-                    and name in {"get", "getenv"}
-                    and (
-                        name == "getenv"
-                        or isinstance(func.value, ast.Name) and func.value.id == "environ"
-                        or isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
+                    (isinstance(func, ast.Name) and name == "getenv")
+                    or (
+                        isinstance(func, ast.Attribute)
+                        and name in {"get", "getenv"}
+                        and (
+                            name == "getenv"
+                            or isinstance(func.value, ast.Name) and func.value.id == "environ"
+                            or isinstance(func.value, ast.Attribute) and func.value.attr == "environ"
+                        )
                     )
                 )
                 if direct_environment:
                     reads.add(node.args[0].value)
-            if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Constant):
+            if (
+                isinstance(node, ast.Subscript)
+                and isinstance(node.slice, ast.Constant)
+                and isinstance(node.slice.value, str)
+            ):
                 value = node.value
-                if isinstance(value, ast.Attribute) and value.attr == "environ":
+                if (isinstance(value, ast.Name) and value.id == "environ") or (
+                    isinstance(value, ast.Attribute) and value.attr == "environ"
+                ):
                     reads.add(node.slice.value)
     return reads
 
