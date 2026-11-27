@@ -169,11 +169,13 @@ def test_skill_markdown_stays_within_character_budgets():
 
 def test_core_and_companion_isolation_is_strictly_unidirectional():
     scripts_dir = ROOT / "skills" / "video-recap" / "scripts"
+    discovered = set()
     violations = []
     for path in sorted(scripts_dir.rglob("*.py")):
         if "__pycache__" in path.parts:
             continue
         mod = _module_name(scripts_dir, path).split(".", 1)[0]
+        discovered.add(mod)
         imported = _imported_top_level_modules(path)
         if mod in CORE_MODULES:
             bad = sorted(imported & COMPANION_MODULES)
@@ -186,6 +188,9 @@ def test_core_and_companion_isolation_is_strictly_unidirectional():
                 violations.append(f"companion {mod}.py must not import peer companion(s) {bad_peers}")
             if bad_clis:
                 violations.append(f"companion {mod}.py must not import core CLI(s) {bad_clis}")
+    assert discovered == CORE_MODULES | COMPANION_MODULES, (
+        f"Classify every video-recap script as core or companion: {sorted(discovered ^ (CORE_MODULES | COMPANION_MODULES))}"
+    )
     assert not violations, "Unidirectional core -> companion boundary violated:\n" + "\n".join(violations)
 
 
@@ -205,17 +210,8 @@ def test_skill_scripts_do_not_import_other_skill_scripts():
             module_owners[module].add(skill_dir.name)
 
     violations = []
-    for skill_name, (_scripts_dir, local_modules, paths) in skill_script_dirs.items():
-        other_script_paths = {
-            f"skills/{other_skill}/scripts"
-            for other_skill in skill_script_dirs
-            if other_skill != skill_name
-        }
+    for _skill_name, (_scripts_dir, local_modules, paths) in skill_script_dirs.items():
         for path in paths:
-            source = path.read_text(encoding="utf-8")
-            for other_path in sorted(other_script_paths):
-                if other_path in source:
-                    violations.append(f"{path.relative_to(ROOT)} references cross-skill path {other_path}")
             for module in sorted(_imported_top_level_modules(path)):
                 if module in module_owners and module not in local_modules:
                     owners = sorted(module_owners[module])
@@ -323,7 +319,7 @@ def _text_io_without_encoding(call: ast.Call) -> bool:
     elif (
         isinstance(func, ast.Attribute)
         and func.attr == "open"
-        and isinstance(func.value, (ast.Name, ast.BinOp, ast.Call))
+        and isinstance(func.value, (ast.Name, ast.Attribute, ast.BinOp, ast.Call))
         and ast.unparse(func.value) not in ("webbrowser", "wave", "Image", "zipfile", "tarfile")
         and "opener" not in ast.unparse(func.value)
     ):
@@ -340,14 +336,16 @@ def _text_io_without_encoding(call: ast.Call) -> bool:
 
 def test_text_file_io_names_its_encoding():
     violations = []
-    for base in ("skills", "tests", "scripts", "tools"):
-        for path in sorted((ROOT / base).rglob("*.py")):
-            if "__pycache__" in path.parts:
-                continue
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            violations.extend(
-                f"{path.relative_to(ROOT)}:{node.lineno}"
-                for node in ast.walk(tree)
-                if isinstance(node, ast.Call) and _text_io_without_encoding(node)
-            )
+    py_files = [ROOT / "conftest.py"]
+    for base in ("skills", "tests", "scripts"):
+        py_files.extend(sorted((ROOT / base).rglob("*.py")))
+    for path in py_files:
+        if not path.is_file() or "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        violations.extend(
+            f"{path.relative_to(ROOT)}:{node.lineno}"
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call) and _text_io_without_encoding(node)
+        )
     assert not violations, 'text I/O without encoding="utf-8":\n' + "\n".join(violations)

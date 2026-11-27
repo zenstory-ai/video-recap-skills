@@ -322,7 +322,7 @@ def test_render_does_not_inherit_source_title_comment_or_chapters(synthetic_medi
     out = tmp_path / "out.mp4"
     render.render_timeline(tl, out)
     probe = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format_tags", "-show_chapters", "-of", "json", str(out)],
-                                      capture_output=True, text=True, check=True).stdout)
+                                      capture_output=True, text=True, encoding="utf-8", errors="replace", check=True).stdout)
     tags = {k.lower(): v for k, v in (probe.get("format", {}).get("tags") or {}).items()}
     assert "title" not in tags and "comment" not in tags
     assert probe.get("chapters") == []

@@ -119,11 +119,16 @@ def test_packaging_cli_roundtrip(tmp_path: Path, sample_timeline):
 
 
 def test_drawtext_fallback_renders_png_without_pillow_or_magick(tmp_path: Path, monkeypatch):
+    import os
+
     monkeypatch.setattr(packaging, "_render_with_pillow", lambda *a, **k: False)
     monkeypatch.setattr(packaging, "_render_with_magick", lambda *a, **k: False)
     out = tmp_path / "dt_plate.png"
     info = packaging.render_plate_png(out, 480, 120, ["KICKER", "Title Line"], {"bg": "#111622E6", "border": "#D9B460EB", "title": "#FFFFFF"})
-    assert info["renderer"] in {"ffmpeg_drawtext", "stdlib_fallback"}
+    if os.environ.get("RECAP_REQUIRE_FFMPEG", "").strip().lower() not in {"", "0", "false", "no"}:
+        assert info["renderer"] == "ffmpeg_drawtext"
+    else:
+        assert info["renderer"] in {"ffmpeg_drawtext", "stdlib_fallback"}
     assert out.is_file() and out.read_bytes().startswith(b"\x89PNG\r\n\x1a\n")
 
 

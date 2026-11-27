@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import os
 import shutil
 import struct
 import subprocess
@@ -48,6 +49,11 @@ def write_solid_png(path: Path, width: int = 64, height: int = 32, rgba: tuple[i
     return path
 
 
+def ffmpeg_required() -> bool:
+    raw = os.environ.get("RECAP_REQUIRE_FFMPEG", "").strip().lower()
+    return raw not in {"", "0", "false", "no"}
+
+
 @pytest.fixture(scope="session")
 def has_ffmpeg() -> bool:
     return bool(shutil.which("ffmpeg") and shutil.which("ffprobe"))
@@ -56,6 +62,8 @@ def has_ffmpeg() -> bool:
 @pytest.fixture(scope="session")
 def synthetic_media(tmp_path_factory: pytest.TempPathFactory, has_ffmpeg: bool) -> dict[str, Path]:
     if not has_ffmpeg:
+        if ffmpeg_required():
+            pytest.fail("RECAP_REQUIRE_FFMPEG is set, but ffmpeg/ffprobe are unavailable")
         pytest.skip("ffmpeg/ffprobe unavailable")
     root = tmp_path_factory.mktemp("core_media")
     v1 = root / "clip_landscape.mp4"

@@ -257,6 +257,8 @@ def test_tts_whole_article_dp_split_and_fallback(monkeypatch: pytest.MonkeyPatch
 
 
 def test_tts_streaming_wav_headers_accepted_and_transcoded(tmp_path: Path) -> None:
+    import os
+
     base = bytearray(write_sine_wav(tmp_path / "base.wav", duration_s=0.4, amplitude=0.2).read_bytes())
     data_pos = base.find(b"data", 12)
     assert data_pos != -1
@@ -271,6 +273,8 @@ def test_tts_streaming_wav_headers_accepted_and_transcoded(tmp_path: Path) -> No
             out_wav = tmp_path / f"fixed_{riff_sz}_{data_sz}.wav"
             tts._write_raw_as_pcm16(bytes(streamed), out_wav)
             assert tts._wav_duration(out_wav) == pytest.approx(0.4, abs=0.02)
+        elif os.environ.get("RECAP_REQUIRE_FFMPEG", "").strip().lower() not in {"", "0", "false", "no"}:
+            pytest.fail("RECAP_REQUIRE_FFMPEG is set, but ffmpeg is unavailable")
 
     # Genuinely truncated non-streaming WAV must still be rejected.
     truncated = bytes(base[:-400])
